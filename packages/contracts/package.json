@@ -7,6 +7,10 @@
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"
+    },
+    "./desktopUpdateIpc": {
+      "types": "./src/desktopUpdateIpc.ts",
+      "import": "./src/desktopUpdateIpc.ts"
     }
   },
   "scripts": {

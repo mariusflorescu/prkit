@@ -10,7 +10,8 @@ import { BrandMark } from "~/components/BrandMark";
 import { Button } from "~/components/ui/button";
 import { Separator } from "~/components/ui/separator";
 import { Skeleton } from "~/components/ui/skeleton";
-import { desktopBridge } from "~/lib/desktop";
+import { desktopBridge, updatesBridge } from "~/lib/desktop";
+import { UpdateButton } from "~/features/updates/UpdateButton";
 import { cn } from "~/lib/utils";
 import { inboxQuery } from "~/rpc/queries";
 import { isSettingsPath } from "~/features/settings/settingsSections";
@@ -193,6 +194,7 @@ export function WorkspaceTabs() {
         </span>
       )}
       <div className="min-w-6 flex-1 self-stretch" />
+      {updatesBridge !== undefined && <UpdateButton />}
     </header>
   );
 }

@@ -2,6 +2,8 @@ export * from "./accounts.ts";
 export * from "./agent.ts";
 export * from "./appearance.ts";
 export * from "./childEnv.ts";
+export * from "./desktopUpdateIpc.ts";
+export * from "./desktopUpdates.ts";
 export * from "./diffRows.ts";
 export * from "./diffSnapshot.ts";
 export * from "./fixer.ts";

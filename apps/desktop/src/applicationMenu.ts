@@ -10,7 +10,7 @@ const settings: MenuItemConstructorOptions = {
   },
 };
 
-export function installApplicationMenu() {
+export function installApplicationMenu(actions: { readonly checkForUpdates: () => void }) {
   const template: MenuItemConstructorOptions[] = [
     ...(process.platform === "darwin"
       ? [
@@ -18,6 +18,11 @@ export function installApplicationMenu() {
             label: "prkit",
             submenu: [
               { role: "about" as const },
+              {
+                id: "check-for-updates",
+                label: "Check for Updates…",
+                click: actions.checkForUpdates,
+              },
               { type: "separator" as const },
               settings,
               { type: "separator" as const },

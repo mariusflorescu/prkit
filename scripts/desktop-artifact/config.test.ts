@@ -9,6 +9,7 @@ import {
   notarizeDmgArgs,
   resolveAppId,
   resolveChannel,
+  resolveMockUpdatePort,
   resolveUpdateRepository,
   SIGNING_ENV,
   UNSIGNED_APP_ID,
@@ -72,6 +73,25 @@ describe("update feed", () => {
 
   it("has no publish block without a repository", () => {
     expect(config("0.1.0", null).publish).toBeNull();
+  });
+
+  it("points a --mock-updates build at the local mock feed instead of GitHub", () => {
+    const mock = (version: string) =>
+      createBuildConfig({
+        version,
+        signed: false,
+        appId: UNSIGNED_APP_ID,
+        electronVersion: "44.4.5",
+        repository: REPOSITORY,
+        mockUpdatePort: 7357,
+      }).publish;
+    expect(mock("0.1.0-nightly.20261015.1")).toEqual([
+      { provider: "generic", url: "http://127.0.0.1:7357", channel: "nightly" },
+    ]);
+    expect(mock("0.1.0")).toEqual([{ provider: "generic", url: "http://127.0.0.1:7357" }]);
+    expect(resolveMockUpdatePort({})).toBe(7357);
+    expect(resolveMockUpdatePort({ PRKIT_DESKTOP_MOCK_UPDATE_PORT: "9123" })).toBe(9123);
+    expect(resolveMockUpdatePort({ PRKIT_DESKTOP_MOCK_UPDATE_PORT: "port" })).toBeUndefined();
   });
 
   it("reads the override first, then GITHUB_REPOSITORY, and rejects anything but owner/repo", () => {
