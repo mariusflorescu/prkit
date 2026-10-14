@@ -32,6 +32,11 @@ import {
   unexpectedExternals,
   updateManifestEntry,
 } from "./desktop-artifact/config.ts";
+import {
+  keychainBuilderEnv,
+  nodeKeychainHost,
+  withSigningKeychain,
+} from "./desktop-artifact/keychain.ts";
 
 const repoRoot = NodePath.resolve(import.meta.dirname, "..");
 const desktopDir = NodePath.join(repoRoot, "apps/desktop");
@@ -264,20 +269,28 @@ const main = async () => {
     say(
       `Packaging ${CHANNELS[channel].productName} ${options.version} for ${options.arch} (${options.signed ? "signed" : "unsigned"})...`,
     );
-    run(
-      electronBuilderBin,
-      ["--projectDir", stageDir, "--mac", `--${options.arch}`, "--publish", "never"],
-      {
-        cwd: stageDir,
-        env: {
-          ...builderEnv(process.env, options.signed),
-          ...(options.verbose
-            ? { DEBUG: "electron-builder,electron-osx-sign*,electron-notarize*" }
-            : {}),
+    const packageApp = (env: Record<string, string>) =>
+      run(
+        electronBuilderBin,
+        ["--projectDir", stageDir, "--mac", `--${options.arch}`, "--publish", "never"],
+        {
+          cwd: stageDir,
+          env: {
+            ...env,
+            ...(options.verbose
+              ? { DEBUG: "electron-builder,electron-osx-sign*,electron-notarize*" }
+              : {}),
+          },
+          verbose: options.verbose,
         },
-        verbose: options.verbose,
-      },
-    );
+      );
+    const env = builderEnv(process.env, options.signed);
+    // Signed, electron-builder gets our keychain and identity instead of the .p12 (keychain.ts).
+    if (options.signed)
+      withSigningKeychain(process.env, nodeKeychainHost(), (signing) =>
+        packageApp(keychainBuilderEnv(env, signing)),
+      );
+    else packageApp(env);
 
     const distDir = NodePath.join(stageDir, "dist");
     if (options.signed)

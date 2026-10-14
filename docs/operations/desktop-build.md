@@ -44,11 +44,11 @@ Read at build time. None of these values goes into a tracked file.
 | --- | --- |
 | `PRKIT_DESKTOP_APP_ID` | The bundle id. Required with `--signed`; unsigned builds default to `dev.prkit.local`. |
 | `PRKIT_DESKTOP_UPDATE_REPOSITORY` | `owner/repo` of the update feed, else `GITHUB_REPOSITORY`. With neither, the app has no `app-update.yml`, no update manifest is written, and the build says so in one line. |
-| `CSC_LINK`, `CSC_KEY_PASSWORD` | The Developer ID Application certificate (.p12) and its password. |
+| `CSC_LINK`, `CSC_KEY_PASSWORD` | The Developer ID Application certificate (.p12, base64) and its password. |
 | `APPLE_TEAM_ID` | The team the certificate belongs to. |
 | `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER` | The App Store Connect API key (path to the .p8), its id and issuer. |
 
-With `--signed`, electron-builder signs the app with the hardened runtime, notarizes and staples it, and signs the DMG. The script then notarizes the DMG with `xcrun notarytool` (same key) and staples it. Stapling changes the DMG after electron-builder hashed it, so the script rebuilds its blockmap and rewrites its hash and size in the update manifest.
+With `--signed`, the script imports the certificate into a keychain of its own (`scripts/desktop-artifact/keychain.ts`): electron-builder's temporary keychain unlocks its keys with the .p12's password instead of the keychain's, which macOS 26 rejects. electron-builder gets that keychain and the identity's SHA-1 (`CSC_KEYCHAIN`, `CSC_NAME`) and never the .p12. The keychain goes first in the user's search list for the build; afterwards the list is restored and the keychain and the .p12 are deleted, whatever happened. Then electron-builder signs the app with the hardened runtime, notarizes and staples it, and signs the DMG. The script then notarizes the DMG with `xcrun notarytool` (same key) and staples it. Stapling changes the DMG after electron-builder hashed it, so the script rebuilds its blockmap and rewrites its hash and size in the update manifest.
 
 Without `--signed`, every `CSC_*` and `APPLE_*` variable is removed from electron-builder's environment and identity discovery is off, so nothing tries to sign. GitHub tokens never reach electron-builder: it publishes nothing (`--publish never`).
 
