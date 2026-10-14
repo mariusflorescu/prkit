@@ -19,7 +19,33 @@ import { installApplicationMenu } from "./applicationMenu.ts";
 const devWebUrl = process.env.PRKIT_DEV_WEB_URL;
 const devServerPort = Number(process.env.PRKIT_SERVER_PORT ?? 0);
 
-app.setName("prkit");
+// A packaged app is named by its bundle ("prkit", or "prkit Nightly"). A dev run keeps a
+// Chromium profile of its own, so it never shares the single-instance lock with an install.
+if (!app.isPackaged) {
+  app.setName("prkit");
+  app.setPath("userData", NodePath.join(app.getPath("appData"), "prkit Dev"));
+}
+
+// Packaged, app.asar mirrors the repository's apps/ folders (scripts/build-desktop-artifact.ts),
+// so the server, web and preload paths below hold in both.
+const desktopDir = app.isPackaged
+  ? NodePath.join(app.getAppPath(), "apps/desktop")
+  : app.getAppPath();
+
+// The server serves the UI with Node's fs, which can't check a path inside app.asar
+// (fs.promises.access fails there), so the packaged build unpacks it beside the archive.
+const webDist = app.isPackaged
+  ? NodePath.join(`${app.getAppPath()}.unpacked`, "apps/web/dist")
+  : NodePath.resolve(desktopDir, "../web/dist");
+
+/** The kit's macOS app icon in dev; packaged, the one the build staged for its channel. */
+const dockIcon = (appearance: "light" | "dark") =>
+  app.isPackaged
+    ? NodePath.join(app.getAppPath(), "dock-icons", `${appearance}.png`)
+    : NodePath.resolve(
+        desktopDir,
+        `../../assets/brand/app-icon/png/prkit-icon-macos-${appearance}-1024.png`,
+      );
 
 let server: NodeChildProcess.ChildProcess | undefined;
 let windowOptions: Parameters<typeof createMainWindow>[0] | undefined;
@@ -38,21 +64,28 @@ const decodeTheme = Schema.decodeUnknownOption(ThemePreference);
 // Held until clicked or closed, so the click handler outlives a garbage collection.
 const shown = new Set<Notification>();
 
-/** Brings a window forward (a new one if all were closed) and opens a PR's Guide (or Fixes) tab in it. */
+/** Brings a window forward, a new one if all were closed; `fresh` when it was just created. */
+const bringForward = () => {
+  const existing = BrowserWindow.getAllWindows()[0];
+  const window = existing ?? (windowOptions ? createMainWindow(windowOptions) : undefined);
+  if (window === undefined) return undefined;
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+  return { window, fresh: existing === undefined };
+};
+
+/** Brings a window forward and opens a PR's Guide (or Fixes) tab in it. */
 const openGuide = (target: {
   readonly key: string;
   readonly accountId: string;
   readonly tab?: "guide" | "fixes";
 }) => {
-  const existing = BrowserWindow.getAllWindows()[0];
-  const window = existing ?? (windowOptions ? createMainWindow(windowOptions) : undefined);
-  if (window === undefined) return;
-  if (window.isMinimized()) window.restore();
-  window.show();
-  window.focus();
+  const forward = bringForward();
+  if (forward === undefined) return;
+  const { window, fresh } = forward;
   const send = () => window.webContents.send("prkit:open-guide", target);
-  if (existing === undefined || window.webContents.isLoading())
-    window.webContents.once("did-finish-load", send);
+  if (fresh || window.webContents.isLoading()) window.webContents.once("did-finish-load", send);
   else send();
 };
 
@@ -83,27 +116,29 @@ ipcMain.on("prkit:set-theme", (event, payload) => {
 });
 
 const fail = (message: string) => {
+  process.stderr.write(`[desktop] could not start: ${message}\n`);
   dialog.showErrorBox("prkit could not start", message);
   app.quit();
 };
 
 async function boot() {
-  applyBranding();
+  applyBranding({ light: dockIcon("light"), dark: dockIcon("dark") });
   installApplicationMenu();
-  const appPath = app.getAppPath();
   const token = NodeCrypto.randomBytes(32).toString("hex");
   // Before the server child exists: it inherits PATH through childEnv, and a Dock launch has only launchd's.
   process.stdout.write(`[desktop] PATH ${await hydratePathFromLoginShell()}\n`);
   const target: ServerTarget = devWebUrl
     ? { _tag: "DevWeb", webOrigin: new URL(devWebUrl).origin }
-    : { _tag: "Built", webDist: NodePath.resolve(appPath, "../web/dist") };
+    : { _tag: "Built", webDist };
 
   const started = await startServer({
-    entry: NodePath.resolve(appPath, "../server/dist/bin.mjs"),
+    entry: NodePath.resolve(desktopDir, "../server/dist/bin.mjs"),
     home: process.env.PRKIT_HOME ?? NodePath.join(NodeOS.homedir(), ".prkit"),
     token,
     port: devWebUrl ? devServerPort : 0,
     target,
+    // Launched from the Dock, the inherited working directory is `/`.
+    ...(app.isPackaged ? { cwd: NodeOS.homedir(), appVersion: app.getVersion() } : {}),
   });
   server = started.child;
   server.once("exit", (code, signal) => {
@@ -115,7 +150,7 @@ async function boot() {
 
   const url = new URL(devWebUrl ?? started.ready.url);
   url.searchParams.set("token", token);
-  windowOptions = { url, preload: NodePath.join(appPath, "dist-electron/preload.cjs") };
+  windowOptions = { url, preload: NodePath.join(desktopDir, "dist-electron/preload.cjs") };
   createMainWindow(windowOptions);
 }
 
@@ -135,7 +170,15 @@ app.on("will-quit", () => {
   server?.kill("SIGTERM");
 });
 
-app
-  .whenReady()
-  .then(boot)
-  .catch((error: Error) => fail(error.message));
+// A second launch of the same app focuses this one's window instead of starting another
+// server. Another app on the same home (stable and nightly, or a dev run) is refused by the
+// server's home lock, with a message.
+if (app.requestSingleInstanceLock()) {
+  app.on("second-instance", () => bringForward());
+  app
+    .whenReady()
+    .then(boot)
+    .catch((error: Error) => fail(error.message));
+} else {
+  app.quit();
+}
