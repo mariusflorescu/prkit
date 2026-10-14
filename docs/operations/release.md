@@ -77,7 +77,7 @@ CI checks the title again when you rename the PR.
 
 ## What CI runs
 
-- **Check** (Ubuntu): `pnpm install`, `pnpm typecheck`, `pnpm lint`, `pnpm fmt:check`, the unit tests (`pnpm exec vp test --run`), and `pnpm build`.
+- **Check** (macOS, because some server tests fail on Linux): `pnpm install`, `pnpm typecheck`, `pnpm lint`, `pnpm fmt:check`, the unit tests (`pnpm exec vp test --run`), and `pnpm build`.
 - **PR title**: the conventional commit check above.
 - **Package** (macOS): an unsigned app built with `pnpm dist:desktop:artifact --build-version 0.0.0-ci.<run>`, kept for 3 days as a workflow artifact. It runs on every push to `main`. On a pull request it runs only when the PR changes `apps/desktop/`, `scripts/build-desktop-artifact*`, or `apps/server/vite.config.ts`.
 - **CI**: passes when every job above passed or was skipped for its reason. Branch protection needs only this check.

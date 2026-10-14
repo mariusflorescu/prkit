@@ -17,8 +17,9 @@ concurrency:
 jobs:
   check:
     name: Check
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # macOS: the server's review and Codex sandbox tests assume macOS paths and fail on Linux.
+    runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
