@@ -108,3 +108,6 @@ summary "## ${name}" "" \
   "| Dry run | ${DRY_RUN} |" \
   "" "### Release notes" ""
 cat "$NOTES_FILE" >> "$GITHUB_STEP_SUMMARY"
+
+echo "${name} from ${commit}, notes from ${from:-the first commit}, dry run ${DRY_RUN}:"
+cat "$NOTES_FILE"

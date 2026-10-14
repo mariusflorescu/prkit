@@ -108,7 +108,7 @@ Rotate before the Developer ID certificate expires, or at once if a key leaks.
 2. Run `base64 -i certificate.p12 | gh secret set CSC_LINK --env release`, then `gh secret set CSC_KEY_PASSWORD --env release` and type the password.
 3. To replace the API key, create a new key in App Store Connect under **Users and Access > Integrations**, with the Developer role. Download `AuthKey_<id>.p8`.
 4. Run `gh secret set APPLE_API_KEY --env release < AuthKey_<id>.p8` and `gh secret set APPLE_API_KEY_ID --env release`, and type the key ID. Update `APPLE_API_ISSUER` the same way if the team changed.
-5. Run a nightly by hand and check that the build summary says **Signed and notarized**.
+5. Run a nightly by hand and check that the build summary says **Signing and notarizing** and that the run publishes the nightly.
 6. Revoke the old key in App Store Connect. Revoke the old certificate only after the new nightly installs and updates. Apps already signed with the old certificate keep opening after you revoke it, unless Apple revokes it for a compromise.
 7. Delete the local `.p12` and `.p8` files.
 

@@ -133,11 +133,6 @@ jobs:
           PRKIT_DESKTOP_UPDATE_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
-          if ! jq -e '.scripts["dist:desktop:artifact"]' package.json > /dev/null; then
-            echo "::error::package.json has no dist:desktop:artifact script, so this commit can't be packaged."
-            exit 1
-          fi
-
           signing=(CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER APPLE_TEAM_ID PRKIT_DESKTOP_APP_ID)
           missing=()
           for name in "${signing[@]}"; do
@@ -165,11 +160,16 @@ jobs:
             if [[ "$DRY_RUN" == "true" ]]; then
               echo "Dry run: built unsigned without the release environment. Not published."
             elif [[ "$signed" == "true" ]]; then
-              echo "Signed and notarized."
+              echo "Signing and notarizing: every secret and variable is set."
             else
               echo "Unsigned: not published. Missing: ${missing[*]}."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+          if ! jq -e '.scripts["dist:desktop:artifact"]' package.json > /dev/null; then
+            echo "::error::package.json has no dist:desktop:artifact script, so this commit can't be packaged."
+            exit 1
+          fi
 
           pnpm dist:desktop:artifact "${args[@]}" | tee "$RUNNER_TEMP/package.log"
           result="$(tail -n 1 "$RUNNER_TEMP/package.log")"
