@@ -1,0 +1,127 @@
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import * as NodeReadline from "node:readline";
+
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+
+import { readRun, repoRoot } from "../scripts/verify-run.ts";
+
+const Ready = Schema.fromJsonString(
+  Schema.Struct({ type: Schema.Literal("ready"), url: Schema.String }),
+);
+const decodeReady = Schema.decodeUnknownOption(Ready);
+const Stats = Schema.fromJsonString(
+  Schema.Struct({
+    requests: Schema.Number,
+    points: Schema.Number,
+    rest: Schema.Number,
+    refused: Schema.Number,
+    mergedInSearch: Schema.Number,
+    byKind: Schema.Record(Schema.String, Schema.Number),
+  }),
+);
+const decodeStats = Schema.decodeUnknownSync(Stats);
+const Writes = Schema.fromJsonString(
+  Schema.Array(Schema.Struct({ kind: Schema.String, input: Schema.Json })),
+);
+const decodeWrites = Schema.decodeUnknownSync(Writes);
+const decodePull = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({ id: Schema.String, head: Schema.String, runs: Schema.Array(Schema.Number) }),
+  ),
+);
+
+/**
+ * A fake GitHub (scripts/fake-github.ts) and a prkit instance that reads only it, so
+ * budget journeys spend nothing of the real accounts. Stop both in a `finally`.
+ * `stacks: false` makes it a host without stacks, like GitHub Enterprise Server.
+ * `secondAccount` adds a second gh config dir, for `budget-second`.
+ */
+export const startFakeGitHub = async (
+  name: string,
+  { stacks = true, secondAccount = false } = {},
+) => {
+  const home = NodePath.join(repoRoot, ".e2e", "fake", name);
+  NodeFS.rmSync(home, { recursive: true, force: true });
+  NodeFS.mkdirSync(home, { recursive: true });
+  const child = NodeChildProcess.spawn(
+    process.execPath,
+    [
+      NodePath.join(repoRoot, "scripts/fake-github.ts"),
+      "--home",
+      home,
+      ...(stacks ? [] : ["--no-stacks"]),
+      ...(secondAccount ? ["--second-account"] : []),
+    ],
+    { cwd: repoRoot, stdio: ["ignore", "pipe", "inherit"] },
+  );
+  const url = await new Promise<string>((resolve, reject) => {
+    child.once("exit", (code) => reject(new Error(`The fake GitHub exited (${code}).`)));
+    if (child.stdout === null) return reject(new Error("The fake GitHub has no stdout."));
+    NodeReadline.createInterface({ input: child.stdout }).on("line", (line) =>
+      Option.match(decodeReady(line), { onNone: () => {}, onSome: (ready) => resolve(ready.url) }),
+    );
+  });
+  const post = (path: string) => fetch(`${url}/__fake/${path}`, { method: "POST" });
+  return {
+    url,
+    home,
+    stats: async () => decodeStats(await (await fetch(`${url}/__fake/stats`)).text()),
+    /** Every write prkit sent, oldest first, as `{ kind, input }`. */
+    writes: async () => decodeWrites(await (await fetch(`${url}/__fake/writes`)).text()),
+    /** A PR's GraphQL node id, head sha and workflow run ids, as the fake answers them. */
+    pull: async (pr: number) =>
+      decodePull(await (await fetch(`${url}/__fake/pull?pr=${pr}`)).text()),
+    limit: (resource: "graphql" | "core", seconds: number) =>
+      post(`limit?resource=${resource}&seconds=${seconds}`),
+    /** Every answer, or only `resource`'s, waits `ms`. */
+    latency: (ms: number, resource?: "graphql" | "core") =>
+      post(`latency?ms=${ms}${resource === undefined ? "" : `&resource=${resource}`}`),
+    archive: (repo: string) => post(`archive?repo=${repo}`),
+    resetStats: () => post("reset-stats"),
+    comment: (pr: number) => post(`comment?pr=${pr}`),
+    push: (pr: number) => post(`push?pr=${pr}`),
+    conflict: (pr: number) => post(`conflict?pr=${pr}`),
+    checking: (pr: number) => post(`checking?pr=${pr}`),
+    require: (pr: number) => post(`require?pr=${pr}`),
+    merge: (pr: number) => post(`merge?pr=${pr}`),
+    close: (pr: number) => post(`close?pr=${pr}`),
+    draft: (pr: number) => post(`draft?pr=${pr}`),
+    behind: (pr: number, by: number) => post(`behind?pr=${pr}&by=${by}`),
+    checks: (pr: number, status: "queued" | "in_progress" | "completed") =>
+      post(`checks?pr=${pr}&status=${status}`),
+    stop: () => {
+      child.kill("SIGTERM");
+    },
+  };
+};
+export type FakeGitHub = Awaited<ReturnType<typeof startFakeGitHub>>;
+
+/**
+ * A prkit instance of the journey's own, on this machine's real accounts unless `extra`
+ * points it at a fake, for a journey that restarts it. Stop it with `stopFakeInstance`.
+ */
+export const startInstance = (name: string, extra: ReadonlyArray<string> = []) => {
+  NodeChildProcess.execFileSync(
+    process.execPath,
+    ["scripts/verify-app.ts", "start", "--name", name, "--detach", ...extra],
+    { cwd: repoRoot, stdio: "ignore" },
+  );
+  return Option.getOrThrowWith(readRun(name), () => new Error(`${name} wrote no run file.`));
+};
+
+export const startFakeInstance = (
+  name: string,
+  fake: FakeGitHub,
+  extra: ReadonlyArray<string> = [],
+) => startInstance(name, ["--github-api", fake.url, "--gh-home", fake.home, ...extra]);
+
+/** Stops an instance a journey started, fake or not, and keeps or removes its home. */
+export const stopFakeInstance = (name: string, options: { keepHome: boolean }) =>
+  NodeChildProcess.execFileSync(
+    process.execPath,
+    ["scripts/verify-app.ts", "stop", "--name", name, ...(options.keepHome ? ["--keep-home"] : [])],
+    { cwd: repoRoot, stdio: "ignore" },
+  );

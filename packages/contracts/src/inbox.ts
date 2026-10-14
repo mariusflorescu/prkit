@@ -1,0 +1,95 @@
+import * as Schema from "effect/Schema";
+
+import { GitHubProblem, PullRequestState } from "./github.ts";
+import { AccountId, PullRequestKey } from "./ids.ts";
+import { StackMembership } from "./stack.ts";
+
+export const PullRequestRef = Schema.Struct({
+  host: Schema.String,
+  owner: Schema.String,
+  repo: Schema.String,
+  number: Schema.Int.check(Schema.isGreaterThan(0)),
+});
+export type PullRequestRef = typeof PullRequestRef.Type;
+export const pullRequestKey = (ref: PullRequestRef) =>
+  PullRequestKey.make(`${ref.host}/${ref.owner}/${ref.repo}#${ref.number}`);
+
+export const InboxReason = Schema.Literals(["review-requested", "authored", "involved"]);
+export type InboxReason = typeof InboxReason.Type;
+export const PullRequestAuthor = Schema.Struct({
+  login: Schema.String,
+  avatarUrl: Schema.NullOr(Schema.String),
+});
+/** A repository label; `color` is GitHub's six hex digits without `#`. */
+export const PullRequestLabel = Schema.Struct({ name: Schema.String, color: Schema.String });
+export type PullRequestLabel = typeof PullRequestLabel.Type;
+/** A pull request as a list row shows it, read through `accountId`. */
+export const PullRequestSummary = Schema.Struct({
+  accountId: AccountId,
+  ref: PullRequestRef,
+  title: Schema.String,
+  url: Schema.String,
+  state: PullRequestState,
+  isDraft: Schema.Boolean,
+  author: Schema.NullOr(PullRequestAuthor),
+  headBranch: Schema.String,
+  baseBranch: Schema.String,
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+  additions: Schema.Int,
+  deletions: Schema.Int,
+  changedFiles: Schema.Int,
+  reviewDecision: Schema.NullOr(
+    Schema.Literals(["APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED"]),
+  ),
+  checks: Schema.NullOr(Schema.Literals(["passing", "failing", "pending"])),
+  labels: Schema.Array(PullRequestLabel),
+  stack: Schema.NullOr(StackMembership),
+});
+export type PullRequestSummary = typeof PullRequestSummary.Type;
+/** A pull request that needs you, and why. */
+export const InboxEntry = Schema.Struct({
+  ...PullRequestSummary.fields,
+  reasons: Schema.NonEmptyArray(InboxReason),
+});
+export type InboxEntry = typeof InboxEntry.Type;
+export const inboxReasonPriority = { "review-requested": 0, authored: 1, involved: 2 } as const;
+export const primaryInboxReason = (reasons: InboxEntry["reasons"]) =>
+  reasons.reduce(
+    (best, reason) => (inboxReasonPriority[reason] < inboxReasonPriority[best] ? reason : best),
+    reasons[0],
+  );
+export const InboxResult = Schema.Struct({
+  entries: Schema.Array(InboxEntry),
+  /** One row per account: how old its entries are, and why they weren't read again. */
+  accounts: Schema.Array(
+    Schema.Struct({
+      accountId: AccountId,
+      count: Schema.Int,
+      fetchedAt: Schema.NullOr(Schema.String),
+      problem: Schema.NullOr(GitHubProblem),
+    }),
+  ),
+  truncated: Schema.Array(
+    Schema.Struct({
+      accountId: AccountId,
+      reason: InboxReason,
+      shown: Schema.Int,
+      total: Schema.Int,
+    }),
+  ),
+});
+export type InboxResult = typeof InboxResult.Type;
+/**
+ * `cached` answers from prkit's cache and reads GitHub only when it is older than
+ * ten minutes. `refresh` reads every account now; `retry` reads one account now.
+ */
+export const InboxRead = Schema.Union([
+  Schema.TaggedStruct("cached", {}),
+  Schema.TaggedStruct("refresh", {}),
+  Schema.TaggedStruct("retry", { accountId: AccountId }),
+]);
+export type InboxRead = typeof InboxRead.Type;
+export class InboxError extends Schema.TaggedError<InboxError>()("InboxError", {
+  message: Schema.String,
+}) {}

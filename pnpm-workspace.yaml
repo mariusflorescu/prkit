@@ -1,0 +1,41 @@
+packages:
+  - apps/*
+  - packages/*
+  - scripts
+
+allowBuilds:
+  electron: true
+  esbuild: true
+  sharp: true
+
+catalog:
+  "@base-ui/react": 1.5.0
+  "@effect/platform-node": 4.0.2
+  "@effect/tsgo": 0.46.1
+  "@pierre/diffs": 1.5.2
+  "@tailwindcss/vite": 4.3.3
+  "@tanstack/react-query": ^5.104.1
+  "@tanstack/react-router": 1.170.41
+  "@types/node": 24.12.4
+  effect: 4.0.2
+  electron: 44.4.5
+  lucide-react: ^0.564.0
+  playwright: 1.64.0
+  react: 19.2.6
+  react-dom: 19.2.6
+  tailwindcss: 4.3.3
+  typescript: 7.0.2
+  vite: npm:@voidzero-dev/vite-plus-core@1.0.0
+  vite-plus: 1.0.0
+  zustand: ^5.0.11
+
+overrides:
+  effect: "catalog:"
+  vite: "catalog:"
+  vite-plus: "catalog:"
+
+peerDependencyRules:
+  allowAny:
+    - vite
+  allowedVersions:
+    vite: "*"

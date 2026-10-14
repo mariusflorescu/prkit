@@ -1,0 +1,88 @@
+---
+// True facts only, each one said in full elsewhere on the page.
+const facts = [
+  { value: "0", label: "prkit servers", note: "No account, no cloud" },
+  { value: "2", label: "Agents", note: "Claude Code and Codex" },
+  { value: "1", label: "Inbox", note: "For every gh login on your Mac" },
+  { value: "0", label: "API keys", note: "Runs on the plan you pay for" },
+];
+---
+
+<section class="section column" aria-labelledby="facts-title">
+  <p class="eyebrow">At a glance</p>
+  <h2 id="facts-title" class="statement">
+    prkit is <strong>one app</strong> on <strong>your Mac</strong>, with <strong>your accounts</strong>{" "}
+    and <strong>your agent</strong>. Nothing else.
+  </h2>
+  <dl>
+    {
+      facts.map((fact) => (
+        <div class="ticks">
+          <dt>
+            <span class="label">{fact.label}</span>
+            <span class="note">{fact.note}</span>
+          </dt>
+          <dd>{fact.value}</dd>
+        </div>
+      ))
+    }
+  </dl>
+</section>
+
+<style>
+  .statement {
+    margin-top: 0.75rem;
+    color: var(--muted-foreground);
+    font-size: clamp(1.375rem, 1.2rem + 0.8vw, 1.75rem);
+    font-weight: 400;
+    line-height: 1.3;
+    letter-spacing: -0.02em;
+  }
+
+  .statement strong {
+    font-weight: 400;
+  }
+
+  dl {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin: 2rem 0 0;
+  }
+
+  dl > div {
+    display: flex;
+    flex-direction: column-reverse;
+    justify-content: flex-end;
+    gap: 1rem;
+    padding: 1.25rem;
+    border: 1px solid var(--border);
+  }
+
+  dt {
+    display: grid;
+    gap: 0.25rem;
+  }
+
+  .label {
+    color: var(--heading);
+    font-weight: 500;
+  }
+
+  .note {
+    color: var(--muted-foreground);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  dd {
+    margin: 0;
+    color: var(--heading);
+    font-family: var(--font-mono);
+    font-size: clamp(2.25rem, 1.8rem + 1.8vw, 3rem);
+    line-height: 1;
+    letter-spacing: -0.04em;
+  }
+</style>

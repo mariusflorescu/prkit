@@ -1,0 +1,224 @@
+{
+  "summary": "Agents can now see which threads the user has snoozed, and every thread they mention comes with a link that opens it inside T3 (web, desktop and mobile) instead of a browser.",
+  "steps": [
+    "A new shared helper formats and parses `t3-thread://v1/<env>/<thread>` links.",
+    "The server gains `isSnoozed`, a copy of the sidebar's snooze rule.",
+    "`t3_thread_list`, `t3_thread_read` and `t3_thread_launch` return a ready `link`; list and read also return `snoozed` / `snoozedUntil`.",
+    "Web and mobile chat recognize those links and open the thread in the app."
+  ],
+  "flow": {
+    "title": "A thread link travels from tool result to an open thread",
+    "nodes": [
+      { "id": "agent", "label": "agent", "status": "unchanged" },
+      {
+        "id": "tools",
+        "label": "t3_thread_list / read",
+        "status": "changed",
+        "chapter": "thread-tools"
+      },
+      { "id": "snooze", "label": "isSnoozed()", "status": "added", "chapter": "snooze-rule" },
+      {
+        "id": "format",
+        "label": "formatThreadLink()",
+        "status": "added",
+        "chapter": "thread-links"
+      },
+      { "id": "chat", "label": "chat markdown", "status": "unchanged" },
+      {
+        "id": "parse",
+        "label": "parseThreadLinkHref()",
+        "status": "added",
+        "chapter": "thread-links"
+      },
+      { "id": "web", "label": "MarkdownThreadLink", "status": "added", "chapter": "web-links" },
+      {
+        "id": "mobile",
+        "label": "ThreadFeed.onLinkPress",
+        "status": "changed",
+        "chapter": "mobile-links"
+      },
+      { "id": "open", "label": "open thread", "status": "unchanged" }
+    ],
+    "edges": [
+      { "from": "agent", "to": "tools" },
+      { "from": "tools", "to": "snooze", "label": "snoozed" },
+      { "from": "tools", "to": "format", "label": "link" },
+      { "from": "format", "to": "chat" },
+      { "from": "chat", "to": "parse" },
+      { "from": "parse", "to": "web", "label": "web" },
+      { "from": "parse", "to": "mobile", "label": "mobile" },
+      { "from": "web", "to": "open" },
+      { "from": "mobile", "to": "open" }
+    ]
+  },
+  "chapters": [
+    {
+      "id": "thread-links",
+      "title": "One link format, built in one place",
+      "kind": "core",
+      "body": [
+        "Everything else in this PR leans on `@t3tools/shared/threadLinks`. `formatThreadLink` turns a thread into a Markdown link labeled with its title; `parseThreadLinkHref` reads the href back into an environment id and thread id, or returns null.",
+        "The careful part is escaping. Ids are percent-encoded, and parentheses are encoded too, because a raw `)` would end the Markdown link early. The label drops brackets and newlines so the title can't break the link either."
+      ],
+      "files": [
+        {
+          "path": "packages/shared/src/threadLinks.ts",
+          "annotations": [
+            {
+              "line": 20,
+              "text": "`encodeURIComponent` leaves `(` and `)` alone, so they're encoded by hand. A thread id like `mcp:(1)` would otherwise cut the link short."
+            },
+            {
+              "line": 50,
+              "text": "Both ids go through the contracts schemas, so a link with an empty or invalid id is rejected rather than half-parsed."
+            }
+          ]
+        },
+        {
+          "path": "packages/shared/package.json",
+          "note": "Just exposes the new module as `@t3tools/shared/threadLinks`."
+        }
+      ]
+    },
+    {
+      "id": "snooze-rule",
+      "title": "The server learns the sidebar's snooze rule",
+      "kind": "core",
+      "body": [
+        "`isSnoozed` answers \"is this thread still parked?\" the same way the client's `effectiveSnoozed` does: the wake time is in the future, nothing is waiting on the user, and the thread hasn't failed or finished work since it was snoozed.",
+        "An interrupted or cancelled run does not wake it - only a run that completed. That mirrors the client on purpose so agents and the sidebar agree."
+      ],
+      "callouts": [
+        {
+          "tone": "question",
+          "text": "One documented difference: the client treats a failure as fresh based on the shell's update time, so renaming a failed thread can wake it in the sidebar but not for agents. Worth confirming that's acceptable."
+        }
+      ],
+      "files": [
+        {
+          "path": "apps/server/src/orchestration-v2/ThreadSettlementService.ts",
+          "annotations": [
+            {
+              "line": 184,
+              "text": "A pending request (the thread is asking the user something) always counts as awake."
+            },
+            {
+              "line": 191,
+              "text": "Completed work only wakes the thread if it finished *after* the snooze started."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "thread-tools",
+      "title": "Thread tools return links and snooze state",
+      "kind": "core",
+      "body": [
+        "List, read and launch results now carry a `link`, and list and read carry `snoozed` and `snoozedUntil`. `t3_thread_list` also takes a `snoozed` filter.",
+        "The clock is read once per call, and read takes snooze state from the thread shell exactly like list does, so the two tools can't disagree about the same thread. Tool descriptions now tell agents to paste the link whenever they mention a thread."
+      ],
+      "files": [
+        {
+          "path": "apps/server/src/mcp/OrchestratorMcpService.ts",
+          "annotations": [
+            {
+              "line": 2269,
+              "text": "One clock read per list call: the filter and every item's `snoozed` field use the same `nowMs`."
+            },
+            {
+              "line": 720,
+              "text": "Read uses the shell (like list) rather than the projection, so read and list agree on snooze state."
+            }
+          ]
+        },
+        {
+          "path": "packages/contracts/src/orchestratorMcp.ts",
+          "note": "`link` is required, not optional - every producer of these results has to fill it in."
+        },
+        { "path": "apps/server/src/mcp/toolkits/project/handlers.ts" },
+        { "path": "apps/server/src/mcp/toolkits/project/tools.ts" },
+        {
+          "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+          "note": "Description-only change: tells agents about the snoozed filter and to paste links."
+        }
+      ]
+    },
+    {
+      "id": "web-links",
+      "title": "Web chat opens thread links in the app",
+      "kind": "supporting",
+      "body": [
+        "Chat markdown is sanitized, so the `t3-thread` protocol has to be allow-listed or the href is stripped. Once it survives, the link renderer hands it to `MarkdownThreadLink`, which routes inside the app and prefixes the project's favicon so it reads as a thread link before you hover."
+      ],
+      "files": [
+        {
+          "path": "apps/web/src/components/ChatMarkdown.tsx",
+          "annotations": [
+            {
+              "line": 548,
+              "text": "Without this, rehype-sanitize drops the `t3-thread:` href and the link renders as plain text."
+            }
+          ]
+        },
+        { "path": "apps/web/src/components/chat/MarkdownThreadLink.tsx" }
+      ]
+    },
+    {
+      "id": "mobile-links",
+      "title": "Mobile opens the Thread screen",
+      "kind": "supporting",
+      "body": [
+        "Mobile has two markdown renderers and both needed a change. The native selectable renderer only kept hrefs for `mailto:` and `tel:`, so thread links now keep theirs too. The feed's link handler then navigates to the Thread screen instead of trying to open a URL."
+      ],
+      "files": [
+        {
+          "path": "apps/mobile/modules/t3-markdown-text/src/markdownLinks.ts",
+          "annotations": [
+            {
+              "line": 298,
+              "text": "Before this, every non-mailto/tel link was inert here. Thread links now keep their href so a press reaches the feed."
+            }
+          ]
+        },
+        {
+          "path": "apps/mobile/src/features/threads/ThreadFeed.tsx",
+          "annotations": [
+            {
+              "line": 2281,
+              "text": "Thread links are handled before any other link kind and never leave the app."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tests",
+      "title": "Tests",
+      "kind": "tests",
+      "body": [
+        "Round-trip tests for awkward ids, snooze wake rules, an end-to-end snooze/unsnooze through the MCP toolkit, and the launch result's link. Test stubs gained a `title` because links are labeled with it."
+      ],
+      "files": ["**/*.test.ts"]
+    },
+    {
+      "id": "docs",
+      "title": "Docs",
+      "kind": "docs",
+      "body": ["The orchestrator MCP doc describes the link format and the snooze fields."],
+      "files": ["docs/orchestration-v2/orchestrator-mcp-server.md"]
+    }
+  ],
+  "focus": [
+    {
+      "tone": "question",
+      "text": "Server and client snooze rules differ for a failed thread that gets renamed after snoozing. Intentional, but worth a second look.",
+      "chapter": "snooze-rule"
+    },
+    {
+      "tone": "note",
+      "text": "`snoozedUntil` is null whenever the thread counts as awake, even if the stored wake time is still in the future.",
+      "chapter": "thread-tools"
+    }
+  ]
+}

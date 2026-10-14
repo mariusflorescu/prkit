@@ -1,0 +1,43 @@
+---
+/**
+ * A hidden page for each figure in src/figures, unlinked and kept out of search results: the
+ * figure alone at the reading column's width, with room to scroll it away and back.
+ */
+import Figure from "../../components/Figure.astro";
+import Layout from "../../layouts/Layout.astro";
+
+export function getStaticPaths() {
+  return Object.keys(import.meta.glob("../../figures/*/figure.mjs")).flatMap((path) => {
+    const slug = /\/figures\/([^/]+)\/figure\.mjs$/.exec(path)?.[1];
+    return slug ? [{ params: { slug } }] : [];
+  });
+}
+
+const { slug } = Astro.params;
+---
+
+<Layout title={`prkit figure: ${slug}`} noindex>
+  <main id="main" class="preview">
+    <p class="eyebrow">Figure preview · {slug}</p>
+    <Figure slug={slug} />
+    <p class="below">The end of the page. Scroll back up to the figure.</p>
+  </main>
+</Layout>
+
+<style>
+  .preview {
+    width: min(100% - 2 * var(--gutter), var(--column));
+    margin: 4rem auto 0;
+  }
+
+  .preview .eyebrow {
+    margin-bottom: 1.5rem;
+  }
+
+  /* Room to scroll the figure out of view, where its motion stops. */
+  .below {
+    padding: 150vh 0 4rem;
+    color: var(--muted-foreground);
+    font-size: 0.875rem;
+  }
+</style>

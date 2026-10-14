@@ -1,0 +1,6 @@
+/* The Inbox's filters row is the whole pinned part; nothing sits above it once collapsed. */
+[data-inbox-scroll] {
+  --collapse-compact-height: 0px;
+  --collapse-pinned-height: 3rem;
+  scrollbar-gutter: stable;
+}

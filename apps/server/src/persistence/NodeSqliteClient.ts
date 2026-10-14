@@ -1,0 +1,340 @@
+/**
+ * Port of `@effect/sql-sqlite-node` that uses the native `node:sqlite`
+ * bindings instead of `better-sqlite3`.
+ *
+ * @module SqliteClient
+ */
+import * as NodeSqlite from "node:sqlite";
+
+import * as Cache from "effect/Cache";
+import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import { identity } from "effect/Function";
+import * as Layer from "effect/Layer";
+import * as Predicate from "effect/Predicate";
+import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
+import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
+import * as Reactivity from "effect/reactivity/Reactivity";
+import * as Client from "effect/sql/SqlClient";
+import type { Connection } from "effect/sql/SqlConnection";
+import { SqlError, classifySqliteError } from "effect/sql/SqlError";
+import * as Statement from "effect/sql/Statement";
+
+const ATTR_DB_SYSTEM_NAME = "db.system.name";
+
+export interface SqliteClientConfig {
+  readonly filename: string;
+  readonly readonly?: boolean | undefined;
+  readonly allowExtension?: boolean | undefined;
+  readonly prepareCacheSize?: number | undefined;
+  readonly prepareCacheTTL?: Duration.Input | undefined;
+  readonly spanAttributes?: Record<string, unknown> | undefined;
+  readonly transformResultNames?: ((str: string) => string) | undefined;
+  readonly transformQueryNames?: ((str: string) => string) | undefined;
+}
+
+export class UnsupportedNodeSqliteVersionError extends Schema.TaggedError<UnsupportedNodeSqliteVersionError>()(
+  "UnsupportedNodeSqliteVersionError",
+  {
+    nodeVersion: Schema.String,
+    requirement: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Node.js ${this.nodeVersion} is missing required node:sqlite APIs. Upgrade to ${this.requirement}.`;
+  }
+}
+
+export class UnsupportedNodeSqliteOperationError extends Schema.TaggedError<UnsupportedNodeSqliteOperationError>()(
+  "UnsupportedNodeSqliteOperationError",
+  {},
+) {
+  override get message(): string {
+    return "Node SQLite does not support executeStream.";
+  }
+}
+
+/**
+ * Verify that the current Node.js version includes the `node:sqlite` APIs
+ * used by `NodeSqliteClient`, specifically `StatementSync.columns()` (added
+ * in Node 22.16.0 / 23.11.0).
+ *
+ * @see https://github.com/nodejs/node/pull/57490
+ */
+const checkNodeSqliteCompat = () => {
+  const parts = process.versions.node.split(".").map(Number);
+  const major = parts[0] ?? 0;
+  const minor = parts[1] ?? 0;
+  const supported = (major === 22 && minor >= 16) || (major === 23 && minor >= 11) || major >= 24;
+
+  if (!supported) {
+    return Effect.die(
+      new UnsupportedNodeSqliteVersionError({
+        nodeVersion: process.versions.node,
+        requirement: "Node.js >=22.16, >=23.11, or >=24",
+      }),
+    );
+  }
+  return Effect.void;
+};
+
+/**
+ * `node:sqlite` reports the SQLite result code as `errcode`, while
+ * `classifySqliteError` reads `errno`. Copy it across so busy, locked and
+ * constraint failures get their own reasons instead of `UnknownError`.
+ */
+const classifyError = (cause: unknown, message: string, operation: string) => {
+  if (
+    Predicate.hasProperty(cause, "errcode") &&
+    typeof cause.errcode === "number" &&
+    !Predicate.hasProperty(cause, "errno")
+  ) {
+    Object.assign(cause, { errno: cause.errcode });
+  }
+  return classifySqliteError(cause, { message, operation });
+};
+
+const isSqlInput = (value: unknown): value is NodeSqlite.SQLInputValue =>
+  value === null ||
+  typeof value === "number" ||
+  typeof value === "bigint" ||
+  typeof value === "string" ||
+  ArrayBuffer.isView(value);
+
+/** Runs inside the statement's try block, so a bad parameter becomes a `SqlError`. */
+const toSqlInputs = (params: ReadonlyArray<unknown>): Array<NodeSqlite.SQLInputValue> =>
+  params.map((param) => {
+    if (isSqlInput(param)) return param;
+    throw new TypeError(`Cannot bind a ${typeof param} to a SQLite parameter`);
+  });
+
+const make = Effect.fn("makeWithDatabase")(function* (
+  options: SqliteClientConfig,
+): Effect.fn.Return<Client.SqlClient, SqlError, Scope.Scope | Reactivity.Reactivity> {
+  yield* checkNodeSqliteCompat();
+
+  const compiler = Statement.makeCompilerSqlite(options.transformQueryNames);
+  const transformRows = options.transformResultNames
+    ? Statement.defaultTransforms(options.transformResultNames).array
+    : undefined;
+
+  const makeConnection = Effect.gen(function* () {
+    const scope = yield* Effect.scope;
+    const db = yield* Effect.try({
+      try: () =>
+        new NodeSqlite.DatabaseSync(options.filename, {
+          readOnly: options.readonly ?? false,
+          allowExtension: options.allowExtension ?? false,
+        }),
+      catch: (cause) =>
+        new SqlError({
+          reason: classifyError(cause, "Failed to open database", "open"),
+        }),
+    });
+    yield* Scope.addFinalizer(
+      scope,
+      Effect.try({
+        try: () => db.close(),
+        catch: (cause) =>
+          new SqlError({
+            reason: classifyError(cause, "Failed to close database", "close"),
+          }),
+      }).pipe(Effect.orDie),
+    );
+    // Runs first (finalizers unwind in reverse). `close()` only folds the WAL back when this is
+    // the last connection, so a reader still attached would leave it behind. A busy or locked
+    // database must not keep the connection from closing, so a failure here is only logged.
+    if (options.readonly !== true) {
+      yield* Scope.addFinalizer(
+        scope,
+        Effect.try({
+          try: () => db.exec("PRAGMA wal_checkpoint(TRUNCATE)"),
+          catch: (cause) =>
+            new SqlError({
+              reason: classifyError(cause, "Failed to checkpoint the WAL", "close"),
+            }),
+        }).pipe(
+          Effect.catchTag("SqlError", (error) =>
+            Effect.logWarning("Could not fold the WAL into the database on shutdown").pipe(
+              Effect.annotateLogs({ error: error.message }),
+            ),
+          ),
+        ),
+      );
+    }
+
+    const statementReaderCache = new WeakMap<NodeSqlite.StatementSync, boolean>();
+    const hasRows = (statement: NodeSqlite.StatementSync): boolean => {
+      const cached = statementReaderCache.get(statement);
+      if (cached !== undefined) {
+        return cached;
+      }
+      const value = statement.columns().length > 0;
+      statementReaderCache.set(statement, value);
+      return value;
+    };
+
+    const prepare = (sql: string) =>
+      Effect.try({
+        try: () => db.prepare(sql),
+        catch: (cause) =>
+          new SqlError({
+            reason: classifyError(cause, "Failed to prepare statement", "prepare"),
+          }),
+      });
+
+    const prepareCache = yield* Cache.makeWith(prepare, {
+      capacity: options.prepareCacheSize ?? 200,
+      // A transient prepare failure must not outlive the lock or missing schema.
+      timeToLive: (exit) =>
+        Exit.isSuccess(exit) ? (options.prepareCacheTTL ?? Duration.minutes(10)) : Duration.zero,
+    });
+
+    const runStatement = (statement: NodeSqlite.StatementSync, params: ReadonlyArray<unknown>) =>
+      Effect.withFiber<ReadonlyArray<Record<string, NodeSqlite.SQLOutputValue>>, SqlError>(
+        (fiber) => {
+          try {
+            statement.setReadBigInts(Boolean(Context.get(fiber.context, Client.SafeIntegers)));
+            if (hasRows(statement)) {
+              return Effect.succeed(statement.all(...toSqlInputs(params)));
+            }
+            statement.run(...toSqlInputs(params));
+            return Effect.succeed([]);
+          } catch (cause) {
+            return Effect.fail(
+              new SqlError({
+                reason: classifyError(cause, "Failed to execute statement", "execute"),
+              }),
+            );
+          }
+        },
+      );
+
+    const runStatementRaw = (statement: NodeSqlite.StatementSync, params: ReadonlyArray<unknown>) =>
+      Effect.try({
+        try: () =>
+          hasRows(statement)
+            ? statement.all(...toSqlInputs(params))
+            : statement.run(...toSqlInputs(params)),
+        catch: (cause) =>
+          new SqlError({
+            reason: classifyError(cause, "Failed to execute statement", "execute"),
+          }),
+      });
+
+    const run = (sql: string, params: ReadonlyArray<unknown>) =>
+      Effect.flatMap(Cache.get(prepareCache, sql), (s) => runStatement(s, params));
+
+    const runStatementValues = (
+      statement: NodeSqlite.StatementSync,
+      params: ReadonlyArray<unknown>,
+    ) =>
+      Effect.acquireUseRelease(
+        Effect.succeed(statement),
+        (statement) =>
+          Effect.try({
+            try: (): ReadonlyArray<ReadonlyArray<NodeSqlite.SQLOutputValue>> => {
+              if (hasRows(statement)) {
+                statement.setReturnArrays(true);
+                // Rows are arrays once setReturnArrays(true) is on; Object.values keeps
+                // their order without asserting a type node:sqlite does not declare.
+                return statement.all(...toSqlInputs(params)).map((row) => Object.values(row));
+              }
+              statement.run(...toSqlInputs(params));
+              return [];
+            },
+            catch: (cause) =>
+              new SqlError({
+                reason: classifyError(cause, "Failed to execute statement", "execute"),
+              }),
+          }),
+        (statement) =>
+          Effect.try({
+            try: () => {
+              if (hasRows(statement)) {
+                statement.setReturnArrays(false);
+              }
+            },
+            catch: (cause) =>
+              new SqlError({
+                reason: classifyError(
+                  cause,
+                  "Failed to reset statement result mode",
+                  "resetResultMode",
+                ),
+              }),
+          }).pipe(Effect.orDie),
+      );
+
+    const runValues = (sql: string, params: ReadonlyArray<unknown>) =>
+      Effect.flatMap(Cache.get(prepareCache, sql), (statement) =>
+        runStatementValues(statement, params),
+      );
+
+    return identity<Connection>({
+      execute(sql, params, rowTransform) {
+        return rowTransform ? Effect.map(run(sql, params), rowTransform) : run(sql, params);
+      },
+      executeRaw(sql, params) {
+        return Effect.flatMap(Cache.get(prepareCache, sql), (s) => runStatementRaw(s, params));
+      },
+      executeValues(sql, params) {
+        return runValues(sql, params);
+      },
+      executeValuesUnprepared(sql, params) {
+        return Effect.flatMap(prepare(sql), (statement) =>
+          runStatementValues(statement, params ?? []),
+        );
+      },
+      executeUnprepared(sql, params, rowTransform) {
+        const effect = prepare(sql).pipe(
+          Effect.flatMap((statement) => runStatement(statement, params ?? [])),
+        );
+        return rowTransform ? Effect.map(effect, rowTransform) : effect;
+      },
+      executeStream(_sql, _params) {
+        return Stream.die(new UnsupportedNodeSqliteOperationError());
+      },
+    });
+  });
+
+  const semaphore = yield* Semaphore.make(1);
+  const connection = yield* makeConnection;
+
+  const acquirer = semaphore.withPermits(1)(Effect.succeed(connection));
+  const transactionAcquirer = Effect.uninterruptibleMask((restore) =>
+    Effect.flatMap(Effect.scope, (scope) =>
+      Effect.as(
+        Effect.tap(restore(semaphore.take(1)), () =>
+          Scope.addFinalizer(scope, semaphore.release(1)),
+        ),
+        connection,
+      ),
+    ),
+  );
+
+  return yield* Client.make({
+    acquirer,
+    compiler,
+    transactionAcquirer,
+    // A deferred BEGIN only takes the write lock at the first write. If another
+    // process commits after this transaction's first read, that write fails at
+    // once with SQLITE_BUSY_SNAPSHOT, which busy_timeout cannot wait out. Taking
+    // the lock up front makes it wait instead, at the cost of serializing
+    // read-only transactions behind other processes' writers. Read-only
+    // connections cannot write, so they keep the deferred BEGIN.
+    beginTransaction: options.readonly === true ? "BEGIN" : "BEGIN IMMEDIATE",
+    spanAttributes: [
+      ...(options.spanAttributes ? Object.entries(options.spanAttributes) : []),
+      [ATTR_DB_SYSTEM_NAME, "sqlite"],
+    ],
+    transformRows,
+  });
+});
+
+export const layer = (config: SqliteClientConfig): Layer.Layer<Client.SqlClient, SqlError> =>
+  Layer.effect(Client.SqlClient, make(config)).pipe(Layer.provide(Reactivity.layer));

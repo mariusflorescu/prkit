@@ -1,0 +1,639 @@
+@import "tailwindcss";
+@import "../../../assets/brand/tokens/colors.css";
+@import "@fontsource/fira-sans/400.css";
+@import "@fontsource/fira-sans/400-italic.css";
+@import "@fontsource/fira-sans/500.css";
+@import "@fontsource/fira-sans/600.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/600.css";
+
+@custom-variant dark (&:is(.dark, .dark *));
+@custom-variant light (&:not(.dark, .dark *));
+
+/* Suppress all transitions during a theme change. */
+.no-transitions,
+.no-transitions *,
+.no-transitions *::before,
+.no-transitions *::after {
+  transition-duration: 0s !important;
+  animation-duration: 0s !important;
+}
+
+:root {
+  --app-scrollbar-width: 6px;
+  --appearance-contrast-base: 100%;
+  --appearance-contrast-boost: 0%;
+  --appearance-contrast-border-boost: 0%;
+  --appearance-contrast-target: black;
+  --app-scrollbar-thumb: var(--prk-neutral-300);
+  --app-scrollbar-thumb-hover: var(--prk-neutral-400);
+  /*
+   * Compact UI geometry. Keep these values semantic so sidebar, palette,
+   * tooltip, and toolbar controls cannot quietly drift apart.
+   */
+  --control-radius: 0.5rem;
+  --sidebar-content-inset: 0.5rem;
+  --sidebar-control-gap: 0.5rem;
+  --sidebar-icon-color: color-mix(
+    in srgb,
+    var(--contrast-sidebar-muted-foreground) 60%,
+    var(--sidebar)
+  );
+  --sidebar-row-content-inset: 0.625rem;
+  --workspace-topbar-height: 52px;
+  /* The workspace panel sits this far inside the frame on the left, right and bottom. Its
+     corners are concentric with the window's: macOS 26 rounds a window without a toolbar,
+     like prkit's, at 16px, and 16 minus the inset is 10. */
+  --panel-inset: 6px;
+  --panel-radius: 10px;
+  /* Room for the macOS traffic lights in the Electron window's 52px title bar. */
+  --workspace-traffic-light-inset: 0px;
+  --workspace-gutter: 0.75rem;
+  --workspace-gutter-start: calc(env(safe-area-inset-left) + var(--workspace-gutter));
+  --workspace-gutter-end: calc(env(safe-area-inset-right) + var(--workspace-gutter));
+
+  @variant sm {
+    --workspace-gutter: 1.25rem;
+  }
+
+  @variant dark {
+    --appearance-contrast-target: white;
+    --app-scrollbar-thumb: --alpha(var(--prk-paper) / 8%);
+    --app-scrollbar-thumb-hover: --alpha(var(--prk-paper) / 12%);
+  }
+}
+
+.electron-mac {
+  --workspace-traffic-light-inset: 5.5rem;
+}
+
+/* The font tokens are declared outside the inline theme so utilities reference
+   the variables and can be overridden at runtime. */
+@theme {
+  --font-sans: "Fira Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@theme inline {
+  /* Two steps below Tailwind's text-xs (12px) for dense UI: metadata rows,
+     badges, counters, keyboard hints. 2xs is 11px, 3xs is 10px, 4xs 8px and
+     5xs 7px. Registered with tailwind-merge in lib/utils.ts so cn() treats
+     them as font sizes, not colours. */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: calc(1 / 0.6875);
+  --text-3xs: 0.625rem;
+  --text-3xs--line-height: calc(0.875 / 0.625);
+  --text-4xs: 0.5rem;
+  --text-4xs--line-height: 1;
+  --text-5xs: 0.4375rem;
+  --text-5xs--line-height: 1;
+  --inset-shadow-control-highlight: 0 1px rgb(255 255 255 / 16%);
+  --inset-shadow-control-pressed: 0 1px rgb(0 0 0 / 8%);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --animate-skeleton: skeleton 2.4s infinite;
+  /* Duty-cycled indicator animations: long holds with stepped ramps, so the
+     compositor updates discrete frames instead of every vsync. */
+  --animate-status-pulse: status-pulse 2s infinite;
+  --animate-status-ping: status-ping 2s infinite;
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning: var(--warning);
+  --color-warning-surface: var(--warning-surface);
+  --color-error-foreground: var(--error-foreground);
+  --color-error: var(--error);
+  --color-error-surface: var(--error-surface);
+  --color-success-foreground: var(--success-foreground);
+  --color-success: var(--success);
+  --color-diff-addition: var(--diff-addition);
+  --color-diff-deletion: var(--diff-deletion);
+  --color-diff-addition-foreground: var(--diff-addition-foreground);
+  --color-diff-deletion-foreground: var(--diff-deletion-foreground);
+  --color-info-foreground: var(--info-foreground);
+  --color-info: var(--info);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-on-destructive: var(--on-destructive);
+  --color-ring: var(--ring);
+  --color-input: var(--contrast-input);
+  --color-border: var(--contrast-border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--contrast-accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--contrast-muted-foreground);
+  --color-muted: var(--muted);
+  --color-placeholder: var(--contrast-placeholder);
+  --color-secondary-label: var(--contrast-secondary-label);
+  --color-icon-muted: var(--contrast-icon-muted);
+  --color-secondary-foreground: var(--contrast-secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--contrast-popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--contrast-card-foreground);
+  --color-card: var(--card);
+  --color-code: var(--code-background);
+  --color-code-foreground: var(--code-foreground);
+  --color-foreground: var(--contrast-foreground);
+  --color-background: var(--background);
+  --color-surface-raised: var(--surface-raised);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--contrast-sidebar-foreground);
+  --color-sidebar-muted-foreground: var(--contrast-sidebar-muted-foreground);
+  --color-sidebar-control-surface: var(--sidebar-control-surface);
+  --color-sidebar-row-hover: var(--sidebar-row-hover);
+  --color-sidebar-row-active: var(--sidebar-row-active);
+  --color-sidebar-row-selected: var(--sidebar-row-selected);
+  --color-sidebar-border: var(--contrast-sidebar-border);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  @keyframes skeleton {
+    /* One stepped opacity pulse per container, so however many bars sit under
+       it, the compositor draws a handful of discrete frames per cycle. */
+    0%,
+    42% {
+      opacity: 1;
+      animation-timing-function: steps(4);
+    }
+    50%,
+    92% {
+      opacity: 0.55;
+      animation-timing-function: steps(4);
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+  @keyframes status-pulse {
+    0%,
+    40% {
+      opacity: 1;
+      animation-timing-function: steps(6);
+    }
+    50%,
+    90% {
+      opacity: 0.5;
+      animation-timing-function: steps(6);
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+  @keyframes status-ping {
+    0% {
+      opacity: 0.9;
+      scale: 0.75;
+      animation-timing-function: steps(8);
+    }
+    40%,
+    100% {
+      opacity: 0;
+      scale: 2;
+    }
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  /* The app's 2px outlines stay inside controls at clipped and scrollport edges. */
+  *,
+  ::before,
+  ::after {
+    outline-offset: -2px;
+  }
+  html,
+  body {
+    background-color: var(--app-chrome-background);
+  }
+  body {
+    @apply text-foreground relative;
+  }
+}
+
+:root {
+  color-scheme: light;
+  --radius: 0.625rem;
+  --background: var(--prk-neutral-50);
+  /* The window as the macOS app icon draws it (assets/brand/app-icon): the title bar sits on a
+     frame in the icon's outer color, and the workspace is a panel of the app background inset
+     from it, with a hairline ring and a 1px top highlight. The active tab is cut from the same
+     material, so it and its content read as one object. Ink (25 21 17), paper (252 250 247)
+     and white are written out with their alpha, as the icon draws them. The fixed light and
+     dark frames also paint the Appearance previews. */
+  --frame-light: #f2eee9;
+  --frame-dark: #15110d;
+  --frame: var(--frame-light);
+  --panel: var(--background);
+  --panel-ring: rgb(25 21 17 / 10%);
+  --panel-highlight: rgb(255 255 255);
+  --panel-edge: 0 0 0 1px var(--panel-ring), inset 0 1px 0 var(--panel-highlight);
+  --panel-shadow: var(--panel-edge), 0 1px 2px rgb(25 21 17 / 6%);
+  --app-chrome-background: var(--frame);
+  --toolbar-background: var(--app-chrome-background);
+  --toolbar-foreground: var(--foreground);
+  --toolbar-border: var(--border);
+  --toolbar-control: var(--popover);
+  --toolbar-control-foreground: var(--foreground);
+  /* The app's accent nearly matches the frame in light, so hovers on the frame darken it instead. */
+  --toolbar-control-hover: rgb(25 21 17 / 5%);
+  --surface-raised: color-mix(in srgb, var(--card) 20%, transparent);
+  --foreground: var(--prk-neutral-800);
+  --card: var(--prk-neutral-50);
+  --card-foreground: var(--prk-neutral-800);
+  --popover: var(--prk-neutral-50);
+  --popover-foreground: var(--prk-neutral-800);
+  /* rose-500 under a paper label is 4.0:1; rose-700 is 6.3:1, so buttons and links use 700. */
+  --primary: var(--prk-rose-700);
+  --primary-foreground: var(--prk-paper);
+  /* Muted sits halfway between paper and neutral-100. */
+  --secondary: color-mix(in srgb, var(--prk-neutral-50) 50%, var(--prk-neutral-100));
+  --secondary-foreground: var(--prk-neutral-800);
+  --muted: var(--secondary);
+  /* neutral-500 is 3.8:1 on neutral-100; halfway to 600 clears 4.5:1 on every light surface. */
+  --muted-foreground: color-mix(in srgb, var(--prk-neutral-500) 50%, var(--prk-neutral-600));
+  --placeholder: var(--muted-foreground);
+  --secondary-label: var(--muted-foreground);
+  --icon-muted: var(--muted-foreground);
+  --accent: var(--prk-neutral-100);
+  --accent-foreground: var(--prk-neutral-900);
+  /* The kit's status colors are too light for text on paper. The -foreground
+     variants mix them with ink until they clear 4.5:1 on neutral-100 and on
+     their own surfaces. */
+  --error: var(--prk-removed);
+  --error-foreground: color-mix(in srgb, var(--prk-removed) 65%, var(--prk-ink));
+  --error-surface: var(--prk-removed-bg);
+  --destructive: var(--error);
+  /* The coral fill is too light for a paper label (3.0:1, white is 3.1:1). Ink is 5.9:1 on it, and
+     5.0:1 under the dark theme's hover, so the label stays ink in both themes. */
+  --on-destructive: var(--prk-ink);
+  --border: var(--prk-neutral-200);
+  --input: var(--prk-neutral-300);
+  --ring: var(--prk-rose-500);
+  --destructive-foreground: var(--error-foreground);
+  --info: var(--prk-info);
+  --info-foreground: color-mix(in srgb, var(--prk-info) 60%, var(--prk-ink));
+  --success: var(--prk-added);
+  --success-foreground: color-mix(in srgb, var(--prk-added) 60%, var(--prk-ink));
+  --warning: var(--prk-warning);
+  --warning-foreground: color-mix(in srgb, var(--prk-warning) 50%, var(--prk-ink));
+  --warning-surface: var(--prk-warning-bg);
+  --diff-addition: var(--prk-added);
+  --diff-deletion: var(--prk-removed);
+  --diff-addition-foreground: var(--success-foreground);
+  --diff-deletion-foreground: var(--error-foreground);
+  /* Keep every sidebar primitive on the same light surface hierarchy. */
+  --sidebar: var(--prk-neutral-100);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-muted-foreground: var(--muted-foreground);
+  --sidebar-control-surface: var(--prk-neutral-200);
+  --sidebar-row-hover: var(--secondary);
+  --sidebar-row-active: var(--prk-neutral-50);
+  --sidebar-row-selected: var(--prk-neutral-50);
+  --sidebar-border: var(--border);
+  --code-background: color-mix(in srgb, var(--card) 90%, var(--background));
+  --code-foreground: var(--foreground);
+  /* The title bar's corner wash. The strengths keep the rose chevron of the mark at 3:1 or more
+     over the wash's brightest point, on paper and on ink. */
+  --titlebar-wash: var(--prk-rose-100);
+  --titlebar-wash-strength: 0.85;
+  --titlebar-core: var(--prk-rose-300);
+  --titlebar-core-strength: 0.2;
+
+  @variant dark {
+    color-scheme: dark;
+    /* Keep controls and floating surfaces close to the ink canvas. Borders and
+       hover states provide separation without milky fills. */
+    --background: var(--prk-neutral-900);
+    --frame: var(--frame-dark);
+    --panel-ring: rgb(255 255 255 / 10%);
+    --panel-highlight: rgb(255 255 255 / 8%);
+    --panel-shadow: var(--panel-edge), 0 1px 3px rgb(0 0 0 / 40%);
+    --toolbar-control-hover: rgb(252 250 247 / 5%);
+    --surface-raised: color-mix(in srgb, var(--background) 97%, var(--prk-paper));
+    --foreground: var(--prk-neutral-100);
+    --card: color-mix(in srgb, var(--background) 97%, var(--prk-paper));
+    --card-foreground: var(--prk-neutral-100);
+    --popover: color-mix(in srgb, var(--background) 97%, var(--prk-paper));
+    --popover-foreground: var(--prk-neutral-100);
+    /* rose-500 links on a dark card are 4.2:1; lifting it toward rose-300 reaches
+       5.5:1 there and 5.9:1 under an ink label. */
+    --primary: color-mix(in srgb, var(--prk-rose-500) 60%, var(--prk-rose-300));
+    --primary-foreground: var(--prk-ink);
+    --secondary: --alpha(var(--prk-paper) / 3%);
+    --secondary-foreground: var(--prk-neutral-100);
+    --muted: --alpha(var(--prk-paper) / 3%);
+    --muted-foreground: color-mix(in srgb, var(--prk-neutral-500) 90%, var(--prk-paper));
+    --accent: --alpha(var(--prk-paper) / 4%);
+    --accent-foreground: var(--prk-neutral-100);
+    --error-foreground: var(--prk-removed);
+    --error-surface: color-mix(in srgb, var(--error) 16%, transparent);
+    --border: --alpha(var(--prk-paper) / 6%);
+    --input: --alpha(var(--prk-paper) / 8%);
+    --info-foreground: var(--prk-info);
+    --success-foreground: var(--prk-added);
+    --warning-foreground: var(--prk-warning);
+    --warning-surface: color-mix(in srgb, var(--warning) 16%, transparent);
+    --sidebar: var(--card);
+    --sidebar-control-surface: var(--muted);
+    --sidebar-row-hover: var(--accent);
+    --sidebar-row-active: var(--accent);
+    --sidebar-row-selected: var(--muted);
+    --titlebar-wash: var(--prk-rose-700);
+    --titlebar-wash-strength: 0.3;
+    --titlebar-core: var(--prk-rose-500);
+    --titlebar-core-strength: 0.1;
+  }
+}
+
+/* Recompute contrast wherever a subtree owns its own semantic color palette. */
+:root {
+  --contrast-toolbar-foreground: color-mix(
+    in oklab,
+    color-mix(
+      in oklab,
+      var(--toolbar-foreground) var(--appearance-contrast-base),
+      var(--toolbar-background)
+    ),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-toolbar-border: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--toolbar-border) var(--appearance-contrast-base), transparent),
+    var(--toolbar-foreground) var(--appearance-contrast-border-boost)
+  );
+  --contrast-toolbar-control-foreground: color-mix(
+    in oklab,
+    color-mix(
+      in oklab,
+      var(--toolbar-control-foreground) var(--appearance-contrast-base),
+      var(--toolbar-control)
+    ),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-input: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--input) var(--appearance-contrast-base), transparent),
+    var(--foreground) var(--appearance-contrast-border-boost)
+  );
+  --contrast-border: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--border) var(--appearance-contrast-base), transparent),
+    var(--foreground) var(--appearance-contrast-border-boost)
+  );
+  --contrast-foreground: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--foreground) var(--appearance-contrast-base), var(--background)),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-muted-foreground: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--muted-foreground) var(--appearance-contrast-base), var(--background)),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-placeholder: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--placeholder) var(--appearance-contrast-base), var(--background)),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-secondary-label: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--secondary-label) var(--appearance-contrast-base), var(--background)),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-icon-muted: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--icon-muted) var(--appearance-contrast-base), var(--background)),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-card-foreground: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--card-foreground) var(--appearance-contrast-base), var(--card)),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-popover-foreground: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--popover-foreground) var(--appearance-contrast-base), var(--popover)),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-accent-foreground: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--accent-foreground) var(--appearance-contrast-base), var(--accent)),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-secondary-foreground: color-mix(
+    in oklab,
+    color-mix(
+      in oklab,
+      var(--secondary-foreground) var(--appearance-contrast-base),
+      var(--secondary)
+    ),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-sidebar-foreground: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--sidebar-foreground) var(--appearance-contrast-base), var(--sidebar)),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-sidebar-muted-foreground: color-mix(
+    in oklab,
+    color-mix(
+      in oklab,
+      var(--sidebar-muted-foreground) var(--appearance-contrast-base),
+      var(--sidebar)
+    ),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-sidebar-border: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--sidebar-border) var(--appearance-contrast-base), transparent),
+    var(--sidebar-foreground) var(--appearance-contrast-border-boost)
+  );
+}
+
+body {
+  font-family: var(--font-sans);
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* JetBrains Mono's code ligatures are contextual alternates; a review shows
+     `===` and `!=` as typed. */
+  font-variant-ligatures: no-contextual;
+}
+
+html,
+body {
+  min-height: calc(100svh + env(safe-area-inset-top));
+  overscroll-behavior: none;
+}
+
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+#root {
+  height: 100%;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+  overflow-y: hidden;
+  overscroll-behavior-y: none;
+}
+
+/* App-chrome grain, baked into the body's own background rather than a fixed
+   overlay, so animations never force a full-viewport re-blend. */
+:root {
+  --surface-grain: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+  --surface-grain-size: 256px 256px;
+}
+
+body {
+  background-image: var(--surface-grain);
+  background-repeat: repeat;
+  background-size: var(--surface-grain-size);
+}
+
+pre,
+code {
+  font-family: var(--font-mono);
+}
+
+/* @pierre/diffs draws its gutter bars and changed-word highlights from these;
+   they inherit into its shadow root, so the diff matches the brand's added and
+   removed colors. */
+diffs-container {
+  --diffs-addition-color-override: var(--diff-addition);
+  --diffs-deletion-color-override: var(--diff-deletion);
+}
+
+/* Window drag region (frameless titlebar) */
+.drag-region {
+  -webkit-app-region: drag;
+}
+
+/* Electron inherits app-region. Reset children to the initial value so they
+   do not add drag rectangles over fixed controls. Explicit `none` is treated
+   as `no-drag` and breaks titlebar dragging; `initial` emits no rectangle.
+   The base layer lets explicit drag/no-drag utilities take precedence. */
+@layer base {
+  .drag-region > * {
+    -webkit-app-region: initial;
+  }
+}
+
+.drag-region button,
+.drag-region input,
+.drag-region textarea,
+.drag-region select,
+.drag-region a {
+  -webkit-app-region: no-drag;
+}
+
+/* The title bar sits on the frame, so its hover fills come from the frame's palette. */
+[data-workspace-tabbar] {
+  --accent: var(--toolbar-control-hover);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: var(--app-scrollbar-width);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--app-scrollbar-thumb);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--app-scrollbar-thumb-hover);
+}
+
+/* A scrollbar along the panel's edge stops short of its rounded corners. */
+[data-workspace-panel] ::-webkit-scrollbar-track:vertical {
+  margin-block: var(--panel-radius);
+}
+
+.pr-markdown {
+  font-size: var(--text-sm);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.pr-markdown > * + * {
+  margin-top: 1rem;
+}
+.pr-markdown h1,
+.pr-markdown h2,
+.pr-markdown h3 {
+  font-weight: 600;
+  line-height: 1.4;
+}
+.pr-markdown h1 {
+  font-size: var(--text-lg);
+}
+.pr-markdown h2 {
+  font-size: var(--text-base);
+}
+.pr-markdown ul {
+  list-style: disc;
+  padding-left: 1.5rem;
+}
+.pr-markdown ol {
+  list-style: decimal;
+  padding-left: 1.5rem;
+}
+.pr-markdown li + li {
+  margin-top: 0.25rem;
+}
+.pr-markdown a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.pr-markdown pre {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--muted);
+  padding: 1rem;
+}
+.pr-markdown code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+.pr-markdown :not(pre) > code {
+  border-radius: var(--radius-sm);
+  background: var(--muted);
+  padding: 0.1em 0.3em;
+}
+.pr-markdown blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: 1rem;
+  color: var(--muted-foreground);
+}
+.pr-markdown table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+.pr-markdown td,
+.pr-markdown th {
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.75rem;
+  text-align: left;
+}
+.pr-markdown img {
+  max-width: 100%;
+  height: auto;
+}
+.pr-markdown hr {
+  border-color: var(--border);
+}

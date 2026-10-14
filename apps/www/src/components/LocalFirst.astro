@@ -1,0 +1,91 @@
+---
+import Figure from "./Figure.astro";
+
+const promises = [
+  {
+    title: "Tokens never leave your machine",
+    body: "prkit asks gh for each account's token and keeps it in memory. It never writes one to disk, and only GitHub ever sees it.",
+  },
+  {
+    title: "Agents work on a copy",
+    body: "The agent writing a guide may only read. The agent fixing comments edits its own checkout of the branch, and prkit makes the commit. Neither gets your GitHub token, and nothing is pushed unless you say so.",
+  },
+  {
+    title: "No prkit servers",
+    body: "There is no prkit account and no prkit cloud. The app talks to GitHub and to your agent, and nothing else.",
+  },
+];
+---
+
+<section id="local" class="section column" aria-labelledby="local-title">
+  <h2 id="local-title" class="section-title">Local first. Your code and your keys stay on your Mac.</h2>
+  <p class="lead">
+    prkit is a desktop app, not a service. It runs on your computer, with your accounts and your
+    agent, the way your terminal does.
+  </p>
+  <div class="figure">
+    <Figure
+      slug="local-only"
+      placeholder={{
+        title: "Two connections",
+        caption:
+          "prkit has two connections: GitHub, through each account's own token, and your agent, on your own plan. There is no third one.",
+        ratio: [4, 3],
+      }}
+    />
+  </div>
+  <ul>
+    {
+      promises.map((promise) => (
+        <li>
+          <h3>{promise.title}</h3>
+          <p>{promise.body}</p>
+        </li>
+      ))
+    }
+  </ul>
+</section>
+
+<style>
+  .lead {
+    margin-top: 0.75rem;
+    color: var(--muted-foreground);
+    font-size: 1.0625rem;
+    line-height: 1.7;
+  }
+
+  .figure {
+    margin-top: 2rem;
+  }
+
+  ul {
+    display: grid;
+    gap: 0.75rem;
+    margin: 2.5rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  @media (min-width: 44rem) {
+    ul {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  li {
+    padding: 1.25rem 1.25rem 1.5rem;
+    border: 1px solid var(--border);
+  }
+
+  h3 {
+    font-size: 1rem;
+    line-height: 1.35;
+  }
+
+  p {
+    margin-top: 0.625rem;
+    color: var(--muted-foreground);
+    font-size: 0.9375rem;
+    line-height: 1.6;
+  }
+</style>

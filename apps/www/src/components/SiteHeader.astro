@@ -1,0 +1,169 @@
+---
+import { GITHUB } from "../glyphs.ts";
+import { GITHUB_URL, SECTIONS } from "../site.ts";
+import BrandMark from "./BrandMark.astro";
+---
+
+<div class="sentinel" data-header-sentinel aria-hidden="true"></div>
+<header class="site-header">
+  <div class="bar wide">
+    <a class="home" href="#main" aria-label="prkit, back to the top">
+      <BrandMark wordmark class="logo" />
+    </a>
+    <nav aria-label="Sections">
+      <ul>
+        {
+          SECTIONS.map((section) => (
+            <li>
+              <a href={section.href}>{section.label}</a>
+            </li>
+          ))
+        }
+      </ul>
+      <a class="github" href={GITHUB_URL} aria-label="prkit on GitHub">
+        <svg viewBox={GITHUB.viewBox} aria-hidden="true"><path fill="currentColor" d={GITHUB.path} /></svg>
+      </a>
+      {/* The name starts with the words on the pill, so voice control finds it by what it says. */}
+      <a class="download" href="#download">
+        Download <span class="soon">Soon</span><span class="visually-hidden">, for macOS</span>
+      </a>
+    </nav>
+  </div>
+</header>
+
+<script>
+  // The hairline under the header shows once the page has scrolled off its very top.
+  const sentinel = document.querySelector("[data-header-sentinel]");
+  const header = document.querySelector(".site-header");
+  if (sentinel && header) {
+    new IntersectionObserver(([entry]) => {
+      header.toggleAttribute("data-scrolled", !entry?.isIntersecting);
+    }).observe(sentinel);
+  }
+</script>
+
+<style>
+  .sentinel {
+    position: absolute;
+    top: 0;
+    height: 1px;
+    width: 1px;
+  }
+
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--background);
+    box-shadow: 0 1px 0 transparent;
+    transition: box-shadow 200ms ease;
+  }
+
+  .site-header[data-scrolled] {
+    box-shadow: 0 1px 0 var(--border);
+  }
+
+  .bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    height: var(--header-height);
+  }
+
+  .home {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.75rem;
+    border-radius: 0.25rem;
+  }
+
+  .home :global(.logo) {
+    width: auto;
+    height: 1.375rem;
+    color: var(--heading);
+  }
+
+  nav {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  ul {
+    display: none;
+    margin: 0 0.5rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  @media (min-width: 52rem) {
+    ul {
+      display: flex;
+    }
+  }
+
+  nav a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.75rem;
+    padding-inline: 0.625rem;
+    border-radius: 0.25rem;
+    color: var(--muted-foreground);
+    font-size: 0.875rem;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 150ms ease;
+  }
+
+  .github {
+    justify-content: center;
+    min-width: 2.75rem;
+  }
+
+  .github svg {
+    width: 1.125rem;
+    height: 1.125rem;
+  }
+
+  /* Points at the closing band, which says plainly that there is no download yet. */
+  nav .download {
+    gap: 0.5rem;
+    min-height: 2.25rem;
+    margin-left: 0.25rem;
+    padding: 0 0.375rem 0 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--heading);
+  }
+
+  @media (pointer: coarse) {
+    nav .download {
+      min-height: 2.75rem;
+    }
+  }
+
+  .soon {
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.1875rem;
+    background: var(--surface);
+    color: var(--muted-foreground);
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    nav a:hover {
+      color: var(--heading);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .site-header,
+    nav a {
+      transition: none;
+    }
+  }
+</style>

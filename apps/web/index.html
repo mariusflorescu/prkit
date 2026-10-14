@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <title>prkit</title>
+    <!-- The stored theme (system, light or dark) as <html data-theme>. The page's origin changes
+         with the server's port, so the server answers instead of localStorage. -->
+    <script src="/appearance.js"></script>
+    <script>
+      // The theme keys on html.dark. Set it before the first paint, or a dark choice shows the
+      // light theme until the app's script runs. Without an answer (data-theme unset) it follows the OS.
+      (function () {
+        var choice = document.documentElement.dataset.theme;
+        document.documentElement.classList.toggle(
+          "dark",
+          choice === "dark" ||
+            (choice !== "light" && matchMedia("(prefers-color-scheme: dark)").matches),
+        );
+      })();
+    </script>
+    <style>
+      /* The frame and the inset panel as AppShell lays them out (index.css --frame, --panel,
+         --panel-shadow, the 52px title bar, --panel-inset and --panel-radius), so the app
+         replaces only the mark. Values, not index.css's tokens: under `vite dev` index.css
+         loads from the app's script, after this paints. */
+      html,
+      body,
+      #root {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+
+      html,
+      #boot-shell {
+        background-color: #f2eee9;
+        color: #191511;
+      }
+
+      html.dark,
+      html.dark #boot-shell {
+        background-color: #15110d;
+        color: #fcfaf7;
+      }
+
+      #boot-shell {
+        position: relative;
+        display: flex;
+        box-sizing: border-box;
+        height: 100%;
+        padding: 52px 6px 6px;
+        /* The window drags by the title bar, as it does by the app's. */
+        -webkit-app-region: drag;
+        /* index.css --surface-grain, which the body paints over the frame. */
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+        background-size: 256px 256px;
+        --boot-wash: 255 231 236;
+        --boot-wash-strength: 0.85;
+        --boot-core: 250 159 180;
+        --boot-core-strength: 0.2;
+      }
+
+      html.dark #boot-shell {
+        --boot-wash: 172 40 86;
+        --boot-wash-strength: 0.3;
+        --boot-core: 224 68 110;
+        --boot-core-strength: 0.1;
+      }
+
+      /* TitleBarBackdrop's corner wash: its two layers and smoothstep stops, and the
+         --titlebar-* colors and strengths. */
+      #boot-shell::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 360px;
+        height: 52px;
+        background:
+          radial-gradient(130px 40px at 30px 4px, var(--boot-core-stops)),
+          radial-gradient(320px 58px at 36px 6px, var(--boot-wash-stops));
+        mask-image: linear-gradient(to bottom, black 40%, transparent);
+        --boot-core-stops:
+          rgb(var(--boot-core) / calc(var(--boot-core-strength) * 1)) 0%,
+          rgb(var(--boot-core) / calc(var(--boot-core-strength) * 0.972)) 10%,
+          rgb(var(--boot-core) / calc(var(--boot-core-strength) * 0.896)) 20%,
+          rgb(var(--boot-core) / calc(var(--boot-core-strength) * 0.784)) 30%,
+          rgb(var(--boot-core) / calc(var(--boot-core-strength) * 0.648)) 40%,
+          rgb(var(--boot-core) / calc(var(--boot-core-strength) * 0.5)) 50%,
+          rgb(var(--boot-core) / calc(var(--boot-core-strength) * 0.352)) 60%,
+          rgb(var(--boot-core) / calc(var(--boot-core-strength) * 0.216)) 70%,
+          rgb(var(--boot-core) / calc(var(--boot-core-strength) * 0.104)) 80%,
+          rgb(var(--boot-core) / calc(var(--boot-core-strength) * 0.028)) 90%,
+          rgb(var(--boot-core) / 0) 100%;
+        --boot-wash-stops:
+          rgb(var(--boot-wash) / calc(var(--boot-wash-strength) * 1)) 0%,
+          rgb(var(--boot-wash) / calc(var(--boot-wash-strength) * 0.972)) 10%,
+          rgb(var(--boot-wash) / calc(var(--boot-wash-strength) * 0.896)) 20%,
+          rgb(var(--boot-wash) / calc(var(--boot-wash-strength) * 0.784)) 30%,
+          rgb(var(--boot-wash) / calc(var(--boot-wash-strength) * 0.648)) 40%,
+          rgb(var(--boot-wash) / calc(var(--boot-wash-strength) * 0.5)) 50%,
+          rgb(var(--boot-wash) / calc(var(--boot-wash-strength) * 0.352)) 60%,
+          rgb(var(--boot-wash) / calc(var(--boot-wash-strength) * 0.216)) 70%,
+          rgb(var(--boot-wash) / calc(var(--boot-wash-strength) * 0.104)) 80%,
+          rgb(var(--boot-wash) / calc(var(--boot-wash-strength) * 0.028)) 90%,
+          rgb(var(--boot-wash) / 0) 100%;
+      }
+
+      #boot-panel {
+        -webkit-app-region: no-drag;
+        display: flex;
+        flex: 1;
+        align-items: center;
+        justify-content: center;
+        border-radius: 10px;
+        background: #fcfaf7;
+        box-shadow:
+          0 0 0 1px rgb(25 21 17 / 10%),
+          inset 0 1px 0 rgb(255 255 255),
+          0 1px 2px rgb(25 21 17 / 6%);
+      }
+
+      html.dark #boot-panel {
+        background: #191511;
+        box-shadow:
+          0 0 0 1px rgb(255 255 255 / 10%),
+          inset 0 1px 0 rgb(255 255 255 / 8%),
+          0 1px 3px rgb(0 0 0 / 40%);
+      }
+
+      #boot-shell svg {
+        width: 64px;
+        height: 64px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div id="boot-shell" aria-busy="true" aria-label="Starting prkit">
+        <div id="boot-panel">
+          <svg role="img" aria-label="prkit" viewBox="0 0 48 48" fill="none" stroke-width="5">
+            <g transform="translate(0.25 0.75)">
+              <path d="M14 6.5V40" stroke="currentColor" />
+              <path d="M14 9h9a10.5 10.5 0 0 1 0 21h-2" stroke="currentColor" />
+              <path d="M26 24.5L20.5 30L26 35.5" stroke="#e0446e" />
+            </g>
+          </svg>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

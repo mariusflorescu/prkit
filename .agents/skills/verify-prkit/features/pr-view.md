@@ -1,0 +1,54 @@
+# PR view
+
+An open PR has a header that becomes compact on scroll, and three tabs: Conversation, Files and Guide, then Fixes once something went to the agent. Metadata and sections sit directly on the page. The Guide tab is [guide generation](./guide-generation.md); Fixes is the [fix agent](./fix-agent.md). Each PR keeps its selected tab and scroll positions for the session.
+
+## Sub-features
+
+- `pr-header` shows repository and number once, as the one link to the PR on GitHub (an external-link icon shows on hover and focus), then state, title, author, updated time, branches with a copy button for `gh pr checkout <n>` (its tooltip shows the command), diff counts, and the reading account as an avatar whose tooltip says `Read through <account>` (`[data-reading-account]` holds the id). Its actions are [PR actions](./pr-actions.md). The inbox is the fixed tab in the title bar.
+- `pr-header-scroll` scrolls the full header away with the content. A title sentinel shows the fixed compact header and pinned tabs with an 8px return threshold. Motion uses transform and opacity only, and reduced motion swaps instantly.
+- `pr-conversation` follows GitHub: reviewers and labels, the description as the author's opening entry, then one rail of comments, reviews, review threads, commits and events in time order, with one Newest/Oldest toggle, and Checks last. Comments render in full, bots included. A line comment appears once, inside its review thread with the code it is on (see [review comments](./review-comments.md)). The description shows as soon as the detail loads; the rail shows `Loading activity` until the timeline and threads load, and each failed read has its own alert with Retry. A link with an old `tab=summary` or `tab=timeline` opens Conversation.
+- `pr-timeline-events` shows each event as one line like GitHub's: rail icon, actor avatar and login, what they did, and a relative time whose tooltip is the absolute time. Events are force-pushes, merge, close, reopen, draft and ready, labels (chips in the label's color), review requests and their removal, assignments, title and base branch changes, mentions from other issues and pull requests, and duplicates. Label, reviewer and assignee changes by one person within five minutes, with nothing between them, fold into one row ("added bug and ui labels"). An item GitHub withholds, such as a mention from a repository behind SAML SSO, is left out like on GitHub; the rest of the rail stays.
+- `pr-checks` lists checks in the Conversation and in the header popover with one row each: status icon, name with a trailing link icon, and status label on the first line, long names wrapping under the name, icons on the section's text edge.
+- `pr-files` orders source by imports, tests by their source, then generated files. Cards and tree follow that reading order. It renders patches first, with a hideable right-side file tree and split, unified and wrap controls. Expanding unchanged context loads old and new contents through the bound account.
+- `pr-refresh` is the icon-only `button "Refresh"` at the end of the tab row, with a tooltip. Its icon spins only while the refresh reads.
+- `pr-account` reads through the stored account and names it on access errors.
+- `pr-tab-memory` restores an inner tab and its scroll position when switching PRs.
+- `pr-tab-fit` a tab shorter than the window has no scrollbar: the guide setup alone leaves `[data-pr-scroll]` with `scrollHeight` equal to `clientHeight`. A tab's own view controls (the diff toggles on Files and on a guide's chapters) sit on the tab row as icons. The Tab row journey below and the stand-in agent's in [guide generation](./guide-generation.md) measure it.
+- `pr-states` has an accessible loading skeleton, empty sections, and errors with Retry.
+- `pr-read-rpcs` provides detail, paginated timeline and files, and immutable old or new file contents.
+
+## How to get to it (user POV)
+
+- Open a PR from the inbox or the command palette.
+- Choose an open PR tab.
+- Follow `/pr/<host>/<owner>/<repo>/<number>?account=<account>&tab=conversation`.
+
+## Driving it with e2e
+
+Preconditions:
+
+- Build the app and open an isolated instance through its `openUrl`.
+- The fixture PR, and a PR of a second account, are available in the inbox.
+
+- **Header.** Open fixture #1. `heading "Validate links and count clicks"` and `[data-reading-account]` naming `github.com/<owner>` appear.
+- **Conversation.** `region "Description"` contains `Short links could point at javascript:`. `region "Activity"` holds the commits and events; a PR with no activity at all shows `No activity yet`. Checks show their current state. PRs without reviewers show `No reviewers`.
+- **Comments.** Fixture #1 has no comments. `tests/pr-view.e2e.ts` opens the fake GitHub's #3: `region "Activity"` has one `article "Comment by budget-test"` reading `First comment on 3`. After the fake's `comment?pr=3` and the tab row's Refresh, it has two, the new one `Comment <n> from the fake`.
+- **Events.** `tests/timeline-events.e2e.ts` opens the fake GitHub's PR 8 (`/pr/github.com/budget/fixtures/8?account=github.com%2Fbudget-test&tab=conversation`), switches to oldest first, and compares every `li[data-timeline-kind]` row but commits, read without its avatar letter and time, with a literal list: one sentence per event or group, `added bug and ui labels` folded, two `wontfix` changes ten minutes apart kept apart, `ghost` for a deleted actor. It checks the `time` of three rows (`datetime`, `Nd ago`, and a `title` equal to the instant in the page's locale), the mention link, and that every label chip's name has at least 4.5:1 contrast on its wash in light and dark, the same chips in both. PR 8 also has a mention from `budget/private`, which the fake answers like GitHub does for a repository behind SSO (a null node and a `FORBIDDEN` error); the rail must still show the commit `Start fixture 8` and every other row. The fake answers only the `itemTypes` asked for and only the selected fields, and rejects a fragment on a type it doesn't know or one that can't be spread there, but it doesn't know every field GitHub has, so open a busy public PR such as `pingdotgg/t3code#17879` once on a real account after changing what the timeline asks for.
+- **Checks.** Tap `button /^Open checks:/` beside the tabs. `dialog "Checks"` shows the summary and check rows. Escape dismisses it. The Conversation's Checks section comes last. Expand its check summary. Status icons have names and each available check URL opens on GitHub. `tests/pr-view.e2e.ts` measures every row in both places: icon, name, link icon and label centered on the first line, icon on the heading's left edge.
+- **Activity.** Open public `pingdotgg/t3code#16782` with `tab=summary`; the old id lands on `link "Conversation"` with `aria-current="page"`. In `region "Activity"`, four `[data-timeline-kind="commit"]` rows and a merge event appear, comments read in full with no `details` folds, the expanded header (`[data-pr-expanded-header]`) names `pingdotgg/t3code` once, `section[aria-label="Checks"]` comes after the activity, and a `[data-timeline-kind="review"]` names its verdict. `button "Newest first"` changes the order to show the first commit first.
+- **Files.** Open fixture #1 from the inbox, then `link "Files"`. All five `[data-file-diff-card]` regions render code. In `region "src/server.js"`, click the first `[data-unmodified-lines]` inside the diff's open shadow root. The previously hidden `createServer` import appears. Toggle Split and Wrap (`aria-pressed="true"`), then Unified. Toggle Hide file tree and Show file tree. Choose a file in the tree and confirm its heading lands below the pinned tab row (the journey does this on `pingdotgg/t3code#16782`). By hand: the expand buttons with keyboard focus and Enter.
+- **Tab row.** `tests/pr-view.e2e.ts` opens the fake GitHub's stacked #2. In `navigation "Pull request tabs"`, `button "Refresh"` has no text and the tooltip `Refresh` (`[data-slot="tooltip-popup"]`). Its icon's `animationName` is `none`, then `spin` with the button disabled while the fake answers after 5 seconds (`latency?ms=5000`), then `none` again. `Unified`, `Split`, `Wrap` and `Hide file tree` are there only on Files, each with no text and its name as the tooltip, and `[data-pr-files]` has no `N files` text. On Guide, `radiogroup "Write guides for"` and then `Choose layers` (`group "Layers to write guides for"`) leave the page and `[data-pr-scroll]` unscrolled. Light and dark screenshots of each.
+- **Bot threads.** Open public `pingdotgg/t3code#16782` through `github.com/<owner>`. The repository heading occurs once in main. Conversation shows the `macroscopeapp[bot]` review and its line comments in a `Thread by macroscopeapp[bot] on ...` article, with no filter or folds. Checks is the final section. `tests/pr-view.e2e.ts` saves a screenshot for each.
+- **Header scroll.** Open `pingdotgg/t3code#16782`, hover `[data-pr-scroll]`, and wheel down. `[data-collapse-pinned]` becomes `data-collapsed="true"` once the title leaves the viewport. Compact `#16782`, title, avatar, age, branches and counts appear. The tab bar stays at the same top position during further scroll. Wheel back to the top and the full header returns. The default journey saves screenshots, a video, and `.e2e/evidence/polish/header-scroll-e2e-long-tasks.json`. In a browser context with reduced motion, both motion elements have a zero transition duration.
+- **Account.** Open a second account's PR and inspect `[data-reading-account]`. Changing its URL account to `github.com/<owner>` retains the stored binding to the second account. The instance's server log (`.e2e/logs/<name>.log`) has a `GitHub request` line for `GET /repos/<owner>/<repo>/pulls/<number>` with that `accountId`, its status and cost.
+- **Memory.** Select `link "Guide"` under `navigation "Pull request tabs"`. Switch to another PR and back. Guide still has `aria-current="page"`. Scroll a long Conversation, switch away, and return. `[data-pr-scroll]` retains its offset.
+- **Errors.** Open a nonexistent PR URL with a valid account. `role="alert"` names that account and offers `button "Retry"`. Close its open PR tab to return to the inbox.
+- **Journeys.** `pnpm e2e run tests/open-prs.e2e.ts tests/pr-view.e2e.ts tests/timeline-events.e2e.ts --trace=on --video=on` captures timeline events, Conversation, check alignment, account binding, memory, errors, patch rendering and context expansion.
+
+## Gotchas
+
+- Fixture checks can change as new commits arrive. Read the current state before changing an assertion.
+- Guide generation has its own recipe in [guide generation](./guide-generation.md).
+
+- The server caches details for ten minutes by account and PR, and reads them again sooner when the watcher sees the PR change. Refresh bypasses that cache.
+- Private-account evidence stays local under `.e2e/evidence/d1-open-prs/`.

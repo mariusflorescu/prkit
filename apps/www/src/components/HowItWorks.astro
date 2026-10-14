@@ -1,0 +1,90 @@
+---
+const steps = [
+  {
+    title: "prkit finds your gh logins",
+    body: "Open the app and it picks up every account you signed in to with gh auth login. There are no tokens to paste and nothing to set up.",
+  },
+  {
+    title: "You open a pull request",
+    body: "Pick one from the inbox, open its Guide tab, choose Claude or Codex, and click Generate guide.",
+  },
+  {
+    title: "Your agent walks you through it",
+    body: "It reads a read-only checkout on your Mac. prkit checks that every chapter and note points at real lines of the diff before it shows you the guide. Then you read it and make the call: comment, approve or request changes.",
+  },
+];
+---
+
+<section id="how-it-works" class="section column" aria-labelledby="how-title">
+  <h2 id="how-title" class="section-title">How it works</h2>
+  <p class="lead">Three steps, and the first one is automatic.</p>
+  <ol>
+    {
+      steps.map((step, index) => (
+        <li class="ticks">
+          <span class="counter" aria-hidden="true">
+            {String(index + 1).padStart(3, "0")}
+          </span>
+          <h3>{step.title}</h3>
+          <p>{step.body}</p>
+        </li>
+      ))
+    }
+  </ol>
+</section>
+
+<style>
+  .lead {
+    margin-top: 0.75rem;
+    color: var(--muted-foreground);
+    font-size: 1.0625rem;
+  }
+
+  ol {
+    display: grid;
+    gap: 0.75rem;
+    margin: 2rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  @media (min-width: 44rem) {
+    ol {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  li {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-content: start;
+    gap: 0 0.75rem;
+    padding: 1.25rem 1.25rem 1.5rem;
+    border: 1px solid var(--border);
+  }
+
+  h3 {
+    grid-column: 1;
+    grid-row: 1;
+    font-size: 1rem;
+    line-height: 1.35;
+  }
+
+  .counter {
+    grid-column: 2;
+    grid-row: 1;
+    color: var(--muted-foreground);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    line-height: 1.9;
+    letter-spacing: 0.06em;
+  }
+
+  p {
+    grid-column: 1 / -1;
+    margin-top: 0.75rem;
+    color: var(--muted-foreground);
+    font-size: 0.9375rem;
+    line-height: 1.6;
+  }
+</style>

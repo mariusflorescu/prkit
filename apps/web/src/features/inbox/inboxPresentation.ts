@@ -1,0 +1,194 @@
+import type {
+  Account,
+  AccountId,
+  InboxEntry,
+  InboxFilters,
+  InboxReason,
+  PullRequestSummary,
+  Repository,
+  RepositoryFilter,
+  RepositoryList,
+} from "@prkit/contracts";
+
+import type { SearchPickerGroup } from "~/components/ui/search-picker";
+
+export const INBOX_GROUPS = [
+  { reason: "review-requested", title: "Needs your review" },
+  { reason: "authored", title: "Yours" },
+  { reason: "involved", title: "Involved" },
+] satisfies ReadonlyArray<{ reason: InboxReason; title: string }>;
+
+export const repositoryKey = (repository: { host: string; owner: string; name: string }) =>
+  `${repository.host}/${repository.owner}/${repository.name}`.toLowerCase();
+const entryRepository = (entry: PullRequestSummary) => ({
+  host: entry.ref.host,
+  owner: entry.ref.owner,
+  name: entry.ref.repo,
+});
+
+/**
+ * Whether a saved repository filter names a repository no account sees any more: every
+ * account's list was read whole after the filter was saved, and neither the list nor the
+ * inbox has it. A list read before the save may predate the repository.
+ */
+export const repositoryGone = (
+  list: RepositoryList,
+  entries: ReadonlyArray<InboxEntry>,
+  repository: RepositoryFilter,
+  savedAt: string,
+) => {
+  const key = repositoryKey(repository);
+  return (
+    list.accounts.every(
+      (row) =>
+        row.fetchedAt !== null &&
+        Date.parse(row.fetchedAt) > Date.parse(savedAt) &&
+        row.problem === null &&
+        row.total === null,
+    ) &&
+    !list.repositories.some((item) => repositoryKey(item) === key) &&
+    !entries.some((entry) => repositoryKey(entryRepository(entry)) === key)
+  );
+};
+
+export const sameRepository = (left: RepositoryFilter | null, right: RepositoryFilter | null) =>
+  left === null || right === null
+    ? left === right
+    : repositoryKey(left) === repositoryKey(right) &&
+      left.accountIds.join() === right.accountIds.join();
+
+/**
+ * Saved filters without the accounts removed since: an account filter on one shows every
+ * account, and a repository is read through the accounts left, or dropped when none is.
+ */
+export const withLiveAccounts = (
+  saved: InboxFilters,
+  accounts: ReadonlyArray<Account>,
+): InboxFilters => {
+  const live = new Set(accounts.map((account) => account.id));
+  const [reader, ...others] = saved.repository?.accountIds.filter((id) => live.has(id)) ?? [];
+  return {
+    search: saved.search,
+    account: saved.account !== null && live.has(saved.account) ? saved.account : null,
+    repository:
+      saved.repository === null || reader === undefined
+        ? null
+        : { ...saved.repository, accountIds: [reader, ...others] },
+  };
+};
+
+export const matchesInboxFilter = (
+  entry: InboxEntry,
+  search: string,
+  account: AccountId | null,
+  repository: RepositoryFilter | null,
+) => {
+  if (account !== null && entry.accountId !== account) return false;
+  if (repository !== null && repositoryKey(entryRepository(entry)) !== repositoryKey(repository))
+    return false;
+  const needle = search.trim().toLowerCase();
+  const number = String(entry.ref.number);
+  return (
+    needle === "" ||
+    [
+      entry.title,
+      `${entry.ref.owner}/${entry.ref.repo}`,
+      entry.author?.login ?? "",
+      number,
+      `#${number}`,
+    ].some((value) => value.toLowerCase().includes(needle))
+  );
+};
+
+const relativeTime = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+export const relativeUpdatedTime = (updatedAt: string) => {
+  const seconds = Math.max(0, (Date.now() - Date.parse(updatedAt)) / 1000);
+  if (seconds < 60) return "just now";
+  if (seconds < 3600) return relativeTime.format(-Math.floor(seconds / 60), "minute");
+  if (seconds < 86400) return relativeTime.format(-Math.floor(seconds / 3600), "hour");
+  if (seconds < 2592000) return relativeTime.format(-Math.floor(seconds / 86400), "day");
+  return relativeTime.format(-Math.floor(seconds / 2592000), "month");
+};
+
+const stackId = (entry: InboxEntry) =>
+  entry.stack === null
+    ? null
+    : `${entry.ref.host}/${entry.ref.owner}/${entry.ref.repo}/${entry.stack.number}`;
+
+/**
+ * Layers of one stack sit together, bottom to top, where its most recently updated
+ * layer would be. Everything else keeps the server's order, newest first.
+ */
+export const stackOrder = (entries: ReadonlyArray<InboxEntry>) => {
+  const layers = new Map<string, Array<InboxEntry>>();
+  for (const entry of entries) {
+    const id = stackId(entry);
+    if (id !== null) layers.set(id, [...(layers.get(id) ?? []), entry]);
+  }
+  const placed = new Set<string>();
+  return entries.flatMap((entry) => {
+    const id = stackId(entry);
+    if (id === null) return [entry];
+    if (placed.has(id)) return [];
+    placed.add(id);
+    return (layers.get(id) ?? []).toSorted(
+      (left, right) => (left.stack?.position ?? 0) - (right.stack?.position ?? 0),
+    );
+  });
+};
+
+/** A row of the repository filter: every repository, or one with its inbox count. */
+export type RepositoryChoice =
+  | { readonly _tag: "all"; readonly key: "all" }
+  | (RepositoryFilter & {
+      readonly _tag: "repository";
+      readonly key: string;
+      readonly count: number;
+    });
+
+export const ALL_REPOSITORIES: RepositoryChoice = { _tag: "all", key: "all" };
+
+/**
+ * The repository filter's rows, grouped by owner: every repository the accounts in view
+ * can see, plus any the inbox lists that the list doesn't (it may be cut or still
+ * loading), each with how many inbox pull requests it has.
+ */
+export const repositoryChoices = (
+  repositories: ReadonlyArray<Repository>,
+  entries: ReadonlyArray<InboxEntry>,
+  account: AccountId | null,
+): ReadonlyArray<SearchPickerGroup<RepositoryChoice>> => {
+  const counts = new Map<string, number>();
+  const found = new Map<string, RepositoryFilter>();
+  for (const entry of entries) {
+    if (account !== null && entry.accountId !== account) continue;
+    const key = repositoryKey(entryRepository(entry));
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    if (!found.has(key))
+      found.set(key, { ...entryRepository(entry), accountIds: [entry.accountId] });
+  }
+  for (const repository of repositories) {
+    const readers = repository.accountIds.filter((id) => account === null || id === account);
+    const [first, ...rest] = readers;
+    if (first !== undefined)
+      found.set(repositoryKey(repository), { ...repository, accountIds: [first, ...rest] });
+  }
+  const byOwner = new Map<string, Array<RepositoryChoice>>();
+  for (const [key, repository] of found) {
+    const owner = `${repository.host}/${repository.owner}`;
+    byOwner.set(owner, [
+      ...(byOwner.get(owner) ?? []),
+      { ...repository, _tag: "repository", key, count: counts.get(key) ?? 0 },
+    ]);
+  }
+  const groups = [...byOwner]
+    .toSorted(([left], [right]) => left.localeCompare(right, undefined, { sensitivity: "base" }))
+    .map(([owner, choices]) => ({
+      value: owner,
+      label: owner.startsWith("github.com/") ? owner.slice("github.com/".length) : owner,
+      items: choices.toSorted((left, right) =>
+        left.key.localeCompare(right.key, undefined, { sensitivity: "base" }),
+      ),
+    }));
+  return [{ value: "all", label: null, items: [ALL_REPOSITORIES] }, ...groups];
+};

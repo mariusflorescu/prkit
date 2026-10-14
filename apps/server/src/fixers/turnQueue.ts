@@ -1,0 +1,266 @@
+import {
+  FIXER_BUSY,
+  type FixerError,
+  type FixerId,
+  type FixerTrigger,
+  FixerTurnId,
+  refFromKey,
+} from "@prkit/contracts";
+import * as Deferred from "effect/Deferred";
+import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import type { PlatformError } from "effect/PlatformError";
+import type { SchemaError } from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
+
+import { Agents } from "../agents/Agents.ts";
+import { turnTmpDir } from "../agents/commandReach.ts";
+import { McpTokens } from "../mcp/McpTokens.ts";
+import {
+  type GitTampered,
+  type LinkRefused,
+  RepoCache,
+  type RepoError,
+} from "../repo/RepoCache.ts";
+import { encodeStatus, encodeWork, type FixerRow, type WorkRequest } from "./fixerRows.ts";
+import { decodeCount, type FixerState, TurnFailure } from "./fixerState.ts";
+import type { TurnLeftovers } from "./turnLeftovers.ts";
+
+/** What a turn does once it holds the checkout and an agent slot. */
+export type TurnBody = Effect.Effect<
+  void,
+  | TurnFailure
+  | SchemaError
+  | SqlError
+  | PlatformError
+  | RepoError
+  | LinkRefused
+  | GitTampered
+  | FixerError
+>;
+
+/**
+ * The turn queue: one turn per PR holds the checkout at a time, queued turns
+ * start in order, and every turn runs in one of the app's two agent slots.
+ * `runTurn` is what a queued turn does when it starts, once what earlier turns left has ended.
+ */
+export const makeTurnQueue = (
+  state: FixerState,
+  leftovers: TurnLeftovers,
+  runTurn: (turnId: FixerTurnId) => TurnBody,
+) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const repo = yield* RepoCache;
+    const agents = yield* Agents;
+    const tokens = yield* McpTokens;
+    const scope = yield* Effect.scope;
+    const {
+      appendActivity,
+      awaiting,
+      contextDir,
+      fail,
+      fixerById,
+      newId,
+      notify,
+      now,
+      publish,
+      returnDrafts,
+      runId,
+      transition,
+      turnById,
+      turnsOf,
+    } = state;
+    const running = new Map<FixerTurnId, Fiber.Fiber<void>>();
+
+    /**
+     * Starts the oldest queued turn when nothing else holds the worktree. The check
+     * and the start are one transaction, so two callers never start two turns.
+     */
+    const advance = (fixerId: FixerId): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const at = yield* now;
+        const next = yield* sql.withTransaction(
+          Effect.gen(function* () {
+            const fixer = yield* fixerById(fixerId);
+            if (fixer === null || fixer.ended !== null) return null;
+            const busy = yield* sql`SELECT COUNT(*) AS count FROM fixer_turns
+              WHERE fixer_id = ${fixerId} AND json_extract(status, '$._tag') IN ${sql.in(FIXER_BUSY)}`.pipe(
+              Effect.flatMap(decodeCount),
+            );
+            if ((busy[0]?.count ?? 0) > 0) return null;
+            const [queued] = yield* turnsOf(fixerId, ["queued"]);
+            if (queued === undefined) return null;
+            yield* sql`UPDATE fixer_turns SET status = ${encodeStatus({ _tag: "preparing" })},
+              run_id = ${runId}, started_at = ${at}, agent_pid = NULL, agent_started = NULL
+              WHERE id = ${queued.id} AND json_extract(status, '$._tag') = 'queued'`;
+            return { fixer, turnId: queued.id };
+          }),
+        );
+        if (next === null) return;
+        yield* launch(next.fixer, next.turnId, runTurn(next.turnId));
+        yield* publish(next.fixer.pr_key);
+      }).pipe(
+        Effect.catchTags({
+          SqlError: (error) => Effect.logError("Couldn't start the next fix turn", error),
+          SchemaError: (error) => Effect.logError("Couldn't read the fix queue", error),
+        }),
+      );
+
+    /**
+     * Ends a turn as failed: drafts go back to the owner, the checkout to the head, unless
+     * something an agent turn started may still be running there.
+     */
+    const failTurn = (fixer: FixerRow, turnId: FixerTurnId, failure: TurnFailure) =>
+      Effect.gen(function* () {
+        const failed = yield* transition(turnId, ["preparing", "running"], {
+          _tag: "failed",
+          reason: failure.reason,
+          message: failure.message,
+        });
+        yield* tokens.revokeTurn(turnId);
+        if (!failed) return;
+        yield* returnDrafts(turnId);
+        const turn = yield* turnById(turnId);
+        const ref = refFromKey(fixer.pr_key);
+        if (ref !== null && turn?.head_sha != null)
+          yield* leftovers
+            .unlessLeftovers(fixer.id, repo.resetFix(ref, fixer.id, turn.head_sha))
+            .pipe(Effect.ignore);
+        yield* Effect.logWarning("Fix turn failed").pipe(
+          Effect.annotateLogs({ reason: failure.reason, message: failure.message }),
+        );
+        yield* appendActivity(fixer.pr_key, turnId, "error", failure.message);
+        yield* notify(fixer, "The agent couldn't finish", failure.message);
+      });
+
+    /**
+     * Runs a turn's body in the service's scope, in one of the app's two agent slots.
+     * Interrupting the fiber stops the agent's process group.
+     */
+    const launch = (fixer: FixerRow, turnId: FixerTurnId, body: TurnBody) =>
+      Effect.gen(function* () {
+        const registered = yield* Deferred.make<void>();
+        // Before any of prkit's git, what earlier turns left must have ended.
+        const guarded = leftovers.settle(fixer.id).pipe(
+          Effect.andThen(body),
+          Effect.catchTags({
+            PlatformError: () =>
+              fail(
+                "repository",
+                "prkit couldn't write the fix's files. Check the disk has space, then retry.",
+              ),
+            SqlError: () => fail("agent", "prkit couldn't save the fix. Retry."),
+            SchemaError: () => fail("agent", "prkit read a damaged fix record. Retry."),
+            RepoError: (error) => fail(error.reason, error.message),
+            LinkRefused: (error) => fail("checks", error.message),
+            GitTampered: (error) => fail("checks", error.message),
+            FixerError: (error) => fail("agent", error.message),
+          }),
+          Effect.catchTag("TurnFailure", (failure) => failTurn(fixer, turnId, failure)),
+          Effect.catchTags({
+            SqlError: (error) => Effect.logError("Couldn't record the fix turn's failure", error),
+            SchemaError: (error) =>
+              Effect.logError("Couldn't record the fix turn's failure", error),
+          }),
+          Effect.tapDefect((defect) =>
+            Effect.logError("Fix turn crashed", defect).pipe(
+              Effect.andThen(
+                failTurn(
+                  fixer,
+                  turnId,
+                  new TurnFailure({
+                    reason: "agent",
+                    message: "prkit hit an internal error. Retry.",
+                  }),
+                ),
+              ),
+              Effect.ignore,
+            ),
+          ),
+          Effect.ensuring(
+            fs
+              .remove(turnTmpDir(path, turnId), { recursive: true, force: true })
+              .pipe(
+                Effect.andThen(
+                  fs.remove(path.join(contextDir, turnId), { recursive: true, force: true }),
+                ),
+                Effect.ignore,
+              ),
+          ),
+          Effect.andThen(publish(fixer.pr_key)),
+          Effect.annotateLogs({ fixerId: fixer.id, turnId }),
+        );
+        const fiber = yield* Deferred.await(registered).pipe(
+          Effect.andThen(
+            agents.slots
+              .withPermitsIfAvailable(1)(guarded)
+              .pipe(
+                Effect.flatMap((ran) =>
+                  Option.isSome(ran)
+                    ? Effect.void
+                    : appendActivity(fixer.pr_key, turnId, "phase", "queued").pipe(
+                        Effect.ignore,
+                        Effect.andThen(agents.slots.withPermits(1)(guarded)),
+                      ),
+                ),
+              ),
+          ),
+          Effect.ensuring(Effect.sync(() => running.delete(turnId))),
+          // The next queued turn starts once this one has let go of the worktree.
+          Effect.andThen(Effect.suspend(() => advance(fixer.id))),
+          Effect.forkIn(scope),
+        );
+        running.set(turnId, fiber);
+        yield* Deferred.succeed(registered, undefined);
+      });
+
+    /** Stops a turn's fiber, unless it is the caller's own, and waits for its process to go. */
+    const stopFiber = (turnId: FixerTurnId) =>
+      Effect.gen(function* () {
+        const fiber = running.get(turnId);
+        if (fiber !== undefined && fiber !== (yield* Effect.fiber)) yield* Fiber.interrupt(fiber);
+        awaiting.delete(turnId);
+        yield* tokens.revokeTurn(turnId);
+      });
+
+    /** Queues a turn on a PR's fixer; `prepare` writes anything else in the same transaction. */
+    const enqueue = (
+      fixer: FixerRow,
+      work: WorkRequest,
+      trigger: FixerTrigger,
+      input: {
+        readonly createdAt?: string;
+        readonly prepare?: (turnId: FixerTurnId) => Effect.Effect<void, FixerError | SqlError>;
+      } = {},
+    ) =>
+      Effect.gen(function* () {
+        const turnId = FixerTurnId.make(yield* newId);
+        const at = yield* now;
+        yield* sql.withTransaction(
+          Effect.gen(function* () {
+            yield* sql`
+              INSERT INTO fixer_turns (id, fixer_id, kind, work, trigger, status, provider, model, created_at)
+              VALUES (${turnId}, ${fixer.id}, ${work._tag}, ${encodeWork(work)}, ${trigger},
+                ${encodeStatus({ _tag: "queued" })}, ${fixer.provider}, ${fixer.model}, ${input.createdAt ?? at})`;
+            if (input.prepare !== undefined) yield* input.prepare(turnId);
+          }),
+        );
+        yield* Effect.logInfo("Fix turn queued").pipe(
+          Effect.annotateLogs({ fixerId: fixer.id, turnId, kind: work._tag, trigger }),
+        );
+        yield* advance(fixer.id);
+        yield* publish(fixer.pr_key);
+        return turnId;
+      });
+
+    return { advance, launch, stopFiber, enqueue };
+  });
+
+export type TurnQueue = Effect.Success<ReturnType<typeof makeTurnQueue>>;

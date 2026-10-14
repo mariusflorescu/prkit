@@ -1,0 +1,539 @@
+import {
+  type AccountId,
+  type AgentSelection,
+  type ConflictStrategy,
+  effectiveSelection,
+  FIXER_BUSY,
+  type FixComment,
+  FixerError,
+  type FixerFeedEntry,
+  type FixerFeedEvent,
+  type FixerSnapshot,
+  FixerStateError,
+  type FixerTrigger,
+  type FixerTurnId,
+  type FixerTurnState,
+  type FixTarget,
+  type PullRequestKey,
+  refFromKey,
+  selectionProblem,
+} from "@prkit/contracts";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as PubSub from "effect/PubSub";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/sql/SqlClient";
+
+import { Agents } from "../agents/Agents.ts";
+import { processHost } from "../agents/turnEnd.ts";
+import { GitHubApi } from "../github/GitHubApi.ts";
+import { PullRequests } from "../pullRequests/PullRequests.ts";
+import { RepoCache } from "../repo/RepoCache.ts";
+import { GuideSettingsStore } from "../reviews/GuideSettingsStore.ts";
+import { reviewTarget } from "../reviews/reviewTarget.ts";
+import { makeAgentRuns } from "./agentRuns.ts";
+import { makeConflictTurn } from "./conflictTurn.ts";
+import { decodeDiff, decodeFixers, encodeStatus, type FixerRow } from "./fixerRows.ts";
+import { clip, decodeCount, makeFixerState } from "./fixerState.ts";
+import { makeFixTools } from "./fixTools.ts";
+import { makeFixWatch } from "./fixWatch.ts";
+import { makePushes } from "./pushes.ts";
+import { makeScriptAccess } from "./scriptAccess.ts";
+import { makeSessions } from "./sessions.ts";
+import { makeTurnBodies } from "./turnBodies.ts";
+import { makeTurnLeftovers } from "./turnLeftovers.ts";
+import { makeTurnQueue, type TurnBody } from "./turnQueue.ts";
+import { makeTurnSteps } from "./turnSteps.ts";
+
+const WORKING: ReadonlyArray<FixerTurnState> = ["queued", "preparing", "running", "pushing"];
+
+export class Fixers extends Context.Service<Fixers, Effect.Success<typeof make>>()(
+  "@prkit/server/fixers/Fixers",
+) {}
+
+export const make = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const repo = yield* RepoCache;
+  const agents = yield* Agents;
+  const api = yield* GitHubApi;
+  const pullRequests = yield* PullRequests;
+  const guideSettings = yield* GuideSettingsStore;
+
+  const state = yield* makeFixerState;
+  const {
+    appendActivity,
+    changes,
+    commandTurn,
+    dbFailures,
+    findFixer,
+    notices,
+    now,
+    runId,
+    snapshotOf,
+    turnsOf,
+    watched,
+  } = state;
+  const leftovers = yield* makeTurnLeftovers(yield* processHost);
+  // A queued turn starts with what its kind of turn does, defined further down.
+  const queue = yield* makeTurnQueue(state, leftovers, (turnId): TurnBody =>
+    bodies.runTurn(turnId),
+  );
+  const { advance, enqueue, launch } = queue;
+  const sessions = yield* makeSessions(state, queue, leftovers);
+  const { boundFixer, dropTurn, ensureFixer, reconcile, stop } = sessions;
+  const runs = yield* makeAgentRuns(state, leftovers);
+  const pushes = yield* makePushes(state, queue);
+  const { pushAccess, pushTurn } = pushes;
+  const steps = yield* makeTurnSteps(state, pushes);
+  const access = yield* makeScriptAccess(state);
+  const conflicts = yield* makeConflictTurn(state, runs, steps, sessions, access);
+  const bodies = yield* makeTurnBodies(state, runs, steps, conflicts, sessions, access, leftovers);
+  const { reviseBody } = bodies;
+  const { finishFixes, finishConflicts, reportProgress } = yield* makeFixTools(state, conflicts);
+
+  /**
+   * The agent for a new turn: the one asked for (checked against the catalog),
+   * else the session's own, else the default from Settings > Agents.
+   */
+  const chooseAgent = (requested: AgentSelection | undefined, fixer: FixerRow | null) =>
+    Effect.gen(function* () {
+      if (requested === undefined && fixer !== null)
+        return { provider: fixer.provider, model: fixer.model, options: fixer.model_options };
+      const catalog = yield* agents.catalog();
+      if (requested !== undefined) {
+        const problem = selectionProblem(catalog, requested);
+        if (problem !== null) return yield* new FixerError({ message: problem });
+        return requested;
+      }
+      const stored = yield* guideSettings
+        .get()
+        .pipe(
+          Effect.catchTag("GuideSettingsError", (error) =>
+            Effect.fail(new FixerError({ message: error.message })),
+          ),
+        );
+      const chosen = effectiveSelection(catalog, stored.defaultAgent);
+      if (chosen === null)
+        return yield* new FixerError({
+          message: "No agent is ready. Sign in to Claude Code or Codex, then check again.",
+        });
+      return chosen;
+    });
+
+  const get = (key: PullRequestKey) => snapshotOf(key).pipe(Effect.catchTags(dbFailures));
+
+  /** The comments as the agent gets them, read fresh: drafts from prkit, threads from GitHub. */
+  const commentsFor = (
+    key: PullRequestKey,
+    accountId: AccountId,
+    targets: ReadonlyArray<FixTarget>,
+  ) =>
+    Effect.gen(function* () {
+      const draftIds = targets.flatMap((target) => (target._tag === "draft" ? [target.id] : []));
+      const drafts =
+        draftIds.length === 0
+          ? []
+          : yield* sql`SELECT id, path, start_side, start_line, end_side, end_line, snippet, body, state, submission_id
+              FROM pending_comments WHERE pr_key = ${key} AND account_id = ${accountId} AND id IN ${sql.in(draftIds)}`.pipe(
+              Effect.flatMap(
+                Schema.decodeUnknownEffect(
+                  Schema.Array(
+                    Schema.Struct({
+                      id: Schema.String,
+                      path: Schema.String,
+                      start_side: Schema.Literals(["old", "new"]),
+                      start_line: Schema.Int,
+                      end_side: Schema.Literals(["old", "new"]),
+                      end_line: Schema.Int,
+                      snippet: Schema.String,
+                      body: Schema.String,
+                      state: Schema.String,
+                      submission_id: Schema.NullOr(Schema.String),
+                    }),
+                  ),
+                ),
+              ),
+            );
+      const threads = targets.some((target) => target._tag === "thread")
+        ? (yield* pullRequests
+            .threads(key, accountId)
+            .pipe(
+              Effect.catchTag("PullRequestReadError", (error) =>
+                Effect.fail(new FixerError({ message: error.message })),
+              ),
+            )).threads
+        : [];
+      const comments: Array<FixComment> = [];
+      for (const target of targets) {
+        const id = `c${comments.length + 1}`;
+        if (target._tag === "draft") {
+          const draft = drafts.find((row) => row.id === target.id);
+          if (draft === undefined || draft.state !== "draft" || draft.submission_id !== null)
+            return yield* new FixerError({
+              message:
+                "A comment you picked was sent or changed meanwhile. Refresh and pick again.",
+            });
+          comments.push({
+            id,
+            source: { _tag: "draft", draftId: target.id },
+            path: draft.path,
+            lines: { side: draft.end_side, start: draft.start_line, end: draft.end_line },
+            snippet: draft.snippet,
+            body: draft.body,
+          });
+          continue;
+        }
+        const thread = threads.find((row) => row.id === target.threadId);
+        if (thread === undefined)
+          return yield* new FixerError({
+            message:
+              "A thread you picked is no longer on the pull request. Refresh and pick again.",
+          });
+        comments.push({
+          id,
+          source: {
+            _tag: "thread",
+            threadId: thread.id,
+            url: thread.comments[0]?.url ?? null,
+            canReply: thread.canReply,
+          },
+          path: thread.path,
+          lines:
+            thread.anchor === null
+              ? null
+              : {
+                  side: thread.anchor.end.side,
+                  start: thread.anchor.start.line,
+                  end: thread.anchor.end.line,
+                },
+          snippet: thread.diffHunk.split("\n").slice(-8).join("\n"),
+          body: thread.comments
+            .map((comment) => `${comment.author?.login ?? "ghost"}: ${comment.body}`)
+            .join("\n\n"),
+        });
+      }
+      const [first, ...rest] = comments;
+      if (first === undefined)
+        return yield* new FixerError({ message: "Pick at least one comment." });
+      return [first, ...rest] as const;
+    });
+
+  /** Marks the batch's drafts as with the agent; a draft that moved on fails the whole send. */
+  const holdDrafts = (comments: ReadonlyArray<FixComment>) => (turnId: FixerTurnId) =>
+    Effect.gen(function* () {
+      const at = yield* now;
+      for (const comment of comments) {
+        if (comment.source._tag !== "draft") continue;
+        const rows =
+          yield* sql`UPDATE pending_comments SET state = 'sent-to-agent', fixer_turn_id = ${turnId}, updated_at = ${at}
+          WHERE id = ${comment.source.draftId} AND state = 'draft' AND submission_id IS NULL RETURNING id`;
+        if (rows.length === 0)
+          return yield* new FixerError({
+            message: "A comment you picked was sent or changed meanwhile. Refresh and pick again.",
+          });
+      }
+    });
+
+  const send = (
+    key: PullRequestKey,
+    accountId: AccountId,
+    input: {
+      readonly agent?: AgentSelection;
+      readonly targets: ReadonlyArray<FixTarget>;
+      readonly note: string | null;
+      readonly replyAfterPush: boolean;
+    },
+    trigger: FixerTrigger = "user",
+  ) =>
+    Effect.gen(function* () {
+      const existing = yield* boundFixer(key, accountId);
+      const agent = yield* chooseAgent(input.agent, existing);
+      const comments = yield* commentsFor(key, accountId, input.targets);
+      const fixer = yield* ensureFixer(key, accountId, agent);
+      const note = input.note?.trim() ?? "";
+      yield* enqueue(
+        fixer,
+        {
+          _tag: "fix",
+          comments,
+          note: note === "" ? null : note.slice(0, 2000),
+          replyAfterPush: input.replyAfterPush,
+        },
+        trigger,
+        { prepare: holdDrafts(comments) },
+      );
+      return yield* snapshotOf(key);
+    }).pipe(Effect.catchTags(dbFailures));
+
+  const resolveConflicts = (
+    key: PullRequestKey,
+    accountId: AccountId,
+    input: { readonly agent?: AgentSelection; readonly strategy: ConflictStrategy },
+    trigger: FixerTrigger = "user",
+  ) =>
+    Effect.gen(function* () {
+      const existing = yield* boundFixer(key, accountId);
+      if (existing !== null && existing.ended === null) {
+        const open = yield* turnsOf(existing.id, [...FIXER_BUSY, "queued"]);
+        if (open.some((turn) => turn.work._tag === "conflicts"))
+          return yield* new FixerStateError({
+            key,
+            message: "prkit is already resolving this pull request's conflicts.",
+          });
+      }
+      if (input.strategy === "rebase") {
+        const ref = refFromKey(key);
+        const target =
+          ref === null
+            ? null
+            : yield* reviewTarget(ref, accountId).pipe(
+                Effect.provideService(GitHubApi, api),
+                Effect.catchTag("GitHubRequestError", (error) =>
+                  Effect.fail(new FixerError({ message: error.message })),
+                ),
+              );
+        if (target === null || target.author !== accountId.slice(accountId.indexOf("/") + 1))
+          return yield* new FixerStateError({
+            key,
+            message:
+              "Rebasing rewrites the branch's history, so prkit offers it only on your own pull requests. Merge the base instead.",
+          });
+      }
+      const agent = yield* chooseAgent(input.agent, existing);
+      const fixer = yield* ensureFixer(key, accountId, agent);
+      yield* enqueue(fixer, { _tag: "conflicts", strategy: input.strategy }, trigger);
+      return yield* snapshotOf(key);
+    }).pipe(Effect.catchTags(dbFailures));
+
+  const discard = (key: PullRequestKey, turnId: FixerTurnId) =>
+    Effect.gen(function* () {
+      const { row, fixer, outcome } = yield* commandTurn(key, turnId, "discard");
+      if (outcome._tag === "reject")
+        return yield* new FixerStateError({ key, message: outcome.message });
+      if (outcome._tag === "start")
+        yield* dropTurn(fixer, row, {
+          _tag: "discarded",
+          reason: "user",
+          message:
+            row.status._tag === "ready"
+              ? "Discarded. Nothing reached GitHub"
+              : "Stopped and discarded",
+        });
+      yield* advance(fixer.id);
+      return yield* snapshotOf(key);
+    }).pipe(Effect.catchTags(dbFailures));
+
+  const revise = (key: PullRequestKey, turnId: FixerTurnId, note: string) =>
+    Effect.gen(function* () {
+      const { row, fixer, outcome } = yield* commandTurn(key, turnId, "revise");
+      if (outcome._tag === "reject")
+        return yield* new FixerStateError({ key, message: outcome.message });
+      if (row.work._tag === "revert")
+        return yield* new FixerStateError({
+          key,
+          message: "A revert has nothing for the agent to change.",
+        });
+      const cleaned = note.trim().slice(0, 2000);
+      if (cleaned === "")
+        return yield* new FixerError({ message: "Say what the agent should change." });
+      const at = yield* now;
+      const moved = yield* sql`UPDATE fixer_turns SET status = ${encodeStatus({ _tag: "running" })},
+        rounds = rounds + 1, run_id = ${runId}, started_at = ${at}, finished_at = NULL
+        WHERE id = ${turnId} AND json_extract(status, '$._tag') = 'ready' RETURNING id`;
+      if (moved.length === 0) return yield* snapshotOf(key);
+      yield* appendActivity(key, turnId, "note", `You asked: ${clip(cleaned, 300)}`);
+      yield* launch(fixer, turnId, reviseBody(turnId, cleaned));
+      return yield* snapshotOf(key);
+    }).pipe(Effect.catchTags(dbFailures));
+
+  const retry = (key: PullRequestKey, turnId: FixerTurnId) =>
+    Effect.gen(function* () {
+      const { row, fixer, outcome } = yield* commandTurn(key, turnId, "retry");
+      if (outcome._tag === "reject")
+        return yield* new FixerStateError({ key, message: outcome.message });
+      if (outcome._tag === "noop") return yield* snapshotOf(key);
+      switch (row.work._tag) {
+        case "fix":
+          return yield* send(
+            key,
+            fixer.account_id,
+            {
+              targets: row.work.comments.map((comment): FixTarget =>
+                comment.source._tag === "draft"
+                  ? { _tag: "draft", id: comment.source.draftId }
+                  : { _tag: "thread", threadId: comment.source.threadId },
+              ),
+              note: row.work.note,
+              replyAfterPush: row.work.replyAfterPush,
+            },
+            "retry",
+          );
+        case "conflicts":
+          return yield* resolveConflicts(
+            key,
+            fixer.account_id,
+            { strategy: row.work.strategy },
+            "retry",
+          );
+        case "revert": {
+          yield* enqueue(fixer, row.work, "retry");
+          return yield* snapshotOf(key);
+        }
+      }
+    }).pipe(Effect.catchTags(dbFailures));
+
+  const revert = (key: PullRequestKey, turnId: FixerTurnId) =>
+    Effect.gen(function* () {
+      const { row, fixer, outcome } = yield* commandTurn(key, turnId, "revert");
+      if (outcome._tag === "reject")
+        return yield* new FixerStateError({ key, message: outcome.message });
+      if (row.commit_sha === null)
+        return yield* new FixerError({ message: "There is no merge to revert." });
+      yield* ensureFixer(key, fixer.account_id, {
+        provider: fixer.provider,
+        model: fixer.model,
+        options: fixer.model_options,
+      });
+      yield* enqueue(fixer, { _tag: "revert", turnId, sha: row.commit_sha }, "user");
+      return yield* snapshotOf(key);
+    }).pipe(Effect.catchTags(dbFailures));
+
+  /** A turn's diff for the Fixes panel; immutable once the commit exists. */
+  const diff = (key: PullRequestKey, turnId: FixerTurnId) =>
+    Effect.gen(function* () {
+      const { row } = yield* commandTurn(key, turnId, "push");
+      const rows = yield* sql`SELECT diff FROM fixer_turns WHERE id = ${row.id}`.pipe(
+        Effect.flatMap(decodeDiff),
+      );
+      const stored = rows[0]?.diff ?? null;
+      if (stored === null)
+        return yield* new FixerError({ message: "This fix has no changes to show yet." });
+      return stored;
+    }).pipe(Effect.catchTags(dbFailures));
+
+  /** The changes as a patch, for an account that can't push to the branch. */
+  const patch = (key: PullRequestKey, turnId: FixerTurnId) =>
+    Effect.gen(function* () {
+      const { row, fixer } = yield* commandTurn(key, turnId, "push");
+      if (row.commit_sha === null || row.head_sha === null)
+        return yield* new FixerError({ message: "This fix has no commit yet." });
+      const ref = refFromKey(fixer.pr_key);
+      if (ref === null)
+        return yield* new FixerError({ message: "This pull request's key can't be read." });
+      const merge = row.work._tag === "conflicts" && row.work.strategy === "merge";
+      const rebase = row.work._tag === "conflicts" && row.work.strategy === "rebase";
+      const text = yield* repo
+        .patchOf(repo.checkout(ref, repo.fixerPath(fixer.id)), {
+          sha: row.commit_sha,
+          from: rebase ? (row.base_sha ?? row.head_sha) : row.head_sha,
+          merge,
+        })
+        .pipe(
+          Effect.catchTag("RepoError", () =>
+            Effect.fail(
+              new FixerError({
+                message: "prkit's copy of this fix is gone, so there is no patch to copy.",
+              }),
+            ),
+          ),
+        );
+      return { patch: text };
+    }).pipe(Effect.catchTags(dbFailures));
+
+  const watch = (key: PullRequestKey): Stream.Stream<FixerSnapshot, FixerError> =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        // Subscribe before reading, so nothing that lands in between is lost.
+        const subscription = yield* PubSub.subscribe(changes);
+        const first = yield* snapshotOf(key);
+        return Stream.concat(
+          Stream.succeed(first),
+          Stream.fromSubscription(subscription).pipe(
+            Stream.filter((changed) => changed === key),
+            Stream.mapEffect(() => snapshotOf(key).pipe(Effect.catchTags(dbFailures))),
+          ),
+        );
+      }).pipe(Effect.catchTags(dbFailures)),
+    );
+
+  const feedEntry = (fixer: FixerRow) =>
+    Effect.gen(function* () {
+      const open = fixer.ended === null ? yield* turnsOf(fixer.id, [...WORKING, "ready"]) : [];
+      const [all] =
+        yield* sql`SELECT COUNT(*) AS count FROM fixer_turns WHERE fixer_id = ${fixer.id}`.pipe(
+          Effect.flatMap(decodeCount),
+        );
+      return {
+        key: fixer.pr_key,
+        accountId: fixer.account_id,
+        state: open.some((turn) => WORKING.includes(turn.status._tag))
+          ? "working"
+          : open.length > 0
+            ? "waiting"
+            : "idle",
+        turns: all?.count ?? 0,
+      } satisfies FixerFeedEntry;
+    });
+
+  /** Every PR's fixer for tabs and notifications: the index, each change, and notices. */
+  const feed = (): Stream.Stream<FixerFeedEvent, FixerError> =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        const changed = yield* PubSub.subscribe(changes);
+        const noticed = yield* PubSub.subscribe(notices);
+        const all = yield* sql`SELECT * FROM fixers`.pipe(Effect.flatMap(decodeFixers));
+        const entries = yield* Effect.forEach(all, feedEntry);
+        const sent = new Map(entries.map((entry) => [entry.key, entry]));
+        const updates = Stream.fromSubscription(changed).pipe(
+          Stream.mapEffect((key) =>
+            findFixer(key).pipe(
+              Effect.flatMap((fixer) => (fixer === null ? Effect.succeed(null) : feedEntry(fixer))),
+              Effect.catchTags(dbFailures),
+            ),
+          ),
+          Stream.flatMap((entry): Stream.Stream<FixerFeedEvent> => {
+            const last = entry === null ? undefined : sent.get(entry.key);
+            if (entry === null || (last?.state === entry.state && last.turns === entry.turns))
+              return Stream.empty;
+            sent.set(entry.key, entry);
+            return Stream.succeed({ _tag: "changed", fixer: entry });
+          }),
+        );
+        return Stream.concat(
+          Stream.succeed<FixerFeedEvent>({ _tag: "index", fixers: entries }),
+          Stream.merge(updates, Stream.fromSubscription(noticed)),
+        );
+      }).pipe(Effect.catchTags(dbFailures)),
+    );
+
+  const { observed } = yield* makeFixWatch(state, queue, sessions, resolveConflicts);
+
+  yield* reconcile;
+
+  return {
+    get,
+    watch,
+    feed,
+    send,
+    resolveConflicts,
+    push: (key: PullRequestKey, turnId: FixerTurnId) => pushTurn(key, turnId),
+    discard,
+    revise,
+    retry,
+    revert,
+    stop,
+    diff,
+    patch,
+    pushAccess,
+    scriptAccess: access.forPullRequest,
+    finishFixes,
+    finishConflicts,
+    reportProgress,
+    watched,
+    observed,
+  };
+});
+
+export const layer = Layer.effect(Fixers, make);

@@ -1,0 +1,254 @@
+---
+import { APPLE, GITHUB } from "../glyphs.ts";
+import { GITHUB_URL } from "../site.ts";
+import ArrowOut from "./ArrowOut.astro";
+import Figure from "./Figure.astro";
+---
+
+<section class="hero" aria-labelledby="hero-title">
+  <div class="column">
+    <p class="chip" data-rise>
+      <span class="note"><span class="dot" aria-hidden="true"></span>Coming soon to macOS</span>
+      <a href={GITHUB_URL}>Follow on GitHub <ArrowOut /></a>
+    </p>
+    <h1 id="hero-title" data-rise style="--rise-step: 1">
+      Your agents write the code. prkit keeps you in the loop.
+    </h1>
+    <p class="lead" data-rise style="--rise-step: 2">
+      You can run twenty agents at once. You can't read twenty pull requests at once. prkit puts every
+      one that needs you in one inbox, and your own Claude Code or Codex walks you through each
+      change, core first, so you understand it before you approve it.
+    </p>
+    <div class="actions" data-rise style="--rise-step: 3">
+      {/* No release exists yet: a label shaped like the button it will become, not a control. */}
+      <p class="download">
+        <span class="icon" aria-hidden="true">
+          <svg viewBox={APPLE.viewBox}><path fill="currentColor" d={APPLE.path} /></svg>
+        </span>
+        <span class="label">Download for macOS</span>
+        <span class="soon">Coming soon</span>
+      </p>
+      <a class="github ticks" href={GITHUB_URL}>View on GitHub <ArrowOut /></a>
+    </div>
+    <div class="works" data-rise style="--rise-step: 4">
+      <p class="eyebrow">Works with</p>
+      <ul>
+        <li>
+          <svg viewBox={GITHUB.viewBox} aria-hidden="true"><path fill="currentColor" d={GITHUB.path} /></svg>
+          GitHub
+        </li>
+        <li>Claude Code</li>
+        <li>Codex</li>
+      </ul>
+    </div>
+  </div>
+  <div class="figure wide" data-rise style="--rise-step: 5">
+    <Figure
+      slug="pr-guide"
+      placeholder={{
+        title: "The guide",
+        caption:
+          "Your agent reads the pull request on your Mac and writes a guide: an overview, a before and after flow, then chapters that walk the diff one idea at a time, core change first.",
+        ratio: [16, 9],
+      }}
+    />
+  </div>
+</section>
+
+<style>
+  .hero {
+    padding-top: clamp(2.5rem, 1.5rem + 4vw, 5rem);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: stretch;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    font-size: 0.8125rem;
+    line-height: 1;
+  }
+
+  .note {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0 0.75rem;
+    color: var(--muted-foreground);
+  }
+
+  .dot {
+    width: 0.375rem;
+    height: 0.375rem;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .chip a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    min-height: 2rem;
+    padding: 0 0.75rem;
+    margin: -1px -1px -1px 0;
+    border: 1px solid var(--border);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    background: var(--background);
+    color: var(--heading);
+    font-weight: 500;
+    text-decoration: none;
+  }
+
+  @media (pointer: coarse) {
+    .chip a {
+      min-height: 2.75rem;
+    }
+  }
+
+  .chip a :global(svg) {
+    width: 0.625rem;
+    height: 0.625rem;
+    color: var(--muted-foreground);
+  }
+
+  h1 {
+    margin-top: 1.75rem;
+    font-size: clamp(2rem, 1.55rem + 1.8vw, 2.625rem);
+    font-weight: 400;
+    line-height: 1.14;
+    letter-spacing: -0.028em;
+  }
+
+  .lead {
+    max-width: 36rem;
+    margin-top: 1.25rem;
+    color: var(--muted-foreground);
+    font-size: 1.0625rem;
+    line-height: 1.6;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 2rem;
+  }
+
+  .download,
+  .github {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .download {
+    gap: 0.75rem;
+    padding: 0 0.375rem 0 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--background);
+    color: var(--foreground);
+    cursor: default;
+  }
+
+  .icon {
+    display: grid;
+    place-items: center;
+    align-self: stretch;
+    width: 2.75rem;
+    border-right: 1px solid var(--border);
+  }
+
+  .icon svg {
+    width: 0.875rem;
+    height: 1.0625rem;
+    margin-top: -0.125rem;
+    color: var(--heading);
+  }
+
+  /* Hatched, the way an unfinished part is drawn: it is real, it is not here yet. */
+  .soon {
+    padding: 0.4375rem 0.5rem;
+    border-radius: 0.1875rem;
+    background: repeating-linear-gradient(
+      -45deg,
+      var(--surface) 0 3px,
+      color-mix(in srgb, var(--surface) 40%, var(--border)) 3px 4px
+    );
+    color: var(--muted-foreground);
+    font-size: 0.6875rem;
+  }
+
+  .github {
+    gap: 0.5rem;
+    padding: 0 1.125rem;
+    color: var(--primary);
+    text-decoration: none;
+  }
+
+  .github :global(svg) {
+    width: 0.6875rem;
+    height: 0.6875rem;
+    transition: transform 200ms var(--ease-out);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .chip a:hover,
+    .github:hover {
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 0.25em;
+    }
+
+    .github:hover :global(svg) {
+      transform: translate(0.125rem, -0.125rem);
+    }
+  }
+
+  .works {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1.25rem;
+    margin-top: 2rem;
+  }
+
+  .works ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .works li {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4375rem;
+    color: var(--foreground);
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+
+  .works svg {
+    width: 0.9375rem;
+    height: 0.9375rem;
+    color: var(--heading);
+  }
+
+  .figure {
+    margin-top: clamp(3rem, 2rem + 3vw, 4.5rem);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .github :global(svg) {
+      transition: none;
+    }
+  }
+</style>

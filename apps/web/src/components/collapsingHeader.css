@@ -1,0 +1,49 @@
+/* A full header that scrolls away and a compact one that fades in: transform and opacity only. */
+[data-collapse-pinned] {
+  position: sticky;
+  z-index: 20;
+  top: 0;
+  height: var(--collapse-pinned-height);
+  margin-top: calc(-1 * var(--collapse-compact-height));
+  --collapse-duration: 120ms;
+}
+[data-collapse-pinned][data-collapsed="true"] {
+  --collapse-duration: 160ms;
+}
+[data-collapse-motion] {
+  transform: translateY(-4px);
+  transition: transform var(--collapse-duration) cubic-bezier(0.23, 1, 0.32, 1);
+}
+[data-collapse-pinned][data-collapsed="true"] [data-collapse-motion] {
+  transform: translateY(0);
+}
+[data-collapse-slot] {
+  height: var(--collapse-compact-height);
+}
+/* The empty slot overlaps the header's last rows until it collapses. */
+[data-collapse-pinned][data-collapsed="false"],
+[data-collapse-pinned][data-collapsed="false"] [data-collapse-motion],
+[data-collapse-pinned][data-collapsed="false"] [data-collapse-slot] {
+  pointer-events: none;
+}
+[data-collapse-motion] > :not([data-collapse-slot]) {
+  pointer-events: auto;
+}
+[data-collapse-compact] {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--collapse-duration) cubic-bezier(0.23, 1, 0.32, 1);
+}
+[data-collapse-pinned][data-collapsed="true"] [data-collapse-compact] {
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-collapse-motion] {
+    transform: none;
+    transition: none;
+  }
+  [data-collapse-compact] {
+    transition: none;
+  }
+}

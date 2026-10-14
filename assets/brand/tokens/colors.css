@@ -1,0 +1,28 @@
+:root{
+  --prk-neutral-50: #FCFAF7;
+  --prk-neutral-100: #F2F0ED;
+  --prk-neutral-200: #E3E1DE;
+  --prk-neutral-300: #CFC9C4;
+  --prk-neutral-400: #A9A49E;
+  --prk-neutral-500: #7E7974;
+  --prk-neutral-600: #59544F;
+  --prk-neutral-700: #393530;
+  --prk-neutral-800: #25211D;
+  --prk-neutral-900: #191511;
+  --prk-ink: #191511;
+  --prk-paper: #FCFAF7;
+  --prk-rose-100: #FFE7EC;
+  --prk-rose-300: #FA9FB4;
+  --prk-rose-500: #E0446E;
+  --prk-rose-700: #AC2856;
+  --prk-added: #53BE70;
+  --prk-added-bg: #DFF6E2;
+  --prk-removed: #EA6C5A;
+  --prk-removed-bg: #FFE8E3;
+  --prk-warning: #F0BB3B;
+  --prk-warning-bg: #FEF0D4;
+  --prk-info: #55AEE8;
+  --prk-info-bg: #E0F1FE;
+  --prk-font-brand: 'JetBrains Mono', ui-monospace, monospace;
+  --prk-font-ui: 'Fira Sans', system-ui, sans-serif;
+}

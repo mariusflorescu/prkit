@@ -1,0 +1,104 @@
+.pr-markdown {
+  color: color-mix(
+    in srgb,
+    var(--contrast-foreground) calc(80% + var(--appearance-contrast-boost) / 5),
+    transparent
+  );
+  font-size: var(--text-sm);
+  line-height: 1.65;
+}
+.pr-markdown > * + * {
+  margin-top: 0.75rem;
+}
+.pr-markdown h1 {
+  font-size: var(--text-xl);
+}
+.pr-markdown h2 {
+  font-size: var(--text-lg);
+}
+.pr-markdown h3 {
+  font-size: var(--text-base);
+}
+.pr-markdown h4 {
+  font-weight: 600;
+}
+.pr-markdown pre {
+  background: var(--code-background);
+  padding: 0.75rem;
+  border-color: var(--border);
+}
+.pr-markdown :not(pre) > code {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  padding: 0.1em 0.3em;
+}
+.pr-markdown img {
+  border-radius: var(--radius-md);
+}
+[data-pr-files] [data-file-diff-card] {
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--background);
+}
+[data-pr-files] [data-file-diff-header] {
+  top: var(--pr-pinned-height);
+  min-height: 40px;
+  border-radius: 0;
+  background: var(--background);
+}
+[data-pr-files] [data-file-diff-card][data-open="true"] > [data-file-diff-header] {
+  border-radius: 0;
+}
+[data-pr-files] [data-file-diff-content] {
+  border-radius: 0;
+}
+[data-pr-files] [data-file-tree] {
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: var(--background);
+}
+[data-pr-scroll] {
+  --pr-compact-header-height: 64px;
+  --pr-pinned-height: 108px;
+  --collapse-compact-height: var(--pr-compact-header-height);
+  --collapse-pinned-height: var(--pr-pinned-height);
+  position: relative;
+  scroll-padding-top: var(--pr-pinned-height);
+  scrollbar-gutter: stable;
+}
+[data-pr-content] :where([data-file-diff-header]) {
+  top: var(--pr-pinned-height);
+}
+[data-pr-content] [data-guide-view] {
+  display: block;
+}
+[data-pr-content] [data-guide-scroll] {
+  overflow: visible;
+  overscroll-behavior: auto;
+}
+[data-pr-files-tree] {
+  position: sticky;
+  top: var(--pr-pinned-height);
+  max-height: calc(
+    100dvh - var(--workspace-topbar-height) - var(--panel-inset) - var(--pr-pinned-height)
+  );
+}
+[data-pr-action-input] {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  padding: 0.5rem;
+  color: var(--foreground);
+  font-size: var(--text-xs);
+}
+[data-pr-action-input]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+[data-pr-action-input][aria-invalid="true"] {
+  border-color: var(--error-foreground);
+}

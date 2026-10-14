@@ -1,0 +1,259 @@
+/* Semantic names and formulas follow apps/web/src/index.css, so the site reads like the app.
+   Every color comes from the brand kit. */
+@import "../../../../assets/brand/tokens/colors.css";
+
+:root {
+  color-scheme: light dark;
+  --background: var(--prk-neutral-50);
+  --surface: var(--prk-neutral-100);
+  --foreground: var(--prk-neutral-800);
+  --heading: var(--prk-ink);
+  /* neutral-500 alone is 3.8:1 on neutral-100; halfway to 600 clears 4.5:1 on both surfaces. */
+  --muted-foreground: color-mix(in srgb, var(--prk-neutral-500) 50%, var(--prk-neutral-600));
+  /* rose-700 is the accent for text and links: rose-500 under paper is only 4.0:1. */
+  --primary: var(--prk-rose-700);
+  --mark-accent: var(--prk-rose-500);
+  --border: var(--prk-neutral-200);
+  --tick: color-mix(in srgb, var(--muted-foreground) 55%, transparent);
+  --shadow-color: var(--prk-ink);
+  --shot-ring: color-mix(in srgb, var(--prk-ink) 10%, transparent);
+
+  --gutter: max(1.25rem, env(safe-area-inset-left), env(safe-area-inset-right));
+  /* One reading column, like a paper; the hero figure breaks out to the wide measure. */
+  --column: 42rem;
+  --wide: 60rem;
+  --header-height: 3.5rem;
+  --radius: 0.375rem;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: var(--prk-neutral-900);
+    --surface: color-mix(in srgb, var(--background) 96%, var(--prk-paper));
+    --foreground: var(--prk-neutral-100);
+    --heading: var(--prk-paper);
+    --muted-foreground: color-mix(in srgb, var(--prk-neutral-500) 90%, var(--prk-paper));
+    /* Lifted toward rose-300 to clear 4.5:1 on the ink canvas. */
+    --primary: color-mix(in srgb, var(--prk-rose-500) 60%, var(--prk-rose-300));
+    --border: color-mix(in srgb, var(--prk-paper) 10%, transparent);
+    --shadow-color: color-mix(in srgb, var(--prk-ink) 40%, black);
+    --shot-ring: color-mix(in srgb, var(--prk-paper) 12%, transparent);
+  }
+}
+
+@media (min-width: 48rem) {
+  :root {
+    --gutter: max(2rem, env(safe-area-inset-left), env(safe-area-inset-right));
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--background);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-variant-numeric: tabular-nums;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  color: var(--heading);
+  font-weight: 500;
+  text-wrap: balance;
+}
+
+p {
+  margin: 0;
+  text-wrap: pretty;
+}
+
+a {
+  color: inherit;
+}
+
+strong {
+  color: var(--heading);
+  font-weight: 500;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+code,
+kbd {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  /* JetBrains Mono's ligatures are contextual alternates; show code as typed, as the app does. */
+  font-variant-ligatures: no-contextual;
+}
+
+kbd {
+  padding: 0.0625rem 0.3125rem;
+  border-radius: 0.3125rem;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border);
+  white-space: nowrap;
+}
+
+:focus-visible {
+  outline: 2px solid var(--heading);
+  outline-offset: 3px;
+  border-radius: 0.125rem;
+}
+
+/* Anchors land below the sticky header. */
+[id] {
+  scroll-margin-top: calc(var(--header-height) + 1.5rem);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+.column {
+  width: min(100% - 2 * var(--gutter), var(--column));
+  margin-inline: auto;
+}
+
+.wide {
+  width: min(100% - 2 * var(--gutter), var(--wide));
+  margin-inline: auto;
+}
+
+/* Every section opens on a hairline, the way a paper's sections do. */
+.section {
+  margin-top: clamp(4.5rem, 3rem + 5vw, 7rem);
+  padding-top: clamp(2.5rem, 2rem + 2vw, 3.5rem);
+  border-top: 1px solid var(--border);
+}
+
+.eyebrow {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.section-title {
+  font-size: 1.5rem;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+}
+
+.eyebrow + .section-title {
+  margin-top: 0.75rem;
+}
+
+.prose {
+  font-size: 1.0625rem;
+  line-height: 1.7;
+}
+
+.prose > * + * {
+  margin-top: 1.25em;
+}
+
+.muted {
+  color: var(--muted-foreground);
+}
+
+/* An inline link that jumps within the page: rose, with a small boxed plus after it. */
+.jump {
+  color: var(--primary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.jump::after {
+  display: inline-block;
+  width: 0.5625em;
+  height: 0.5625em;
+  margin-left: 0.2em;
+  border: 1px solid currentColor;
+  content: "";
+  vertical-align: 0.4em;
+  opacity: 0.7;
+  background:
+    linear-gradient(currentColor, currentColor) center / 55% 1px no-repeat,
+    linear-gradient(currentColor, currentColor) center / 1px 55% no-repeat;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .jump:hover {
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.2em;
+  }
+}
+
+/* Four corner ticks on a positioned box, one L per corner. */
+.ticks {
+  position: relative;
+}
+
+.ticks::before {
+  position: absolute;
+  inset: 0.5rem;
+  content: "";
+  pointer-events: none;
+  background:
+    linear-gradient(var(--tick), var(--tick)) top left / 0.5rem 1px no-repeat,
+    linear-gradient(var(--tick), var(--tick)) top left / 1px 0.5rem no-repeat,
+    linear-gradient(var(--tick), var(--tick)) top right / 0.5rem 1px no-repeat,
+    linear-gradient(var(--tick), var(--tick)) top right / 1px 0.5rem no-repeat,
+    linear-gradient(var(--tick), var(--tick)) bottom left / 0.5rem 1px no-repeat,
+    linear-gradient(var(--tick), var(--tick)) bottom left / 1px 0.5rem no-repeat,
+    linear-gradient(var(--tick), var(--tick)) bottom right / 0.5rem 1px no-repeat,
+    linear-gradient(var(--tick), var(--tick)) bottom right / 1px 0.5rem no-repeat;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The hero settles in once per visit. Layout.astro marks a repeat view in the same session,
+   and the motion is skipped entirely when the system asks for less of it. */
+@media (prefers-reduced-motion: no-preference) {
+  html:not([data-intro="seen"]) [data-rise] {
+    animation: rise 720ms var(--ease-out) both;
+    animation-delay: calc(var(--rise-step, 0) * 70ms);
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(0.75rem);
+  }
+}

@@ -1,0 +1,73 @@
+---
+/**
+ * One figure: `<Figure slug="inbox-list" />`. The drawing comes from
+ * src/figures/<slug>/figure.mjs at build time and is inlined, so it reads without JavaScript and
+ * holds its box from the first paint. Its live.js loads only when the figure comes near the
+ * viewport. Until a figure lands, `placeholder` holds its place with an empty frame of the right
+ * shape. The contract is in src/figures/README.md.
+ */
+import "../figures/kit/iso.css";
+import "../figures/kit/prkit-theme.css";
+import "../figures/kit/prkit-frame.css";
+import {
+  type FigureCard,
+  type FigurePlaceholder,
+  frameHtml,
+  placeholderHtml,
+} from "../figures/kit/prkit-frame.ts";
+
+interface Props {
+  slug: string;
+  placeholder?: FigurePlaceholder;
+}
+
+const { slug, placeholder } = Astro.props;
+const figures = import.meta.glob<{ figure: () => FigureCard }>("../figures/*/figure.mjs", {
+  eager: true,
+});
+const found = figures[`../figures/${slug}/figure.mjs`];
+
+const missing = (): never => {
+  throw new Error(`No figure at src/figures/${slug}/figure.mjs and no placeholder for it.`);
+};
+const html = found
+  ? frameHtml({ slug, card: found.figure() })
+  : placeholder
+    ? placeholderHtml({ slug, placeholder })
+    : missing();
+---
+
+<Fragment set:html={html} />
+
+<script>
+  interface Live {
+    mount: (root: HTMLElement) => () => void;
+  }
+
+  // One chunk per figure, fetched when its figure comes within a screen of the viewport.
+  const lives = import.meta.glob<Live>("../figures/*/live.js");
+  const liveOf = (root: HTMLElement) => lives[`../figures/${root.dataset.figure}/live.js`];
+
+  const near = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        const root = entry.target;
+        if (!entry.isIntersecting || !(root instanceof HTMLElement)) continue;
+        near.unobserve(root);
+        liveOf(root)?.().then(
+          ({ mount }) => {
+            mount(root);
+            root.dataset.live = "on";
+          },
+          // The drawing is already on the page; without its motion it still reads.
+          (error) => console.error(`Figure ${root.dataset.figure} did not load.`, error),
+        );
+      }
+    },
+    { rootMargin: "100% 0px" },
+  );
+
+  for (const root of document.querySelectorAll<HTMLElement>("[data-figure]")) {
+    if (liveOf(root)) near.observe(root);
+  }
+</script>

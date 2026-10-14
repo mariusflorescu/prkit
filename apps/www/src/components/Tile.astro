@@ -1,0 +1,41 @@
+---
+import "../figures/kit/iso.css";
+import "../figures/kit/prkit-theme.css";
+import { tiles } from "../tiles/tiles.mjs";
+
+/** One small kit-drawn mark from src/tiles/tiles.mjs, in a hairline square. */
+interface Props {
+  name: keyof typeof tiles;
+}
+
+const { name } = Astro.props;
+---
+
+<span class="tile" set:html={tiles[name]()} />
+
+<style>
+  .tile {
+    display: block;
+    width: 4.5rem;
+    height: 4.5rem;
+    flex: none;
+    padding: 0.125rem;
+    border: 1px solid var(--border);
+    background-color: var(--background);
+    background-image: radial-gradient(
+      circle,
+      color-mix(in srgb, var(--muted-foreground) 22%, transparent) 0.6px,
+      transparent 0.9px
+    );
+    background-position: center;
+    background-size: 0.75rem 0.75rem;
+    --anatomy-weight: 0.75px;
+  }
+
+  @media (max-width: 30rem) {
+    .tile {
+      width: 3.75rem;
+      height: 3.75rem;
+    }
+  }
+</style>

@@ -1,0 +1,271 @@
+{
+  "summary": [
+    "T3 Code groups projects in the sidebar and project pickers by repository, so two checkouts of the same repo (even on different machines) show up as one entry. It works out which repo a checkout is from its git remotes, and an `upstream` remote wins over `origin`. That broke forks set up the usual way, with `origin` pointing at your fork and `upstream` at the original: the fork was treated as the original, landed in the same group as real checkouts of it, and got the original's name as its label. With a renamed fork you couldn't tell which repo you were in ([#4880](https://github.com/pingdotgg/t3code/issues/4880)).",
+    "The upstream-based identity stays, because pull request features need it: a fork's PRs go to the repo it tracks. What's new is a second key used only for grouping and labels. The server now also reports the checkout's own `origin` when it names a different repo, and web, desktop and mobile group and label by that. A checkout with no `upstream` remote, or whose `upstream` and `origin` are the same repo, produces exactly the same data as before."
+  ],
+  "background": [
+    "A project is a folder on one machine. The server runs `git remote -v` in it and builds a `RepositoryIdentity`. Its `canonicalKey` is a cleaned-up remote URL like `github.com/t3tools/t3code`, taken from the `upstream` remote if there is one, else `origin`, else the first remote by name.",
+    "Clients use that key in two ways. The shared grouping code in `packages/client-runtime` merges projects with the same key into one sidebar group (web and desktop re-export it, mobile imports it). Pull request code on the server and in the clients uses the same key to match PRs to projects."
+  ],
+  "steps": [
+    "`RepositoryIdentity` gets an optional `origin: { canonicalKey, displayName? }`, plus `repositoryGroupingKeyOf` and `repositoryGroupingDisplayNameOf`, which return the `origin` values when present and the canonical ones otherwise.",
+    "The server fills in `origin` from the remote named `origin`, but only when it points at a different repo than `canonicalKey`.",
+    "The shared sidebar grouping keys and labels groups through those two helpers.",
+    "Mobile's new-task flow uses the same key to decide which machines have the selected repo and which project to pick on them.",
+    "Pull request code keeps reading `canonicalKey`, so nothing changes there."
+  ],
+  "flow": {
+    "title": "A checkout's git remotes become a sidebar group",
+    "subtitle": "Before: groups follow `canonicalKey`, which prefers `upstream`. After: they follow the fork's own `origin` when it names a different repo.",
+    "nodes": [
+      {
+        "id": "git",
+        "label": "git remote -v",
+        "detail": "Run by the server in each project's git root."
+      },
+      {
+        "id": "pick",
+        "label": "pickPrimaryRemote()",
+        "detail": "Unchanged: upstream wins over origin, so canonicalKey is still the repo a fork tracks."
+      },
+      {
+        "id": "origin",
+        "label": "buildRepositoryOrigin()",
+        "status": "added",
+        "chapter": "resolver-origin",
+        "detail": "Normalizes the origin URL and keeps it only if it names a different repo than canonicalKey."
+      },
+      {
+        "id": "identity",
+        "label": "RepositoryIdentity",
+        "status": "changed",
+        "chapter": "identity-origin",
+        "detail": "Gains an optional origin with its own canonicalKey and displayName."
+      },
+      {
+        "id": "key",
+        "label": "repositoryGroupingKeyOf()",
+        "status": "added",
+        "chapter": "identity-origin",
+        "detail": "origin.canonicalKey if set, else canonicalKey. A matching helper picks the label."
+      },
+      {
+        "id": "groups",
+        "label": "buildProjectGroups()",
+        "status": "changed",
+        "chapter": "client-grouping",
+        "detail": "Shared sidebar grouping in client-runtime, used by web, desktop and mobile."
+      },
+      {
+        "id": "mobile",
+        "label": "resolveEnvironmentProjectMatch()",
+        "status": "changed",
+        "chapter": "mobile-matching",
+        "detail": "Mobile new-task flow: which machines to offer and which project to pick on them."
+      },
+      {
+        "id": "ui",
+        "label": "sidebar / project picker",
+        "detail": "Where the user sees the group and its label."
+      },
+      {
+        "id": "pr",
+        "label": "pull request features",
+        "detail": "Still read canonicalKey, so a fork's PRs keep targeting the upstream."
+      }
+    ],
+    "edges": [
+      { "from": "git", "to": "pick" },
+      { "from": "git", "to": "origin", "label": "origin URL" },
+      { "from": "pick", "to": "identity", "label": "canonicalKey" },
+      { "from": "origin", "to": "identity", "label": "origin" },
+      { "from": "identity", "to": "pr", "label": "canonicalKey" },
+      { "from": "identity", "to": "groups", "label": "canonicalKey", "status": "removed" },
+      { "from": "identity", "to": "mobile", "label": "canonicalKey", "status": "removed" },
+      { "from": "identity", "to": "key" },
+      { "from": "key", "to": "groups" },
+      { "from": "key", "to": "mobile" },
+      { "from": "groups", "to": "ui" },
+      { "from": "mobile", "to": "ui" }
+    ]
+  },
+  "chapters": [
+    {
+      "id": "identity-origin",
+      "title": "Identity gets a separate key for grouping",
+      "kind": "core",
+      "body": [
+        "`canonicalKey` keeps meaning \"the repo this checkout tracks\" (the `upstream` remote when there is one). The new optional `origin` holds the checkout's own remote, but only when that's a different repo.",
+        "The whole rule lives in two small helpers. `repositoryGroupingKeyOf` returns `origin.canonicalKey` when it's set, otherwise `canonicalKey`. `repositoryGroupingDisplayNameOf` does the same for the label. Grouping and labels go through the helpers, while pull request code keeps reading `canonicalKey`. That split is the design, and the doc comment on `RepositoryOrigin` says so.",
+        "A side effect worth knowing: a fork with an `upstream` remote and a plain clone of the same fork (no `upstream`) now get the same key, `github.com/<you>/<fork>`, so they share a group. Before, they were split. Adding an `upstream` remote to a fork later also no longer moves it to another group."
+      ],
+      "callouts": [
+        {
+          "tone": "note",
+          "text": "Both helpers take a non-null identity, so every caller writes `x ? repositoryGroupingKeyOf(x) : null`, six times across the PR. Accepting `null | undefined` would make each one a single call. A nit, not a blocker."
+        }
+      ],
+      "files": [
+        {
+          "path": "packages/contracts/src/environment.ts",
+          "annotations": [
+            {
+              "line": 253,
+              "text": "Optional, so data from servers without this change still decodes. Forks on those servers keep grouping under the upstream until they update."
+            },
+            {
+              "line": 259,
+              "text": "The entire grouping rule. The origin key is normalized the same way as `canonicalKey`, which is why a fork with `upstream` and a plain clone of the fork end up with the same key."
+            },
+            {
+              "line": 265,
+              "text": "With no `owner/repo` path on the origin, the label falls back to the raw origin key, not to the upstream's name. A fork never borrows the upstream's label."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "resolver-origin",
+      "title": "The server reports the checkout's own origin",
+      "kind": "core",
+      "body": [
+        "`resolveRepositoryIdentityFromCacheKey` already parsed every fetch remote, and `pickPrimaryRemote` still picks `upstream` first for `canonicalKey`. The change passes the `origin` URL along too, and `buildRepositoryIdentity` hands it to the new `buildRepositoryOrigin`.",
+        "`buildRepositoryOrigin` returns nothing when there's no `origin` remote, or when it normalizes to the same key as the canonical one. So `origin` only shows up when a checkout has both remotes and they name different repos. Example: `origin` = `git@github.com:julius/t3code-fork.git` and `upstream` = `git@github.com:T3Tools/t3code.git` give `canonicalKey` `github.com/t3tools/t3code` and `origin` `{ canonicalKey: \"github.com/julius/t3code-fork\", displayName: \"julius/t3code-fork\" }`.",
+        "`repositoryPathOf` is the old inline `split/slice/join`, pulled out so both keys get their display name the same way. The Forgejo `refine` hook in `apps/server/src/server.ts` copies the identity with `{ ...identity }`, so `origin` survives it."
+      ],
+      "files": [
+        {
+          "path": "apps/server/src/project/RepositoryIdentityResolver.ts",
+          "annotations": [
+            {
+              "line": 83,
+              "text": "This is what keeps ordinary clones unchanged: same repo, so no `origin` field at all."
+            },
+            {
+              "line": 160,
+              "tone": "question",
+              "text": "Only a remote named exactly `origin` counts. That covers the `gh repo fork` layout, but a fork whose own remote has another name, next to `upstream`, still groups with the upstream. Intended scope?"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "client-grouping",
+      "title": "Sidebar groups and labels use the grouping key",
+      "kind": "core",
+      "body": [
+        "`deriveRepositoryScopedKey` builds the group key for both the `repository` and `repository_path` modes, and `deriveProjectGroupLabel` picks the group's label. Both now go through the helpers instead of reading `canonicalKey` and `displayName` directly. Web and desktop get this through `apps/web/src/logicalProject.ts`, which re-exports `buildProjectGroups` and friends from this module. Mobile imports it too.",
+        "Saved sidebar order and per-project grouping overrides are keyed by folder path (`getProjectOrderKey`, `deriveProjectGroupingOverrideKey`), not by this key, so splitting a fork out of its upstream's group doesn't lose any saved preferences."
+      ],
+      "callouts": [
+        {
+          "tone": "note",
+          "text": "Did they catch every use? At the PR's head commit, the remaining readers of `canonicalKey` and `displayName` are all pull request code (`PullRequestService`, `ThreadPullRequestService`, `ThreadSettlementService`, `openPullRequestLink`, `pullRequestProjectFilter`, mobile's `pullRequestRepository`). Those should keep the upstream, so nothing grouping-related was missed."
+        }
+      ],
+      "files": [
+        {
+          "path": "packages/client-runtime/src/state/projectGrouping.ts",
+          "annotations": [
+            {
+              "line": 105,
+              "text": "Still named `canonicalKey`, but it now holds the grouping key. In `repository_path` mode it also becomes the `<key>::<relative path>` prefix."
+            },
+            {
+              "line": 170,
+              "text": "`name` still comes from the upstream identity. It's only used to drop a project title equal to the repo name, and as a last fallback. So a fork titled `t3code` is still labeled `julius/t3code-fork`."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mobile-matching",
+      "title": "Mobile matches machines by the same key",
+      "kind": "supporting",
+      "body": [
+        "When you start a new task on mobile, you can switch which machine it runs on, and the app tries to keep the same repo. `NewTaskFlowProvider` only offers machines that have the selected repo, and `resolveEnvironmentProjectMatch` picks the matching project on the chosen machine. Both compared `canonicalKey`. Both now use `repositoryGroupingKeyOf`, so the picker agrees with the sidebar.",
+        "This changes behavior on purpose: if you pick a fork, a machine that only has a checkout of the upstream is no longer offered. Both keys are known and differ, and in that case the weaker folder-name and title matches are never tried."
+      ],
+      "files": [
+        {
+          "path": "apps/mobile/src/features/threads/new-task-flow-provider.tsx",
+          "annotations": [
+            {
+              "line": 424,
+              "text": "With both keys known, this is the only check. A fork against its upstream is now `false` here, and the folder-name fallback below never runs."
+            }
+          ]
+        },
+        {
+          "path": "apps/mobile/src/features/threads/new-task-project-selection.ts",
+          "annotations": [
+            {
+              "line": 72,
+              "text": "Same strict rule as the machine filter: two known, different keys never match on folder name or title."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tests",
+      "title": "Tests cover the fork case on server and client",
+      "kind": "tests",
+      "body": [
+        "The resolver test builds a real git repo with `origin` = a fork and `upstream` = `T3Tools/t3code`, and checks that `canonicalKey` stays on the upstream while `origin` names the fork. The grouping tests check that a fork and its second checkout split off from an upstream checkout under the fork's label, and that the label falls back to the origin key when there's no display name."
+      ],
+      "callouts": [
+        {
+          "tone": "question",
+          "text": "Nothing checks that a plain clone, or a fork without `upstream`, gets no `origin`. The existing resolver tests assert single fields, so they'd still pass if `origin` started showing up everywhere. The mobile matching change has no test either. Worth one assertion each?"
+        }
+      ],
+      "files": [
+        "apps/server/src/project/RepositoryIdentityResolver.test.ts",
+        {
+          "path": "packages/client-runtime/src/state/projectGrouping.test.ts",
+          "annotations": [
+            {
+              "line": 188,
+              "text": "A key with no `/`, which the server would send without a `displayName`. This exercises the label fallback in `repositoryGroupingDisplayNameOf`."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "docs",
+      "title": "Internals doc records the split",
+      "kind": "docs",
+      "body": [
+        "Four lines saying that `canonicalKey` follows `upstream` for pull requests, while clients group and label by a fork's own `origin`."
+      ],
+      "files": ["docs/internals/remote.md"]
+    }
+  ],
+  "focus": [
+    {
+      "tone": "note",
+      "text": "Grouping now follows a fork's own `origin`, while pull request code still follows `canonicalKey` (the upstream). Every remaining `canonicalKey` reader is PR code, so nothing was missed.",
+      "chapter": "client-grouping"
+    },
+    {
+      "tone": "note",
+      "text": "On mobile, picking a fork no longer offers machines that only have the upstream checked out.",
+      "chapter": "mobile-matching"
+    },
+    {
+      "tone": "question",
+      "text": "No test pins that ordinary clones get no `origin`, and the mobile change has no test.",
+      "chapter": "tests"
+    },
+    {
+      "tone": "question",
+      "text": "Only a remote named exactly `origin` counts as the fork's own.",
+      "chapter": "resolver-origin"
+    }
+  ]
+}

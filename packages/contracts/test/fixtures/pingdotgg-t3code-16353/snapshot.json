@@ -1,0 +1,92 @@
+{
+  "files": [
+    {
+      "path": "apps/mobile/src/features/threads/new-task-flow-provider.tsx",
+      "previousPath": null,
+      "status": "modified",
+      "additions": 7,
+      "deletions": 2,
+      "patch": {
+        "_tag": "text",
+        "patch": "diff --git a/apps/mobile/src/features/threads/new-task-flow-provider.tsx b/apps/mobile/src/features/threads/new-task-flow-provider.tsx\n--- a/apps/mobile/src/features/threads/new-task-flow-provider.tsx\n+++ b/apps/mobile/src/features/threads/new-task-flow-provider.tsx\n@@ -16,6 +16,7 @@ import {\n   DEFAULT_RUNTIME_MODE,\n   DEFAULT_SERVER_SETTINGS,\n   MessageId,\n+  repositoryGroupingKeyOf,\n   T3_PROJECT_FILE_NAME,\n   ThreadId,\n } from \"@t3tools/contracts\";\n@@ -393,7 +394,9 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {\n   // whatever unrelated project happens to be first on the other machine. Repository\n   // identity is the primary signal; projects that haven't reported one yet (still\n   // indexing) fall back to workspace basename / title so a valid host isn't hidden.\n-  const selectedRepositoryKey = selectedProject?.repositoryIdentity?.canonicalKey ?? null;\n+  const selectedRepositoryKey = selectedProject?.repositoryIdentity\n+    ? repositoryGroupingKeyOf(selectedProject.repositoryIdentity)\n+    : null;\n   // `|| null` (not `??`): a pending-task placeholder project can have an empty\n   // workspaceRoot, and an \"\" basename would reject every real host below.\n   const selectedWorkspaceBasename = selectedProject?.workspaceRoot.split(\"/\").at(-1) || null;\n@@ -414,7 +417,9 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {\n       if (selectedRepositoryKey === null && selectedWorkspaceBasename === null) {\n         return true;\n       }\n-      const projectKey = project.repositoryIdentity?.canonicalKey ?? null;\n+      const projectKey = project.repositoryIdentity\n+        ? repositoryGroupingKeyOf(project.repositoryIdentity)\n+        : null;\n       if (selectedRepositoryKey !== null && projectKey !== null) {\n         return projectKey === selectedRepositoryKey;\n       }\n"
+      }
+    },
+    {
+      "path": "apps/mobile/src/features/threads/new-task-project-selection.ts",
+      "previousPath": null,
+      "status": "modified",
+      "additions": 11,
+      "deletions": 4,
+      "patch": {
+        "_tag": "text",
+        "patch": "diff --git a/apps/mobile/src/features/threads/new-task-project-selection.ts b/apps/mobile/src/features/threads/new-task-project-selection.ts\n--- a/apps/mobile/src/features/threads/new-task-project-selection.ts\n+++ b/apps/mobile/src/features/threads/new-task-project-selection.ts\n@@ -1,5 +1,5 @@\n import type { EnvironmentProject } from \"@t3tools/client-runtime/state/shell\";\n-import type { EnvironmentId } from \"@t3tools/contracts\";\n+import { repositoryGroupingKeyOf, type EnvironmentId } from \"@t3tools/contracts\";\n \n import { scopedProjectKey } from \"../../lib/scopedEntities\";\n import type { HomeProjectScope } from \"../home/homeThreadList\";\n@@ -56,21 +56,28 @@ export function resolveEnvironmentProjectMatch(\n   projectsOnTarget: ReadonlyArray<EnvironmentProject>,\n   selectedProject: EnvironmentProject | null,\n ): EnvironmentProject | null {\n-  const repositoryKey = selectedProject?.repositoryIdentity?.canonicalKey ?? null;\n+  const repositoryKey = selectedProject?.repositoryIdentity\n+    ? repositoryGroupingKeyOf(selectedProject.repositoryIdentity)\n+    : null;\n   // `|| null` (not `??`): a pending-task placeholder project can have an empty\n   // workspaceRoot, and an \"\" basename would match nothing meaningful.\n   const workspaceBasename = selectedProject?.workspaceRoot.split(\"/\").at(-1) || null;\n   // The weaker signals only apply where identity is unknown on at least one\n   // side; two known, different repositories never match on a shared basename\n   // or title (mirrors the environment list filter in the new-task flow).\n   const isKnownMismatch = (project: EnvironmentProject) => {\n-    const projectKey = project.repositoryIdentity?.canonicalKey ?? null;\n+    const projectKey = project.repositoryIdentity\n+      ? repositoryGroupingKeyOf(project.repositoryIdentity)\n+      : null;\n     return repositoryKey !== null && projectKey !== null && projectKey !== repositoryKey;\n   };\n   return (\n     (repositoryKey !== null\n       ? projectsOnTarget.find(\n-          (project) => (project.repositoryIdentity?.canonicalKey ?? null) === repositoryKey,\n+          (project) =>\n+            (project.repositoryIdentity\n+              ? repositoryGroupingKeyOf(project.repositoryIdentity)\n+              : null) === repositoryKey,\n         )\n       : undefined) ??\n     (workspaceBasename !== null\n"
+      }
+    },
+    {
+      "path": "apps/server/src/project/RepositoryIdentityResolver.test.ts",
+      "previousPath": null,
+      "status": "modified",
+      "additions": 23,
+      "deletions": 0,
+      "patch": {
+        "_tag": "text",
+        "patch": "diff --git a/apps/server/src/project/RepositoryIdentityResolver.test.ts b/apps/server/src/project/RepositoryIdentityResolver.test.ts\n--- a/apps/server/src/project/RepositoryIdentityResolver.test.ts\n+++ b/apps/server/src/project/RepositoryIdentityResolver.test.ts\n@@ -288,6 +288,29 @@ it.layer(NodeServices.layer)(\"RepositoryIdentityResolverLive\", (it) => {\n       }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),\n   );\n \n+  it.effect(\"reports a fork's own remote as origin next to the upstream identity\", () =>\n+    Effect.gen(function* () {\n+      const fileSystem = yield* FileSystem.FileSystem;\n+      const cwd = yield* fileSystem.makeTempDirectoryScoped({\n+        prefix: \"t3-repository-identity-fork-test-\",\n+      });\n+\n+      yield* git(cwd, [\"init\"]);\n+      yield* git(cwd, [\"remote\", \"add\", \"origin\", \"git@github.com:julius/t3code-fork.git\"]);\n+      yield* git(cwd, [\"remote\", \"add\", \"upstream\", \"git@github.com:T3Tools/t3code.git\"]);\n+\n+      const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;\n+      const identity = yield* resolver.resolve(cwd);\n+\n+      expect(identity?.canonicalKey).toBe(\"github.com/t3tools/t3code\");\n+      expect(identity?.displayName).toBe(\"t3tools/t3code\");\n+      expect(identity?.origin).toEqual({\n+        canonicalKey: \"github.com/julius/t3code-fork\",\n+        displayName: \"julius/t3code-fork\",\n+      });\n+    }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),\n+  );\n+\n   it.effect(\"uses the last remote path segment as the repository name for nested groups\", () =>\n     Effect.gen(function* () {\n       const fileSystem = yield* FileSystem.FileSystem;\n"
+      }
+    },
+    {
+      "path": "apps/server/src/project/RepositoryIdentityResolver.ts",
+      "previousPath": null,
+      "status": "modified",
+      "additions": 24,
+      "deletions": 3,
+      "patch": {
+        "_tag": "text",
+        "patch": "diff --git a/apps/server/src/project/RepositoryIdentityResolver.ts b/apps/server/src/project/RepositoryIdentityResolver.ts\n--- a/apps/server/src/project/RepositoryIdentityResolver.ts\n+++ b/apps/server/src/project/RepositoryIdentityResolver.ts\n@@ -70,17 +70,34 @@ function pickPrimaryRemote(\n   return remoteName && remoteUrl ? { remoteName, remoteUrl } : null;\n }\n \n+function repositoryPathOf(canonicalKey: string): string {\n+  return canonicalKey.split(\"/\").slice(1).join(\"/\");\n+}\n+\n+function buildRepositoryOrigin(\n+  originUrl: string | undefined,\n+  canonicalKey: string,\n+): RepositoryIdentity[\"origin\"] {\n+  if (!originUrl) return undefined;\n+  const originKey = normalizeGitRemoteUrl(originUrl);\n+  if (originKey === canonicalKey) return undefined;\n+  const displayName = repositoryPathOf(originKey);\n+  return { canonicalKey: originKey, ...(displayName ? { displayName } : {}) };\n+}\n+\n function buildRepositoryIdentity(input: {\n   readonly remoteName: string;\n   readonly remoteUrl: string;\n+  readonly originUrl: string | undefined;\n   readonly rootPath: string;\n }): RepositoryIdentity {\n   const canonicalKey = normalizeGitRemoteUrl(input.remoteUrl);\n   const sourceControlProvider = detectSourceControlProviderFromGitRemoteUrl(input.remoteUrl);\n-  const repositoryPath = canonicalKey.split(\"/\").slice(1).join(\"/\");\n+  const repositoryPath = repositoryPathOf(canonicalKey);\n   const repositoryPathSegments = repositoryPath.split(\"/\").filter((segment) => segment.length > 0);\n   const [owner] = repositoryPathSegments;\n   const repositoryName = repositoryPathSegments.at(-1);\n+  const origin = buildRepositoryOrigin(input.originUrl, canonicalKey);\n \n   return {\n     canonicalKey,\n@@ -94,6 +111,7 @@ function buildRepositoryIdentity(input: {\n     ...(sourceControlProvider ? { provider: sourceControlProvider.kind } : {}),\n     ...(owner ? { owner } : {}),\n     ...(repositoryName ? { name: repositoryName } : {}),\n+    ...(origin ? { origin } : {}),\n   };\n }\n \n@@ -136,8 +154,11 @@ const resolveRepositoryIdentityFromCacheKey = Effect.fn(\n     return null;\n   }\n \n-  const remote = pickPrimaryRemote(parseRemoteFetchUrls(remoteResult.value.stdout));\n-  return remote ? buildRepositoryIdentity({ ...remote, rootPath: cacheKey }) : null;\n+  const remotes = parseRemoteFetchUrls(remoteResult.value.stdout);\n+  const remote = pickPrimaryRemote(remotes);\n+  return remote\n+    ? buildRepositoryIdentity({ ...remote, originUrl: remotes.get(\"origin\"), rootPath: cacheKey })\n+    : null;\n });\n \n export const make = Effect.fn(\"RepositoryIdentityResolver.make\")(function* (\n"
+      }
+    },
+    {
+      "path": "docs/internals/remote.md",
+      "previousPath": null,
+      "status": "modified",
+      "additions": 4,
+      "deletions": 0,
+      "patch": {
+        "_tag": "text",
+        "patch": "diff --git a/docs/internals/remote.md b/docs/internals/remote.md\n--- a/docs/internals/remote.md\n+++ b/docs/internals/remote.md\n@@ -12,6 +12,10 @@ An environment keeps its ID across server restarts and endpoint changes. Saved\n connections are local to a client profile; the server's identity and state are\n not. A repository identity can correlate clones across environments, but never\n routes work between them. A project and its threads belong to one environment.\n+The canonical key follows the `upstream` remote when one exists, so pull request\n+features target the repository a fork tracks. A fork also reports its own\n+`origin`, and clients group and label by that, so a fork never collapses into a\n+checkout of its upstream.\n \n [Environment ID initialization](../../apps/server/src/environment/ServerEnvironment.ts)\n must publish a complete ID atomically. Repair of an empty ID file retains a\n"
+      }
+    },
+    {
+      "path": "packages/client-runtime/src/state/projectGrouping.test.ts",
+      "previousPath": null,
+      "status": "modified",
+      "additions": 39,
+      "deletions": 0,
+      "patch": {
+        "_tag": "text",
+        "patch": "diff --git a/packages/client-runtime/src/state/projectGrouping.test.ts b/packages/client-runtime/src/state/projectGrouping.test.ts\n--- a/packages/client-runtime/src/state/projectGrouping.test.ts\n+++ b/packages/client-runtime/src/state/projectGrouping.test.ts\n@@ -158,6 +158,45 @@ describe(\"buildProjectGroups\", () => {\n     );\n   });\n \n+  it(\"keeps a fork apart from its upstream checkout and labels it by its own remote\", () => {\n+    const fork = makeProject(\"fork\", \"/work/t3code-fork\", {\n+      repositoryIdentity: {\n+        ...repositoryIdentity,\n+        origin: {\n+          canonicalKey: \"github.com/julius/t3code-fork\",\n+          displayName: \"julius/t3code-fork\",\n+        },\n+      },\n+    });\n+    const forkWorktree = makeProject(\"fork-2\", \"/work/t3code-fork-2\", {\n+      repositoryIdentity: fork.repositoryIdentity,\n+    });\n+    const projects = [makeProject(\"t3code\", \"/work/t3code\"), fork, forkWorktree];\n+\n+    const groups = buildProjectGroups({ projects, settings: settings(\"repository\") });\n+    expect(groups.map((group) => group.key)).toEqual([\n+      \"github.com/t3tools/t3code\",\n+      \"github.com/julius/t3code-fork\",\n+    ]);\n+    expect(groups[1]?.members.map((member) => member.project.id)).toEqual([\"fork\", \"fork-2\"]);\n+    expect(groups[1]?.label).toBe(\"julius/t3code-fork\");\n+  });\n+\n+  it(\"labels a fork by its canonical key when its origin has no display name\", () => {\n+    const identity = {\n+      ...repositoryIdentity,\n+      origin: { canonicalKey: \"internal-host\" },\n+    };\n+    const projects = [\n+      makeProject(\"fork\", \"/work/fork\", { repositoryIdentity: identity }),\n+      makeProject(\"fork-2\", \"/work/fork-2\", { repositoryIdentity: identity }),\n+    ];\n+\n+    const groups = buildProjectGroups({ projects, settings: settings(\"repository\") });\n+    expect(groups).toHaveLength(1);\n+    expect(groups[0]?.label).toBe(\"internal-host\");\n+  });\n+\n   it(\"keeps physical clones in separate groups when requested\", () => {\n     const projects = [\n       makeProject(\"t3code\", \"/work/t3code\"),\n"
+      }
+    },
+    {
+      "path": "packages/client-runtime/src/state/projectGrouping.ts",
+      "previousPath": null,
+      "status": "modified",
+      "additions": 12,
+      "deletions": 6,
+      "patch": {
+        "_tag": "text",
+        "patch": "diff --git a/packages/client-runtime/src/state/projectGrouping.ts b/packages/client-runtime/src/state/projectGrouping.ts\n--- a/packages/client-runtime/src/state/projectGrouping.ts\n+++ b/packages/client-runtime/src/state/projectGrouping.ts\n@@ -1,8 +1,10 @@\n import { scopedProjectKey, scopeProjectRef } from \"../environment/scoped.ts\";\n-import type {\n-  EnvironmentId,\n-  ScopedProjectRef,\n-  SidebarProjectGroupingMode,\n+import {\n+  repositoryGroupingDisplayNameOf,\n+  repositoryGroupingKeyOf,\n+  type EnvironmentId,\n+  type ScopedProjectRef,\n+  type SidebarProjectGroupingMode,\n } from \"@t3tools/contracts\";\n import type { ClientSettings } from \"@t3tools/contracts/settings\";\n \n@@ -100,7 +102,9 @@ function deriveRepositoryScopedKey(\n   project: Pick<EnvironmentProject, \"workspaceRoot\" | \"repositoryIdentity\">,\n   groupingMode: SidebarProjectGroupingMode,\n ): string | null {\n-  const canonicalKey = project.repositoryIdentity?.canonicalKey;\n+  const canonicalKey = project.repositoryIdentity\n+    ? repositoryGroupingKeyOf(project.repositoryIdentity)\n+    : null;\n   if (!canonicalKey) {\n     return null;\n   }\n@@ -158,7 +162,9 @@ export function deriveProjectGroupLabel(input: {\n }): string {\n   const sharedTitles = uniqueNonEmptyValues(input.members.map((member) => member.title));\n   const sharedDisplayNames = uniqueNonEmptyValues(\n-    input.members.map((member) => member.repositoryIdentity?.displayName),\n+    input.members.map((member) =>\n+      member.repositoryIdentity ? repositoryGroupingDisplayNameOf(member.repositoryIdentity) : null,\n+    ),\n   );\n   const sharedRepositoryNames = uniqueNonEmptyValues(\n     input.members.map((member) => member.repositoryIdentity?.name),\n"
+      }
+    },
+    {
+      "path": "packages/contracts/src/environment.ts",
+      "previousPath": null,
+      "status": "modified",
+      "additions": 24,
+      "deletions": 0,
+      "patch": {
+        "_tag": "text",
+        "patch": "diff --git a/packages/contracts/src/environment.ts b/packages/contracts/src/environment.ts\n--- a/packages/contracts/src/environment.ts\n+++ b/packages/contracts/src/environment.ts\n@@ -229,6 +229,17 @@ export const RepositoryIdentityLocator = Schema.Struct({\n });\n export type RepositoryIdentityLocator = typeof RepositoryIdentityLocator.Type;\n \n+/**\n+ * The checkout's own remote when it names a different repository than the canonical one, such as\n+ * a fork that tracks its upstream. Clients group and label by it so a fork stays distinct from the\n+ * repository it forked, while pull request features keep the canonical identity.\n+ */\n+export const RepositoryOrigin = Schema.Struct({\n+  canonicalKey: TrimmedNonEmptyString,\n+  displayName: Schema.optionalKey(TrimmedNonEmptyString),\n+});\n+export type RepositoryOrigin = typeof RepositoryOrigin.Type;\n+\n export const RepositoryIdentity = Schema.Struct({\n   canonicalKey: TrimmedNonEmptyString,\n   locator: RepositoryIdentityLocator,\n@@ -239,9 +250,22 @@ export const RepositoryIdentity = Schema.Struct({\n   provider: Schema.optionalKey(TrimmedNonEmptyString),\n   owner: Schema.optionalKey(TrimmedNonEmptyString),\n   name: Schema.optionalKey(TrimmedNonEmptyString),\n+  origin: Schema.optionalKey(RepositoryOrigin),\n });\n export type RepositoryIdentity = typeof RepositoryIdentity.Type;\n \n+/** Key clients group checkouts by: a fork's own remote, otherwise the canonical repository. */\n+export function repositoryGroupingKeyOf(identity: RepositoryIdentity): string {\n+  return identity.origin?.canonicalKey ?? identity.canonicalKey;\n+}\n+\n+/** Label clients show for a checkout's repository, matching `repositoryGroupingKeyOf`. */\n+export function repositoryGroupingDisplayNameOf(identity: RepositoryIdentity): string | undefined {\n+  return identity.origin\n+    ? (identity.origin.displayName ?? identity.origin.canonicalKey)\n+    : identity.displayName;\n+}\n+\n export const ScopedProjectRef = Schema.Struct({\n   environmentId: EnvironmentId,\n   projectId: ProjectId,\n"
+      }
+    }
+  ]
+}

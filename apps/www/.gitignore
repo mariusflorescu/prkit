@@ -1,0 +1,3 @@
+.astro/
+# Figure dev pages from src/figures/<slug>/build.mjs.
+.figures/

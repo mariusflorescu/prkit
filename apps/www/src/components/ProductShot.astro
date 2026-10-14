@@ -1,0 +1,57 @@
+---
+import "../figures/kit/prkit-frame.css";
+import guideDark from "../assets/shots/guide-dark.webp";
+import guideLight from "../assets/shots/guide-light.webp";
+import Shot from "./Shot.astro";
+
+const alt =
+  "prkit with four pull requests open as tabs, showing the guide Claude wrote for one of them: a before and after flow of the change, then its three chapters, core change first.";
+---
+
+<section class="section" aria-labelledby="shot-title">
+  <div class="column">
+    <h2 id="shot-title" class="section-title">The real thing</h2>
+    <p class="lead">
+      The figures explain the idea. This is the app: a guide Claude wrote, open next to three other
+      pull requests.
+    </p>
+  </div>
+  {/* The figure frame from src/figures, holding a real screenshot instead of a drawing. */}
+  <figure class="prk-figure wide shot">
+    <div class="iso-plate">
+      <div class="iso-plate-corners" aria-hidden="true">
+        <span class="iso-plate-corner" data-corner="fig">Screenshot</span>
+        <span class="iso-plate-corner" data-corner="title">The guide</span>
+        <span class="iso-plate-corner" data-corner="hint">Light and dark</span>
+      </div>
+      <Shot
+        light={guideLight}
+        dark={guideDark}
+        alt={alt}
+        sizes="(min-width: 64rem) 57rem, calc(100vw - 4rem)"
+        widths={[640, 960, 1280, 1920, 2560]}
+      />
+    </div>
+    <figcaption class="prk-figure-caption">
+      <span class="prk-figure-text">
+        <span class="prk-figure-n">Screenshot.</span>{" "}
+        The guide tab: an overview, a before and after flow of the change, then three chapters, core
+        change first. The app follows your system's light or dark, or the theme you pick in
+        Settings.
+      </span>
+    </figcaption>
+  </figure>
+</section>
+
+<style>
+  .lead {
+    margin-top: 0.75rem;
+    color: var(--muted-foreground);
+    font-size: 1.0625rem;
+    line-height: 1.7;
+  }
+
+  .shot {
+    margin-top: 2rem;
+  }
+</style>

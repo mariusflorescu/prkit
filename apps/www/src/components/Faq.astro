@@ -1,0 +1,151 @@
+---
+const questions = [
+  {
+    question: "Does prkit review the pull request for me?",
+    answer:
+      "No, and that is the point. Your agent reads the pull request and explains it, so you can review it properly. The agent never touches GitHub: approving, merging and commenting are your clicks. The one thing that can go out on its own is a fix you sent the agent, and only in a repository where you turned on automatic pushing (with replies on the fixed threads, if you asked for them).",
+  },
+  {
+    question: "Which agents does it work with?",
+    answer:
+      "Claude Code and Codex. Install one, sign in with your Claude or ChatGPT plan, and prkit finds it. You can pick a different one for each pull request.",
+  },
+  {
+    question: "Does it cost anything extra?",
+    answer:
+      "Not on the agent side. Guides and fixes run on the Claude or ChatGPT plan you already pay for and count toward its usage like any other session. prkit never switches to an API key, so there is no second bill.",
+  },
+  {
+    question: "Which platforms does it run on?",
+    answer: "macOS. The first release is a Mac app.",
+  },
+  {
+    question: "Is my code sent anywhere?",
+    answer:
+      "prkit itself sends your code only to GitHub, and only when you push a fix (or turn on automatic pushing for a repository). It has no servers of its own. Your agent reads the checkout the same way it reads code in your terminal, under your own Claude or Codex account.",
+  },
+  {
+    question: "Can I use more than one GitHub account?",
+    answer:
+      "Yes. prkit lists every login in ~/.config/gh and in any ~/.config/gh-* folder, and you can add other folders in Settings. Each pull request is always read through the account that found it, so one client's code never shows up under another account.",
+  },
+  {
+    question: "Is it open source?",
+    answer:
+      "Not yet. The code is private while prkit takes shape. Follow along on GitHub to hear when that changes.",
+  },
+];
+---
+
+<section id="faq" class="section column" aria-labelledby="faq-title">
+  <h2 id="faq-title" class="section-title">Questions people ask first</h2>
+  <div class="table">
+    {
+      questions.map((item, index) => (
+        <details>
+          <summary>
+            <span class="n" aria-hidden="true">
+              {String(index + 1).padStart(2, "0")}
+            </span>
+            <span class="q">{item.question}</span>
+            <span class="mark" aria-hidden="true" />
+          </summary>
+          <p>{item.answer}</p>
+        </details>
+      ))
+    }
+  </div>
+</section>
+
+<style>
+  .table {
+    margin-top: 2rem;
+    border: 1px solid var(--border);
+  }
+
+  details + details {
+    border-top: 1px solid var(--border);
+  }
+
+  summary {
+    display: grid;
+    grid-template-columns: 2rem 1fr 1rem;
+    align-items: center;
+    gap: 0.75rem;
+    min-height: 3.25rem;
+    padding: 0.75rem 1rem;
+    color: var(--heading);
+    font-weight: 500;
+    line-height: 1.4;
+    list-style: none;
+    cursor: pointer;
+  }
+
+  summary::-webkit-details-marker {
+    display: none;
+  }
+
+  summary:focus-visible {
+    outline-offset: -2px;
+  }
+
+  .n {
+    color: var(--muted-foreground);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 400;
+  }
+
+  /* A plus whose upright folds away when the answer opens. */
+  .mark {
+    position: relative;
+    width: 0.625rem;
+    height: 0.625rem;
+    justify-self: end;
+  }
+
+  .mark::before,
+  .mark::after {
+    position: absolute;
+    inset: 0;
+    content: "";
+    background: linear-gradient(var(--muted-foreground), var(--muted-foreground)) center / 100% 1px
+      no-repeat;
+  }
+
+  .mark::after {
+    transform: rotate(90deg);
+    transition: transform 200ms var(--ease-out);
+  }
+
+  details[open] .mark::after {
+    transform: rotate(90deg) scaleX(0);
+  }
+
+  details p {
+    max-width: 36rem;
+    padding: 0 1rem 1.25rem 3.75rem;
+    color: var(--muted-foreground);
+    line-height: 1.65;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    summary:hover .q {
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 0.2em;
+    }
+  }
+
+  @media (max-width: 30rem) {
+    details p {
+      padding-left: 1rem;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mark::after {
+      transition: none;
+    }
+  }
+</style>

@@ -1,0 +1,37 @@
+{
+  "name": "@prkit/monorepo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare": "effect-tsgo patch",
+    "dev": "node scripts/dev-runner.ts dev",
+    "dev:desktop": "node scripts/dev-runner.ts dev:desktop",
+    "dev:www": "vp run --filter @prkit/www dev",
+    "build": "vp run --filter './apps/*' build",
+    "build:www": "vp run --filter @prkit/www build",
+    "preview:www": "vp run --filter @prkit/www preview",
+    "typecheck": "vp run -r typecheck && tsc --noEmit",
+    "lint": "node scripts/check-private.ts && vp lint --report-unused-disable-directives",
+    "fmt": "vp fmt",
+    "fmt:check": "vp fmt --check",
+    "smoke:desktop": "vp run --filter @prkit/desktop smoke",
+    "verify:app": "node scripts/verify-app.ts",
+    "check:private": "node scripts/check-private.ts",
+    "e2e": "DO_NOT_TRACK=1 e2e"
+  },
+  "devDependencies": {
+    "@e2e-dev/web": "0.14.0",
+    "@effect/tsgo": "catalog:",
+    "@shadcn/lint": "0.1.5",
+    "@types/node": "catalog:",
+    "e2e": "0.19.0",
+    "effect": "catalog:",
+    "playwright": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "engines": {
+    "node": "^24.13.1"
+  },
+  "packageManager": "pnpm@11.10.0"
+}

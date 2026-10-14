@@ -1,0 +1,130 @@
+---
+import FeatureFigure from "./FeatureFigure.astro";
+import Tile from "./Tile.astro";
+
+const rows = [
+  {
+    tile: "inbox",
+    lead: "Everything that needs you, in one inbox.",
+    body: "prkit finds every login the GitHub CLI has on your Mac and lists the pull requests that need you, grouped by why. Open as many as you like as tabs: switching is instant, and they are still there after a restart.",
+  },
+  {
+    tile: "guide",
+    lead: "Understand each change before you approve it.",
+    body: "One click and your own Claude Code or Codex reads the pull request and walks you through it: an overview, a before and after flow, then chapters, core change first. You watch each changed file get checked off as it reads.",
+  },
+  {
+    tile: "watching",
+    lead: "Current until the pull request is done.",
+    body: "When new commits land or the branch moves to a new base, the agent updates the guide, and earlier versions stay readable. It stops when the pull request is merged or closed, or when you tell it to.",
+  },
+  {
+    tile: "fixes",
+    lead: "Fixes come back as one commit you push.",
+    body: "Send review comments to your agent, your own drafts or a reviewer's threads. It edits its own checkout of the branch, prkit commits the batch, and the Fixes tab shows what changed for each comment. Conflicts with the base get the same help. You push when you are ready.",
+  },
+  {
+    tile: "stack",
+    lead: "Stacks, one layer at a time.",
+    body: "prkit reads GitHub stacks. The layers sit together in the inbox, a strip under the header moves between them, and one click writes a guide for every open layer.",
+  },
+] as const;
+---
+
+<section id="what" class="section column" aria-labelledby="what-title">
+  <h2 id="what-title" class="section-title">What it does</h2>
+  <ul class="rows">
+    {
+      rows.map((row) => (
+        <li>
+          <Tile name={row.tile} />
+          <p>
+            <strong>{row.lead}</strong>
+            <span class="muted">{row.body}</span>
+          </p>
+        </li>
+      ))
+    }
+  </ul>
+
+  <FeatureFigure
+    eyebrow="Inbox"
+    title="Sorted by why it needs you"
+    slug="inbox-list"
+    placeholder={{
+      title: "One inbox",
+      caption:
+        "Pull requests from every gh login on your Mac land in one inbox, grouped by why they need you: Needs your review, Yours, Involved. Each row stays tied to the account that found it.",
+      ratio: [4, 3],
+    }}
+  >
+    A review you owe, a pull request of yours, or a thread you are in. Search the inbox, or narrow
+    it to one account or one repository. Every pull request is read through the account that found
+    it, so one client's code never shows up under another account.
+  </FeatureFigure>
+
+  <FeatureFigure
+    eyebrow="Fixes"
+    title="Review comments, fixed on a copy"
+    slug="fix-commit"
+    placeholder={{
+      title: "Fixes, on a copy",
+      caption:
+        "Send review comments to your agent as one batch. It edits its own checkout of the branch, and prkit makes one commit for the batch. The token stays with prkit, and nothing reaches GitHub until you push.",
+      ratio: [4, 3],
+    }}
+  >
+    Pick comments, your drafts or a reviewer's threads, and send them to the agent as one batch. It
+    works on its own checkout, prkit makes one commit for the batch, and you push when you are happy
+    with it. A branch that
+    conflicts with its base gets the same help.
+  </FeatureFigure>
+
+  <FeatureFigure
+    eyebrow="Stacks"
+    title="One guide per layer"
+    slug="stack-guides"
+    placeholder={{
+      title: "One guide per layer",
+      caption:
+        "A stack's layers, numbered from the bottom. Each layer gets its own guide, and each guide explains only its own layer's diff.",
+      ratio: [4, 3],
+    }}
+  >
+    A stack made with <code>gh stack</code> keeps its layers together in the inbox. One click writes a
+    guide for every open layer, and each guide covers only the diff of its own layer, so the review stays
+    the size of the change.
+  </FeatureFigure>
+</section>
+
+<style>
+  .rows {
+    display: grid;
+    gap: 2rem;
+    margin: 2rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .rows li {
+    display: flex;
+    gap: 1.5rem;
+    align-items: flex-start;
+  }
+
+  .rows p {
+    font-size: 1.0625rem;
+    line-height: 1.65;
+  }
+
+  .rows strong {
+    display: block;
+    margin-bottom: 0.25rem;
+  }
+
+  @media (max-width: 30rem) {
+    .rows li {
+      gap: 1rem;
+    }
+  }
+</style>

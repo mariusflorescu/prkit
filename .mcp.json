@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "e2e": {
+      "command": "node_modules/.bin/e2e",
+      "args": ["mcp"],
+      "env": { "DO_NOT_TRACK": "1" }
+    }
+  }
+}

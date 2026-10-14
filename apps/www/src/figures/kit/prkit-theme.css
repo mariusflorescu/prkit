@@ -1,0 +1,57 @@
+/* The anatomy kit's tones (kit/iso.css) on prkit's brand neutrals, light and dark by the system
+   setting. The steps keep the kit's own contrast ladder: four side shades just under the paper,
+   a top face just over it, then hi, mid, lo and faint for strokes. Rose is the one lit part.
+   The tones sit on :root, so any kit drawing on the site (a figure, a tile) picks them up. */
+:root {
+  --anatomy-page: var(--prk-neutral-50);
+  --anatomy-card: var(--prk-neutral-50);
+  --anatomy-text: var(--prk-neutral-600);
+  --anatomy-strong: var(--prk-ink);
+  --anatomy-muted: color-mix(in srgb, var(--prk-neutral-500) 50%, var(--prk-neutral-600));
+  --anatomy-paper: var(--prk-neutral-50);
+  --anatomy-face: var(--prk-paper);
+  --anatomy-top: var(--prk-paper);
+  --anatomy-shade-0: color-mix(in srgb, var(--prk-neutral-200) 75%, var(--prk-neutral-300));
+  --anatomy-shade-1: color-mix(in srgb, var(--prk-neutral-100) 25%, var(--prk-neutral-200));
+  --anatomy-shade-2: color-mix(in srgb, var(--prk-neutral-100) 80%, var(--prk-neutral-200));
+  --anatomy-shade-3: color-mix(in srgb, var(--prk-neutral-50) 60%, var(--prk-neutral-100));
+  --anatomy-lit-top: var(--prk-paper);
+  --anatomy-lit-shade: color-mix(in srgb, var(--prk-neutral-100) 85%, var(--prk-neutral-200));
+  --anatomy-hi: var(--prk-neutral-800);
+  --anatomy-mid: color-mix(in srgb, var(--prk-neutral-400) 40%, var(--prk-neutral-500));
+  --anatomy-lo: color-mix(in srgb, var(--prk-neutral-300) 40%, var(--prk-neutral-400));
+  --anatomy-faint: color-mix(in srgb, var(--prk-neutral-200) 40%, var(--prk-neutral-300));
+  /* rose-700: rose-500 is too light to hold a hairline on paper. */
+  --anatomy-lit: var(--prk-rose-700);
+  --anatomy-halo: var(--prk-neutral-500);
+  --anatomy-halo-opacity: 0.32;
+  --anatomy-dot: var(--prk-neutral-700);
+  --anatomy-mono: var(--font-mono), ui-monospace, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --anatomy-page: var(--prk-neutral-900);
+    --anatomy-card: var(--prk-neutral-900);
+    --anatomy-text: color-mix(in srgb, var(--prk-neutral-300) 70%, var(--prk-neutral-400));
+    --anatomy-strong: var(--prk-paper);
+    --anatomy-muted: color-mix(in srgb, var(--prk-neutral-500) 90%, var(--prk-paper));
+    --anatomy-paper: var(--prk-neutral-900);
+    --anatomy-face: color-mix(in srgb, var(--prk-ink) 96%, var(--prk-paper));
+    --anatomy-top: color-mix(in srgb, var(--prk-ink) 96%, var(--prk-paper));
+    --anatomy-shade-0: color-mix(in srgb, var(--prk-ink) 80%, black);
+    --anatomy-shade-1: color-mix(in srgb, var(--prk-ink) 95%, black);
+    --anatomy-shade-2: color-mix(in srgb, var(--prk-ink) 99%, var(--prk-paper));
+    --anatomy-shade-3: color-mix(in srgb, var(--prk-ink) 98%, var(--prk-paper));
+    --anatomy-lit-top: color-mix(in srgb, var(--prk-ink) 92%, var(--prk-paper));
+    --anatomy-lit-shade: color-mix(in srgb, var(--prk-ink) 96%, var(--prk-paper));
+    --anatomy-hi: color-mix(in srgb, var(--prk-neutral-200) 50%, var(--prk-neutral-300));
+    --anatomy-mid: color-mix(in srgb, var(--prk-neutral-500) 50%, var(--prk-neutral-600));
+    --anatomy-lo: color-mix(in srgb, var(--prk-neutral-600) 30%, var(--prk-neutral-700));
+    --anatomy-faint: color-mix(in srgb, var(--prk-neutral-700) 45%, var(--prk-neutral-800));
+    --anatomy-lit: var(--prk-rose-500);
+    --anatomy-halo: color-mix(in srgb, var(--prk-ink) 40%, black);
+    --anatomy-halo-opacity: 0.9;
+    --anatomy-dot: var(--prk-neutral-200);
+  }
+}
