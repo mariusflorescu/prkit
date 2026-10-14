@@ -1,5 +1,5 @@
 ---
-import { GITHUB } from "../glyphs.ts";
+import { APPLE, GITHUB } from "../glyphs.ts";
 import { GITHUB_URL, SECTIONS } from "../site.ts";
 import BrandMark from "./BrandMark.astro";
 ---
@@ -25,7 +25,13 @@ import BrandMark from "./BrandMark.astro";
       </a>
       {/* The name starts with the words on the pill, so voice control finds it by what it says. */}
       <a class="download" href="#download">
-        Download <span class="soon">Soon</span><span class="visually-hidden">, for macOS</span>
+        Download
+        <span class="badge">
+          <span class="soon" data-release-part="soon">Soon</span>
+          <span class="ready" data-release-part="ready" aria-hidden="true">
+            <svg viewBox={APPLE.viewBox}><path fill="currentColor" d={APPLE.path} /></svg>
+          </span>
+        </span><span class="visually-hidden">, for macOS</span>
       </a>
     </nav>
   </div>
@@ -126,7 +132,7 @@ import BrandMark from "./BrandMark.astro";
     height: 1.125rem;
   }
 
-  /* Points at the closing band, which says plainly that there is no download yet. */
+  /* Points at the closing band, which says whether there is a download yet. */
   nav .download {
     gap: 0.5rem;
     min-height: 2.25rem;
@@ -143,10 +149,26 @@ import BrandMark from "./BrandMark.astro";
     }
   }
 
-  .soon {
+  .badge {
+    display: grid;
+  }
+
+  .soon,
+  .ready {
+    display: grid;
+    place-items: center;
     padding: 0.125rem 0.375rem;
     border-radius: 0.1875rem;
     background: var(--surface);
+  }
+
+  .ready svg {
+    width: 0.625rem;
+    height: 0.75rem;
+    color: var(--heading);
+  }
+
+  .soon {
     color: var(--muted-foreground);
     font-family: var(--font-mono);
     font-size: 0.625rem;

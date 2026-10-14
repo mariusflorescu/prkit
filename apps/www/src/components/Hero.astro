@@ -1,14 +1,25 @@
 ---
 import { APPLE, GITHUB } from "../glyphs.ts";
+import { repositoryOf } from "../release.ts";
 import { GITHUB_URL } from "../site.ts";
 import ArrowOut from "./ArrowOut.astro";
 import Figure from "./Figure.astro";
+
+// The release lookup (download.ts) runs only when GITHUB_URL names a repository.
+const repository = repositoryOf(GITHUB_URL) ?? "";
 ---
 
 <section class="hero" aria-labelledby="hero-title">
   <div class="column">
     <p class="chip" data-rise>
-      <span class="note"><span class="dot" aria-hidden="true"></span>Coming soon to macOS</span>
+      <span class="note">
+        <span class="dot" aria-hidden="true"></span>
+        <span class="swap">
+          <span data-release-part="soon">Coming soon to macOS</span>
+          <span data-release-part="ready"><span data-release-version></span> is out for macOS</span>
+          <span data-release-part="sizer">00.00.00 is out for macOS</span>
+        </span>
+      </span>
       <a href={GITHUB_URL}>Follow on GitHub <ArrowOut /></a>
     </p>
     <h1 id="hero-title" data-rise style="--rise-step: 1">
@@ -20,14 +31,23 @@ import Figure from "./Figure.astro";
       change, core first, so you understand it before you approve it.
     </p>
     <div class="actions" data-rise style="--rise-step: 3">
-      {/* No release exists yet: a label shaped like the button it will become, not a control. */}
-      <p class="download">
+      {
+        /* Without an href this is a placeholder, not a control: a label shaped like the button it
+           becomes when download.ts finds a stable release and gives it the disk image's URL. */
+      }
+      <a class="download" data-release-link="dmg" data-release-repo={repository}>
         <span class="icon" aria-hidden="true">
           <svg viewBox={APPLE.viewBox}><path fill="currentColor" d={APPLE.path} /></svg>
         </span>
         <span class="label">Download for macOS</span>
-        <span class="soon">Coming soon</span>
-      </p>
+        <span class="badge">
+          <span class="soon" data-release-part="soon">Coming soon</span>
+          <span class="ready" data-release-part="ready">
+            <span class="version">v<span data-release-version></span></span> · Apple Silicon
+          </span>
+          <span class="ready" data-release-part="sizer">v00.00.00 · Apple Silicon</span>
+        </span>
+      </a>
       <a class="github ticks" href={GITHUB_URL}>View on GitHub <ArrowOut /></a>
     </div>
     <div class="works" data-rise style="--rise-step: 4">
@@ -54,6 +74,10 @@ import Figure from "./Figure.astro";
     />
   </div>
 </section>
+
+<script>
+  import "../download.ts";
+</script>
 
 <style>
   .hero {
@@ -83,6 +107,20 @@ import Figure from "./Figure.astro";
     height: 0.375rem;
     border-radius: 50%;
     background: currentColor;
+    transition: background-color 200ms var(--ease-out);
+  }
+
+  :global(:root[data-release="ready"]) .dot {
+    background: var(--mark-accent);
+  }
+
+  .swap,
+  .badge {
+    display: grid;
+  }
+
+  .swap {
+    font-variant-numeric: tabular-nums;
   }
 
   .chip a {
@@ -153,7 +191,15 @@ import Figure from "./Figure.astro";
     border-radius: var(--radius);
     background: var(--background);
     color: var(--foreground);
+    text-decoration: none;
     cursor: default;
+    transition: border-color 200ms var(--ease-out);
+  }
+
+  .download[href] {
+    border-color: color-mix(in srgb, var(--heading) 40%, var(--border));
+    color: var(--heading);
+    cursor: pointer;
   }
 
   .icon {
@@ -171,9 +217,16 @@ import Figure from "./Figure.astro";
     color: var(--heading);
   }
 
+  .soon,
+  .ready {
+    padding: 0.4375rem 0.5rem;
+    border-radius: 0.1875rem;
+    font-size: 0.6875rem;
+    white-space: nowrap;
+  }
+
   /* Hatched, the way an unfinished part is drawn: it is real, it is not here yet. */
   .soon {
-    padding: 0.4375rem 0.5rem;
     border-radius: 0.1875rem;
     background: repeating-linear-gradient(
       -45deg,
@@ -181,7 +234,15 @@ import Figure from "./Figure.astro";
       color-mix(in srgb, var(--surface) 40%, var(--border)) 3px 4px
     );
     color: var(--muted-foreground);
-    font-size: 0.6875rem;
+  }
+
+  .ready {
+    background: var(--heading);
+    color: var(--background);
+  }
+
+  .version {
+    text-transform: none;
   }
 
   .github {
@@ -198,6 +259,10 @@ import Figure from "./Figure.astro";
   }
 
   @media (hover: hover) and (pointer: fine) {
+    .download[href]:hover {
+      border-color: var(--heading);
+    }
+
     .chip a:hover,
     .github:hover {
       text-decoration: underline;
@@ -247,6 +312,8 @@ import Figure from "./Figure.astro";
   }
 
   @media (prefers-reduced-motion: reduce) {
+    .dot,
+    .download,
     .github :global(svg) {
       transition: none;
     }

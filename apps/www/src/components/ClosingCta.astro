@@ -1,17 +1,39 @@
 ---
 import { GITHUB_URL } from "../site.ts";
 import ArrowOut from "./ArrowOut.astro";
+
+// Electron 44's own Info.plist sets LSMinimumSystemVersion 13.0, and the desktop build keeps it.
+const REQUIREMENTS = "Needs a Mac with Apple Silicon and macOS 13 Ventura or later.";
 ---
 
-<section id="download" class="band" aria-labelledby="download-title">
+{/* The ready state shares the grid cell of the "Coming soon" one: see global.css. */}
+<section
+  id="download"
+  class="band"
+  aria-labelledby="download-title"
+  data-release-labelledby="download-ready-title"
+>
   <div class="inner">
     <p class="eyebrow">macOS</p>
-    <h2 id="download-title">Coming soon to your Mac.</h2>
-    <p class="lead">
-      prkit is still taking shape and there is no download yet. Follow along on GitHub to hear when
-      the first release is out.
-    </p>
-    <a class="follow" href={GITHUB_URL}>Follow along on GitHub <ArrowOut /></a>
+    <div class="states">
+      <div data-release-part="soon">
+        <h2 id="download-title">Coming soon to your Mac.</h2>
+        <p class="lead">
+          prkit is still taking shape and there is no download yet. Follow along on GitHub to hear
+          when the first release is out.
+        </p>
+        <a class="follow" href={GITHUB_URL}>Follow along on GitHub <ArrowOut /></a>
+      </div>
+      <div data-release-part="ready">
+        <h2 id="download-ready-title">prkit <span data-release-version></span> for your Mac.</h2>
+        <p class="lead">{REQUIREMENTS}</p>
+        <div class="links">
+          <a class="follow primary" data-release-link="dmg">Download for macOS</a>
+          <a class="follow" data-release-link="notes">Release notes <ArrowOut /></a>
+          <a class="follow" data-release-link="all">All releases <ArrowOut /></a>
+        </div>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -61,8 +83,12 @@ import ArrowOut from "./ArrowOut.astro";
     color: var(--band-muted);
   }
 
-  h2 {
+  .states {
+    display: grid;
     margin-top: 0.75rem;
+  }
+
+  h2 {
     color: var(--band-text);
     font-size: clamp(1.5rem, 1.25rem + 1vw, 1.875rem);
     font-weight: 400;
@@ -94,6 +120,23 @@ import ArrowOut from "./ArrowOut.astro";
     text-transform: uppercase;
   }
 
+  .links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+  }
+
+  .links .follow {
+    margin-top: 0;
+  }
+
+  .primary {
+    border-color: var(--band-text);
+    background: var(--band-text);
+    color: var(--band-bg);
+  }
+
   .follow :global(svg) {
     width: 0.6875rem;
     height: 0.6875rem;
@@ -109,6 +152,10 @@ import ArrowOut from "./ArrowOut.astro";
       border-color: var(--band-text);
     }
 
+    .primary:hover {
+      background: color-mix(in srgb, var(--band-text) 88%, var(--band-bg));
+    }
+
     .follow:hover :global(svg) {
       transform: translate(0.125rem, -0.125rem);
     }
@@ -121,7 +168,24 @@ import ArrowOut from "./ArrowOut.astro";
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .follow :global(svg) {
+    .links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+  }
+
+  .links .follow {
+    margin-top: 0;
+  }
+
+  .primary {
+    border-color: var(--band-text);
+    background: var(--band-text);
+    color: var(--band-bg);
+  }
+
+  .follow :global(svg) {
       transition: none;
     }
   }

@@ -2,7 +2,7 @@ import * as NodeFS from "node:fs";
 import * as NodeHttp from "node:http";
 import * as NodePath from "node:path";
 
-import { type Browser, test } from "@e2e-dev/web";
+import { type Browser, test, type WebRoute } from "@e2e-dev/web";
 import { expect } from "e2e";
 
 const dist = NodePath.resolve(import.meta.dirname, "../apps/www/dist");
@@ -19,8 +19,12 @@ const types: Record<string, string> = {
 
 /** The built site (`pnpm build:www`), served the way a static host would serve it. */
 const siteTest = test.extend<{ site: string }>({
-  // oxlint-disable-next-line no-empty-pattern -- the fixture needs no other fixture
-  site: async ({}, use) => {
+  site: async ({ browser }, use) => {
+    // The page asks GitHub for the latest release when the build names a repository. No journey
+    // reaches the real API: unless a journey answers itself, there is no release yet.
+    await browser.route("https://api.github.com/**", (route) =>
+      route.fulfill({ status: 404, json: { message: "Not Found" } }),
+    );
     if (!NodeFS.existsSync(NodePath.join(dist, "index.html"))) {
       throw new Error("apps/www/dist is missing. Run pnpm build:www first.");
     }
@@ -54,7 +58,9 @@ siteTest(
     const requests: Array<string> = [];
     await browser.route("**/*", async (route) => {
       requests.push(route.request.url);
-      await route.continue();
+      // The release lookup is not an asset; the fixture answers it.
+      if (route.request.url.startsWith("https://api.github.com/")) await route.fallback();
+      else await route.continue();
     });
     await app.open(site);
 
@@ -117,7 +123,9 @@ siteTest(
       expect(page.faces).toContain(face);
     }
     expect(requests.length).toBeGreaterThan(0);
-    expect(requests.filter((url) => !url.startsWith(site))).toEqual([]);
+    expect(
+      requests.filter((url) => !url.startsWith(site) && !url.startsWith("https://api.github.com/")),
+    ).toEqual([]);
   },
 );
 
@@ -762,5 +770,228 @@ siteTest(
     await pause(3000);
     expect(await fullyShown(browser, '[data-part="empty"]')).toBe(true);
     expect(await framesSoFar(browser)).toBe(0);
+  },
+);
+
+// The download surfaces. The build derives the repository from GITHUB_URL, so these journeys serve
+// the page as built for a placeholder repository and answer GitHub's API themselves.
+const RELEASE_API = "https://api.github.com/repos/octocat/prkit/releases/latest";
+const RELEASES = "https://github.com/octocat/prkit/releases";
+const DMG = `${RELEASES}/download/v0.1.0/prkit-0.1.0-arm64.dmg`;
+const NOTES = `${RELEASES}/tag/v0.1.0`;
+const STABLE = {
+  tag_name: "v0.1.0",
+  name: "prkit 0.1.0",
+  draft: false,
+  prerelease: false,
+  html_url: NOTES,
+  assets: [
+    { name: "prkit-0.1.0-arm64.dmg", browser_download_url: DMG },
+    { name: "prkit-0.1.0-arm64.zip", browser_download_url: `${DMG.slice(0, -4)}.zip` },
+    { name: "latest-mac.yml", browser_download_url: `${RELEASES}/download/v0.1.0/latest-mac.yml` },
+  ],
+};
+const DOWNLOAD_NAME = "Download prkit 0.1.0 for macOS, Apple Silicon";
+
+/** Adds up every layout shift the page makes, the way Cumulative Layout Shift counts them. */
+const countShifts = `(() => {
+  window.__shift = 0;
+  new PerformanceObserver((list) => {
+    for (const entry of list.getEntries()) if (!entry.hadRecentInput) window.__shift += entry.value;
+  }).observe({ type: "layout-shift", buffered: true });
+})()`;
+const shiftSoFar = (browser: Browser) =>
+  browser.evaluate(() => Number(Reflect.get(window, "__shift")));
+
+/**
+ * Opens the page as built for the placeholder repository, with GitHub's answer to the latest
+ * release given by `answer`. `scripts: false` serves it with every script blocked, as a reader with
+ * JavaScript off sees it. Returns how many times the page asked.
+ */
+async function openWithRelease(
+  {
+    app,
+    browser,
+    site,
+  }: { app: { open: (url: string) => Promise<void> }; browser: Browser; site: string },
+  answer: (route: WebRoute) => Promise<void>,
+  { scripts = true } = {},
+) {
+  const page = NodeFS.readFileSync(NodePath.join(dist, "index.html"), "utf8");
+  const built = page.replace(
+    /data-release-repo(?:="[^"]*")?(?=[\s>])/,
+    'data-release-repo="octocat/prkit"',
+  );
+  expect(built).toContain('data-release-repo="octocat/prkit"');
+  await browser.route(site, (route) =>
+    route.fulfill({
+      body: built,
+      contentType: "text/html; charset=utf-8",
+      headers: scripts ? {} : { "content-security-policy": "script-src 'none'" },
+    }),
+  );
+  const asked = { count: 0 };
+  await browser.route(RELEASE_API, async (route) => {
+    asked.count += 1;
+    expect(route.request.headers.accept).toBe("application/vnd.github+json");
+    await answer(route);
+  });
+  await app.open(site);
+  return asked;
+}
+
+/** What the download surfaces say and where they lead. */
+const downloadState = (browser: Browser) =>
+  browser.evaluate(() => {
+    const shown = (node: Element) =>
+      getComputedStyle(node).visibility === "visible" && node.getClientRects().length > 0;
+    const page = document.documentElement;
+    return {
+      release: page.dataset.release ?? "soon",
+      // Every link with somewhere to go into the disk image, release notes or the release list.
+      downloads: [...document.querySelectorAll<HTMLAnchorElement>("a[data-release-link][href]")]
+        .filter(shown)
+        .map((link) => `${link.dataset.releaseLink} ${link.href}`),
+      soon: [...document.querySelectorAll('[data-release-part="soon"]')]
+        .filter(shown)
+        // The band's state opens with its heading; the others are one line each.
+        .map((node) => (node.firstElementChild ?? node).textContent?.trim() ?? ""),
+      nightly: /nightly/i.test(
+        [
+          page.textContent ?? "",
+          ...[...document.querySelectorAll("a")].map((link) => link.href),
+          ...[...document.querySelectorAll("[aria-label]")].map((node) =>
+            node.getAttribute("aria-label"),
+          ),
+        ].join(" "),
+      ),
+    };
+  });
+
+const COMING_SOON = {
+  release: "soon",
+  downloads: [],
+  soon: ["Soon", "Coming soon to macOS", "Coming soon", "Coming soon to your Mac."],
+  nightly: false,
+};
+
+/** Waits until the page has asked for the release, then a moment longer for it to act on the answer. */
+async function settled(asked: { count: number }) {
+  for (let waited = 0; asked.count === 0 && waited < 5_000; waited += 50) await pause(50);
+  expect(asked.count).toBe(1);
+  await pause(500);
+}
+
+siteTest(
+  "the download says coming soon while GitHub has no stable release",
+  async ({ app, screen, browser, site }) => {
+    const asked = await openWithRelease({ app, browser, site }, (route) =>
+      route.fulfill({ status: 404, json: { message: "Not Found" } }),
+    );
+    await settled(asked);
+    expect(await downloadState(browser)).toEqual(COMING_SOON);
+    await expect(screen.getByText("Coming soon to macOS")).toBeVisible();
+    await expect(screen.getByRole("link", DOWNLOAD_NAME)).toHaveCount(0);
+    await expect(screen.getByRole("link", /^Download\s*Soon\W*for macOS$/)).toBeVisible();
+
+    // A 404 is remembered for the session: a reload does not ask again.
+    await browser.reload();
+    await pause(500);
+    expect(asked.count).toBe(1);
+    expect(await downloadState(browser)).toEqual(COMING_SOON);
+  },
+);
+
+siteTest(
+  "a stable release turns on every download surface in place",
+  async ({ app, screen, browser, site }) => {
+    await browser.addInitScript(countShifts);
+    const asked = await openWithRelease({ app, browser, site }, (route) =>
+      route.fulfill({ json: STABLE }),
+    );
+    await expect(browser.locator("html")).toHaveAttribute("data-release", "ready");
+    await pause(500);
+    expect(await downloadState(browser)).toEqual({
+      release: "ready",
+      downloads: [`dmg ${DMG}`, `dmg ${DMG}`, `notes ${NOTES}`, `all ${RELEASES}`],
+      soon: [],
+      nightly: false,
+    });
+
+    // The hero's label became the link, named for what it downloads, and the chip says so.
+    await expect(screen.getByRole("link", DOWNLOAD_NAME)).toHaveCount(2);
+    await expect(screen.getByText("0.1.0 is out for macOS")).toBeVisible();
+    await expect(screen.getByText("Coming soon to macOS")).toBeHidden();
+    // The header pill still leads to the band, without "Soon".
+    await expect(screen.getByRole("link", /^Download\W*for macOS$/)).toHaveAttribute(
+      "href",
+      "#download",
+    );
+    const band = screen.getByRole("region", "prkit 0.1.0 for your Mac.");
+    await band.scrollIntoView();
+    await expect(band).toBeVisible();
+    await expect(
+      screen.getByText("Needs a Mac with Apple Silicon and macOS 13 Ventura or later."),
+    ).toBeVisible();
+    await expect(screen.getByRole("link", "Release notes")).toHaveAttribute("href", NOTES);
+    await expect(screen.getByRole("link", "All releases")).toHaveAttribute("href", RELEASES);
+    await expect(screen.getByRole("heading", "Coming soon to your Mac.")).toBeHidden();
+
+    // Nothing moved when the surfaces switched: the boxes were already the size of both states.
+    const shift = await shiftSoFar(browser);
+    console.log(`layout shift with a stable release: ${shift.toFixed(4)}`);
+    expect(shift).toBeLessThan(0.01);
+
+    // A found release is remembered for the session.
+    await browser.reload();
+    await expect(browser.locator("html")).toHaveAttribute("data-release", "ready");
+    expect(asked.count).toBe(1);
+  },
+);
+
+siteTest(
+  "a refused, failed or slow lookup leaves the download coming soon",
+  async ({ app, browser, site }) => {
+    const answers: Array<[string, (route: WebRoute) => Promise<void>]> = [
+      ["rate limited", (route) => route.fulfill({ status: 403, json: { message: "rate limit" } })],
+      ["network failure", (route) => route.abort()],
+      ["not JSON", (route) => route.fulfill({ body: "<html>", contentType: "text/html" })],
+    ];
+    for (const [, answer] of answers) {
+      const asked = await openWithRelease({ app, browser, site }, answer);
+      await settled(asked);
+      expect(await downloadState(browser)).toEqual(COMING_SOON);
+      await browser.unroute(RELEASE_API);
+      await browser.unroute(site);
+      // Failures are not remembered: a fresh session would ask again.
+      await browser.evaluate(() => {
+        sessionStorage.clear();
+        return null;
+      });
+    }
+
+    // A stable release that arrives after the page stopped waiting (5 s) changes nothing.
+    const asked = await openWithRelease({ app, browser, site }, async (route) => {
+      await pause(6_000);
+      await route.fulfill({ json: STABLE }).catch(() => undefined);
+    });
+    await pause(7_000);
+    expect(asked.count).toBe(1);
+    expect(await downloadState(browser)).toEqual(COMING_SOON);
+  },
+);
+
+siteTest(
+  "with JavaScript off the download says coming soon",
+  async ({ app, screen, browser, site }) => {
+    const asked = await openWithRelease(
+      { app, browser, site },
+      (route) => route.fulfill({ json: STABLE }),
+      { scripts: false },
+    );
+    await pause(1_000);
+    expect(asked.count).toBe(0);
+    expect(await downloadState(browser)).toEqual(COMING_SOON);
+    await expect(screen.getByText("Coming soon to macOS")).toBeVisible();
   },
 );
