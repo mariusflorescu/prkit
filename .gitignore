@@ -12,3 +12,4 @@ packages/*/dist
 .audit/
 .pnpm-store/
 .private-names
+release/

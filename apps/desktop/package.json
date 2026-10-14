@@ -6,6 +6,7 @@
   "main": "dist-electron/main.cjs",
   "scripts": {
     "icon": "node scripts/build-icon.ts",
+    "icon:nightly": "node scripts/build-icon.ts --nightly",
     "start": "electron .",
     "smoke": "node scripts/smoke.ts",
     "typecheck": "tsc --noEmit"
