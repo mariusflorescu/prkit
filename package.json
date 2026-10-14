@@ -9,6 +9,7 @@
     "dev:www": "vp run --filter @prkit/www dev",
     "build": "vp run --filter './apps/*' build",
     "build:www": "vp run --filter @prkit/www build",
+    "dist:desktop:artifact": "node scripts/build-desktop-artifact.ts",
     "preview:www": "vp run --filter @prkit/www preview",
     "typecheck": "vp run -r typecheck && tsc --noEmit",
     "lint": "node scripts/check-private.ts && vp lint --report-unused-disable-directives",

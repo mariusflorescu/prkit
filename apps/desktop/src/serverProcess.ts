@@ -1,12 +1,18 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeReadline from "node:readline";
 
-import { childEnv, type ServerReadyLine, ServerReadyLineJson } from "@prkit/contracts";
+import {
+  childEnv,
+  ServerHomeInUseLineJson,
+  type ServerReadyLine,
+  ServerReadyLineJson,
+} from "@prkit/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 const READY_TIMEOUT_MS = 20_000;
 const decodeReadyLine = Schema.decodeUnknownOption(ServerReadyLineJson);
+const decodeHomeInUseLine = Schema.decodeUnknownOption(ServerHomeInUseLineJson);
 
 export interface ServerProcess {
   readonly child: NodeChildProcess.ChildProcess;
@@ -27,6 +33,10 @@ export function startServer(options: {
   readonly token: string;
   readonly port: number;
   readonly target: ServerTarget;
+  /** The server's working directory; the caller's when absent. */
+  readonly cwd?: string;
+  /** The packaged app's version, for the server to report; its own when absent. */
+  readonly appVersion?: string;
 }): Promise<ServerProcess> {
   const targetArgs =
     options.target._tag === "Built"
@@ -42,8 +52,10 @@ export function startServer(options: {
         ELECTRON_RUN_AS_NODE: "1",
         PRKIT_HOME: options.home,
         PRKIT_AUTH_TOKEN: options.token,
+        PRKIT_APP_VERSION: options.appVersion,
       }),
       stdio: ["ignore", "pipe", "inherit"],
+      ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     },
   );
 
@@ -58,13 +70,23 @@ export function startServer(options: {
     };
     const lines = NodeReadline.createInterface({ input: child.stdout });
     lines.on("line", (line) => {
-      Option.match(decodeReadyLine(line), {
-        onNone: () => process.stdout.write(`[server] ${line}\n`),
-        onSome: (ready) => {
-          settle();
-          resolve({ child, ready });
-        },
-      });
+      const ready = decodeReadyLine(line);
+      if (Option.isSome(ready)) {
+        settle();
+        resolve({ child, ready: ready.value });
+        return;
+      }
+      const inUse = decodeHomeInUseLine(line);
+      if (Option.isSome(inUse)) {
+        settle();
+        reject(
+          new Error(
+            `Another prkit is already running with the data folder ${inUse.value.home}. Quit it, then open this one again.`,
+          ),
+        );
+        return;
+      }
+      process.stdout.write(`[server] ${line}\n`);
     });
     child.once("error", (error) => {
       settle();

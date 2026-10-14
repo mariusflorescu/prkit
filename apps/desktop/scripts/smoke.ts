@@ -2,10 +2,16 @@
  * Launches the built desktop app, checks the UI talked to its server, saves a
  * screenshot, and checks quitting stops the server child. Exits non-zero on any
  * failure. Run `vp run build` first.
+ *
+ *   node scripts/smoke.ts                      the built app in this checkout
+ *   node scripts/smoke.ts --app <path to .app> a packaged app, with its own home and
+ *                                              Chromium profile under .prkit/smoke-app-home
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeUtil from "node:util";
 
 import { childEnv } from "@prkit/contracts";
 import { _electron as electron } from "playwright";
@@ -13,8 +19,48 @@ import { _electron as electron } from "playwright";
 const desktopDir = NodePath.resolve(import.meta.dirname, "..");
 const repoRoot = NodePath.resolve(desktopDir, "../..");
 const evidenceDir = NodePath.join(repoRoot, ".e2e/evidence");
-const screenshotPath = NodePath.join(evidenceDir, "desktop-smoke.png");
-const smokeHome = NodePath.join(repoRoot, ".e2e/smoke-home");
+
+const { values } = NodeUtil.parseArgs({ options: { app: { type: "string" } } });
+const appBundle = values.app === undefined ? undefined : NodePath.resolve(values.app);
+const screenshotPath = NodePath.join(
+  evidenceDir,
+  appBundle === undefined ? "desktop-smoke.png" : "desktop-smoke-app.png",
+);
+const smokeHome = NodePath.join(
+  repoRoot,
+  appBundle === undefined ? ".e2e/smoke-home" : ".prkit/smoke-app-home",
+);
+
+/** A Dock-like PATH has these only once main rebuilt it from the login shell. */
+const TOOLS = ["gh", "git", "claude", "codex"];
+/** Within this long of launch, a module the package left out would have failed to load. */
+const MODULE_CHECK_MS = 8_000;
+
+/** The bundle's executable, as Finder would launch it. */
+const bundleExecutable = (bundle: string) =>
+  NodePath.join(
+    bundle,
+    "Contents/MacOS",
+    NodeChildProcess.execFileSync(
+      "plutil",
+      ["-extract", "CFBundleExecutable", "raw", NodePath.join(bundle, "Contents/Info.plist")],
+      { encoding: "utf8" },
+    ).trim(),
+  );
+
+const findOnPath = (tool: string, path: string) =>
+  path
+    .split(":")
+    .filter((dir) => dir !== "")
+    .map((dir) => NodePath.join(dir, tool))
+    .find((candidate) => {
+      try {
+        NodeFS.accessSync(candidate, NodeFS.constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    });
 
 const step = (message: string) => process.stdout.write(`[smoke] ${message}\n`);
 
@@ -40,13 +86,17 @@ const isAlive = (pid: number): boolean => {
   }
 };
 
-for (const required of [
-  "dist-electron/main.cjs",
-  "../server/dist/bin.mjs",
-  "../web/dist/index.html",
-]) {
-  if (!NodeFS.existsSync(NodePath.join(desktopDir, required))) {
-    process.stderr.write(`[smoke] missing ${required}; run \`vp run build\` first\n`);
+const required =
+  appBundle === undefined
+    ? ["dist-electron/main.cjs", "../server/dist/bin.mjs", "../web/dist/index.html"].map((file) =>
+        NodePath.join(desktopDir, file),
+      )
+    : [NodePath.join(appBundle, "Contents/Info.plist")];
+for (const file of required) {
+  if (!NodeFS.existsSync(file)) {
+    process.stderr.write(
+      `[smoke] missing ${NodePath.relative(repoRoot, file)}; ${appBundle === undefined ? "run `vp run build` first" : "pass a packaged .app"}\n`,
+    );
     process.exit(1);
   }
 }
@@ -57,24 +107,58 @@ NodeFS.rmSync(smokeHome, { recursive: true, force: true });
 
 // childEnv drops ELECTRON_RUN_AS_NODE (an agent shell may carry it) and any PRKIT_* from the caller.
 // PATH is what launchd gives an app started from the Dock, so main has to rebuild it from the
-// login shell for the server to find gh, git, claude and codex.
+// login shell for the server to find gh, git, claude and codex. A packaged app keeps its
+// Chromium profile in the smoke home too, away from an installed prkit's.
+const launchedAt = Date.now();
 const app = await electron.launch({
-  args: [desktopDir],
+  ...(appBundle === undefined
+    ? { args: [desktopDir] }
+    : {
+        executablePath: bundleExecutable(appBundle),
+        args: [`--user-data-dir=${NodePath.join(smokeHome, "electron")}`],
+      }),
   env: { ...childEnv(process.env), PATH: "/usr/bin:/bin:/usr/sbin:/sbin", PRKIT_HOME: smokeHome },
   timeout: 30_000,
 });
+let output = "";
+app.process().stdout?.on("data", (chunk: Buffer) => (output += chunk.toString()));
+app.process().stderr?.on("data", (chunk: Buffer) => (output += chunk.toString()));
 let failure: Error | undefined;
 let serverPids: Array<number> = [];
 try {
   const electronPid = app.process().pid;
   const window = await app.firstWindow();
   step(`window opened: ${window.url().replace(/token=[^&]+/, "token=…")}`);
+  if (appBundle !== undefined) {
+    const appPath = await app.evaluate(({ app: electronApp }) => electronApp.getAppPath());
+    if (!appPath.startsWith(appBundle))
+      throw new Error(`expected the app to run from ${appBundle}, it runs from ${appPath}`);
+    step(`runs the packaged app: ${NodePath.relative(appBundle, appPath)}`);
+  }
 
   await window
     .getByRole("navigation")
     .getByText("Inbox", { exact: true })
     .waitFor({ timeout: 15_000 });
   step("tab strip shows Inbox");
+
+  await new Promise((resolve) =>
+    setTimeout(resolve, Math.max(0, launchedAt + MODULE_CHECK_MS - Date.now())),
+  );
+  const missingModule = /MODULE_NOT_FOUND|Cannot find (module|package)/.exec(output);
+  if (missingModule !== null)
+    throw new Error(`a module failed to load within ${MODULE_CHECK_MS / 1000}s: ${output}`);
+  step(`no MODULE_NOT_FOUND within ${MODULE_CHECK_MS / 1000}s of launch`);
+
+  // Main rebuilt its own PATH before it started the server, which inherits it.
+  const hydrated = await app.evaluate(() => process.env.PATH ?? "");
+  for (const tool of TOOLS) {
+    const found = findOnPath(tool, hydrated);
+    if (found !== undefined) step(`${tool} resolves from the rebuilt PATH: ${found}`);
+    else if (findOnPath(tool, process.env.PATH ?? "") !== undefined)
+      throw new Error(`${tool} is on this shell's PATH but not on the PATH main rebuilt`);
+    else step(`${tool} is not installed on this machine; skipped`);
+  }
 
   const footer = window.getByTestId("app-info");
   await footer.waitFor({ timeout: 15_000 });
@@ -140,6 +224,19 @@ try {
   if (serverPids.length !== 1)
     throw new Error(`expected one server child, found ${serverPids.length}`);
   step(`electron pid ${electronPid}, server child pid ${serverPids.join(", ")}`);
+  if (appBundle !== undefined) {
+    // From the Dock the app's own working directory is `/`; the server runs in the home folder.
+    const cwd = NodeChildProcess.execFileSync(
+      "lsof",
+      ["-a", "-p", String(serverPids[0]), "-d", "cwd", "-Fn"],
+      { encoding: "utf8" },
+    )
+      .split("\n")
+      .find((line) => line.startsWith("n"))
+      ?.slice(1);
+    if (cwd !== NodeOS.homedir()) throw new Error(`the server runs in ${cwd}, not the home folder`);
+    step("the packaged server runs in the home folder");
+  }
 
   await window.screenshot({ path: screenshotPath });
   step(`screenshot saved to ${NodePath.relative(repoRoot, screenshotPath)}`);
@@ -244,6 +341,8 @@ if (failure === undefined) {
 }
 
 if (failure !== undefined) {
+  const tail = output.split("\n").slice(-40).join("\n");
+  process.stderr.write(`[smoke] app output, last lines:\n${tail}\n`);
   process.stderr.write(`[smoke] FAILED: ${failure.message}\n`);
   process.exit(1);
 }

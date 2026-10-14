@@ -17,5 +17,5 @@
       }
     ]
   },
-  "include": ["*.ts", "fake-github/*.ts"]
+  "include": ["*.ts", "fake-github/*.ts", "desktop-artifact/*.ts"]
 }

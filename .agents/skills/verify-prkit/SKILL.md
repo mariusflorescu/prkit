@@ -105,7 +105,7 @@ pnpm e2e run tests/shell.e2e.ts --trace=on --video=on --output .e2e/proof/<name>
 pnpm build && pnpm smoke:desktop
 ```
 
-It launches the built app with `PRKIT_HOME=.e2e/smoke-home`, waits for the app and the server-info footer, saves `.e2e/evidence/desktop-smoke.png`, and checks that quitting stops the server child.
+It launches the built app with `PRKIT_HOME=.e2e/smoke-home`, waits for the app and the server-info footer, saves `.e2e/evidence/desktop-smoke.png`, and checks that quitting stops the server child. `pnpm smoke:desktop --app <path to .app>` runs the same checks against a packaged app; see [Desktop app](./features/desktop-app.md).
 
 ## Evidence
 

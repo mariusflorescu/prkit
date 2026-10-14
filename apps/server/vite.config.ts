@@ -26,9 +26,12 @@ export default defineConfig({
     },
     // Read at runtime next to the bundle (Reviews.ts and Fixers.ts load them from their own directory).
     copy: ["src/reviews/instructions.md", "src/fixers/fix-instructions.md"],
+    // Everything but Node's builtins is inlined, so the packaged app ships one self-contained
+    // server with no node_modules. The Claude Agent SDK finds its platform binary with a
+    // runtime resolve the bundler never follows; prkit always passes the user's own claude.
     deps: {
-      // Workspace packages export TypeScript source, which Node will not strip under node_modules.
-      alwaysBundle: (id: string) => id.startsWith("@prkit/"),
+      alwaysBundle: (id: string) => !id.startsWith("node:"),
+      onlyBundle: false,
     },
   },
 });

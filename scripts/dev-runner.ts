@@ -13,7 +13,7 @@ import * as NodeNet from "node:net";
 import * as NodePath from "node:path";
 import * as NodeReadline from "node:readline";
 
-import { childEnv, ServerReadyLineJson } from "@prkit/contracts";
+import { childEnv, ServerHomeInUseLineJson, ServerReadyLineJson } from "@prkit/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
@@ -23,6 +23,7 @@ type Mode = (typeof MODES)[number];
 const repoRoot = NodePath.resolve(import.meta.dirname, "..");
 const vp = NodePath.join(repoRoot, "node_modules/.bin/vp");
 const decodeReadyLine = Schema.decodeUnknownOption(ServerReadyLineJson);
+const decodeHomeInUseLine = Schema.decodeUnknownOption(ServerHomeInUseLineJson);
 
 const isMode = (value: string | undefined): value is Mode => MODES.some((mode) => mode === value);
 
@@ -138,13 +139,20 @@ const runDev = async (base: { home: string; serverPort: number; webPort: number 
   const firstReady = new Promise<void>((resolve) => {
     if (!server.stdout) return;
     NodeReadline.createInterface({ input: server.stdout }).on("line", (line) => {
-      Option.match(decodeReadyLine(line), {
-        onNone: () => process.stdout.write(`${line}\n`),
-        onSome: (ready) => {
-          log(`server ready on ${ready.url}`);
-          resolve();
-        },
-      });
+      const ready = decodeReadyLine(line);
+      if (Option.isSome(ready)) {
+        log(`server ready on ${ready.value.url}`);
+        resolve();
+        return;
+      }
+      // `node --watch` would wait for a file change; another prkit owns this home.
+      const inUse = decodeHomeInUseLine(line);
+      if (Option.isSome(inUse)) {
+        log(`another prkit is already using ${inUse.value.home}; quit it, then run this again`);
+        void shutdown(1);
+        return;
+      }
+      process.stdout.write(`${line}\n`);
     });
   });
   startVite(base);

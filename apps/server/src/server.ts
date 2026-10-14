@@ -32,6 +32,7 @@ import * as FixerWatcher from "./fixers/FixerWatcher.ts";
 import * as ReviewWatcher from "./reviews/ReviewWatcher.ts";
 import * as ServerHttp from "./http.ts";
 import { boundPort } from "./listenAddress.ts";
+import * as HomeLock from "./persistence/HomeLock.ts";
 import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import * as Ws from "./ws.ts";
 import * as Workspace from "./workspace/Workspace.ts";
@@ -118,5 +119,6 @@ const layerServer = layerReadyLine.pipe(
   Layer.provideMerge(layerHttpServer),
 );
 
-// The CLI supplies ServerConfig.
-export const runServer = Layer.launch(layerServer);
+// The CLI supplies ServerConfig. The home lock builds first, so a second server for the
+// same home never touches the database or listens.
+export const runServer = Layer.launch(layerServer.pipe(Layer.provide(HomeLock.layer)));

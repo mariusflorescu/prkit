@@ -5,7 +5,7 @@ export default defineConfig({
     root: import.meta.dirname,
     environment: "node",
     // Every unit test, so a new one can't be left out; e2e journeys are `*.e2e.ts`.
-    include: ["packages/*/test/**/*.test.ts", "apps/*/src/**/*.test.ts", "scripts/*.test.ts"],
+    include: ["packages/*/test/**/*.test.ts", "apps/*/src/**/*.test.ts", "scripts/**/*.test.ts"],
   },
   staged: {
     "*": "vp fmt --no-error-on-unmatched-pattern",
