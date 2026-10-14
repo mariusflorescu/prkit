@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "astro",
-  "installCommand": "pnpm install --frozen-lockfile --filter @prkit/www...",
+  "installCommand": "pnpm install --frozen-lockfile --prod --ignore-scripts --filter @prkit/www...",
   "buildCommand": "pnpm run build",
   "outputDirectory": "dist",
   "ignoreCommand": "git diff --quiet ${VERCEL_GIT_PREVIOUS_SHA:-HEAD^} HEAD -- . ../../assets/brand ../../package.json ../../pnpm-lock.yaml ../../pnpm-workspace.yaml"
