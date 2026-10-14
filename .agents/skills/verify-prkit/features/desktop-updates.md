@@ -4,12 +4,12 @@ The installed app looks for a newer release on its track 15 seconds after launch
 
 ## Sub-features
 
-- `updates-check` the startup and periodic checks, Check for updates in Settings, and the app menu's Check for Updates… with its native up-to-date and failure dialogs.
+- `updates-check` the startup and periodic checks, Check for updates in Settings, and the app menu's Check for Updates… with its native up-to-date and failure dialogs; a menu check during a running check waits for it. An update on offer stays through later checks unless a newer one replaces it.
 - `updates-notes` What's new from the feed's release notes, newest first, one block per version since the running one, PR links, no HTML.
 - `updates-titlebar` the title bar button: Update, download progress, Restart to update; hover or focus shows What's new.
 - `updates-download` the download, its progress, the "Update downloaded" toast.
 - `updates-install` the confirm dialog, the server stopped before Squirrel takes over, and restarted when the install fails.
-- `updates-track` Stable or Nightly, stored in the profile, with a one-time downgrade when switching back to Stable.
+- `updates-track` Stable or Nightly, stored in the profile, with a downgrade allowed when switching to Stable, kept while that older version is on offer.
 - `updates-after` the "Updated to <version>" toast, once per version.
 - `updates-disabled` a dev run, a build with no feed, or `PRKIT_DISABLE_AUTO_UPDATE` turns updates off with a reason; the web build shows no update UI.
 - `updates-quit` SIGTERM to the app's main process quits it and its server child.
@@ -28,7 +28,7 @@ Preconditions: macOS, `pnpm install`, about 3 GB free on disk for two builds. Bu
 - **Error with Retry.** No mock server running: after 15 s, `[role=status][data-update-status="error"]` reads "The last check didn't finish." and the alert says prkit couldn't reach the update server, with Retry.
 - **Checking.** Start `node scripts/mock-update-server.ts --root <vB dir> --latency 3000`, click Retry: `data-update-status="checking"`, "Checking for updates…".
 - **Available.** Then `available`, "<vB> is available.", a Download button and What's new with the mock's notes. The title bar shows `getByRole("button", { name: "Update to <vB>" })`; hovering it opens `getByRole("dialog", { name: "What's new" })`.
-- **Track.** `getByRole("combobox", { name: "Track" })`, pick Stable: with a `latest-mac.yml` of a lower version in the folder, that version is offered (the one-time downgrade). Pick Nightly again: vB is offered. `<profile>/desktop-settings.json` holds `{"updateChannel":"nightly"}`.
+- **Track.** `getByRole("combobox", { name: "Track" })`, pick Stable: with a `latest-mac.yml` of a lower version in the folder, that version is offered (the downgrade), and stays on offer through the next polls. Pick Nightly again: vB is offered. `<profile>/desktop-settings.json` holds `{"updateChannel":"nightly"}`.
 - **Download.** Click the title bar button with `--throttle 6144`: `downloading`, "Downloading <vB>: N%", and the title bar shows progress. Then `downloaded`, the "Update downloaded" toast, and `<profile>/update-notes.json` holds vB's notes with `"shown": false`.
 - **Confirm.** Click `getByRole("button", { name: "Restart to update to <vB>" })`: `getByRole("alertdialog")` reads "Install <vB> and restart prkit?" and "Running guides and fixes will be interrupted." Install and restart on an unsigned build ends in the dialog's alert "macOS couldn't verify the downloaded update…", Try again, and the server answers `/health` again.
 - **Up to date and the menu.** Serve a folder whose `nightly-mac.yml` names vA: `up-to-date`, "You're up to date." Click the menu item in the main process with `Menu.getApplicationMenu().getMenuItemById("check-for-updates").click()`: the native dialog says "You're up to date"; with the mock stopped, "Couldn't check for updates". To read a native dialog without screen recording, replace `dialog.showMessageBox` in `app.evaluate` and record its options.

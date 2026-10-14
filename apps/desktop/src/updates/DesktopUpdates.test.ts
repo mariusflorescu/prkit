@@ -359,8 +359,127 @@ describe("DesktopUpdates", () => {
       allowPrerelease: false,
       allowDowngrade: false,
     });
-    expect(harness.downgrade).toEqual([true, false]);
+    // The first check ran on Nightly with nothing on offer; the switch check allows a downgrade.
+    expect(harness.downgrade).toEqual([false, true]);
     expect(harness.checkCount()).toBe(2);
+  });
+
+  it("keeps an older Stable offer through later polls, with downgrades still allowed", async () => {
+    const harness = makeHarness({ checks: [found("0.0.9"), Effect.succeedNone] });
+    const state = await run(
+      harness,
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates;
+        yield* updates.setChannel("stable");
+        const offered = harness.published.length;
+        // The startup check at 15 s, then the first poll.
+        yield* TestClock.adjust("31 minutes");
+        yield* settle;
+        expect(harness.checkCount()).toBe(3);
+        expect(harness.published.slice(offered).map((published) => published.status)).toEqual(
+          expect.arrayContaining(["available"]),
+        );
+        expect(
+          harness.published.slice(offered).every((published) => published.status === "available"),
+        ).toBe(true);
+        return yield* updates.getState;
+      }),
+    );
+    expect(state).toMatchObject({
+      status: "available",
+      channel: "stable",
+      availableVersion: "0.0.9",
+    });
+    expect(harness.downgrade).toEqual([true, true, true]);
+  });
+
+  it("a poll that fails while an update is on offer keeps the offer and the title bar", async () => {
+    const harness = makeHarness({
+      checks: [
+        found(NEXT_NIGHTLY),
+        Effect.fail(new UpdaterFailed({ operation: "check", message: "Offline." })),
+      ],
+    });
+    const [before, after, published] = await run(
+      harness,
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates;
+        const offered = (yield* updates.check).state;
+        const count = harness.published.length;
+        yield* TestClock.adjust("15 seconds");
+        yield* settle;
+        expect(harness.checkCount()).toBe(2);
+        return [offered, yield* updates.getState, harness.published.slice(count)] as const;
+      }),
+    );
+    expect(after).toEqual(before);
+    expect(published.every((state) => state.status === "available")).toBe(true);
+  });
+
+  it("a poll that finds a newer version replaces the offer and its notes", async () => {
+    const LATEST = "0.1.0-nightly.20261017.1";
+    const harness = makeHarness({
+      checks: [
+        found(NEXT_NIGHTLY),
+        found(LATEST, "### Fixes\n- Keep the offer ([#9](https://github.com/acme/widgets/pull/9))"),
+      ],
+    });
+    const state = await run(
+      harness,
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates;
+        yield* updates.check;
+        yield* TestClock.adjust("15 seconds");
+        yield* settle;
+        return yield* updates.getState;
+      }),
+    );
+    expect(state.availableVersion).toBe(LATEST);
+    expect(state.releaseNotes.versions[0]?.groups[0]).toEqual({
+      title: "Fixes",
+      items: [{ text: "Keep the offer", prUrl: "https://github.com/acme/widgets/pull/9" }],
+    });
+  });
+
+  it("a menu check during a running check waits for it and answers with its result", async () => {
+    const release = Deferred.makeUnsafe<void>();
+    const harness = makeHarness({
+      checks: [Deferred.await(release).pipe(Effect.andThen(found(NEXT_NIGHTLY)))],
+    });
+    const result = await run(
+      harness,
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates;
+        yield* TestClock.adjust("15 seconds");
+        yield* settle;
+        expect((yield* updates.getState).status).toBe("checking");
+        const menu = yield* updates.checkNow.pipe(Effect.forkChild);
+        yield* settle;
+        yield* Deferred.succeed(release, undefined);
+        return yield* Fiber.join(menu);
+      }),
+    );
+    expect(harness.checkCount()).toBe(1);
+    expect(result).toMatchObject({
+      accepted: true,
+      failure: null,
+      state: { status: "available", availableVersion: NEXT_NIGHTLY },
+    });
+  });
+
+  it("a menu check reports why it failed", async () => {
+    const harness = makeHarness({
+      checks: [Effect.fail(new UpdaterFailed({ operation: "check", message: "Offline." }))],
+    });
+    const result = await run(
+      harness,
+      DesktopUpdates.use((updates) => updates.checkNow),
+    );
+    expect(result).toMatchObject({
+      accepted: true,
+      failure: "Offline.",
+      state: { status: "error" },
+    });
   });
 
   it("starts on the stored track over the build's", async () => {

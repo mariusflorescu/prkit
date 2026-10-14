@@ -15,6 +15,7 @@ export type UpdateEvent =
       readonly at: string;
     }
   | { readonly _tag: "NoUpdate"; readonly at: string }
+  | { readonly _tag: "OtherTrackIgnored"; readonly at: string }
   | { readonly _tag: "DownloadStarted" }
   | { readonly _tag: "DownloadProgress"; readonly percent: number }
   | { readonly _tag: "DownloadFailed"; readonly message: string }
@@ -52,6 +53,14 @@ const cleared = {
 
 const noError = { errorMessage: null, errorContext: null } as const;
 
+/**
+ * An update on offer stays on offer through later checks: the title bar button and its notes
+ * don't flicker away during a poll, a failed poll, or one that finds nothing new.
+ * electron-updater keeps what it found until a check finds something else, so Download
+ * still fetches the offered version.
+ */
+const onOffer = (state: DesktopUpdateState) => state.status === "available";
+
 export const reduceUpdateState = (
   state: DesktopUpdateState,
   event: UpdateEvent,
@@ -69,8 +78,9 @@ export const reduceUpdateState = (
         channel: event.channel,
       };
     case "CheckStarted":
-      return { ...state, ...noError, status: "checking" };
+      return onOffer(state) ? state : { ...state, ...noError, status: "checking" };
     case "CheckFailed":
+      if (onOffer(state)) return state;
       return {
         ...state,
         ...cleared,
@@ -90,6 +100,11 @@ export const reduceUpdateState = (
         lastCheckedAt: event.at,
       };
     case "NoUpdate":
+      return onOffer(state)
+        ? { ...state, lastCheckedAt: event.at }
+        : { ...state, ...cleared, status: "up-to-date", lastCheckedAt: event.at };
+    case "OtherTrackIgnored":
+      // electron-updater now holds the ignored version, so the offer can't be downloaded anymore.
       return { ...state, ...cleared, status: "up-to-date", lastCheckedAt: event.at };
     case "DownloadStarted":
       return { ...state, ...noError, status: "downloading", downloadPercent: 0 };

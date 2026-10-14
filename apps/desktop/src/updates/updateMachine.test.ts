@@ -14,6 +14,7 @@ const NOTES = {
   omittedVersions: 0,
 };
 const AT = "2026-10-15T09:00:00.000Z";
+const LATER = "2026-10-15T09:30:00.000Z";
 
 const start = initialUpdateState({
   currentVersion: "0.1.0",
@@ -56,14 +57,43 @@ describe("reduceUpdateState", () => {
     expect(done).toMatchObject({ status: "downloaded", downloadPercent: 100, releaseNotes: NOTES });
   });
 
-  it("checking shows checking, then up to date clears what an earlier check offered", () => {
+  it("an update on offer stays through later checks, and a newer one replaces it", () => {
     const offered = run(
       { _tag: "Enabled", channel: "stable" },
       { _tag: "UpdateAvailable", version: "0.2.0", releaseNotes: NOTES, at: AT },
     );
-    expect(reduceUpdateState(offered, { _tag: "CheckStarted" }).status).toBe("checking");
-    const current = reduceUpdateState(offered, { _tag: "NoUpdate", at: AT });
-    expect(current).toMatchObject({
+    expect(reduceUpdateState(offered, { _tag: "CheckStarted" })).toBe(offered);
+    expect(
+      reduceUpdateState(offered, { _tag: "CheckFailed", message: "Offline.", at: LATER }),
+    ).toBe(offered);
+    expect(reduceUpdateState(offered, { _tag: "NoUpdate", at: LATER })).toMatchObject({
+      status: "available",
+      availableVersion: "0.2.0",
+      releaseNotes: NOTES,
+      lastCheckedAt: LATER,
+    });
+    const newer = {
+      versions: [{ version: "0.3.0", groups: [], summary: "Faster inbox.", omittedItems: 0 }],
+      omittedVersions: 0,
+    };
+    expect(
+      reduceUpdateState(offered, {
+        _tag: "UpdateAvailable",
+        version: "0.3.0",
+        releaseNotes: newer,
+        at: LATER,
+      }),
+    ).toMatchObject({ status: "available", availableVersion: "0.3.0", releaseNotes: newer });
+    expect(reduceUpdateState(offered, { _tag: "OtherTrackIgnored", at: LATER })).toMatchObject({
+      status: "up-to-date",
+      availableVersion: null,
+    });
+  });
+
+  it("with nothing on offer, a check shows checking and up to date", () => {
+    const idle = run({ _tag: "Enabled", channel: "stable" });
+    expect(reduceUpdateState(idle, { _tag: "CheckStarted" }).status).toBe("checking");
+    expect(reduceUpdateState(idle, { _tag: "NoUpdate", at: AT })).toMatchObject({
       status: "up-to-date",
       availableVersion: null,
       releaseNotes: { versions: [], omittedVersions: 0 },

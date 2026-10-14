@@ -37,6 +37,8 @@ export function startServer(options: {
   readonly cwd?: string;
   /** The packaged app's version, for the server to report; its own when absent. */
   readonly appVersion?: string;
+  /** Called with the child as soon as it exists, before it's ready, so it can be stopped while booting. */
+  readonly onSpawn?: (child: NodeChildProcess.ChildProcess) => void;
 }): Promise<ServerProcess> {
   const targetArgs =
     options.target._tag === "Built"
@@ -58,6 +60,7 @@ export function startServer(options: {
       ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     },
   );
+  options.onSpawn?.(child);
 
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {

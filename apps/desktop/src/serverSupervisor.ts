@@ -4,7 +4,7 @@ import type { ServerReadyLine } from "@prkit/contracts";
 
 import { startServer } from "./serverProcess.ts";
 
-type StartOptions = Parameters<typeof startServer>[0];
+type StartOptions = Omit<Parameters<typeof startServer>[0], "port" | "onSpawn">;
 
 /** How long a stopping server gets after SIGTERM before it's killed. */
 const STOP_GRACE_MS = 5_000;
@@ -14,24 +14,37 @@ const STOP_GRACE_MS = 5_000;
  * install that didn't happen), and an exit nobody asked for is reported once.
  */
 export function createServerSupervisor(options: {
-  readonly start: Omit<StartOptions, "port">;
+  readonly start: StartOptions;
   readonly onUnexpectedExit: (reason: string) => void;
 }) {
   let child: NodeChildProcess.ChildProcess | undefined;
   let stopping = false;
 
-  const watch = (started: NodeChildProcess.ChildProcess) => {
-    started.once("exit", (code, signal) => {
-      if (child === started) child = undefined;
-      if (!stopping) options.onUnexpectedExit(signal ?? `code ${code}`);
+  /** Tracked from the spawn, so Cmd+Q or SIGTERM while it boots still stops it. */
+  const track = (spawned: NodeChildProcess.ChildProcess) => {
+    child = spawned;
+    let ready = false;
+    spawned.once("exit", (code, signal) => {
+      if (child === spawned) child = undefined;
+      // An exit while booting rejects `start`, which reports it.
+      if (ready && !stopping) options.onUnexpectedExit(signal ?? `code ${code}`);
     });
+    return () => {
+      ready = true;
+    };
   };
 
   const start = async (port: number): Promise<ServerReadyLine> => {
     stopping = false;
-    const started = await startServer({ ...options.start, port });
-    child = started.child;
-    watch(started.child);
+    let markReady = () => {};
+    const started = await startServer({
+      ...options.start,
+      port,
+      onSpawn: (spawned) => {
+        markReady = track(spawned);
+      },
+    });
+    markReady();
     return started.ready;
   };
 

@@ -117,6 +117,10 @@ export const make = ElectronUpdater.of({
     }
     return Effect.sync(() => autoUpdater.off("error", onError));
   }).pipe(
+    // The timeout can't disarm the `update-downloaded` handler MacUpdater set up inside
+    // quitAndInstall, so a very late Squirrel success may still quit and install after the UI
+    // said it failed. That's acceptable: the user asked to install this version, and the quit
+    // runs through will-quit, which stops the server like any other quit.
     Effect.timeoutOrElse({
       duration: INSTALL_VERDICT_TIMEOUT,
       orElse: () =>

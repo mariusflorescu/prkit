@@ -216,7 +216,10 @@ if (app.requestSingleInstanceLock()) {
   app
     .whenReady()
     .then(boot)
-    .catch((error: Error) => fail(error.message));
+    .catch((error: Error) => {
+      // Quitting while booting stops the server on purpose; that's no failure to report.
+      if (!quitting) fail(error.message);
+    });
 } else {
   app.quit();
 }
