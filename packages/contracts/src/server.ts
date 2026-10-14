@@ -16,3 +16,14 @@ export const ServerReadyLine = Schema.Struct({
 export type ServerReadyLine = typeof ServerReadyLine.Type;
 
 export const ServerReadyLineJson = Schema.fromJsonString(ServerReadyLine);
+
+/**
+ * Printed on stdout instead of the ready line when another server already holds the home,
+ * just before the server exits. Electron shows it; nothing else is started.
+ */
+export const ServerHomeInUseLine = Schema.Struct({
+  type: Schema.Literal("home-in-use"),
+  home: Schema.String,
+});
+
+export const ServerHomeInUseLineJson = Schema.fromJsonString(ServerHomeInUseLine);

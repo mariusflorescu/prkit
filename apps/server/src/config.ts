@@ -52,6 +52,8 @@ const EnvConfig = Config.all({
   watchIntervalMs: Config.Int("PRKIT_WATCH_INTERVAL_MS").pipe(Config.withDefault(60_000)),
   e2e: Config.Boolean("PRKIT_E2E").pipe(Config.withDefault(false)),
   devReviewRequested: Config.String("PRKIT_DEV_REVIEW_REQUESTED").pipe(Config.withDefault("")),
+  // The packaged app's version, which its build stamps; the bundle carries the workspace's.
+  appVersion: Config.NonEmptyString("PRKIT_APP_VERSION").pipe(Config.option),
 });
 
 export const resolve = Effect.fn("ServerConfig.resolve")(function* (flags: ServerFlags) {
@@ -74,7 +76,7 @@ export const resolve = Effect.fn("ServerConfig.resolve")(function* (flags: Serve
       .split(",")
       .map((key) => key.trim())
       .filter((key) => key !== ""),
-    version: packageJson.version,
+    version: Option.getOrElse(env.appVersion, () => packageJson.version),
     startedAt,
   });
 });
