@@ -1,4 +1,5 @@
-import type { ThemePreference } from "@prkit/contracts";
+import type { DesktopUpdateState, ThemePreference, UpdateChannel } from "@prkit/contracts";
+import { DesktopUpdateIpc } from "@prkit/contracts/desktopUpdateIpc";
 import { contextBridge, ipcRenderer } from "electron";
 
 interface GuideTarget {
@@ -26,5 +27,20 @@ contextBridge.exposeInMainWorld("prkitDesktop", {
     const listener = (_event: Electron.IpcRendererEvent, target: GuideTarget) => callback(target);
     ipcRenderer.on("prkit:open-guide", listener);
     return () => ipcRenderer.removeListener("prkit:open-guide", listener);
+  },
+  updates: {
+    getState: () => ipcRenderer.invoke(DesktopUpdateIpc.getState),
+    check: () => ipcRenderer.invoke(DesktopUpdateIpc.check),
+    download: () => ipcRenderer.invoke(DesktopUpdateIpc.download),
+    install: () => ipcRenderer.invoke(DesktopUpdateIpc.install),
+    setChannel: (channel: UpdateChannel) =>
+      ipcRenderer.invoke(DesktopUpdateIpc.setChannel, channel),
+    dismissWhatsNew: () => ipcRenderer.invoke(DesktopUpdateIpc.dismissWhatsNew),
+    onState: (callback: (state: DesktopUpdateState) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, state: DesktopUpdateState) =>
+        callback(state);
+      ipcRenderer.on(DesktopUpdateIpc.state, listener);
+      return () => ipcRenderer.removeListener(DesktopUpdateIpc.state, listener);
+    },
   },
 });

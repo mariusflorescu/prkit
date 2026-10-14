@@ -80,6 +80,26 @@ export const publishConfig = (channel: Channel, owner: string, repo: string) => 
   ...(channel === "nightly" ? { channel: "nightly" } : {}),
 });
 
+/** `--mock-updates` builds read this port unless PRKIT_DESKTOP_MOCK_UPDATE_PORT names another. */
+export const DEFAULT_MOCK_UPDATE_PORT = 7357;
+
+export const resolveMockUpdatePort = (env: Env) => {
+  const value = env.PRKIT_DESKTOP_MOCK_UPDATE_PORT?.trim();
+  if (value === undefined || value === "") return DEFAULT_MOCK_UPDATE_PORT;
+  const port = Number(value);
+  return Number.isInteger(port) && port > 0 && port < 65536 ? port : undefined;
+};
+
+/**
+ * A test build's feed: scripts/mock-update-server.ts on this machine, in place of GitHub. The
+ * manifest keeps its channel name, so the app reads the same latest-mac.yml or nightly-mac.yml.
+ */
+export const mockPublishConfig = (channel: Channel, port: number) => ({
+  provider: "generic" as const,
+  url: `http://127.0.0.1:${port}`,
+  ...(channel === "nightly" ? { channel: "nightly" } : {}),
+});
+
 const SIGNING_PREFIXES = ["CSC_", "APPLE_"];
 
 /**
@@ -115,6 +135,8 @@ export interface BuildConfigOptions {
   readonly appId: string;
   readonly electronVersion: string;
   readonly repository: Extract<UpdateRepository, { _tag: "Repository" }> | undefined;
+  /** Set by `--mock-updates`: the local mock feed's port, which replaces the repository's feed. */
+  readonly mockUpdatePort?: number;
 }
 
 export const createBuildConfig = (options: BuildConfigOptions): Configuration => {
@@ -135,9 +157,11 @@ export const createBuildConfig = (options: BuildConfigOptions): Configuration =>
     npmRebuild: false,
     nodeGypRebuild: false,
     publish:
-      options.repository === undefined
-        ? null
-        : [publishConfig(channel, options.repository.owner, options.repository.repo)],
+      options.mockUpdatePort !== undefined
+        ? [mockPublishConfig(channel, options.mockUpdatePort)]
+        : options.repository === undefined
+          ? null
+          : [publishConfig(channel, options.repository.owner, options.repository.repo)],
     mac: {
       target: ["dmg", "zip"],
       category: "public.app-category.developer-tools",

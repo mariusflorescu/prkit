@@ -9,6 +9,8 @@ import { WorkspaceMutationError } from "~/features/workspace/WorkspaceMutationEr
 import { CommandPalette } from "~/features/workspace/CommandPalette";
 import { useGitHubEvents } from "~/features/github/useGitHubEvents";
 import { FixerNotifications } from "~/features/fixes/FixerNotifications";
+import { UpdateNotifications } from "~/features/updates/UpdateNotifications";
+import { updatesBridge } from "~/lib/desktop";
 
 export function AppShell() {
   useGitHubEvents();
@@ -19,6 +21,7 @@ export function AppShell() {
         <CommandPalette />
         <GuideNotifications />
         <FixerNotifications />
+        {updatesBridge !== undefined && <UpdateNotifications />}
         <div className="flex h-dvh min-h-0 w-full flex-col">
           <WorkspaceTabs />
           <main

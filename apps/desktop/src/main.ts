@@ -1,9 +1,16 @@
-import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification } from "electron";
+import {
+  app,
+  autoUpdater as nativeUpdater,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  nativeTheme,
+  Notification,
+} from "electron";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
@@ -11,8 +18,10 @@ import { ThemePreference } from "@prkit/contracts";
 import { applyBranding } from "./branding.ts";
 import { hydratePathFromLoginShell } from "./loginShellPath.ts";
 import { createMainWindow } from "./mainWindow.ts";
-import { startServer, type ServerTarget } from "./serverProcess.ts";
+import type { ServerTarget } from "./serverProcess.ts";
+import { createServerSupervisor } from "./serverSupervisor.ts";
 import { installApplicationMenu } from "./applicationMenu.ts";
+import { startDesktopUpdates } from "./updates/startDesktopUpdates.ts";
 
 // Set by scripts/dev-runner.ts for `dev:desktop`: load the Vite URL, and pin the
 // server port that Vite proxies /ws to.
@@ -47,7 +56,8 @@ const dockIcon = (appearance: "light" | "dark") =>
         `../../assets/brand/app-icon/png/prkit-icon-macos-${appearance}-1024.png`,
       );
 
-let server: NodeChildProcess.ChildProcess | undefined;
+let server: ReturnType<typeof createServerSupervisor> | undefined;
+let updates: ReturnType<typeof startDesktopUpdates> | undefined;
 let windowOptions: Parameters<typeof createMainWindow>[0] | undefined;
 let quitting = false;
 
@@ -123,7 +133,7 @@ const fail = (message: string) => {
 
 async function boot() {
   applyBranding({ light: dockIcon("light"), dark: dockIcon("dark") });
-  installApplicationMenu();
+  installApplicationMenu({ checkForUpdates: () => void updates?.checkFromMenu() });
   const token = NodeCrypto.randomBytes(32).toString("hex");
   // Before the server child exists: it inherits PATH through childEnv, and a Dock launch has only launchd's.
   process.stdout.write(`[desktop] PATH ${await hydratePathFromLoginShell()}\n`);
@@ -131,26 +141,45 @@ async function boot() {
     ? { _tag: "DevWeb", webOrigin: new URL(devWebUrl).origin }
     : { _tag: "Built", webDist };
 
-  const started = await startServer({
-    entry: NodePath.resolve(desktopDir, "../server/dist/bin.mjs"),
-    home: process.env.PRKIT_HOME ?? NodePath.join(NodeOS.homedir(), ".prkit"),
-    token,
-    port: devWebUrl ? devServerPort : 0,
-    target,
-    // Launched from the Dock, the inherited working directory is `/`.
-    ...(app.isPackaged ? { cwd: NodeOS.homedir(), appVersion: app.getVersion() } : {}),
+  const supervisor = createServerSupervisor({
+    start: {
+      entry: NodePath.resolve(desktopDir, "../server/dist/bin.mjs"),
+      home: process.env.PRKIT_HOME ?? NodePath.join(NodeOS.homedir(), ".prkit"),
+      token,
+      target,
+      // Launched from the Dock, the inherited working directory is `/`.
+      ...(app.isPackaged ? { cwd: NodeOS.homedir(), appVersion: app.getVersion() } : {}),
+    },
+    onUnexpectedExit: (reason) => {
+      if (!quitting) fail(`The prkit server stopped unexpectedly (${reason}).`);
+    },
   });
-  server = started.child;
-  server.once("exit", (code, signal) => {
-    if (!quitting) fail(`The prkit server stopped unexpectedly (${signal ?? `code ${code}`}).`);
-  });
+  server = supervisor;
+  const ready = await supervisor.start(devWebUrl ? devServerPort : 0);
 
   // Before the window exists, so it opens in the stored theme with no flash of the other one.
-  nativeTheme.themeSource = started.ready.theme;
+  nativeTheme.themeSource = ready.theme;
 
-  const url = new URL(devWebUrl ?? started.ready.url);
+  const url = new URL(devWebUrl ?? ready.url);
   url.searchParams.set("token", token);
   windowOptions = { url, preload: NodePath.join(desktopDir, "dist-electron/preload.cjs") };
+
+  updates = startDesktopUpdates({
+    userDataDir: app.getPath("userData"),
+    updateConfigPath: NodePath.join(process.resourcesPath, "app-update.yml"),
+    allowedOrigin: () => windowOptions?.url.origin,
+    stopServer: supervisor.stop,
+    // An install that didn't happen: the same port when it's free, so the window's origin holds.
+    restartServer: async () => {
+      const restarted = await supervisor.start(ready.port).catch(() => supervisor.start(0));
+      if (devWebUrl || windowOptions === undefined) return;
+      const next = new URL(restarted.url);
+      next.searchParams.set("token", token);
+      if (next.origin === windowOptions.url.origin) return;
+      windowOptions = { ...windowOptions, url: next };
+      for (const window of BrowserWindow.getAllWindows()) void window.loadURL(next.toString());
+    },
+  });
   createMainWindow(windowOptions);
 }
 
@@ -164,11 +193,20 @@ app.on("activate", () => {
   if (windowOptions && BrowserWindow.getAllWindows().length === 0) createMainWindow(windowOptions);
 });
 
+// The updater quits the app to install. Nothing may hold the quit back, and the server
+// stopping on the way out is expected.
+nativeUpdater.on("before-quit-for-update", () => {
+  quitting = true;
+});
+
 app.on("will-quit", () => {
   quitting = true;
-  // Only the child this process spawned, by its handle.
-  server?.kill("SIGTERM");
+  server?.signalStop();
+  void updates?.dispose();
 });
+
+// `kill <pid>` on the main process quits like Cmd+Q, so the server child stops too.
+for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => app.quit());
 
 // A second launch of the same app focuses this one's window instead of starting another
 // server. Another app on the same home (stable and nightly, or a dev run) is refused by the

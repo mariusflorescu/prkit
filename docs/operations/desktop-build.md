@@ -17,6 +17,7 @@ pnpm dist:desktop:artifact --build-version 0.1.0-nightly.20261014.1   # "prkit N
 | `--output-dir <dir>` | `release/` (gitignored) | |
 | `--skip-build` | off | Package the existing `dist` output instead of running the desktop build (which builds server and web first). |
 | `--signed` | off | Sign and notarize. Fails before building, naming every missing variable below. |
+| `--mock-updates` | off | Read updates from the local mock feed instead of GitHub (see [Testing updates](#testing-updates)). Not with `--signed`. |
 | `--keep-stage` | off | Keep the temporary stage directory and print its path. |
 | `--verbose` | off | Stream the build and electron-builder output. |
 
@@ -43,6 +44,7 @@ Read at build time. None of these values goes into a tracked file.
 | Variable | |
 | --- | --- |
 | `PRKIT_DESKTOP_APP_ID` | The bundle id. Required with `--signed`; unsigned builds default to `dev.prkit.local`. |
+| `PRKIT_DESKTOP_MOCK_UPDATE_PORT` | The mock feed's port for `--mock-updates`, default `7357`. |
 | `PRKIT_DESKTOP_UPDATE_REPOSITORY` | `owner/repo` of the update feed, else `GITHUB_REPOSITORY`. With neither, the app has no `app-update.yml`, no update manifest is written, and the build says so in one line. |
 | `CSC_LINK`, `CSC_KEY_PASSWORD` | The Developer ID Application certificate (.p12, base64) and its password. |
 | `APPLE_TEAM_ID` | The team the certificate belongs to. |
@@ -68,3 +70,30 @@ A dev run keeps its Chromium profile in `prkit Dev`, apart from an installed app
 ## Checking a build
 
 Mount the DMG without Finder (`hdiutil attach -nobrowse -readonly`), copy the app out, and run `pnpm smoke:desktop --app <path to .app>`. It launches the packaged app with its home and Chromium profile under `.prkit/smoke-app-home`, runs the usual smoke, and also checks that no module failed to load within 8 seconds, that gh, git, claude and codex resolve from the PATH main rebuilt from a Dock-like one, and that the server runs in the home folder.
+
+## Updates
+
+The installed app updates itself from the feed in `Resources/app-update.yml` (`apps/desktop/src/updates/`). It checks 15 seconds after launch and every 30 minutes, downloads only when you click **Update**, and installs only after you confirm **Restart to update**. Installing stops the server child first (SIGTERM, then 5 seconds before SIGKILL), then hands over to Squirrel.Mac, which quits, replaces and relaunches the app. If the install doesn't start, the server starts again and the error shows.
+
+The track is Stable (`latest-mac.yml`) or Nightly (`nightly-mac.yml`, prereleases allowed). A build starts on its own track; Settings > Updates switches it, and the switch is kept in `desktop-settings.json` in the Chromium profile folder (userData), never in the prkit home. Switching allows one downgrade, so Nightly to Stable works, and a version found on the other track is ignored. Release notes come from the release bodies (`fullChangelog`, so every version since the running one), are parsed into groups and PR links, and are never rendered as HTML. When a download finishes its notes go into `update-notes.json`; the first launch on that version shows them once.
+
+Updates are off, with the reason in Settings, when the app isn't packaged, when the build has no `app-update.yml`, or when `PRKIT_DISABLE_AUTO_UPDATE` is set. A plain browser on the dev server shows no update UI.
+
+## Testing updates
+
+Unsigned builds can't install an update: Squirrel.Mac checks the new app's signature. Everything up to **Restart to update** works unsigned against the mock feed.
+
+```sh
+pnpm dist:desktop:artifact --mock-updates --build-version 0.1.0-nightly.20261015.1 --output-dir release/a
+pnpm dist:desktop:artifact --mock-updates --build-version 0.1.0-nightly.20261016.1 --output-dir release/b --skip-build
+node scripts/mock-update-server.ts --root release/b --throttle 4096
+```
+
+`--mock-updates` writes a `generic` feed at `http://127.0.0.1:<PRKIT_DESKTOP_MOCK_UPDATE_PORT>` into the app, with the same manifest names. `scripts/mock-update-server.ts` serves a folder of release files: the manifests, the zips and their blockmaps. A manifest with no `releaseNotes` gets fake notes in the release body format, or the ones in `--notes <file.json>` (`[{"version","note"}]`, newest first). `--throttle <KB/s>` slows downloads so the progress can be watched, and `/` lists the folder, which is where the app's "All releases" link points. To try the Stable track, put a `latest-mac.yml` in the same folder.
+
+Run the older app from a copy outside the DMG, with its own home and profile, never `~/.prkit`:
+
+```sh
+PRKIT_HOME="$PWD/.prkit/update-test" "release/a/mac-arm64/prkit Nightly.app/Contents/MacOS/prkit Nightly" \
+  --user-data-dir="$PWD/.prkit/update-test/electron"
+```

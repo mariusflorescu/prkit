@@ -3,7 +3,7 @@
  * update manifest electron-builder writes when an update feed is configured.
  *
  *   node scripts/build-desktop-artifact.ts [--arch arm64|x64] [--build-version <semver>]
- *        [--output-dir <dir>] [--skip-build] [--signed] [--keep-stage] [--verbose]
+ *        [--output-dir <dir>] [--skip-build] [--signed] [--mock-updates] [--keep-stage] [--verbose]
  *
  * A version ending in `-nightly.<yyyymmdd>.<n>` builds "prkit Nightly". The version is
  * stamped into the staged package.json only. Progress goes to stderr; the last line on
@@ -28,6 +28,7 @@ import {
   notarizeDmgArgs,
   resolveAppId,
   resolveChannel,
+  resolveMockUpdatePort,
   resolveUpdateRepository,
   unexpectedExternals,
   updateManifestEntry,
@@ -59,6 +60,7 @@ const parseOptions = () => {
       "output-dir": { type: "string", default: "release" },
       "skip-build": { type: "boolean", default: false },
       signed: { type: "boolean", default: false },
+      "mock-updates": { type: "boolean", default: false },
       "keep-stage": { type: "boolean", default: false },
       verbose: { type: "boolean", default: false },
     },
@@ -68,12 +70,15 @@ const parseOptions = () => {
     throw new BuildFailed(`--arch must be arm64 or x64, not ${arch}.`);
   const version = values["build-version"] ?? readVersion(NodePath.join(desktopDir, "package.json"));
   if (!SEMVER.test(version)) throw new BuildFailed(`--build-version ${version} is not a semver.`);
+  if (values["mock-updates"] && values.signed)
+    throw new BuildFailed("--mock-updates is for local test builds; it can't be --signed.");
   return {
     arch: arch satisfies Arch,
     version,
     outputDir: NodePath.resolve(repoRoot, values["output-dir"]),
     skipBuild: values["skip-build"],
     signed: values.signed,
+    mockUpdates: values["mock-updates"],
     keepStage: values["keep-stage"],
     verbose: values.verbose,
   };
@@ -232,7 +237,12 @@ const main = async () => {
   const repository = resolveUpdateRepository(process.env);
   if (repository._tag === "Invalid")
     throw new BuildFailed(`${repository.name} must look like owner/repo.`);
-  if (repository._tag === "None")
+  const mockUpdatePort = options.mockUpdates ? resolveMockUpdatePort(process.env) : undefined;
+  if (options.mockUpdates && mockUpdatePort === undefined)
+    throw new BuildFailed("PRKIT_DESKTOP_MOCK_UPDATE_PORT must be a port number.");
+  if (mockUpdatePort !== undefined)
+    say(`Mock updates: the app reads its feed from http://127.0.0.1:${mockUpdatePort}.`);
+  else if (repository._tag === "None")
     say(
       "No update feed: set PRKIT_DESKTOP_UPDATE_REPOSITORY (or GITHUB_REPOSITORY) to owner/repo for app-update.yml and the update manifest.",
     );
@@ -261,6 +271,7 @@ const main = async () => {
     appId: resolveAppId(process.env),
     electronVersion: readVersion(NodePath.join(desktopDir, "node_modules/electron/package.json")),
     repository: repository._tag === "Repository" ? repository : undefined,
+    ...(mockUpdatePort === undefined ? {} : { mockUpdatePort }),
   });
 
   const stageDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "prkit-desktop-stage-"));
@@ -308,7 +319,7 @@ const main = async () => {
     const extensions = [".dmg", ".zip", ".dmg.blockmap", ".zip.blockmap"];
     const missing = extensions.filter((ext) => !files.some((file) => file.endsWith(ext)));
     if (
-      repository._tag === "Repository" &&
+      (repository._tag === "Repository" || mockUpdatePort !== undefined) &&
       !files.some((file) => file.endsWith(CHANNELS[channel].updateManifest))
     )
       missing.push(CHANNELS[channel].updateManifest);

@@ -15,8 +15,10 @@ import { GuidesSettings } from "~/features/guides/GuidesSettings";
 import { AboutSettings } from "~/features/settings/AboutSettings";
 import { AgentsSettings } from "~/features/settings/agents/AgentsSettings";
 import { AppearanceSettings } from "~/features/settings/appearance/AppearanceSettings";
-import { SETTINGS_SECTIONS } from "~/features/settings/settingsSections";
+import { VISIBLE_SETTINGS_SECTIONS } from "~/features/settings/settingsSections";
 import { KeyboardShortcutsSettings } from "~/features/settings/shortcuts/KeyboardShortcutsSettings";
+import { UpdatesSettings } from "~/features/updates/UpdatesSettings";
+import { updatesBridge } from "~/lib/desktop";
 import { InboxPage } from "~/routes/InboxPage";
 import { SettingsPage } from "~/routes/SettingsPage";
 import { PullRequestPage } from "~/routes/PullRequestPage";
@@ -42,7 +44,7 @@ const settingsIndexRoute = createRoute({
   path: "/",
   beforeLoad: () => {
     const last = useWorkspaceSession.getState().settingsTab.section;
-    const section = SETTINGS_SECTIONS.find((candidate) => candidate.id === last);
+    const section = VISIBLE_SETTINGS_SECTIONS.find((candidate) => candidate.id === last);
     throw redirect({ to: section?.to ?? "/settings/accounts", replace: true });
   },
 });
@@ -66,6 +68,16 @@ const settingsSectionRoutes = [
     component: KeyboardShortcutsSettings,
   }),
   createRoute({ getParentRoute: () => settingsRoute, path: "about", component: AboutSettings }),
+  // A plain browser has no updates to show, so it has no such page.
+  ...(updatesBridge === undefined
+    ? []
+    : [
+        createRoute({
+          getParentRoute: () => settingsRoute,
+          path: "updates",
+          component: UpdatesSettings,
+        }),
+      ]),
 ];
 
 const pullRequestRoute = createRoute({
