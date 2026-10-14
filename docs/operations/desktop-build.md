@@ -89,7 +89,7 @@ pnpm dist:desktop:artifact --mock-updates --build-version 0.1.0-nightly.20261016
 node scripts/mock-update-server.ts --root release/b --throttle 4096
 ```
 
-`--mock-updates` writes a `generic` feed at `http://127.0.0.1:<PRKIT_DESKTOP_MOCK_UPDATE_PORT>` into the app, with the same manifest names. `scripts/mock-update-server.ts` serves a folder of release files: the manifests, the zips and their blockmaps. A manifest with no `releaseNotes` gets fake notes in the release body format, or the ones in `--notes <file.json>` (`[{"version","note"}]`, newest first). `--throttle <KB/s>` slows downloads so the progress can be watched, and `/` lists the folder, which is where the app's "All releases" link points. To try the Stable track, put a `latest-mac.yml` in the same folder.
+`--mock-updates` writes a `generic` feed at `http://127.0.0.1:<PRKIT_DESKTOP_MOCK_UPDATE_PORT>` into the app, with the same manifest names. `scripts/mock-update-server.ts` serves a folder of release files: the manifests, the zips and their blockmaps. A manifest with no `releaseNotes` gets fake notes in the release body format, or the ones in `--notes <file.json>` (`[{"version","note"}]`, newest first). `--throttle <KB/s>` slows downloads so the progress can be watched, `--latency <ms>` holds every answer so **Checking** stays on screen, and `/` lists the folder, which is where the app's "All releases" link points. To try the Stable track, put a `latest-mac.yml` in the same folder.
 
 Run the older app from a copy outside the DMG, with its own home and profile, never `~/.prkit`:
 

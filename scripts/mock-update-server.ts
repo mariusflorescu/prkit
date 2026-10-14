@@ -4,11 +4,12 @@
  * their blockmaps. A manifest without release notes gets fake ones in the release body format.
  *
  *   node scripts/mock-update-server.ts --root <dir> [--port <port>] [--notes <file.json>]
- *        [--throttle <KB/s>]
+ *        [--throttle <KB/s>] [--latency <ms>]
  *
  * --port         defaults to PRKIT_DESKTOP_MOCK_UPDATE_PORT, else 7357, as the build does.
  * --notes        a JSON array of {"version","note"} for every manifest, newest first.
  * --throttle     slows file downloads, so the app's download progress can be watched.
+ * --latency      holds every answer this long, so the app's "Checking" state can be seen.
  */
 import * as NodeFS from "node:fs";
 import * as NodeHttp from "node:http";
@@ -31,6 +32,7 @@ const { values } = NodeUtil.parseArgs({
     port: { type: "string" },
     notes: { type: "string" },
     throttle: { type: "string" },
+    latency: { type: "string" },
   },
 });
 if (values.root === undefined) {
@@ -47,10 +49,11 @@ if (port === undefined) {
   process.exit(1);
 }
 const bytesPerSecond = values.throttle === undefined ? undefined : Number(values.throttle) * 1024;
+const latencyMs = values.latency === undefined ? 0 : Number(values.latency);
 const notes =
   values.notes === undefined
     ? undefined
-    : Schema.decodeUnknownSync(NotesFile)(NodeFS.readFileSync(values.notes, "utf8"));
+    : Schema.decodeSync(NotesFile)(NodeFS.readFileSync(values.notes, "utf8"));
 
 /** A release body as cliff.toml writes it, with links to pull requests of a placeholder repository. */
 const fakeNote = (version: string) => `### Features
@@ -93,7 +96,7 @@ const sendThrottled = (file: string, response: NodeHttp.ServerResponse, rate: nu
   stream.on("error", () => response.destroy());
 };
 
-const server = NodeHttp.createServer((request, response) => {
+const answer = (request: NodeHttp.IncomingMessage, response: NodeHttp.ServerResponse) => {
   const path = decodeURIComponent((request.url ?? "/").split("?", 1)[0] ?? "/");
   say(`${request.method ?? "GET"} ${path}`);
   if (path === "/" || path === "/releases") {
@@ -124,6 +127,11 @@ const server = NodeHttp.createServer((request, response) => {
   }
   if (bytesPerSecond === undefined) NodeFS.createReadStream(file).pipe(response);
   else sendThrottled(file, response, bytesPerSecond);
+};
+
+const server = NodeHttp.createServer((request, response) => {
+  if (latencyMs > 0) setTimeout(() => answer(request, response), latencyMs);
+  else answer(request, response);
 });
 
 server.listen(port, "127.0.0.1", () => say(`serving ${root} at http://127.0.0.1:${port}`));

@@ -8,6 +8,7 @@ import * as Scope from "effect/Scope";
 import { autoUpdater } from "electron-updater";
 
 import type { RawReleaseNotes } from "./releaseNotes.ts";
+import { describeUpdaterError } from "./updaterErrors.ts";
 
 /** Squirrel.Mac verifies the downloaded app before it quits; a failure arrives as an error event. */
 const INSTALL_VERDICT_TIMEOUT = Duration.minutes(2);
@@ -28,37 +29,6 @@ export interface UpdaterChannelOptions {
   readonly allowPrerelease: boolean;
   readonly allowDowngrade: boolean;
 }
-
-const NO_RELEASE_CODES = new Set([
-  "ERR_UPDATER_CHANNEL_FILE_NOT_FOUND",
-  "ERR_UPDATER_LATEST_VERSION_NOT_FOUND",
-  "ERR_UPDATER_NO_PUBLISHED_VERSIONS",
-]);
-const OFFLINE = /net::ERR_|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|EAI_AGAIN/;
-
-const VERBS = {
-  check: "check for updates",
-  download: "download the update",
-  install: "install the update",
-} as const;
-
-/**
- * A message a person can act on. electron-updater's own errors carry response headers and
- * whole feeds after the first line, so only a short first line ever leaves this function.
- */
-export const describeUpdaterError = (
-  operation: UpdaterFailed["operation"],
-  error: { readonly message?: string; readonly code?: string },
-) => {
-  const message = error.message ?? "";
-  if (error.code !== undefined && NO_RELEASE_CODES.has(error.code))
-    return "There's no release on this track yet.";
-  if (OFFLINE.test(message) || (error.code !== undefined && OFFLINE.test(error.code)))
-    return `prkit couldn't reach the update server to ${VERBS[operation]}. Check your connection and try again.`;
-  const firstLine = (message.split(/\r?\n/, 1)[0] ?? "").replace(/https?:\/\/\S+/g, "…").trim();
-  const detail = firstLine === "" ? "" : ` ${firstLine.slice(0, 160)}`;
-  return `prkit couldn't ${VERBS[operation]}.${detail}`;
-};
 
 const failed = (operation: UpdaterFailed["operation"]) => (cause: Error | string) =>
   new UpdaterFailed({

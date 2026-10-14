@@ -59,7 +59,7 @@ export function UpdateStatusRow({ state }: { state: DesktopUpdateState }) {
               Restart to update
             </Button>
           )}
-          {state.status !== "disabled" && !offered && (
+          {state.status !== "disabled" && state.status !== "error" && !offered && (
             <Button
               size="sm"
               variant="outline"
@@ -77,6 +77,9 @@ export function UpdateStatusRow({ state }: { state: DesktopUpdateState }) {
       )}
       {state.errorContext === "download" && state.errorMessage !== null && (
         <SettingsAlert message={state.errorMessage} retry={() => download.mutate()} />
+      )}
+      {state.errorContext === "install" && state.errorMessage !== null && (
+        <SettingsAlert message={state.errorMessage} retry={() => setConfirmOpen(true)} />
       )}
       {failure !== null && (
         <SettingsAlert

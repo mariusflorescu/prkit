@@ -30,6 +30,7 @@ test("the web build shows no update UI", async ({ app, screen, browser }) => {
     await browser.evaluate(() => {
       history.pushState(null, "", "/settings/updates");
       dispatchEvent(new PopStateEvent("popstate"));
+      return null;
     });
     await expect(screen.getByRole("heading", "Updates")).toHaveCount(0);
   } finally {
