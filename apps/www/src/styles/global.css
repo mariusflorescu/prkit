@@ -257,3 +257,33 @@ kbd {
     transform: translateY(0.75rem);
   }
 }
+
+/* The download surfaces ship saying "Coming soon" and hold a hidden "ready" twin in the same grid
+   cell, so the box already fits both. download.ts sets data-release="ready" once a stable release
+   exists, and the two cross-fade in place. A sizer that never shows holds the width of the longest
+   version the box expects, so filling in the real one moves nothing. */
+[data-release-part] {
+  grid-area: 1 / 1;
+  transition:
+    opacity 200ms var(--ease-out),
+    visibility 0s linear 200ms;
+}
+
+[data-release-part="ready"],
+[data-release-part="sizer"],
+:root[data-release="ready"] [data-release-part="soon"] {
+  visibility: hidden;
+  opacity: 0;
+}
+
+:root[data-release="ready"] [data-release-part="ready"] {
+  visibility: visible;
+  opacity: 1;
+  transition-delay: 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-release-part] {
+    transition: none;
+  }
+}
