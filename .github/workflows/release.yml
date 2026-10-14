@@ -2,8 +2,6 @@ name: Release
 
 # How releases work, and what to check by hand: docs/operations/release.md.
 on:
-  # Temporary: dry-runs this workflow on its own pull request. Removed before merge.
-  pull_request:
   schedule:
     # The nightly. Off the hour, when GitHub's scheduler is least busy.
     - cron: "17 3 * * *"
