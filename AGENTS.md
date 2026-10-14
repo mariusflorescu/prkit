@@ -92,6 +92,7 @@ It is built as an Effect server that owns all real work, a thin React client, an
 - Conventional commit titles in plain words: `feat(inbox): group PRs by why they need you`.
 - PR body: the problem in a sentence or two, then what changed and how you proved it. UI changes include screenshots. No tool or model attribution lines.
 - One unit of work per PR.
+- The PR title becomes the squash commit subject, which picks the next version and the release-notes line. Releases, nightlies and signing: [docs/operations/release.md](docs/operations/release.md).
 
 ## Documentation
 
