@@ -20,7 +20,7 @@ pnpm dist:desktop:artifact --build-version 0.1.0-nightly.20261014.1   # "prkit N
 | `--keep-stage` | off | Keep the temporary stage directory and print its path. |
 | `--verbose` | off | Stream the build and electron-builder output. |
 
-Progress goes to stderr. The last line on stdout is one JSON object: `{"version","channel","arch","signed","files":[absolute paths]}`. The exit code is non-zero on any failure.
+Progress goes to stderr. The last line on stdout is one JSON object: `{"version","channel","arch","signed","files":[absolute paths]}`. `files` lists the DMG, the zip, their blockmaps and the update manifest. The app itself lands in `<output-dir>/mac-<arch>/` (`mac/` for x64), outside `files`. The exit code is non-zero on any failure.
 
 ## Channels
 
@@ -46,7 +46,9 @@ Read at build time. None of these values goes into a tracked file.
 | `PRKIT_DESKTOP_UPDATE_REPOSITORY` | `owner/repo` of the update feed, else `GITHUB_REPOSITORY`. With neither, the app has no `app-update.yml`, no update manifest is written, and the build says so in one line. |
 | `CSC_LINK`, `CSC_KEY_PASSWORD` | The Developer ID Application certificate (.p12) and its password. |
 | `APPLE_TEAM_ID` | The team the certificate belongs to. |
-| `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER` | The App Store Connect API key (path to the .p8), its id and issuer. electron-builder notarizes when they are set. |
+| `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER` | The App Store Connect API key (path to the .p8), its id and issuer. |
+
+With `--signed`, electron-builder signs the app with the hardened runtime, notarizes and staples it, and signs the DMG. The script then notarizes the DMG with `xcrun notarytool` (same key) and staples it. Stapling changes the DMG after electron-builder hashed it, so the script rebuilds its blockmap and rewrites its hash and size in the update manifest.
 
 Without `--signed`, every `CSC_*` and `APPLE_*` variable is removed from electron-builder's environment and identity discovery is off, so nothing tries to sign. GitHub tokens never reach electron-builder: it publishes nothing (`--publish never`).
 

@@ -145,9 +145,13 @@ export const createBuildConfig = (options: BuildConfigOptions): Configuration =>
       hardenedRuntime: true,
       entitlements: "build/entitlements.mac.plist",
       entitlementsInherit: "build/entitlements.mac.plist",
+      // electron-builder notarizes and staples the app itself once the APPLE_API_* are set.
+      notarize: options.signed,
       ...(options.signed ? {} : { identity: null }),
     },
     dmg: {
+      // Signed here; the build then notarizes and staples it (notarizeDmgArgs).
+      sign: options.signed,
       title: `${names.productName} \${version}`,
       window: { width: 640, height: 432 },
       iconSize: 120,
@@ -205,3 +209,41 @@ export const unexpectedExternals = (source: string) =>
     (name) =>
       !SERVER_EXTERNAL_ALLOWLIST.includes(name) && !SERVER_OPTIONAL_EXTERNALS.includes(name),
   );
+
+/** `xcrun` arguments that notarize a signed DMG with the App Store Connect key and wait for the verdict. */
+export const notarizeDmgArgs = (dmg: string, env: Env) => [
+  "notarytool",
+  "submit",
+  dmg,
+  "--key",
+  env.APPLE_API_KEY ?? "",
+  "--key-id",
+  env.APPLE_API_KEY_ID ?? "",
+  "--issuer",
+  env.APPLE_API_ISSUER ?? "",
+  "--wait",
+  "--output-format",
+  "json",
+];
+
+/**
+ * Stapling changes the DMG after electron-builder hashed it, so its entry in the update
+ * manifest gets the new hash and size. Undefined when the manifest doesn't list the file.
+ */
+export const updateManifestEntry = (
+  manifest: string,
+  fileName: string,
+  file: { readonly sha512: string; readonly size: number },
+) => {
+  const lines = manifest.split("\n");
+  const start = lines.findIndex((line) => line.trim() === `- url: ${fileName}`);
+  if (start === -1) return undefined;
+  for (let index = start + 1; index < lines.length; index++) {
+    const line = lines[index] ?? "";
+    if (line.trim().startsWith("- ") || !line.startsWith(" ")) break;
+    const indent = line.slice(0, line.length - line.trimStart().length);
+    if (line.trim().startsWith("sha512:")) lines[index] = `${indent}sha512: ${file.sha512}`;
+    if (line.trim().startsWith("size:")) lines[index] = `${indent}size: ${file.size}`;
+  }
+  return lines.join("\n");
+};

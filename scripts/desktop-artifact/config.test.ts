@@ -6,12 +6,14 @@ import {
   createBuildConfig,
   externalPackages,
   missingSigningEnv,
+  notarizeDmgArgs,
   resolveAppId,
   resolveChannel,
   resolveUpdateRepository,
   SIGNING_ENV,
   UNSIGNED_APP_ID,
   unexpectedExternals,
+  updateManifestEntry,
 } from "./config.ts";
 
 const REPOSITORY = { _tag: "Repository", owner: "octocat", repo: "prkit" } as const;
@@ -112,6 +114,8 @@ describe("signing", () => {
   it("signs with the hardened runtime and the static entitlements, or not at all", () => {
     const unsigned = config("0.1.0");
     expect(unsigned.mac?.identity).toBeNull();
+    expect(unsigned.mac?.notarize).toBe(false);
+    expect(unsigned.dmg?.sign).toBe(false);
     expect(unsigned.mac?.hardenedRuntime).toBe(true);
     expect(unsigned.mac?.entitlements).toBe("build/entitlements.mac.plist");
     const signed = createBuildConfig({
@@ -122,7 +126,61 @@ describe("signing", () => {
       repository: undefined,
     });
     expect(signed.mac).not.toHaveProperty("identity");
+    expect(signed.mac?.notarize).toBe(true);
+    expect(signed.dmg?.sign).toBe(true);
     expect(signed.appId).toBe("com.example.prkit");
+  });
+});
+
+describe("signed DMG", () => {
+  it("notarizes with the App Store Connect key and waits for a verdict it can read", () => {
+    expect(
+      notarizeDmgArgs("/out/prkit-0.1.0-arm64.dmg", {
+        APPLE_API_KEY: "/keys/AuthKey_ABC.p8",
+        APPLE_API_KEY_ID: "ABC",
+        APPLE_API_ISSUER: "issuer-uuid",
+      }),
+    ).toEqual([
+      "notarytool",
+      "submit",
+      "/out/prkit-0.1.0-arm64.dmg",
+      "--key",
+      "/keys/AuthKey_ABC.p8",
+      "--key-id",
+      "ABC",
+      "--issuer",
+      "issuer-uuid",
+      "--wait",
+      "--output-format",
+      "json",
+    ]);
+  });
+
+  const manifest = [
+    "version: 0.1.0",
+    "files:",
+    "  - url: prkit-0.1.0-arm64.zip",
+    "    sha512: ZIPHASH",
+    "    size: 100",
+    "  - url: prkit-0.1.0-arm64.dmg",
+    "    sha512: OLDHASH",
+    "    size: 200",
+    "path: prkit-0.1.0-arm64.zip",
+    "sha512: ZIPHASH",
+    "releaseDate: '2026-10-14T17:20:42.069Z'",
+    "",
+  ].join("\n");
+
+  it("gives the stapled DMG its new hash and size in the update manifest, and nothing else", () => {
+    expect(
+      updateManifestEntry(manifest, "prkit-0.1.0-arm64.dmg", { sha512: "NEWHASH", size: 205 }),
+    ).toBe(manifest.replace("OLDHASH", "NEWHASH").replace("size: 200", "size: 205"));
+  });
+
+  it("reports a DMG the manifest doesn't list", () => {
+    expect(
+      updateManifestEntry(manifest, "prkit-0.2.0-arm64.dmg", { sha512: "NEWHASH", size: 1 }),
+    ).toBeUndefined();
   });
 });
 

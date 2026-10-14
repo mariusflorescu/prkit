@@ -298,6 +298,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.12.4
+      app-builder-lib:
+        specifier: 26.15.6
+        version: 26.15.6(dmg-builder@26.15.6)(electron-builder-squirrel-windows@26.15.6)
       electron-builder:
         specifier: 26.15.6
         version: 26.15.6(electron-builder-squirrel-windows@26.15.6)

@@ -16,6 +16,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
 
+import { buildBlockMap } from "app-builder-lib/out/targets/blockmap/blockmap.js";
 import * as Schema from "effect/Schema";
 
 import {
@@ -24,10 +25,12 @@ import {
   CHANNELS,
   createBuildConfig,
   missingSigningEnv,
+  notarizeDmgArgs,
   resolveAppId,
   resolveChannel,
   resolveUpdateRepository,
   unexpectedExternals,
+  updateManifestEntry,
 } from "./desktop-artifact/config.ts";
 
 const repoRoot = NodePath.resolve(import.meta.dirname, "..");
@@ -167,7 +170,56 @@ const stageApp = (stageDir: string, version: string, buildConfig: object) => {
   );
 };
 
-const main = () => {
+const NotaryResult = Schema.fromJsonString(
+  Schema.Struct({ id: Schema.String, status: Schema.String }),
+);
+const decodeNotaryResult = Schema.decodeUnknownSync(NotaryResult);
+
+/**
+ * electron-builder signs the DMG but neither notarizes nor staples it. Stapling changes the
+ * file, so its blockmap is rebuilt and its hash and size in the update manifest follow.
+ */
+const notarizeDmgs = async (distDir: string, manifestName: string, verbose: boolean) => {
+  const manifestPath = NodePath.join(distDir, manifestName);
+  for (const name of NodeFS.readdirSync(distDir).filter((entry) => entry.endsWith(".dmg"))) {
+    const dmg = NodePath.join(distDir, name);
+    say(`Notarizing ${name}...`);
+    const submitted = NodeChildProcess.spawnSync("xcrun", notarizeDmgArgs(dmg, process.env), {
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    const result = submitted.status === 0 ? decodeNotaryResult(submitted.stdout) : undefined;
+    if (result?.status !== "Accepted") {
+      process.stderr.write(`${submitted.stdout ?? ""}${submitted.stderr ?? ""}`);
+      throw new BuildFailed(
+        `Notarizing ${name} ended ${result === undefined ? "with an error" : `${result.status} (submission ${result.id}; xcrun notarytool log ${result.id} explains)`}.`,
+      );
+    }
+    run("xcrun", ["stapler", "staple", dmg], { cwd: distDir, verbose });
+    const blockmap = await buildBlockMap(dmg, "gzip", `${dmg}.blockmap`);
+    if (!NodeFS.existsSync(manifestPath)) continue;
+    const updated = updateManifestEntry(NodeFS.readFileSync(manifestPath, "utf8"), name, {
+      sha512: blockmap.sha512,
+      size: NodeFS.statSync(dmg).size,
+    });
+    if (updated === undefined) throw new BuildFailed(`${manifestName} does not list ${name}.`);
+    NodeFS.writeFileSync(manifestPath, updated);
+  }
+};
+
+/** Where the release workflow finds the app: `<output>/mac-<arch>/<product>.app`. */
+const moveAppDir = (distDir: string, outputDir: string) => {
+  for (const entry of NodeFS.readdirSync(distDir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.startsWith("mac")) continue;
+    const to = NodePath.join(outputDir, entry.name);
+    NodeFS.rmSync(to, { recursive: true, force: true });
+    NodeFS.renameSync(NodePath.join(distDir, entry.name), to);
+    return to;
+  }
+  throw new BuildFailed(`electron-builder left no app folder in ${distDir}.`);
+};
+
+const main = async () => {
   const options = parseOptions();
   const channel = resolveChannel(options.version);
   checkSigning(options.signed);
@@ -228,7 +280,10 @@ const main = () => {
     );
 
     const distDir = NodePath.join(stageDir, "dist");
+    if (options.signed)
+      await notarizeDmgs(distDir, CHANNELS[channel].updateManifest, options.verbose);
     NodeFS.mkdirSync(options.outputDir, { recursive: true });
+    const appDir = moveAppDir(distDir, options.outputDir);
     const files = NodeFS.readdirSync(distDir, { withFileTypes: true })
       .filter((entry) => entry.isFile() && !entry.name.startsWith("builder-"))
       .map((entry) => {
@@ -247,7 +302,7 @@ const main = () => {
     if (missing.length > 0)
       throw new BuildFailed(`electron-builder produced no ${missing.join(", ")} in ${distDir}.`);
 
-    for (const file of files) say(`  ${NodePath.relative(repoRoot, file)}`);
+    for (const file of [...files, appDir]) say(`  ${NodePath.relative(repoRoot, file)}`);
     if (options.keepStage) say(`Stage kept at ${stageDir}`);
     process.stdout.write(
       `${JSON.stringify({ version: options.version, channel, arch: options.arch, signed: options.signed, files })}\n`,
@@ -258,7 +313,7 @@ const main = () => {
 };
 
 try {
-  main();
+  await main();
 } catch (error) {
   say(error instanceof Error ? error.message : String(error));
   process.exit(1);

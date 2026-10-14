@@ -12,6 +12,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "app-builder-lib": "26.15.6",
     "electron-builder": "26.15.6",
     "typescript": "catalog:"
   }
