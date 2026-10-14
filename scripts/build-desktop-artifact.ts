@@ -122,6 +122,15 @@ const copyTree = (from: string, to: string) => {
   });
 };
 
+/** A rename when the stage and the output share a volume, so a DMG never exists twice on disk. */
+const moveFile = (from: string, to: string) => {
+  try {
+    NodeFS.renameSync(from, to);
+  } catch {
+    NodeFS.copyFileSync(from, to);
+  }
+};
+
 const stageApp = (stageDir: string, version: string, buildConfig: object) => {
   for (const app of ["desktop/dist-electron", "server/dist", "web/dist"])
     copyTree(NodePath.join(repoRoot, "apps", app), NodePath.join(stageDir, "apps", app));
@@ -224,7 +233,7 @@ const main = () => {
       .filter((entry) => entry.isFile() && !entry.name.startsWith("builder-"))
       .map((entry) => {
         const to = NodePath.join(options.outputDir, entry.name);
-        NodeFS.copyFileSync(NodePath.join(distDir, entry.name), to);
+        moveFile(NodePath.join(distDir, entry.name), to);
         return to;
       })
       .sort();
