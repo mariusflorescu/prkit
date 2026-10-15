@@ -2,6 +2,7 @@
 import * as NodeChildProcess from "node:child_process";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- a stand-in for prkit's MCP server, outside Effect
 import * as NodeHttp from "node:http";
+import * as NodeNet from "node:net";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { AgentInstanceId } from "@prkit/contracts";
@@ -32,7 +33,6 @@ import {
 } from "../AgentProvider.ts";
 import { checkoutFor } from "../../repo/gitRun.ts";
 import * as CursorAgent from "./CursorAgent.ts";
-import { startCursorControl } from "./fakeControl.ts";
 import { SDK_PATH_VARIABLE } from "./sdkLoader.ts";
 import { ALLOWED_TOOLS, DENIED_TOOLS } from "./tools.ts";
 
@@ -55,7 +55,6 @@ const Run = Schema.fromJsonString(
 let root = "";
 let home = "";
 let control = "";
-let controlServer = { url: "", close: () => Promise.resolve() };
 let mcpUrl = "";
 /** Each MCP call prkit's stand-in server got: its method and tool, and whether it had the token. */
 const mcpCalls: Array<{
@@ -103,9 +102,8 @@ beforeAll(async () => {
     }),
   );
   home = `${root}/prkit-home`;
-  control = `${root}/control`;
-  controlServer = await startCursorControl(control);
-  // The stand-in SDK as a package folder, steered from `control`.
+  // The stand-in SDK as a package folder, steered from `control` in it.
+  control = `${root}/sdk/control`;
   const source = await fsRun(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -121,10 +119,7 @@ beforeAll(async () => {
       yield* fs.makeDirectory(control, { recursive: true });
       yield* fs.makeDirectory(home, { recursive: true });
       yield* fs.writeFileString(`${root}/sdk/package.json`, '{"type":"module"}\n');
-      yield* fs.writeFileString(
-        `${root}/sdk/dist/esm/index.js`,
-        source.replace('process.env.FAKE_CURSOR_CONTROL ?? ""', JSON.stringify(controlServer.url)),
-      );
+      yield* fs.writeFileString(`${root}/sdk/dist/esm/index.js`, source);
     }),
   );
   await new Promise<void>((resolve) => mcpServer.listen(0, "127.0.0.1", resolve));
@@ -133,7 +128,6 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   delete process.env[SDK_PATH_VARIABLE];
-  await controlServer.close();
   await new Promise((resolve) => mcpServer.close(resolve));
   await fsRun(
     Effect.gen(function* () {
@@ -206,17 +200,45 @@ const flag = (name: string, on: boolean) =>
     }),
   );
 
-const runs = () =>
+const Disposed = Schema.fromJsonString(Schema.Struct({ agentId: Schema.String }));
+const At = Schema.fromJsonString(Schema.Struct({ at: Schema.Number }));
+
+/** Every line the stand-in logged as `name`, in every instance's home, oldest first. */
+const standIn = async (name: string) => {
+  const lines = await fsRun(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const instances = `${home}/cursor-instances`;
+      if (!(yield* fs.exists(instances))) return [];
+      const found: Array<string> = [];
+      for (const id of yield* fs.readDirectory(instances)) {
+        const file = `${instances}/${id}/home/stand-in/${name}`;
+        if (yield* fs.exists(file)) found.push(...(yield* fs.readFileString(file)).split("\n"));
+      }
+      return found;
+    }),
+  );
+  return lines
+    .filter((line) => line !== "")
+    .map((line) => ({ at: Schema.decodeUnknownSync(At)(line).at, line }))
+    .sort((a, b) => a.at - b.at)
+    .map((entry) => entry.line);
+};
+
+/** Forgets what the stand-in logged as `name`, in every instance's home. */
+const forget = (name: string) =>
   fsRun(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      if (!(yield* fs.exists(`${control}/runs.log`))) return [];
-      return (yield* fs.readFileString(`${control}/runs.log`))
-        .split("\n")
-        .filter((line) => line !== "")
-        .map((line) => Schema.decodeUnknownSync(Run)(line));
+      const instances = `${home}/cursor-instances`;
+      if (!(yield* fs.exists(instances))) return;
+      for (const id of yield* fs.readDirectory(instances))
+        yield* fs.remove(`${instances}/${id}/home/stand-in/${name}`, { force: true });
     }),
   );
+
+const runs = async () =>
+  (await standIn("runs.log")).map((line) => Schema.decodeUnknownSync(Run)(line));
 
 const Escape = Schema.fromJsonString(
   Schema.Struct({
@@ -228,32 +250,39 @@ const Escape = Schema.fromJsonString(
 );
 
 /**
- * What the stand-in's next turns do with Node's own fs before anything else, past prkit's tools:
- * read `reads` and write `writes`. Returns each outcome, as `path: ok` or `path: <code>`.
+ * What the stand-in's next turns try with Node's own calls before anything else, past prkit's
+ * tools (fake-cursor-sdk.mjs, escape.json). Returns each outcome, as `<op> <path>: ok` or
+ * `<op> <path>: <code>`.
  */
 const escapeTurn = async <A>(
-  steps: { readonly reads: ReadonlyArray<string>; readonly writes: ReadonlyArray<string> },
+  steps: {
+    readonly reads?: ReadonlyArray<string>;
+    readonly writes?: ReadonlyArray<string>;
+    readonly renames?: ReadonlyArray<readonly [string, string]>;
+    readonly links?: ReadonlyArray<readonly [string, string]>;
+    readonly children?: ReadonlyArray<string>;
+    readonly sockets?: ReadonlyArray<string>;
+    readonly ports?: ReadonlyArray<number>;
+  },
   turn: () => Promise<A>,
 ) => {
+  await forget("escape.log");
   await fsRun(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      yield* fs.remove(`${control}/escape.log`, { force: true });
       yield* fs.writeFileString(`${control}/escape.json`, JSON.stringify(steps));
     }),
   );
   await turn();
-  return fsRun(
+  await fsRun(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       yield* fs.remove(`${control}/escape.json`);
-      return (yield* fs.readFileString(`${control}/escape.log`))
-        .split("\n")
-        .filter((line) => line !== "")
-        .map((line) => Schema.decodeUnknownSync(Escape)(line))
-        .map((entry) => `${entry.op} ${entry.path}: ${entry.ok ? "ok" : entry.code}`);
     }),
   );
+  return (await standIn("escape.log"))
+    .map((line) => Schema.decodeUnknownSync(Escape)(line))
+    .map((entry) => `${entry.op} ${entry.path}: ${entry.ok ? "ok" : entry.code}`);
 };
 
 /** Files the runner must never reach: a stand-in for the user's home, and prkit's own data. */
@@ -569,6 +598,17 @@ describe("Cursor turns", () => {
     ).toEqual(["report_progress"]);
   });
 
+  it("doesn't take a custom tool call still being written for one of Cursor's own", async () => {
+    const provider = await instance("cursor_partial", { env: { CURSOR_API_KEY: "stand-in-key" } });
+    await flag("partial-call", true);
+    const all = await events(
+      provider,
+      await turnInput("partial", { _tag: "read-only", tmpDir: `${root}/tmp-partial` }),
+    );
+    await flag("partial-call", false);
+    expect(all.at(-1)).toEqual({ _tag: "finished", outcome: "completed", message: null });
+  });
+
   it("exits non-zero when Cursor ran one of its own tools", async () => {
     const input = await turnInput("exit", { _tag: "read-only", tmpDir: `${root}/tmp-exit` });
     await flag("builtin-read", true);
@@ -609,13 +649,10 @@ describe("Cursor turns", () => {
     // The stand-in prints half a line before the runner's last event; the event still arrives.
     expect(all.at(-1)).toEqual({ _tag: "finished", outcome: "completed", message: null });
     const session = all.find((event) => event._tag === "session");
-    const disposed = await fsRun(
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        return yield* fs.readFileString(`${control}/disposed.log`);
-      }),
+    const disposed = (await standIn("disposed.log")).map(
+      (line) => Schema.decodeUnknownSync(Disposed)(line).agentId,
     );
-    expect(disposed.split("\n")).toContain(session?._tag === "session" ? session.sessionId : "");
+    expect(disposed).toContain(session?._tag === "session" ? session.sessionId : "");
   });
 
   it("stops the runner's whole process group when the turn is stopped", async () => {
@@ -669,12 +706,22 @@ describe("Cursor's sandbox", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         yield* fs.makeDirectory(tmpDir, { recursive: true });
+        // A link the pull request brings, pointing out of the checkout.
+        yield* fs.symlink(outside[0] ?? "", `${input.cwd}/src/key.pem`);
       }),
     );
     const outcomes = await escapeTurn(
       {
-        reads: [`${input.cwd}/src/a.js`, ca, `${root}/proxy-ca/other.pem`, ...outside],
+        reads: [
+          `${input.cwd}/src/a.js`,
+          ca,
+          `${root}/proxy-ca/other.pem`,
+          `${input.cwd}/src/key.pem`,
+          ...outside,
+        ],
         writes: [`${input.cwd}/src/a.js`, `${root}/written-outside.txt`, `${tmpDir}/scratch.txt`],
+        // A program the runner starts runs in its sandbox too.
+        children: [`${input.cwd}/src/a.js`, outside[0] ?? ""],
       },
       () => events(provider, input),
     );
@@ -682,11 +729,63 @@ describe("Cursor's sandbox", () => {
       `read ${input.cwd}/src/a.js: ok`,
       `read ${ca}: ok`,
       `read ${root}/proxy-ca/other.pem: EPERM`,
+      `read ${input.cwd}/src/key.pem: EPERM`,
       ...outside.map((file) => `read ${file}: EPERM`),
       `write ${input.cwd}/src/a.js: EPERM`,
       `write ${root}/written-outside.txt: EPERM`,
       `write ${tmpDir}/scratch.txt: ok`,
+      `child ${input.cwd}/src/a.js: ok`,
+      `child ${outside[0]}: EPERM`,
     ]);
+  });
+
+  it("keeps local sockets, other local ports and the saved key closed to a turn", async () => {
+    const provider = await instance("cursor_boxnet", { env: { CURSOR_API_KEY: "stand-in-key" } });
+    const tmpDir = `${root}/tmp-boxnet`;
+    const input = await turnInput("boxnet", { _tag: "read-only", tmpDir });
+    const own = `${home}/cursor-instances/cursor_boxnet/home/.cursor`;
+    // A Docker-like socket and a local service: neither is prkit's MCP server.
+    const socket = `${root}/d.sock`;
+    const unix = NodeNet.createServer((client) => client.end("hello"));
+    const tcp = NodeNet.createServer((client) => client.end("hello"));
+    await new Promise<void>((resolve) => unix.listen(socket, resolve));
+    await new Promise<void>((resolve) => tcp.listen(0, "127.0.0.1", resolve));
+    const address = tcp.address();
+    const port = typeof address === "object" && address !== null ? address.port : 0;
+    await fsRun(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        yield* fs.makeDirectory(tmpDir, { recursive: true });
+        yield* fs.makeDirectory(`${own}/sdk`, { recursive: true });
+        yield* fs.makeDirectory(`${own}/projects`, { recursive: true });
+      }),
+    );
+    try {
+      const outcomes = await escapeTurn(
+        {
+          writes: [
+            `${own}/sdk/auth.json`,
+            `${own.replace(/cursor$/, "CURSOR")}/sdk/auth.json`,
+            `${own}/projects/transcript.txt`,
+          ],
+          renames: [[`${own}/projects`, `${own}/sdk-moved`]],
+          sockets: [socket],
+          ports: [port],
+        },
+        () => events(provider, input),
+      );
+      expect(outcomes).toEqual([
+        `write ${own}/sdk/auth.json: EPERM`,
+        `write ${own.replace(/cursor$/, "CURSOR")}/sdk/auth.json: EPERM`,
+        `write ${own}/projects/transcript.txt: ok`,
+        `rename ${own}/projects -> ${own}/sdk-moved: EPERM`,
+        `socket ${socket}: EPERM`,
+        `port ${port}: EPERM`,
+      ]);
+    } finally {
+      unix.close();
+      tcp.close();
+    }
   });
 
   it("lets a fix's runner write its checkout, but never .git, .cursor or outside", async () => {
@@ -702,7 +801,8 @@ describe("Cursor's sandbox", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         yield* fs.makeDirectory(tmpDir, { recursive: true });
-        yield* fs.makeDirectory(`${input.cwd}/.git/hooks`, { recursive: true });
+        // A worktree's `.git` is a file naming its git folder.
+        yield* fs.writeFileString(`${input.cwd}/.git`, "gitdir: /elsewhere/.git/worktrees/x\n");
         yield* fs.makeDirectory(`${input.cwd}/.cursor`, { recursive: true });
       }),
     );
@@ -711,12 +811,14 @@ describe("Cursor's sandbox", () => {
         reads: outside,
         writes: [
           `${input.cwd}/src/a.js`,
-          `${input.cwd}/.git/hooks/pre-commit`,
-          `${input.cwd}/.GIT/config`,
+          `${input.cwd}/.git`,
+          `${input.cwd}/.GIT`,
           `${input.cwd}/.cursor/hooks.json`,
           `${input.cwd}/.curſor/sandbox.json`,
           `${root}/written-outside.txt`,
         ],
+        renames: [[`${input.cwd}/.git`, `${input.cwd}/moved-git`]],
+        links: [[`${input.cwd}/.git`, `${input.cwd}/linked-git`]],
       },
       () =>
         events(provider, {
@@ -727,11 +829,13 @@ describe("Cursor's sandbox", () => {
     expect(outcomes).toEqual([
       ...outside.map((file) => `read ${file}: EPERM`),
       `write ${input.cwd}/src/a.js: ok`,
-      `write ${input.cwd}/.git/hooks/pre-commit: EPERM`,
-      `write ${input.cwd}/.GIT/config: EPERM`,
+      `write ${input.cwd}/.git: EPERM`,
+      `write ${input.cwd}/.GIT: EPERM`,
       `write ${input.cwd}/.cursor/hooks.json: EPERM`,
       `write ${input.cwd}/.curſor/sandbox.json: EPERM`,
       `write ${root}/written-outside.txt: EPERM`,
+      `rename ${input.cwd}/.git -> ${input.cwd}/moved-git: EPERM`,
+      `link ${input.cwd}/.git -> ${input.cwd}/linked-git: EPERM`,
     ]);
   });
 });

@@ -22,6 +22,13 @@ export interface RunnerReach {
   readonly writes: ReadonlyArray<string>;
   /** Folders whose `.git` and `.cursor` entries stay closed to writes: a fix's checkout. */
   readonly guarded: ReadonlyArray<string>;
+  /**
+   * The instance's home, when its `.cursor` (the saved key) stays closed to writes: every run but
+   * a sign-in or sign-out. Only `.cursor/projects`, where Cursor writes its transcripts, opens.
+   */
+  readonly sealedHome: string | null;
+  /** prkit's MCP server's port, the one local address a turn may reach; null for none. */
+  readonly mcpPort: number | null;
 }
 
 /**
@@ -32,7 +39,21 @@ const SYSTEM_READS = [
   "/private/etc",
   "/Library/Preferences/com.apple.networkd.plist",
   "/private/var/db/timezone",
+  // Homebrew's OpenSSL settings and CA bundle, which its node reads at start and for TLS.
+  ...["/opt/homebrew", "/usr/local"].flatMap((prefix) => [
+    `${prefix}/etc/openssl@3`,
+    `${prefix}/etc/ca-certificates`,
+  ]),
 ];
+
+/**
+ * Where Homebrew keeps installed programs' libraries, which its node links (libuv, OpenSSL,
+ * ICU); without them dyld stops it before it starts. Its `etc` and `var` stay closed, but for
+ * OpenSSL's settings (SYSTEM_READS).
+ */
+const HOMEBREW_CODE = ["/opt/homebrew", "/usr/local"].flatMap((prefix) =>
+  ["opt", "Cellar", "lib"].map((folder) => `${prefix}/${folder}`),
+);
 
 const quoted = (text: string) => `"${text.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 
@@ -81,8 +102,13 @@ export const runnerProfile = (path: Path.Path, reach: RunnerReach) => {
     "(allow process-exec)",
     "(allow signal (target same-sandbox))",
     "(allow sysctl-read)",
-    // Cursor's backend and prkit's own MCP server, on this machine.
-    "(allow network-outbound)",
+    // Cursor's backend, anywhere but this machine, and the resolver's socket; no other local
+    // socket (Docker's, an SSH agent's) and no local port but prkit's MCP server's.
+    '(allow network-outbound (remote ip "*:*") (literal "/private/var/run/mDNSResponder"))',
+    '(deny network-outbound (remote ip "localhost:*"))',
+    ...(reach.mcpPort === null
+      ? []
+      : [`(allow network-outbound (remote ip "localhost:${reach.mcpPort}"))`]),
     "(allow system-socket)",
     '(allow mach-lookup (global-name "com.apple.SystemConfiguration.DNSConfiguration"))',
     `(allow file-read-metadata file-test-existence ${above.map((dir) => `(literal ${quoted(dir)})`).join(" ")})`,
@@ -93,19 +119,33 @@ export const runnerProfile = (path: Path.Path, reach: RunnerReach) => {
     rules.push(`(allow file-read* file-test-existence ${subpaths(reach.reads)})`);
   if (reach.writes.length > 0)
     rules.push(`(allow file-read* file-write* file-test-existence ${subpaths(reach.writes)})`);
+  const closed = (folder: string, name: string) =>
+    `(deny file-write* (regex ${regexLiteral(`^${literalPattern(folder)}/${anySpelling(name)}(/|$)`)}))`;
   for (const folder of reach.guarded)
-    for (const name of [".git", ".cursor"])
-      rules.push(
-        `(deny file-write* (regex ${regexLiteral(`^${literalPattern(folder)}/${anySpelling(name)}(/|$)`)}))`,
-      );
+    for (const name of [".git", ".cursor"]) rules.push(closed(folder, name));
+  if (reach.sealedHome !== null)
+    rules.push(
+      closed(reach.sealedHome, ".cursor"),
+      `(allow file-write* (subpath ${quoted(path.join(reach.sealedHome, ".cursor", "projects"))}))`,
+    );
   return `${rules.join("\n")}\n`;
 };
 
 /**
- * The folder holding the runner's runtime: node's install prefix (`<prefix>/bin/node`), or the
- * app bundle's `Contents` for Electron's binary (`Contents/MacOS/prkit`).
+ * What the runner's runtime loads: the app bundle's `Contents` for Electron's binary
+ * (`Contents/MacOS/prkit`), else node's binary alone, which is all an official build needs. A
+ * prefix would open too much: `/usr/local` for nodejs.org's installer, the home for `~/bin/node`.
+ * Homebrew's node also loads its libraries, from HOMEBREW_CODE.
  */
-const runtimeOf = (path: Path.Path, executable: string) => path.dirname(path.dirname(executable));
+export const runtimeOf = (path: Path.Path, executable: string) => {
+  const macos = path.dirname(executable);
+  const contents = path.dirname(macos);
+  return path.basename(macos) === "MacOS" &&
+    path.basename(contents) === "Contents" &&
+    path.extname(path.dirname(contents)) === ".app"
+    ? [contents, ...HOMEBREW_CODE]
+    : [executable, ...HOMEBREW_CODE];
+};
 
 /**
  * The SDK's packages: the `node_modules` folder above its own package, where prkit installs its
@@ -140,11 +180,14 @@ export const runnerReach = (input: {
   readonly home: string;
   /** More to read: the checkout a session check names, the instance's extra CA file. */
   readonly reads: ReadonlyArray<string>;
+  /** A sign-in or sign-out, the only runs that write the saved key. */
+  readonly signs: boolean;
   readonly turn: {
     readonly cwd: string;
     readonly readableDirs: ReadonlyArray<string>;
     readonly tmpDir: string;
     readonly writes: boolean;
+    readonly mcpPort: number;
   } | null;
 }) =>
   Effect.gen(function* () {
@@ -152,23 +195,35 @@ export const runnerReach = (input: {
     const path = yield* Path.Path;
     const [executable = process.execPath] = yield* realPaths(fs, [process.execPath]);
     const code = yield* realPaths(fs, [
-      runtimeOf(path, executable),
+      ...runtimeOf(path, executable),
       ...runnerCode(path, input.script),
       sdkRootOf(path, input.sdk),
     ]);
     const home = yield* realPaths(fs, [input.home]);
     const extra = yield* realPaths(fs, input.reads);
-    if (input.turn === null) return { code, reads: extra, writes: home, guarded: [] };
+    const sealedHome = input.signs ? null : (home[0] ?? null);
+    if (input.turn === null)
+      return { code, reads: extra, writes: home, guarded: [], sealedHome, mcpPort: null };
     const [cwd] = yield* realPaths(fs, [input.turn.cwd]);
     const dirs = yield* realPaths(fs, input.turn.readableDirs);
     const tmp = yield* realPaths(fs, [input.turn.tmpDir]);
     const checkout = cwd === undefined ? [] : [cwd];
+    const mcpPort = input.turn.mcpPort;
     return input.turn.writes
       ? {
           code,
           reads: [...dirs, ...extra],
           writes: [...home, ...tmp, ...checkout],
           guarded: checkout,
+          sealedHome,
+          mcpPort,
         }
-      : { code, reads: [...checkout, ...dirs, ...extra], writes: [...home, ...tmp], guarded: [] };
+      : {
+          code,
+          reads: [...checkout, ...dirs, ...extra],
+          writes: [...home, ...tmp],
+          guarded: [],
+          sealedHome,
+          mcpPort,
+        };
   });

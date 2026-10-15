@@ -1,12 +1,13 @@
 /**
  * A stand-in for Cursor's SDK (`@cursor/sdk`), so tests can install, sign in and run Cursor
- * without Cursor. `tests/fakeCursor.ts` lays it out as an SDK package folder, with the address
- * of the control server that steers it (apps/server/src/agents/cursor/fakeControl.ts) baked in as CONTROL, and prkit
- * loads it through PRKIT_CURSOR_SDK_PATH or the installer. Plain JavaScript: the installer puts
- * it under node_modules, where Node strips no types. prkit runs it in the runner's sandbox like
- * the real SDK, so it reaches the test only through that server.
+ * without Cursor. `tests/fakeCursor.ts` lays it out as an SDK package folder, and prkit loads it
+ * through PRKIT_CURSOR_SDK_PATH or the installer. Plain JavaScript: the installer puts it under
+ * node_modules, where Node strips no types. prkit runs it in the runner's sandbox like the real
+ * SDK, which opens no test folder and no local port but prkit's, so a test steers it with files in
+ * `control/` in its own package folder, which it may read, and reads what it did in `stand-in/`
+ * in its HOME, the instance's home, which it may write. Each line there is JSON with an `at`.
  *
- * In the control folder:
+ * In control/:
  *   approve-login  a sign-in waiting in the browser finishes
  *   reject-keys    Cursor turns every key down
  *   hold           a turn keeps writing until the file is removed
@@ -15,9 +16,14 @@
  *   builtin-overlap  a turn starts submit_guide, starts Cursor's own read tool while it runs,
  *                  then lets submit_guide finish
  *   shell-output   a turn reports a shell's output, as Cursor's own shell tool would
- *   escape.json    paths a turn reads and writes with Node's own fs first, past prkit's tools,
- *                  `{ "reads": [...], "writes": [...] }`; each outcome goes to escape.log
- *   disposed.log   each agent disposed, written a moment after the dispose starts, as the
+ *   partial-call   a turn reports a call to a custom tool while it is still being written,
+ *                  before its server is named, as Cursor does
+ *   escape.json    what a turn tries first with Node's own calls, past prkit's tools: `reads`
+ *                  and `writes` (paths), `renames` and `links` (hard, `[from, to]` pairs),
+ *                  `children` (paths a child process reads), `sockets` (unix sockets) and
+ *                  `ports` (local TCP ports); each outcome goes to escape.log
+ *
+ * In stand-in/: *   disposed.log   each agent disposed, written a moment after the dispose starts, as the
  *                  SDK's own store writes land late
  *   probe.json     calls a turn makes first, `[{ "tool": "read_file", "args": {...} }]`
  *   runs.log       each turn appends what it was started with: tools, setting sources, sandbox,
@@ -33,21 +39,30 @@
  */
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
+import * as NodeNet from "node:net";
+import * as NodeChildProcess from "node:child_process";
 import * as NodePath from "node:path";
+import { fileURLToPath } from "node:url";
 
-const CONTROL = process.env.FAKE_CURSOR_CONTROL ?? "";
-/** A control server's answer, or null without one. */
-const ask = async (path, body) => {
-  if (CONTROL === "") return null;
-  const response = await fetch(
-    `${CONTROL}/${path}`,
-    body === undefined ? {} : { method: "POST", body },
-  );
-  return response.ok ? response.text() : null;
+const CONTROL = NodePath.join(
+  NodePath.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "control",
+);
+const flagged = (name) => NodeFS.existsSync(NodePath.join(CONTROL, name));
+const controlFile = (name) => {
+  const file = NodePath.join(CONTROL, name);
+  return NodeFS.existsSync(file) ? NodeFS.readFileSync(file, "utf8") : null;
 };
-const flagged = async (name) => (await ask(`flag/${name}`)) === "1";
-const log = (name, value) =>
-  ask(`log/${name}`, typeof value === "string" ? value : JSON.stringify(value));
+const log = (name, value) => {
+  const dir = NodePath.join(process.env.HOME ?? "", "stand-in");
+  NodeFS.mkdirSync(dir, { recursive: true });
+  NodeFS.appendFileSync(
+    NodePath.join(dir, name),
+    `${JSON.stringify({ ...value, at: performance.timeOrigin + performance.now() })}\n`,
+  );
+};
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class AuthenticationError extends Error {}
@@ -208,23 +223,56 @@ class StandInAgent {
       return { ok, text };
     };
     const work = async () => {
-      const escape = await ask("file/escape.json");
+      const escape = controlFile("escape.json");
       if (escape !== null) {
-        const { reads = [], writes = [] } = JSON.parse(escape);
+        const steps = JSON.parse(escape);
         const attempt = async (op, path, run) => {
           try {
-            run();
-            await log("escape.log", { op, path, ok: true, code: null });
+            await run();
+            log("escape.log", { op, path, ok: true, code: null });
           } catch (error) {
-            await log("escape.log", { op, path, ok: false, code: error.code ?? "unknown" });
+            log("escape.log", { op, path, ok: false, code: error.code ?? "unknown" });
           }
         };
-        for (const path of reads) await attempt("read", path, () => NodeFS.readFileSync(path));
-        for (const path of writes)
+        const connect = (options) =>
+          new Promise((resolve, reject) => {
+            const socket = NodeNet.connect(options, () => {
+              socket.destroy();
+              resolve();
+            });
+            socket.once("error", reject);
+          });
+        for (const path of steps.reads ?? [])
+          await attempt("read", path, () => NodeFS.readFileSync(path));
+        for (const path of steps.writes ?? [])
           await attempt("write", path, () => NodeFS.writeFileSync(path, "written past prkit\n"));
+        for (const [from, to] of steps.renames ?? [])
+          await attempt("rename", `${from} -> ${to}`, () => NodeFS.renameSync(from, to));
+        for (const [from, to] of steps.links ?? [])
+          await attempt("link", `${from} -> ${to}`, () => NodeFS.linkSync(from, to));
+        for (const path of steps.children ?? [])
+          await attempt("child", path, () => {
+            const child = NodeChildProcess.spawnSync("/bin/cat", [path], { encoding: "utf8" });
+            if (child.status !== 0)
+              throw Object.assign(new Error(child.stderr), {
+                code: /not permitted/.test(child.stderr) ? "EPERM" : `exit ${child.status}`,
+              });
+          });
+        for (const path of steps.sockets ?? [])
+          await attempt("socket", path, () => connect({ path }));
+        for (const port of steps.ports ?? [])
+          await attempt("port", String(port), () => connect({ host: "127.0.0.1", port }));
       }
-      const probe = await ask("file/probe.json");
+      const probe = controlFile("probe.json");
       if (probe !== null) for (const step of JSON.parse(probe)) await call(step.tool, step.args);
+      if (await flagged("partial-call"))
+        await onDelta({
+          update: {
+            type: "partial-tool-call",
+            callId: NodeCrypto.randomUUID(),
+            toolCall: { type: "mcp", args: { toolName: "report_progress" } },
+          },
+        });
       await onDelta({ update: { type: "text-delta", text: "Reading the change." } });
       await call("report_progress", { message: "Reading the change with a stand-in Cursor" });
       while ((await flagged("hold")) && !state.cancelled) await sleep(200);
@@ -318,7 +366,7 @@ class StandInAgent {
   close() {}
   async [Symbol.asyncDispose]() {
     await sleep(300);
-    await log("disposed.log", this.agentId);
+    log("disposed.log", { agentId: this.agentId });
   }
 }
 

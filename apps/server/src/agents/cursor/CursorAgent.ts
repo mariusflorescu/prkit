@@ -3,6 +3,7 @@ import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -22,7 +23,7 @@ import {
 } from "../AgentProvider.ts";
 import { TURN_MARKER, watchTurn } from "../turnEnd.ts";
 import { toModels } from "./models.ts";
-import { Event, eventMark, eventText, Request } from "./protocol.ts";
+import { Event, eventMark, eventText, FORBIDDEN, Request } from "./protocol.ts";
 import { layOutHome, workspaceSandboxProblem } from "./sandbox.ts";
 import { runnerProfile, runnerReach, SANDBOX_EXEC } from "./seatbelt.ts";
 import { findSdk } from "./sdkLoader.ts";
@@ -55,7 +56,12 @@ const cursorTools = (input: TurnInput) =>
       ? ["- write_file and edit_file: change files in the working directory."]
       : []),
     `- prkit's own tools: ${input.tools.join(", ")}.`,
-    "What changed, and what the base branch had, come from the task below and any diff file it names: a diff shows each changed line's old version. In a file with a merge conflict, the conflict markers hold both sides: read the file to see them.",
+    "What changed, and what the base branch had, come from the task below and any diff file it names: a diff shows each changed line's old version.",
+    ...(input.access._tag === "write"
+      ? [
+          "In a file with a merge conflict, the conflict markers hold both sides: read the file to see them.",
+        ]
+      : []),
   ].join("\n");
 
 /** The turn's rules and its task in one message: Cursor takes no system prompt from prkit. */
@@ -113,7 +119,12 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
       readonly reach?: Pick<Parameters<typeof runnerReach>[0], "reads" | "turn">;
     },
   ): Effect.Effect<
-    { readonly pid: number; readonly events: Stream.Stream<Event, AgentError> },
+    {
+      readonly pid: number;
+      readonly events: Stream.Stream<Event, AgentError>;
+      /** The end of what the runner wrote to stderr, once it has stopped writing. */
+      readonly stderr: Effect.Effect<string>;
+    },
     AgentError,
     Scope.Scope
   > =>
@@ -127,6 +138,9 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
         });
       yield* provide(layOutHome(home));
       const script = yield* runnerScript;
+      const nonce = Hex.encode(yield* crypto.randomBytes(16));
+      const mark = eventMark(nonce);
+      const message = request({ nonce, sdk, apiKey });
       const reach = yield* provide(
         runnerReach({
           script,
@@ -140,6 +154,7 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
               : [instanceEnv.NODE_EXTRA_CA_CERTS]),
           ],
           turn: options.reach?.turn ?? null,
+          signs: message.op === "login" || message.op === "logout",
         }),
       );
       const child = yield* spawner.spawn(
@@ -166,13 +181,21 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
       yield* Effect.addFinalizer(() =>
         child.kill({ forceKillAfter: "3 seconds" }).pipe(Effect.ignore),
       );
-      const nonce = Hex.encode(yield* crypto.randomBytes(16));
-      const mark = eventMark(nonce);
-      yield* Stream.make(`${encodeRequest(request({ nonce, sdk, apiKey }))}\n`).pipe(
+      yield* Stream.make(`${encodeRequest(message)}\n`).pipe(
         Stream.encodeText,
         Stream.run(child.stdin),
       );
-      yield* child.stderr.pipe(Stream.runDrain, Effect.ignore, Effect.forkScoped);
+      let tail = "";
+      const reading = yield* child.stderr.pipe(
+        Stream.decodeText(),
+        Stream.runForEach((text) => Effect.sync(() => (tail = `${tail}${text}`.slice(-2000)))),
+        Effect.ignore,
+        Effect.forkScoped,
+      );
+      const stderr = Fiber.join(reading).pipe(
+        Effect.timeoutOrElse({ duration: "1 second", orElse: () => Effect.void }),
+        Effect.map(() => tail.trim()),
+      );
       // The SDK may print lines of its own: only prkit's events count.
       const events = child.stdout.pipe(
         Stream.decodeText(),
@@ -188,7 +211,7 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
             new AgentError({ reason: "agent", message: "Cursor's runner stopped unexpectedly." }),
         ),
       );
-      return { pid: child.pid, events };
+      return { pid: child.pid, events, stderr };
     }).pipe(
       Effect.catchTag("PlatformError", () =>
         Effect.fail(
@@ -208,8 +231,15 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
   ) =>
     Effect.scoped(
       Effect.gen(function* () {
-        const { events } = yield* start(request, { cwd: home, reach: { reads, turn: null } });
+        const { events, stderr } = yield* start(request, {
+          cwd: home,
+          reach: { reads, turn: null },
+        });
         const all = yield* Stream.runCollect(events);
+        if (all.length === 0)
+          yield* Effect.logWarning("Cursor's runner stopped without a word").pipe(
+            Effect.annotateLogs({ instance: setup.id, stderr: yield* stderr }),
+          );
         const failed = all.find((event) => event.type === "error");
         if (failed !== undefined && failed.type === "error")
           return yield* new AgentError({ reason: failed.reason, message: failed.message });
@@ -399,7 +429,10 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
         const params = input.options.flatMap((option) =>
           typeof option.value === "string" ? [{ id: option.id, value: option.value }] : [],
         );
-        const { pid, events } = yield* start(
+        // prkit's MCP server is the one local port the runner reaches (seatbelt.ts).
+        const mcp = new URL(input.mcp.url);
+        const mcpPort = Number(mcp.port === "" ? (mcp.protocol === "https:" ? 443 : 80) : mcp.port);
+        const { pid, events, stderr } = yield* start(
           (common) => ({
             ...common,
             op: "turn",
@@ -422,6 +455,7 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
                 readableDirs: input.readableDirs,
                 tmpDir: input.access.tmpDir,
                 writes: input.access._tag === "write",
+                mcpPort,
               },
             },
           },
@@ -445,7 +479,10 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
               case "text":
                 return Stream.make({ _tag: "text", text: event.text });
               case "tool":
-                return Stream.fromIterable(describeToolCall(event, relative));
+                // The runner fails such a turn itself; this holds even if its error line is lost.
+                return event.tool === "other" || event.tool === "mcp"
+                  ? Stream.fail(new AgentError({ reason: "agent", message: FORBIDDEN }))
+                  : Stream.fromIterable(describeToolCall(event, relative));
               case "tool-done":
                 return Stream.make({ _tag: "tool-done", id: event.callId, ok: event.ok });
               case "finished":
@@ -468,10 +505,15 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
             Stream.suspend(() =>
               finished
                 ? Stream.empty
-                : Stream.fail(
-                    new AgentError({
-                      reason: "agent",
-                      message: "Cursor stopped before the turn finished. Retry.",
+                : Stream.fromEffect(
+                    Effect.gen(function* () {
+                      yield* Effect.logWarning(
+                        "Cursor's runner stopped before the turn finished",
+                      ).pipe(Effect.annotateLogs({ instance: setup.id, stderr: yield* stderr }));
+                      return yield* new AgentError({
+                        reason: "agent",
+                        message: "Cursor stopped before the turn finished. Retry.",
+                      });
                     }),
                   ),
             ),

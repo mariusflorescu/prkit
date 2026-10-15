@@ -91,6 +91,10 @@ export const eventText = (line: string, mark: string) => {
   return at === -1 ? null : line.slice(at + mark.length);
 };
 
+/** Why a turn fails once Cursor shows a tool of its own at work. */
+export const FORBIDDEN =
+  "Cursor tried to use one of its own tools, which prkit doesn't allow. Nothing from this run was kept.";
+
 export const Event = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("status"),

@@ -17,9 +17,11 @@ export const spellingsOf = (fs: FileSystem.FileSystem, dirs: ReadonlyArray<strin
 type Place = "checkout" | "git" | "readable" | "outside";
 
 /**
- * A file name folded so every spelling APFS opens as the same name compares equal. APFS folds
- * only ASCII case and the long s (`.GIT` is `.git`, `.curſor` is `.cursor`); NFKC folds more,
- * on purpose: a few names APFS keeps apart are refused too, and none it joins slips through.
+ * A file name folded for comparing with `.git` and `.cursor`, the names prkit protects. Of the
+ * spellings of their letters, APFS joins only ASCII case and the long s (`.GIT` is `.git`,
+ * `.curſor` is `.cursor`); NFKC folds more, on purpose, so a few names APFS keeps apart are
+ * refused too and none it joins slips through. APFS folds other letters too (é and É), which
+ * these two names don't have.
  */
 export const foldedName = (name: string) => name.normalize("NFKC").toLowerCase();
 

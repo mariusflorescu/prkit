@@ -6,7 +6,6 @@ import * as NodeUrl from "node:url";
 
 import * as Schema from "effect/Schema";
 
-import { startCursorControl } from "../apps/server/src/agents/cursor/fakeControl.ts";
 import { repoRoot } from "../scripts/verify-run.ts";
 
 const VERSION = "1.0.37";
@@ -24,6 +23,7 @@ const Run = Schema.fromJsonString(
     resumed: Schema.Boolean,
   }),
 );
+const At = Schema.fromJsonString(Schema.Struct({ at: Schema.Number }));
 const Call = Schema.fromJsonString(
   Schema.Struct({ tool: Schema.String, ok: Schema.Boolean, text: Schema.String }),
 );
@@ -55,22 +55,28 @@ const pack = (dir: string, name: string, files: Readonly<Record<string, string>>
  * unpacks them from file URLs, checked like npm's, without the network. `approveLogin` finishes
  * a sign-in waiting in the browser; `runs` lists every turn the stand-in started.
  */
-export const setUpFakeCursor = async (name: string) => {
+export const setUpFakeCursor = (name: string) => {
   const dir = NodePath.join(repoRoot, ".e2e", "fake", `${name}-cursor`);
   NodeFS.rmSync(dir, { recursive: true, force: true });
-  const control = NodePath.join(dir, "control");
-  // The stand-in runs in the runner's sandbox, so it reaches `control` through this server.
-  const server = await startCursorControl(control);
+  // The stand-in runs in the runner's sandbox: it reads `control/` in the SDK it was installed as,
+  // and logs to `stand-in/` in each instance's home (fake-cursor-sdk.mjs).
+  const home = NodePath.join(repoRoot, ".e2e", "homes", name);
+  const control = NodePath.join(
+    home,
+    "cursor-sdk",
+    VERSION,
+    "node_modules",
+    "@cursor",
+    "sdk",
+    "control",
+  );
   const source = NodeFS.readFileSync(
     NodePath.join(repoRoot, "scripts", "fake-cursor-sdk.mjs"),
     "utf8",
   );
   const sdk = pack(dir, "sdk", {
     "package.json": JSON.stringify({ name: "@cursor/sdk", version: VERSION, type: "module" }),
-    "dist/esm/index.js": source.replace(
-      'process.env.FAKE_CURSOR_CONTROL ?? ""',
-      JSON.stringify(server.url),
-    ),
+    "dist/esm/index.js": source,
   });
   const platform = (arch: string) => ({
     name: `@cursor/sdk-darwin-${arch}`,
@@ -89,25 +95,25 @@ export const setUpFakeCursor = async (name: string) => {
       platform("x64"),
     ]),
   );
-  const flag = (what: string, on: boolean) =>
-    on
-      ? NodeFS.writeFileSync(NodePath.join(control, what), "")
-      : NodeFS.rmSync(NodePath.join(control, what), { force: true });
-  const lines = (name: string) => {
-    const file = NodePath.join(control, name);
-    if (!NodeFS.existsSync(file)) return [];
-    return NodeFS.readFileSync(file, "utf8")
-      .split("\n")
-      .filter((line) => line !== "");
+  const write = (what: string, content: string) => {
+    NodeFS.mkdirSync(control, { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(control, what), content);
   };
+  /** Every line the stand-in logged as `log`, in every instance's home, oldest first. */
+  const lines = (log: string) =>
+    NodeFS.globSync(NodePath.join(home, "cursor-instances", "*", "home", "stand-in", log))
+      .flatMap((file) => NodeFS.readFileSync(file, "utf8").split("\n"))
+      .filter((line) => line !== "")
+      .map((line) => ({ at: Schema.decodeUnknownSync(At)(line).at, line }))
+      .sort((a, b) => a.at - b.at)
+      .map((entry) => entry.line);
   return {
     manifest,
-    approveLogin: () => flag("approve-login", true),
+    approveLogin: () => write("approve-login", ""),
     runs: () => lines("runs.log").map((line) => Schema.decodeUnknownSync(Run)(line)),
     /** Every custom tool call the stand-in made, with whether it worked and what it returned. */
     calls: () => lines("calls.log").map((line) => Schema.decodeUnknownSync(Call)(line)),
     /** Calls each later turn makes first, as an agent trying its tools would. */
-    probe: (steps: ReadonlyArray<ProbeStep>) =>
-      NodeFS.writeFileSync(NodePath.join(control, "probe.json"), JSON.stringify(steps)),
+    probe: (steps: ReadonlyArray<ProbeStep>) => write("probe.json", JSON.stringify(steps)),
   };
 };

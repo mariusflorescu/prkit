@@ -17,7 +17,7 @@ import * as Schema from "effect/Schema";
 import { checkoutPaths } from "../checkoutPaths.ts";
 import { makeFileTools, type ToolResult } from "./fileTools.ts";
 import { connectPrkitTools } from "./prkitTools.ts";
-import { type Event, eventMark, Request, type TurnRequest } from "./protocol.ts";
+import { type Event, eventMark, FORBIDDEN, Request, type TurnRequest } from "./protocol.ts";
 import { loadSdk } from "./sdkLoader.ts";
 import { ALLOWED_TOOLS, CUSTOM_TOOLS_SERVER, DENIED_TOOLS } from "./tools.ts";
 
@@ -166,8 +166,6 @@ const FILE_TOOLS = new Set(["read_file", "list_dir", "glob", "grep", "write_file
  * refuse every later call, and no later call counts as done, so nothing from the turn is kept.
  */
 let forbidden = false;
-const FORBIDDEN =
-  "Cursor tried to use one of its own tools, which prkit doesn't allow. Nothing from this run was kept.";
 
 /**
  * Whether an update shows one of Cursor's own tools at work: a call that isn't one of the custom
@@ -179,12 +177,17 @@ const showsOwnTool = (update: InteractionUpdate) => {
     case "tool-call-delta":
       return true;
     case "tool-call-started":
-    case "partial-tool-call":
     case "tool-call-completed":
       return !(
         update.toolCall.type === "mcp" &&
         update.toolCall.args.providerIdentifier === CUSTOM_TOOLS_SERVER
       );
+    // A call still being written may not name its server yet: only a named other one counts.
+    case "partial-tool-call": {
+      if (update.toolCall.type !== "mcp") return true;
+      const provider = update.toolCall.args.providerIdentifier;
+      return provider !== undefined && provider !== "" && provider !== CUSTOM_TOOLS_SERVER;
+    }
     default:
       return false;
   }
