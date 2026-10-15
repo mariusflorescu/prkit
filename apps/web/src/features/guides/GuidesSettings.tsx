@@ -9,7 +9,7 @@ export function GuidesSettings() {
   return (
     <SettingsSection
       title="Guides"
-      description="Guides run on your own Claude or Codex subscription, on this machine."
+      description="Guides run on your own Claude, Codex or Cursor plan, on this machine."
     >
       <AutoGuidesSetting />
       <GlobalGuideConfig />

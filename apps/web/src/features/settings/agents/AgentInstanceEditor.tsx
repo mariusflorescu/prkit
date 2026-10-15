@@ -27,7 +27,8 @@ export function AgentInstanceEditor({
   const { update } = useAgentInstanceActions();
   const form = useForm<InstanceFormValues>({ defaultValues: formValuesOf(entry) });
   const { errors, isDirty } = form.formState;
-  const fields = KIND_FIELDS[entry.kind];
+  // Cursor runs through its SDK in a folder of prkit's own: no binary, no config folder.
+  const fields = entry.kind === "cursor" ? null : KIND_FIELDS[entry.kind];
   const id = (name: string) => `agent-${entry.instance}-${name}`;
   const submit = form.handleSubmit((values) =>
     update.mutate(configFrom(configOf(entry), values), { onSuccess: onDone }),
@@ -64,17 +65,19 @@ export function AgentInstanceEditor({
             />
           )}
         />
-        <TextField
-          id={id("binary")}
-          label="Binary path"
-          hint={`Empty finds ${fields.binary} on your PATH.`}
-          placeholder={fields.binary}
-          mono
-          error={errors.binaryPath?.message}
-          disabled={update.isPending}
-          field={form.register("binaryPath", { validate: pathProblem })}
-        />
-        {entry.login === "shared" && (
+        {fields !== null && (
+          <TextField
+            id={id("binary")}
+            label="Binary path"
+            hint={`Empty finds ${fields.binary} on your PATH.`}
+            placeholder={fields.binary}
+            mono
+            error={errors.binaryPath?.message}
+            disabled={update.isPending}
+            field={form.register("binaryPath", { validate: pathProblem })}
+          />
+        )}
+        {fields !== null && entry.login === "shared" && (
           <TextField
             id={id("folder")}
             label={fields.folder.label}

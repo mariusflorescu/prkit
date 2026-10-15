@@ -6,6 +6,7 @@ import { useForm, useWatch } from "react-hook-form";
 import { Button } from "~/components/ui/button";
 import { resolveConflicts } from "~/rpc/client";
 
+import { runsOnCursor } from "./cursorFixes";
 import { FixAgentPicker } from "./FixAgentPicker";
 import { storeFixer } from "./fixerCache";
 import { PushNotice } from "./PushNotice";
@@ -103,7 +104,7 @@ export function ResolveConflictsForm({
         onChange={(selection) => form.setValue("agent", selection)}
       />
       <PushNotice detail={detail} />
-      <ScriptAccessNotice detail={detail} />
+      <ScriptAccessNotice detail={detail} cursor={runsOnCursor(agent.catalog, agent.selection)} />
       {agent.problem !== null && (
         <p role="status" className="text-xs text-muted-foreground">
           {agent.problem}

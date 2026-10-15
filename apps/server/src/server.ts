@@ -18,6 +18,7 @@ import * as GitHubApi from "./github/GitHubApi.ts";
 import * as GitHubHttpClient from "./github/httpClient.ts";
 import * as PullRequests from "./pullRequests/PullRequests.ts";
 import * as Agents from "./agents/Agents.ts";
+import * as CursorSdk from "./agents/cursor/CursorSdk.ts";
 import * as McpHttp from "./mcp/McpHttp.ts";
 import * as McpTokens from "./mcp/McpTokens.ts";
 import * as RepoCache from "./repo/RepoCache.ts";
@@ -92,6 +93,8 @@ const layerReviews = Layer.mergeAll(ReviewWatcher.layer, AutoGuides.layer).pipe(
     Layer.mergeAll(
       RepoCache.layer,
       Agents.layer,
+      // Downloads from npm with the same HTTP client; nothing of GitHub's goes with it.
+      CursorSdk.layer.pipe(Layer.provide(GitHubHttpClient.layer)),
       McpTokens.layer,
       GuideSettingsStore.layer,
       GuideConfigStore.layer,

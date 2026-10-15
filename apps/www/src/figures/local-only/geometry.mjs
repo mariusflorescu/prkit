@@ -1,7 +1,7 @@
 // The local-first drawing, built once with the kit and prkit's digital materials, as an architecture diagram whose
 // boxes are the software itself: your Mac's dashed boundary holds prkit's window, its server's memory with one
 // token per account, your agent's terminal and prkit's data folder. One connector leaves for GitHub's API; the
-// agent's own line goes to the Claude or Codex login it runs on. Where a prkit server would be there is only a
+// agent's own line goes to the Claude, Codex or Cursor login it runs on. Where a prkit server would be there is only a
 // dashed, crossed-out, empty frame.
 import * as k from "../kit/iso-kit.mjs";
 import * as D from "../kit/prkit-digital.mjs";

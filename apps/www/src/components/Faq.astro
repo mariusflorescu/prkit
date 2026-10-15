@@ -8,12 +8,12 @@ const questions = [
   {
     question: "Which agents does it work with?",
     answer:
-      "Claude Code and Codex. Install one, sign in with your Claude or ChatGPT plan, and prkit finds it. You can pick a different one for each pull request.",
+      "Claude Code, Codex and Cursor. Install Claude Code or Codex and sign in with your Claude or ChatGPT plan, and prkit finds it. Cursor support installs from prkit's settings and signs in with your Cursor account; its fixes only edit files and never run commands. You can pick a different one for each pull request.",
   },
   {
     question: "Does it cost anything extra?",
     answer:
-      "Not on the agent side. Guides and fixes run on the Claude or ChatGPT plan you already pay for and count toward its usage like any other session. prkit never switches to an API key, so there is no second bill.",
+      "Not on the agent side. Guides and fixes run on the Claude, ChatGPT or Cursor plan you already pay for and count toward its usage like any other session. prkit never switches Claude Code or Codex to an API key, and the key Cursor's sign-in makes for prkit bills your Cursor plan, so there is no second bill.",
   },
   {
     question: "Which platforms does it run on?",
@@ -22,7 +22,7 @@ const questions = [
   {
     question: "Is my code sent anywhere?",
     answer:
-      "prkit itself sends your code only to GitHub, and only when you push a fix (or turn on automatic pushing for a repository). It has no servers of its own. Your agent reads the checkout the same way it reads code in your terminal, under your own Claude or Codex account.",
+      "prkit itself sends your code only to GitHub, and only when you push a fix (or turn on automatic pushing for a repository). It has no servers of its own. Your agent reads the checkout the same way it reads code in your terminal, under your own Claude, Codex or Cursor account.",
   },
   {
     question: "Can I use more than one GitHub account?",

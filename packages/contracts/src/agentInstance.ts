@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 
 /** The agents prkit can run. Each kind's default instance has the kind as its id. */
-export const AGENT_KINDS = ["claude", "codex"] as const;
+export const AGENT_KINDS = ["claude", "codex", "cursor"] as const;
 export const AgentProviderKind = Schema.Literals(AGENT_KINDS);
 export type AgentProviderKind = typeof AgentProviderKind.Type;
 
@@ -11,6 +11,7 @@ export const AGENT_KIND_NAMES: Readonly<
 > = {
   claude: { name: "Claude Code", short: "Claude" },
   codex: { name: "Codex", short: "Codex" },
+  cursor: { name: "Cursor", short: "Cursor" },
 };
 
 const INSTANCE_ID_MAX = 64;
@@ -77,9 +78,12 @@ export const AgentInstanceConfig = Schema.Struct({
   label: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
   accent: Schema.NullOr(AgentAccent),
   enabled: Schema.Boolean,
-  /** CLAUDE_CONFIG_DIR or CODEX_HOME; null for the agent's own default folder. `~` is expanded. */
+  /**
+   * CLAUDE_CONFIG_DIR or CODEX_HOME; null for the agent's own default folder. `~` is expanded.
+   * Always null for Cursor, which runs in a folder of prkit's own.
+   */
   configDir: Schema.NullOr(AgentPath),
-  /** Null finds the agent on PATH. */
+  /** Null finds the agent on PATH. Always null for Cursor, which prkit runs through its SDK. */
   binaryPath: Schema.NullOr(AgentPath),
   environment: Schema.Array(AgentEnvironmentVariable),
   /**
@@ -206,12 +210,33 @@ const BLOCKED_ENV: ReadonlyArray<{
   },
 ];
 
-/** Why an instance can't set `name`, in words for the form, or null when it can. */
-export const environmentNameProblem = (name: string) => {
+/**
+ * The one Cursor variable an instance may set: a Cursor API key, in place of signing in. Every
+ * Cursor key bills the user's own plan, so it stays on the subscription; a custom endpoint would
+ * not, and is refused with the rest of `CURSOR_`.
+ */
+export const CURSOR_API_KEY = "CURSOR_API_KEY";
+
+/**
+ * Why an instance of `kind` can't set `name`, in words for the form, or null when it can.
+ * `sensitive` says whether the value is kept as a secret.
+ */
+export const environmentNameProblem = (
+  name: string,
+  kind: AgentProviderKind,
+  sensitive: boolean,
+) => {
   if (name.length === 0) return "Name the variable.";
   if (name.length > 128) return "Variable names are 128 characters or fewer.";
   if (!ENV_NAME_PATTERN.test(name))
     return "Use letters, digits and '_', starting with a letter or '_'.";
   const upper = name.toUpperCase();
+  if (upper === CURSOR_API_KEY) {
+    if (kind !== "cursor") return "Only a Cursor agent uses a Cursor API key.";
+    if (name !== CURSOR_API_KEY) return `Write it as ${CURSOR_API_KEY}.`;
+    return sensitive ? null : "Mark it Sensitive, so prkit keeps the key out of its database.";
+  }
+  if (upper.startsWith("CURSOR_"))
+    return "It changes how Cursor runs: its servers, settings or login from outside prkit. Only CURSOR_API_KEY is allowed, on a Cursor agent.";
   return BLOCKED_ENV.find((rule) => rule.test(upper))?.why ?? null;
 };

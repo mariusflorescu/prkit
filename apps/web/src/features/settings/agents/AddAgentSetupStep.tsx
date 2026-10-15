@@ -12,7 +12,9 @@ export function AddAgentSetupStep({
   form: UseFormReturn<AddAgentValues>;
   problem: StepProblem | null;
 }) {
-  const fields = KIND_FIELDS[form.getValues("kind")];
+  const kind = form.getValues("kind");
+  if (kind === "cursor") return null;
+  const fields = KIND_FIELDS[kind];
   return (
     <div className="space-y-4">
       <TextField

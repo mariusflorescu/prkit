@@ -8,6 +8,7 @@ import { toastManager } from "~/components/ui/toast";
 import { sendToAgent } from "~/rpc/client";
 import { pendingCommentsQuery } from "~/rpc/queries";
 
+import { runsOnCursor } from "./cursorFixes";
 import { FixAgentPicker } from "./FixAgentPicker";
 import { FixCandidateRow } from "./FixCandidateRow";
 import type { FixCandidate } from "./fixCandidates";
@@ -157,7 +158,7 @@ export function SendToAgentFields({
         </label>
       )}
       <PushNotice detail={detail} />
-      <ScriptAccessNotice detail={detail} />
+      <ScriptAccessNotice detail={detail} cursor={runsOnCursor(agent.catalog, agent.selection)} />
       {agent.problem !== null && (
         <p role="status" className="text-xs text-muted-foreground">
           {agent.problem}

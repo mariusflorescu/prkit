@@ -393,6 +393,7 @@ describe("AgentInstances secrets", () => {
           "claude_plain",
           "claude_work",
           "codex",
+          "cursor",
         ]);
         const reasons = Object.fromEntries(
           catalog.providers.map((entry) => [
@@ -443,6 +444,7 @@ describe("AgentInstances secrets", () => {
         expect((yield* store.resolved).map((entry) => entry.config.id)).toEqual([
           "claude",
           "codex",
+          "cursor",
           "claude_work",
         ]);
       }),
@@ -465,7 +467,56 @@ describe("AgentInstances secrets", () => {
         expect((yield* store.resolved).map((entry) => entry.config.id)).toEqual([
           "claude",
           "codex",
+          "cursor",
         ]);
+      }),
+    ));
+
+  it("keeps a Cursor API key only as a Cursor agent's secret, and no config folder for Cursor", () =>
+    run(
+      Effect.gen(function* () {
+        const store = yield* AgentInstancesStore.AgentInstances;
+        const key = (sensitive: boolean) => ({
+          name: "CURSOR_API_KEY",
+          value: "key_123",
+          sensitive,
+          valueRedacted: false,
+        });
+        const cursor = (overrides: Partial<AgentInstanceConfig> = {}) =>
+          work({ id: id("cursor_work"), kind: "cursor", configDir: null, ...overrides });
+        const onClaude = yield* store.create(work({ environment: [key(true)] })).pipe(Effect.flip);
+        expect(onClaude.message).toContain("Only a Cursor agent");
+        const plain = yield* store.create(cursor({ environment: [key(false)] })).pipe(Effect.flip);
+        expect(plain.message).toContain("Sensitive");
+        const endpoint = yield* store
+          .create(
+            cursor({
+              environment: [
+                {
+                  name: "CURSOR_BACKEND_URL",
+                  value: "https://example.com",
+                  sensitive: false,
+                  valueRedacted: false,
+                },
+              ],
+            }),
+          )
+          .pipe(Effect.flip);
+        expect(endpoint.message).toContain("changes how Cursor runs");
+        const folder = yield* store.create(cursor({ configDir: "~/.cursor" })).pipe(Effect.flip);
+        expect(folder.message).toContain("leave Config folder and Binary path empty");
+
+        yield* store.create(cursor({ environment: [key(true)] }));
+        const read = (yield* store.resolved).find((entry) => entry.config.id === "cursor_work");
+        expect(read?.environment).toEqual({ CURSOR_API_KEY: "key_123" });
+        expect(read?.config.environment[0]?.value).toBe("");
+        // A saved key can't be turned into a plain value later.
+        const flipped = yield* store
+          .update(cursor({ environment: [{ ...key(false), value: "key_456" }] }))
+          .pipe(Effect.flip);
+        expect(flipped.message).toContain("Sensitive");
+        const kept = (yield* store.resolved).find((entry) => entry.config.id === "cursor_work");
+        expect(kept?.environment).toEqual({ CURSOR_API_KEY: "key_123" });
       }),
     ));
 });

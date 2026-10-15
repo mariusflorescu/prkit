@@ -8,13 +8,19 @@ import { useAgentSignIn } from "./useAgentSignIn";
  * Signs an agent in for prkit in the browser, when the user's own login can't be shared:
  * the button, then the page to finish on with Cancel, or why it failed with Try again.
  */
-export function AgentSignIn({ instance }: { instance: AgentInstanceId }) {
+export function AgentSignIn({
+  instance,
+  label = "Sign in for prkit",
+}: {
+  instance: AgentInstanceId;
+  label?: string;
+}) {
   const { state, start, cancel } = useAgentSignIn(instance);
   switch (state._tag) {
     case "idle":
       return (
         <Button size="xs" onClick={start}>
-          Sign in for prkit
+          {label}
         </Button>
       );
     case "opening":

@@ -3,7 +3,7 @@ import type { AgentCatalogEntry } from "@prkit/contracts";
 export type AgentStatusTone = "ready" | "off" | "problem" | "checking";
 
 /**
- * The one line under an instance's name, in a fixed order: Checking, Off, Not found, Not signed
+ * The one line under an instance's name, in a fixed order: Checking, Off, Not found (Cursor: Not installed), Not signed
  * in, Needs attention, Unavailable, Signed in · {plan}, Ready. The detail says what to do.
  */
 export const agentStatus = (
@@ -28,7 +28,10 @@ export const agentStatus = (
       : { headline: `Signed in · ${state.detail}`, detail: null, tone: "ready" };
   switch (state.reason) {
     case "not-installed":
-      return { headline: "Not found", detail: state.message, tone: "problem" };
+      // Cursor's card offers the install itself, saying what it does.
+      return entry.kind === "cursor"
+        ? { headline: "Not installed", detail: null, tone: "problem" }
+        : { headline: "Not found", detail: state.message, tone: "problem" };
     case "logged-out":
     case "keychain-login":
       return { headline: "Not signed in", detail: state.message, tone: "problem" };

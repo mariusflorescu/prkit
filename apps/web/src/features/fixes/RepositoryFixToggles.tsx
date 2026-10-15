@@ -5,15 +5,20 @@ import { Switch } from "~/components/ui/switch";
 import { updateFixerSettings } from "~/rpc/client";
 import { fixerSettingsQuery } from "~/rpc/queries";
 
+import { CURSOR_SCRIPTS_REASON } from "./cursorFixes";
+
 /**
  * A repository's opt-ins: push the agent's fixes and resolve new conflicts without a
- * click, and run its check scripts on any pull request.
+ * click, and run its check scripts on any pull request. When the fix agent is Cursor, the
+ * scripts option says why it won't run them.
  */
 export function RepositoryFixToggles({
   settings,
+  cursor,
   onSaved,
 }: {
   settings: RepositoryFixerSettings;
+  cursor: boolean;
   onSaved?: () => void;
 }) {
   const client = useQueryClient();
@@ -70,6 +75,9 @@ export function RepositoryFixToggles({
             outside authors included. Their commands come from the pull request. Off, they run only
             on pull requests from this repository by you, a member or a collaborator.
           </span>
+          {cursor && (
+            <span className="mt-1 block text-muted-foreground">{CURSOR_SCRIPTS_REASON}</span>
+          )}
         </span>
         <Switch
           checked={current.runScriptsOnAnyPullRequest}

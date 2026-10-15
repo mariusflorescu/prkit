@@ -17,6 +17,15 @@ export const spellingsOf = (fs: FileSystem.FileSystem, dirs: ReadonlyArray<strin
 type Place = "checkout" | "git" | "readable" | "outside";
 
 /**
+ * A file name folded for comparing with `.git` and `.cursor`, the names prkit protects. Of the
+ * spellings of their letters, APFS joins only ASCII case and the long s (`.GIT` is `.git`,
+ * `.curſor` is `.cursor`); NFKC folds more, on purpose, so a few names APFS keeps apart are
+ * refused too and none it joins slips through. APFS folds other letters too (é and É), which
+ * these two names don't have.
+ */
+export const foldedName = (name: string) => name.normalize("NFKC").toLowerCase();
+
+/**
  * A path a command or tool reads. `option` when the command could take a match of it as
  * an option: anywhere before a command's `--`, never for the Read, Grep and Glob tools.
  */
@@ -129,7 +138,7 @@ export const checkoutPaths = (
         return path
           .relative(checkout, real)
           .split(path.sep)
-          .some((part) => part.toLowerCase() === ".git")
+          .some((part) => foldedName(part) === ".git")
           ? "git"
           : "checkout";
       return readable.some(under) ? "readable" : "outside";
@@ -260,6 +269,9 @@ export const checkoutPaths = (
             if (!(yield* reads(target, path.resolve(where.checkout, from)))) return target.path;
           return null;
         }),
+      /** Where prkit's own file tools read: the checkout or an extra readable directory, never `.git`. */
+      reads: (targets: ReadonlyArray<string>) =>
+        every(targets, where.checkout, (at) => at === "checkout" || at === "readable"),
       /** A fix may change files in its checkout, never anything named `.git`. */
       writable: (targets: ReadonlyArray<string>) =>
         every(targets, where.checkout, (at) => at === "checkout"),

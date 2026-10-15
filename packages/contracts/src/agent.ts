@@ -53,6 +53,20 @@ export class AgentSignInError extends Schema.TaggedError<AgentSignInError>()("Ag
   message: Schema.String,
 }) {}
 
+/** Installing Cursor's SDK on request: one step per package, then done. */
+export const CursorSdkInstallProgress = Schema.Struct({
+  /** The package being downloaded and checked now; null once everything is in place. */
+  name: Schema.NullOr(Schema.String),
+  done: Schema.Number,
+  total: Schema.Number,
+});
+export type CursorSdkInstallProgress = typeof CursorSdkInstallProgress.Type;
+
+export class CursorSdkInstallError extends Schema.TaggedError<CursorSdkInstallError>()(
+  "CursorSdkInstallError",
+  { message: Schema.String },
+) {}
+
 export const AgentModel = Schema.Struct({
   slug: Schema.NonEmptyString,
   name: Schema.String,

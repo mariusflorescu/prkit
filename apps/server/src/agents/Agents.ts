@@ -12,6 +12,7 @@ import {
   isDefaultInstance,
 } from "@prkit/contracts";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -26,21 +27,24 @@ import type { AgentError, AgentProvider, InstanceSetup } from "./AgentProvider.t
 import * as AgentInstancesStore from "./AgentInstances.ts";
 import * as ClaudeAgent from "./ClaudeAgent.ts";
 import * as CodexAgent from "./codex/CodexAgent.ts";
+import * as CursorAgent from "./cursor/CursorAgent.ts";
 
 export class Agents extends Context.Service<Agents, Effect.Success<typeof make>>()(
   "@prkit/server/agents/Agents",
 ) {}
 
 type BuildServices =
+  | Crypto.Crypto
   | FileSystem.FileSystem
   | Path.Path
   | ChildProcessSpawner.ChildProcessSpawner
   | ServerConfig;
 
-/** The variable each kind reads its config folder from. */
-const CONFIG_DIR_VARIABLES: Record<AgentProviderKind, string> = {
+/** The variable each kind reads its config folder from; Cursor runs in a folder of prkit's own. */
+const CONFIG_DIR_VARIABLES: Record<AgentProviderKind, string | null> = {
   claude: "CLAUDE_CONFIG_DIR",
   codex: "CODEX_HOME",
+  cursor: null,
 };
 
 /** How each kind's provider is made from an instance's setup. */
@@ -50,6 +54,7 @@ const FACTORIES: Record<
 > = {
   claude: ClaudeAgent.make,
   codex: CodexAgent.make,
+  cursor: CursorAgent.make,
 };
 
 /**
@@ -61,9 +66,8 @@ export const setupOf = (
   env: Readonly<Record<string, string | undefined>>,
 ): InstanceSetup => {
   const { config } = resolved;
-  const inherited = isDefaultInstance(config.id)
-    ? env[CONFIG_DIR_VARIABLES[config.kind]]
-    : undefined;
+  const variable = CONFIG_DIR_VARIABLES[config.kind];
+  const inherited = isDefaultInstance(config.id) && variable !== null ? env[variable] : undefined;
   const configDir = config.configDir !== null ? expandHome(config.configDir) : (inherited ?? null);
   return {
     id: config.id,

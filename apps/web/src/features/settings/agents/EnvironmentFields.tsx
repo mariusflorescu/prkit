@@ -44,6 +44,8 @@ export function EnvironmentFields({
         Variables that change how the agent runs or signs in are refused.
         {kind === "claude" &&
           " Claude Code passes these to commands it runs; on trusted fixes the repository's check scripts can read them."}
+        {kind === "cursor" &&
+          " Cursor takes one: CURSOR_API_KEY, marked Sensitive, to run on a key from your Cursor dashboard instead of signing in."}
       </p>
       {variables.fields.length > 0 && (
         <ul aria-label="Environment variables" className="space-y-2">
@@ -66,7 +68,12 @@ export function EnvironmentFields({
                     aria-invalid={nameError !== undefined}
                     className={`${inputClass} w-44 shrink-0`}
                     {...register(`environment.${index}.name`, {
-                      validate: (value) => environmentNameProblem(value.trim()) ?? true,
+                      validate: (value, form) =>
+                        environmentNameProblem(
+                          value.trim(),
+                          kind,
+                          form.environment[index]?.sensitive ?? false,
+                        ) ?? true,
                     })}
                   />
                   <input

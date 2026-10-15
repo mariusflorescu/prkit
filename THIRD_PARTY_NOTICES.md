@@ -63,3 +63,17 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Cursor SDK
+
+prkit doesn't include or distribute Cursor's SDK (`@cursor/sdk`), which is proprietary
+software of Anysphere, Inc. When the user clicks "Install Cursor support", prkit downloads
+the exact pinned versions of the SDK, its platform package and its dependencies from
+registry.npmjs.org into the user's prkit folder, checks each against the integrity prkit
+pins, and uses them under [Cursor's Terms of Service](https://cursor.com/terms-of-service),
+which the user accepts by installing them. The repository lists `@cursor/sdk` as a
+development dependency only, for local development, and the packaged app doesn't contain it.
+
+Cursor's mark in the agent icon (`apps/web/src/components/review/agent/ProviderIcon.tsx`) is
+taken from Cursor's brand assets at [cursor.com/brand](https://cursor.com/brand) and is a
+trademark of Anysphere, Inc., used only to name the Cursor agent.

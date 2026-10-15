@@ -1,12 +1,12 @@
 # prkit
 
-prkit is a local desktop app for reviewing GitHub pull requests. It lists the PRs that need you across every GitHub account on the machine, keeps many of them open at once, and with one click asks the user's own coding agent (Claude Code or Codex, on their own subscription) to write a guided review of a PR. The agent keeps watching the PR and updates the guide when new commits land, until the PR is merged or closed.
+prkit is a local desktop app for reviewing GitHub pull requests. It lists the PRs that need you across every GitHub account on the machine, keeps many of them open at once, and with one click asks the user's own coding agent (Claude Code, Codex or Cursor, on their own subscription) to write a guided review of a PR. The agent keeps watching the PR and updates the guide when new commits land, until the PR is merged or closed.
 
 It is built as an Effect server that owns all real work, a thin React client, and an Electron shell that hosts both. How the pieces fit, and why, is in [docs/internals/architecture.md](docs/internals/architecture.md). Read it before changing anything on the server.
 
 ## What we never compromise on
 
-1. **Local only.** prkit never talks to a service of its own. GitHub tokens, agent sessions and clones stay on the user's machine, and agents run on the user's own Claude or Codex login, never an API key.
+1. **Local only.** prkit never talks to a service of its own. GitHub tokens, agent sessions and clones stay on the user's machine, and agents run on the user's own Claude, Codex or Cursor login, never an API key of prkit's or from the environment. The one key is Cursor's: each Cursor instance uses its own Cursor key, the one its sign-in mints and saves in the instance's folder, or a `CURSOR_API_KEY` the user enters, kept only as a sensitive value.
 2. **The right account, every time.** Each PR is read through the GitHub account that found it, and nothing falls back to "whichever token works". Showing one client's private code under another client's account is the worst bug this app can have.
 3. **Fast, calm UI.** Switching between open PRs is instant. No continuously repainting animations, no lying spinners, no layout jumps when data arrives. Every view has a loading skeleton, an empty state and an error state with a way out.
 4. **Guides worth reading.** The guide is the product. Plain words, one idea per chapter, core change first.
@@ -17,7 +17,7 @@ It is built as an Effect server that owns all real work, a thin React client, an
 - **account** - one GitHub login reached through a gh config directory (`github.com/octocat`).
 - **inbox** - PRs that request your review, belong to you, or involve you, across all accounts.
 - **open PRs** - the PRs the user has open, shown as compact tabs in the horizontal title bar strip, after the fixed Inbox tab.
-- **provider** - Claude Code or Codex, installed locally and signed in with the user's subscription.
+- **provider** - Claude Code, Codex or Cursor, installed locally and signed in with the user's subscription. Cursor's SDK is installed into prkit's home on request, and each Cursor instance uses its own Cursor key: the one its sign-in mints and saves in the instance's folder, or a `CURSOR_API_KEY` the user enters.
 - **review** - one guide session per PR, in `preparing`, `writing`, `watching`, `failed`, or `done`.
 - **attempt** - one revision attempt with its own process, fetched head, diff snapshot, and outcome.
 - **revision** - an accepted guide and the exact diff it explains. It stays readable after the PR moves.

@@ -23,6 +23,11 @@
  * config and gh binary, so the real accounts and tokens on this machine are never read.
  * `--claude <file>` runs that file as Claude Code (the server's PRKIT_CLAUDE_PATH), such as
  * the stand-in `tests/fakeClaude.ts` sets up, so a guide spends no subscription.
+ * `--cursor-manifest <file>` installs the stand-in Cursor SDK packages it lists instead of
+ * npm's (the server's PRKIT_CURSOR_SDK_MANIFEST, read only with `--e2e`), as
+ * `tests/fakeCursor.ts` lays them out. `--cursor-sdk <dir>` loads Cursor's SDK from that package
+ * folder instead of an installed one (the server's PRKIT_CURSOR_SDK_PATH, also read only with
+ * `--e2e`), such as the real development dependency for a live run.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
@@ -135,6 +140,8 @@ interface StartOptions {
   readonly githubApi: string | undefined;
   readonly ghHome: string | undefined;
   readonly claude: string | undefined;
+  readonly cursorManifest: string | undefined;
+  readonly cursorSdk: string | undefined;
 }
 
 const start = async (options: StartOptions) => {
@@ -194,6 +201,10 @@ const start = async (options: StartOptions) => {
               PRKIT_GITHUB_API_URL: options.githubApi,
             }),
         ...(options.claude === undefined ? {} : { PRKIT_CLAUDE_PATH: options.claude }),
+        ...(options.cursorManifest === undefined
+          ? {}
+          : { PRKIT_CURSOR_SDK_MANIFEST: options.cursorManifest }),
+        ...(options.cursorSdk === undefined ? {} : { PRKIT_CURSOR_SDK_PATH: options.cursorSdk }),
       },
       stdio: ["ignore", "pipe", logFd],
     },
@@ -274,6 +285,8 @@ const startDetached = async (options: StartOptions) => {
     ...(options.githubApi === undefined ? [] : ["--github-api", options.githubApi]),
     ...(options.ghHome === undefined ? [] : ["--gh-home", options.ghHome]),
     ...(options.claude === undefined ? [] : ["--claude", options.claude]),
+    ...(options.cursorManifest === undefined ? [] : ["--cursor-manifest", options.cursorManifest]),
+    ...(options.cursorSdk === undefined ? [] : ["--cursor-sdk", options.cursorSdk]),
   ];
   const child = NodeChildProcess.spawn(process.execPath, args, {
     cwd: repoRoot,
@@ -383,6 +396,8 @@ const { positionals, values } = NodeUtil.parseArgs({
     "github-api": { type: "string" },
     "gh-home": { type: "string" },
     claude: { type: "string" },
+    "cursor-manifest": { type: "string" },
+    "cursor-sdk": { type: "string" },
   },
 });
 const command = positionals[0];
@@ -396,6 +411,7 @@ if (watchInterval !== null && (!Number.isInteger(watchInterval) || watchInterval
   fail(`--watch-interval must be a whole number of milliseconds, at least 1000`);
 if ((values["github-api"] === undefined) !== (values["gh-home"] === undefined))
   fail("--github-api and --gh-home go together");
+if (values["cursor-sdk"] !== undefined && !values.e2e) fail("--cursor-sdk needs --e2e");
 
 switch (command) {
   case "start":
@@ -410,6 +426,12 @@ switch (command) {
       githubApi: values["github-api"],
       ghHome: values["gh-home"] === undefined ? undefined : NodePath.resolve(values["gh-home"]),
       claude: values.claude === undefined ? undefined : NodePath.resolve(values.claude),
+      cursorManifest:
+        values["cursor-manifest"] === undefined
+          ? undefined
+          : NodePath.resolve(values["cursor-manifest"]),
+      cursorSdk:
+        values["cursor-sdk"] === undefined ? undefined : NodePath.resolve(values["cursor-sdk"]),
     });
     break;
   case "doctor":

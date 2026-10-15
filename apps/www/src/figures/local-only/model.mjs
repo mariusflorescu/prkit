@@ -4,7 +4,7 @@
 // access" and "The fix agent"):
 // - prkit asks gh for each account's token and keeps it in the server's memory. It never writes one to disk, and
 //   only GitHub sees it: each request goes through the account that found the pull request.
-// - The agent runs on your Mac under your own Claude or Codex login. It works on its own copy, its commands carry
+// - The agent runs on your Mac under your own Claude, Codex or Cursor login. It works on its own copy, its commands carry
 //   no GitHub token and have no network, and it never gets your GitHub token. (It does get its own per-turn token
 //   for prkit's MCP server, and prkit's folder may link to Codex's own login: neither is a GitHub token.)
 // - There is no prkit account and no prkit cloud: the app talks to GitHub and to your agent, and nothing else.
