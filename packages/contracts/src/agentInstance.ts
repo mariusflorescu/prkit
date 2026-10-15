@@ -215,7 +215,7 @@ const BLOCKED_ENV: ReadonlyArray<{
  * Cursor key bills the user's own plan, so it stays on the subscription; a custom endpoint would
  * not, and is refused with the rest of `CURSOR_`.
  */
-const CURSOR_API_KEY = "CURSOR_API_KEY";
+export const CURSOR_API_KEY = "CURSOR_API_KEY";
 
 /**
  * Why an instance of `kind` can't set `name`, in words for the form, or null when it can.

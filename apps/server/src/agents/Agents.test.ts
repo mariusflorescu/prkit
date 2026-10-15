@@ -510,6 +510,13 @@ describe("AgentInstances secrets", () => {
         const read = (yield* store.resolved).find((entry) => entry.config.id === "cursor_work");
         expect(read?.environment).toEqual({ CURSOR_API_KEY: "key_123" });
         expect(read?.config.environment[0]?.value).toBe("");
+        // A saved key can't be turned into a plain value later.
+        const flipped = yield* store
+          .update(cursor({ environment: [{ ...key(false), value: "key_456" }] }))
+          .pipe(Effect.flip);
+        expect(flipped.message).toContain("Sensitive");
+        const kept = (yield* store.resolved).find((entry) => entry.config.id === "cursor_work");
+        expect(kept?.environment).toEqual({ CURSOR_API_KEY: "key_123" });
       }),
     ));
 });

@@ -6,6 +6,7 @@ import {
   AgentInstanceId,
   AgentLogin,
   AgentProviderKind,
+  CURSOR_API_KEY,
   defaultInstanceConfig,
   environmentNameProblem,
   isDefaultInstance,
@@ -196,6 +197,7 @@ export const make = Effect.gen(function* () {
   /**
    * `saved` holds the names the instance already has. One a newer rule refuses isn't checked
    * again, so turning the agent on or off never fails on it; `resolved` still never passes it.
+   * CURSOR_API_KEY is always checked: a saved key must never be turned into a plain value.
    */
   const checkConfig = (config: AgentInstanceConfig, saved: ReadonlySet<string>) =>
     Effect.gen(function* () {
@@ -210,9 +212,10 @@ export const make = Effect.gen(function* () {
         });
       const names = new Set<string>();
       for (const variable of config.environment) {
-        const problem = saved.has(variable.name)
-          ? null
-          : environmentNameProblem(variable.name, config.kind, variable.sensitive);
+        const problem =
+          saved.has(variable.name) && variable.name.toUpperCase() !== CURSOR_API_KEY
+            ? null
+            : environmentNameProblem(variable.name, config.kind, variable.sensitive);
         if (problem !== null)
           return yield* new AgentInstanceError({ message: `${variable.name}: ${problem}` });
         if (names.has(variable.name))
