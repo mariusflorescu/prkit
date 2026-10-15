@@ -15,6 +15,7 @@ export * from "./guideNormalize.ts";
 export * from "./github.ts";
 export * from "./ids.ts";
 export * from "./inbox.ts";
+export * from "./inboxFilter.ts";
 export * from "./model.ts";
 export * from "./outsideAgents.ts";
 export * from "./pullRequest.ts";

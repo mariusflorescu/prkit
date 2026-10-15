@@ -16,7 +16,6 @@ import {
   sha,
   STACK,
   start,
-  wrote,
 } from "./model.ts";
 import { STACKS } from "./options.ts";
 
@@ -109,11 +108,19 @@ export const rest = (
   if (path === "/user") {
     const login = token.replace(/^(Bearer|token) fake-token-for-/, "");
     return login.startsWith("budget-")
-      ? { kind: "rest:user", status: 200, body: { login, avatar_url: "", name: "Budget Test" } }
+      ? {
+          kind: "rest:user",
+          status: 200,
+          body: { id: login === LOGIN ? 101 : 102, login, avatar_url: "", name: "Budget Test" },
+        }
       : { kind: "rest:user-refused", status: 401, body: { message: "Bad credentials" } };
   }
   if (path === `/repos/${OWNER}/${REPO}`)
     return { kind: "rest:repository", status: 200, body: REPOSITORY };
+  if (path === `/repos/${OWNER}/${REPO}/labels`)
+    return { kind: "rest:labels", status: 200, body: [{ name: "fixture", color: "eeeeee" }] };
+  if (path === `/repos/${OWNER}/${REPO}/teams`)
+    return { kind: "rest:teams", status: 200, body: [] };
   const match =
     /^\/repos\/budget\/fixtures\/(pulls|issues|commits|compare|contents|actions)\/([^/]+)(?:\/(.*))?$/.exec(
       path,
@@ -143,7 +150,6 @@ export const rest = (
       };
     if (tail === "reviews" && method === "POST") {
       const input = decodeBody(text || "{}");
-      wrote(`POST pulls/${pull.number}/reviews`, input);
       if (pull.author === LOGIN && input["event"] !== "COMMENT")
         return {
           kind: "rest:review-refused",
@@ -210,7 +216,6 @@ export const rest = (
     if (owner === undefined || run === undefined)
       return { kind: "rest:unknown", status: 404, body: { message: "Not Found" } };
     if (action === "approve" && method === "POST") {
-      wrote(`POST actions/runs/${run.id}/approve`, {});
       if (run.conclusion !== "action_required")
         return {
           kind: "rest:run-approve-refused",

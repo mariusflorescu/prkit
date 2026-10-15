@@ -160,7 +160,7 @@ export const makeFixerState = Effect.gen(function* () {
   const autoResolvesLeft = (fixerId: FixerId) =>
     autoResolvedToday(fixerId).pipe(Effect.map((count) => count < AUTO_RESOLVE_LIMIT));
 
-  const snapshotOf = (key: PullRequestKey) =>
+  const snapshotOf = (key: PullRequestKey, history = false) =>
     Effect.gen(function* () {
       const row = yield* findFixer(key);
       const repositorySettings = yield* settingsOf(key);
@@ -174,7 +174,7 @@ export const makeFixerState = Effect.gen(function* () {
           autoResolvePaused: false,
         } satisfies FixerSnapshot;
       const turns = yield* sql`SELECT ${sql.literal(TURN_COLUMNS)} FROM fixer_turns
-        WHERE fixer_id = ${row.id} ORDER BY created_at DESC, rowid DESC LIMIT 20`.pipe(
+        WHERE fixer_id = ${row.id} ORDER BY created_at DESC, rowid DESC ${history ? sql`` : sql`LIMIT 20`}`.pipe(
         Effect.flatMap(decodeTurns),
       );
       const current = turns.find((turn) => turn.status._tag !== "queued");
@@ -265,6 +265,14 @@ export const makeFixerState = Effect.gen(function* () {
       return { row, fixer, outcome: decideTurn(command, toTurn(row)) };
     });
 
+  const turnActivity = (key: PullRequestKey, turnId: FixerTurnId) =>
+    Effect.gen(function* () {
+      yield* commandTurn(key, turnId, "push");
+      return (yield* sql`SELECT * FROM fixer_activity WHERE turn_id = ${turnId} ORDER BY id`.pipe(
+        Effect.flatMap(decodeActivity),
+      )).map(toActivity);
+    });
+
   /** Every active fixer, with its PR's account, for the watcher. */
   const watched = sql`SELECT * FROM fixers WHERE ended IS NULL`.pipe(Effect.flatMap(decodeFixers));
 
@@ -291,6 +299,7 @@ export const makeFixerState = Effect.gen(function* () {
     notify,
     dbFailures,
     commandTurn,
+    turnActivity,
     watched,
   };
 });

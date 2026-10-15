@@ -1,4 +1,6 @@
 // @effect-diagnostics globalFetch:off -- the test is an MCP client, the way the bridge is
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Inspect the published tool inventory as part of its parity contract.
+import * as NodeFS from "node:fs";
 
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -6,6 +8,7 @@ import {
   OUTSIDE_AGENTS_DEFAULTS,
   OUTSIDE_MCP_PATH,
   type OutsideAgentsSettings,
+  WS_METHODS,
 } from "@prkit/contracts";
 import { AttemptId, ReviewId } from "@prkit/contracts";
 import * as Effect from "effect/Effect";
@@ -37,6 +40,34 @@ const READS = [
   "list_review_comments",
   "read_fix",
   "wait_for",
+  "list_accounts",
+  "list_repositories",
+  "list_repository_pull_requests",
+  "list_agents",
+  "read_pull_request_files",
+  "read_file_contents",
+  "read_timeline",
+  "read_threads",
+  "read_checks",
+  "read_conversation",
+  "read_stack",
+  "read_pull_request_action_candidates",
+  "list_reviews",
+  "list_guide_revisions",
+  "read_guide_revision",
+  "read_guide_progress",
+  "read_review_diff",
+  "read_guide_duration",
+  "read_guide_settings",
+  "read_guide_scope",
+  "list_guide_repositories",
+  "find_guide_repository",
+  "list_fixes",
+  "read_fix_turn",
+  "read_fix_diff",
+  "read_fix_patch",
+  "read_fix_access",
+  "read_settings",
 ];
 const STARTS_WORK = [
   "open_pull_request",
@@ -48,6 +79,13 @@ const STARTS_WORK = [
   "stop_fix",
   "retry_fix",
   "resolve_conflicts",
+  "close_pull_request_tab",
+  "focus_pull_request_tab",
+  "reorder_pull_request_tabs",
+  "save_inbox_filters",
+  "save_pull_request_guide_settings",
+  "edit_review_comment",
+  "move_review_comment",
 ];
 
 const Answer = Schema.Struct({
@@ -119,6 +157,22 @@ const names = (answer: typeof Answer.Type) =>
   (answer.result?.tools ?? []).map((tool) => tool.name).sort();
 
 describe("outside agents' MCP endpoint", () => {
+  it("accounts for every tool and app RPC in the published inventory", () => {
+    const docs = NodeFS.readFileSync(
+      new URL("../../../../../docs/features/outside-agents.md", import.meta.url),
+      "utf8",
+    );
+    const table = docs
+      .split("\n")
+      .filter((line) => line.startsWith("| "))
+      .join("\n");
+    for (const tool of levelsOf(makeOutsideToolkit(() => true))) {
+      expect(tool.level).toBeDefined();
+      expect(table).toContain(`\`${tool.name}\``);
+    }
+    for (const method of Object.values(WS_METHODS)) expect(table).toContain(method);
+  });
+
   it("declares every tool with its level", () => {
     expect(levelsOf(makeOutsideToolkit(() => true))).toEqual([
       ...READS.map((name) => ({ name, level: "reads" })),

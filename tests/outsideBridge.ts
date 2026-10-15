@@ -87,6 +87,9 @@ export const startBridge = (home: string, clientName = "e2e client") => {
   const call = async (name: string, args: object = {}) => {
     const answer = await request("tools/call", { name, arguments: args });
     if (answer.error !== undefined) return { rpcError: answer.error.message } as const;
+    const wireBytes = new TextEncoder().encode(JSON.stringify(answer.result)).length;
+    if (wireBytes > 48_000)
+      throw new Error(`${name} returned ${wireBytes} encoded bytes, above the 48 KB cap.`);
     const result = Schema.decodeUnknownSync(ToolResult)(answer.result);
     const text = result.content.map((part) => part.text ?? "").join("\n");
     return { isError: result.isError === true, text, json: result.structuredContent } as const;

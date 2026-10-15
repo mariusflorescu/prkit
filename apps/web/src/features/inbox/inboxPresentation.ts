@@ -18,8 +18,9 @@ export const INBOX_GROUPS = [
   { reason: "involved", title: "Involved" },
 ] satisfies ReadonlyArray<{ reason: InboxReason; title: string }>;
 
-export const repositoryKey = (repository: { host: string; owner: string; name: string }) =>
-  `${repository.host}/${repository.owner}/${repository.name}`.toLowerCase();
+export { matchesInboxFilter, stackOrder } from "@prkit/contracts";
+import { repositoryKey } from "@prkit/contracts";
+export { repositoryKey };
 const entryRepository = (entry: PullRequestSummary) => ({
   host: entry.ref.host,
   owner: entry.ref.owner,
@@ -77,29 +78,6 @@ export const withLiveAccounts = (
   };
 };
 
-export const matchesInboxFilter = (
-  entry: InboxEntry,
-  search: string,
-  account: AccountId | null,
-  repository: RepositoryFilter | null,
-) => {
-  if (account !== null && entry.accountId !== account) return false;
-  if (repository !== null && repositoryKey(entryRepository(entry)) !== repositoryKey(repository))
-    return false;
-  const needle = search.trim().toLowerCase();
-  const number = String(entry.ref.number);
-  return (
-    needle === "" ||
-    [
-      entry.title,
-      `${entry.ref.owner}/${entry.ref.repo}`,
-      entry.author?.login ?? "",
-      number,
-      `#${number}`,
-    ].some((value) => value.toLowerCase().includes(needle))
-  );
-};
-
 const relativeTime = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 export const relativeUpdatedTime = (updatedAt: string) => {
   const seconds = Math.max(0, (Date.now() - Date.parse(updatedAt)) / 1000);
@@ -108,33 +86,6 @@ export const relativeUpdatedTime = (updatedAt: string) => {
   if (seconds < 86400) return relativeTime.format(-Math.floor(seconds / 3600), "hour");
   if (seconds < 2592000) return relativeTime.format(-Math.floor(seconds / 86400), "day");
   return relativeTime.format(-Math.floor(seconds / 2592000), "month");
-};
-
-const stackId = (entry: InboxEntry) =>
-  entry.stack === null
-    ? null
-    : `${entry.ref.host}/${entry.ref.owner}/${entry.ref.repo}/${entry.stack.number}`;
-
-/**
- * Layers of one stack sit together, bottom to top, where its most recently updated
- * layer would be. Everything else keeps the server's order, newest first.
- */
-export const stackOrder = (entries: ReadonlyArray<InboxEntry>) => {
-  const layers = new Map<string, Array<InboxEntry>>();
-  for (const entry of entries) {
-    const id = stackId(entry);
-    if (id !== null) layers.set(id, [...(layers.get(id) ?? []), entry]);
-  }
-  const placed = new Set<string>();
-  return entries.flatMap((entry) => {
-    const id = stackId(entry);
-    if (id === null) return [entry];
-    if (placed.has(id)) return [];
-    placed.add(id);
-    return (layers.get(id) ?? []).toSorted(
-      (left, right) => (left.stack?.position ?? 0) - (right.stack?.position ?? 0),
-    );
-  });
 };
 
 /** A row of the repository filter: every repository, or one with its inbox count. */

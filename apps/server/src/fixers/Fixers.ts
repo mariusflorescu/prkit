@@ -12,6 +12,7 @@ import {
   type FixerTrigger,
   type FixerTurnId,
   type FixerTurnState,
+  FixerWorkRefused,
   type FixTarget,
   type PullRequestKey,
   refFromKey,
@@ -26,6 +27,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import { processHost } from "../agents/turnEnd.ts";
 import { GitHubApi } from "../github/GitHubApi.ts";
+import { makeKeyedGate } from "../github/keyedGate.ts";
 import { PullRequests } from "../pullRequests/PullRequests.ts";
 import { StartedBy } from "../outside/StartedBy.ts";
 import { RepoCache } from "../repo/RepoCache.ts";
@@ -62,6 +64,7 @@ export const make = Effect.gen(function* () {
   const repo = yield* RepoCache;
   const api = yield* GitHubApi;
   const pullRequests = yield* PullRequests;
+  const withRetry = makeKeyedGate<PullRequestKey>(1);
 
   const state = yield* makeFixerState;
   const {
@@ -105,6 +108,9 @@ export const make = Effect.gen(function* () {
   const { finishFixes, finishConflicts, reportProgress } = yield* makeFixTools(state, conflicts);
 
   const get = (key: PullRequestKey) => snapshotOf(key).pipe(Effect.catchTags(dbFailures));
+  const history = (key: PullRequestKey) => snapshotOf(key, true).pipe(Effect.catchTags(dbFailures));
+  const turnActivity = (key: PullRequestKey, turnId: FixerTurnId) =>
+    state.turnActivity(key, turnId).pipe(Effect.catchTags(dbFailures));
 
   /** The comments as the agent gets them, read fresh: drafts from prkit, threads from GitHub. */
   const commentsFor = (
@@ -371,15 +377,28 @@ export const make = Effect.gen(function* () {
       return yield* snapshotOf(key);
     }).pipe(Effect.catchTags(dbFailures));
 
-  const retry = (key: PullRequestKey, turnId: FixerTurnId) =>
-    Effect.gen(function* () {
-      const { row, fixer, outcome } = yield* commandTurn(key, turnId, "retry");
-      if (outcome._tag === "reject")
-        return yield* new FixerStateError({ key, message: outcome.message });
-      if (outcome._tag === "noop") return yield* snapshotOf(key);
-      const startedBy = startedByFor(row.started_by, yield* StartedBy);
-      return yield* retryWork(key, row, fixer).pipe(Effect.provideService(StartedBy, startedBy));
-    }).pipe(Effect.catchTags(dbFailures));
+  const retry = (
+    key: PullRequestKey,
+    turnId: FixerTurnId,
+    input: { readonly refuse?: ReadonlyArray<"revert"> } = {},
+  ) =>
+    withRetry(
+      key,
+      Effect.gen(function* () {
+        const { row, fixer, outcome } = yield* commandTurn(key, turnId, "retry");
+        // Work is immutable. Read its stored kind under the same gate that queues the retry.
+        if (row.work._tag === "revert" && input.refuse?.includes("revert"))
+          return yield* new FixerWorkRefused({
+            key,
+            message: "Reverts run again only from prkit, by the owner.",
+          });
+        if (outcome._tag === "reject")
+          return yield* new FixerStateError({ key, message: outcome.message });
+        if (outcome._tag === "noop") return yield* snapshotOf(key);
+        const startedBy = startedByFor(row.started_by, yield* StartedBy);
+        return yield* retryWork(key, row, fixer).pipe(Effect.provideService(StartedBy, startedBy));
+      }),
+    ).pipe(Effect.catchTags(dbFailures));
 
   /** Runs a turn's work again, as a new turn. */
   const retryWork = (key: PullRequestKey, row: TurnRow, fixer: FixerRow) =>
@@ -541,6 +560,8 @@ export const make = Effect.gen(function* () {
 
   return {
     get,
+    history,
+    turnActivity,
     watch,
     feed,
     send,

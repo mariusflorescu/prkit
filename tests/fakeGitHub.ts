@@ -64,6 +64,14 @@ export const startFakeGitHub = async (
       Option.match(decodeReady(line), { onNone: () => {}, onSome: (ready) => resolve(ready.url) }),
     );
   });
+  const budget = Schema.decodeUnknownSync(
+    Schema.fromJsonString(Schema.Struct({ core: Schema.Int, graphql: Schema.Int })),
+  )(await (await fetch(`${url}/__fake/budget`)).text());
+  if (budget.core !== 5000 || budget.graphql !== 5000)
+    throw new Error("The fresh fake GitHub budget is not full.");
+  const budgetDir = NodePath.join(repoRoot, ".e2e", "evidence", "u70-r1", "budgets");
+  NodeFS.mkdirSync(budgetDir, { recursive: true });
+  NodeFS.writeFileSync(NodePath.join(budgetDir, `${name}.json`), JSON.stringify(budget));
   const post = (path: string) => fetch(`${url}/__fake/${path}`, { method: "POST" });
   return {
     url,
@@ -81,7 +89,7 @@ export const startFakeGitHub = async (
       post(`latency?ms=${ms}${resource === undefined ? "" : `&resource=${resource}`}`),
     archive: (repo: string) => post(`archive?repo=${repo}`),
     resetStats: () => post("reset-stats"),
-    comment: (pr: number) => post(`comment?pr=${pr}`),
+    comment: (pr: number, size = 0) => post(`comment?pr=${pr}&size=${size}`),
     push: (pr: number) => post(`push?pr=${pr}`),
     conflict: (pr: number) => post(`conflict?pr=${pr}`),
     checking: (pr: number) => post(`checking?pr=${pr}`),

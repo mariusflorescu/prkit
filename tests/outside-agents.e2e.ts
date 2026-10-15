@@ -2,6 +2,7 @@ import * as NodeFS from "node:fs";
 import * as NodeHttp from "node:http";
 import * as NodePath from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { FixerSnapshot } from "../packages/contracts/src/fixer.ts";
 
 import { describe, test } from "@e2e-dev/web";
 import { expect } from "e2e";
@@ -9,16 +10,21 @@ import * as Schema from "effect/Schema";
 
 import { repoRoot } from "../scripts/verify-run.ts";
 import { setUpFakeClaude } from "./fakeClaude.ts";
-import {
-  startFakeGitHub,
-  startFakeInstance,
-  startInstance,
-  stopFakeInstance,
-} from "./fakeGitHub.ts";
+import { startFakeGitHub, startFakeInstance, stopFakeInstance } from "./fakeGitHub.ts";
 import { draftOn, type Fixtures, openSendToAgent } from "./fixActions.ts";
-import { closeFixFixture, createFixFixture, type FixFixture, pullState } from "./fixFixture.ts";
-import { FIXTURE_ACCOUNT, FIXTURE_REPO, NEEDS_FIXTURE, prPath, readRows } from "./fixturePr.ts";
+import { readRows } from "./fixturePr.ts";
+import { outsideGit } from "./outsideGit.ts";
+import { StatusResult } from "../apps/server/src/outside/schemas.ts";
+import { AgentsResult, FixTurnResult } from "../apps/server/src/outside/paritySchemas.ts";
 import { type Bridge, startBridge } from "./outsideBridge.ts";
+
+const accountOf = async (bridge: Bridge) => {
+  const answer = await bridge.call("prkit_status");
+  const status = Schema.decodeUnknownSync(StatusResult)("json" in answer ? answer.json : null);
+  const account = status.accounts[0];
+  if (account === undefined) throw new Error("Fake account missing");
+  return account.accountId;
+};
 
 const READS = [
   "list_inbox",
@@ -29,7 +35,35 @@ const READS = [
   "read_guide",
   "read_pull_request",
   "wait_for",
-];
+  "list_accounts",
+  "list_repositories",
+  "list_repository_pull_requests",
+  "list_agents",
+  "read_pull_request_files",
+  "read_file_contents",
+  "read_timeline",
+  "read_threads",
+  "read_checks",
+  "read_conversation",
+  "read_stack",
+  "read_pull_request_action_candidates",
+  "list_reviews",
+  "list_guide_revisions",
+  "read_guide_revision",
+  "read_guide_progress",
+  "read_review_diff",
+  "read_guide_duration",
+  "read_guide_settings",
+  "read_guide_scope",
+  "list_guide_repositories",
+  "find_guide_repository",
+  "list_fixes",
+  "read_fix_turn",
+  "read_fix_diff",
+  "read_fix_patch",
+  "read_fix_access",
+  "read_settings",
+].sort();
 const ALL = [
   ...READS,
   "add_review_comment",
@@ -41,6 +75,13 @@ const ALL = [
   "send_to_fix_agent",
   "stop_fix",
   "stop_guide",
+  "close_pull_request_tab",
+  "focus_pull_request_tab",
+  "reorder_pull_request_tabs",
+  "save_inbox_filters",
+  "save_pull_request_guide_settings",
+  "edit_review_comment",
+  "move_review_comment",
 ].sort();
 const NOT_OPEN = "prkit isn't open. Open it, then try again.";
 const OFF = "Outside agents are off. Turn them on in prkit > Settings > Outside agents.";
@@ -143,16 +184,209 @@ const raw = (home: string, headers: Record<string, string>) => {
 
 describe("outside agents", { tags: ["outside-agents"] }, () => {
   test(
+    "outside retries refuse recent and older reverts while the app retry path keeps its behavior",
+    { timeout: 180_000 },
+    async ({ app, screen, browser }) => {
+      const name = "outside-agents-retry";
+      const fake = await startFakeGitHub(name);
+      const git = outsideGit(name, { fetches: false });
+      const claude = setUpFakeClaude(name);
+      let bridge: Bridge | null = null;
+      const log = transcript(name);
+      try {
+        const run = git.start(() => startFakeInstance(name, fake, ["--claude", claude.file]));
+        await app.open(run.openUrl);
+        await openOutsideSettings({ app, screen, browser });
+        await switchOn({ app, screen, browser }, true);
+        await screen.getByRole("radio", "Read and start work").tap();
+        bridge = startBridge(run.home, CLIENT);
+        await bridge.initialize();
+        await toolsSettle(bridge, ALL);
+        const account = await accountOf(bridge);
+        const catalog = await bridge.call("list_agents");
+        const agent = Schema.decodeUnknownSync(AgentsResult)(
+          "json" in catalog ? catalog.json : null,
+        ).items.find((entry) => entry.kind === "claude" && entry.ready);
+        if (agent === undefined) throw new Error("The stand-in Claude must be ready");
+        const key = "github.com/budget/fixtures#9";
+        const old = "outside-old-revert";
+        const recent = "outside-recent-revert";
+        const fixer = "outside-retry-session";
+        const at = Date.now() - 60_000;
+        // Terminal history is a fixture: exercising 20 real agent turns would hide this boundary.
+        const db = new DatabaseSync(NodePath.join(run.home, "prkit.sqlite"));
+        try {
+          db.prepare(`INSERT INTO fixers
+            (id, pr_key, account_id, provider, instance_id, created_at, updated_at)
+            VALUES (?, ?, ?, 'claude', ?, ?, ?)`).run(
+            fixer,
+            key,
+            account,
+            agent.instance,
+            new Date(at).toISOString(),
+            new Date(at).toISOString(),
+          );
+          const insert = db.prepare(`INSERT INTO fixer_turns
+            (id, fixer_id, kind, work, trigger, status, provider, instance_id, created_at, finished_at)
+            VALUES (?, ?, ?, ?, 'user', ?, 'claude', ?, ?, ?)`);
+          for (let index = 0; index < 22; index++) {
+            const revert = index === 0 || index === 21;
+            const id = index === 0 ? old : index === 21 ? recent : `outside-history-${index}`;
+            const createdAt = new Date(at + index * 1000).toISOString();
+            insert.run(
+              id,
+              fixer,
+              revert ? "revert" : "conflicts",
+              JSON.stringify(
+                revert
+                  ? { _tag: "revert", turnId: old, sha: "a".repeat(40) }
+                  : { _tag: "conflicts", strategy: "merge" },
+              ),
+              JSON.stringify(
+                revert
+                  ? { _tag: "failed", reason: "repository", message: "Fixture revert failed" }
+                  : { _tag: "unchanged" },
+              ),
+              agent.instance,
+              createdAt,
+              createdAt,
+            );
+          }
+        } finally {
+          db.close();
+        }
+
+        const Exit = Schema.TaggedStruct("Exit", {
+          exit: Schema.TaggedStruct("Success", { value: FixerSnapshot }),
+        });
+        const ownerCall = async (tag: "fixers.get" | "fixers.retry", turnId?: string) => {
+          const text = await browser.evaluate(
+            (input: {
+              url: string;
+              token: string;
+              tag: string;
+              payload: { key: string; turnId?: string };
+            }) =>
+              new Promise<string>((resolve, reject) => {
+                const url = new URL("/ws", input.url);
+                url.protocol = "ws:";
+                url.searchParams.set("token", input.token);
+                const socket = new WebSocket(url);
+                const timer = setTimeout(() => {
+                  socket.close();
+                  reject(new Error("App RPC timed out"));
+                }, 20_000);
+                socket.addEventListener(
+                  "open",
+                  () =>
+                    socket.send(
+                      JSON.stringify({
+                        _tag: "Request",
+                        id: "1",
+                        tag: input.tag,
+                        payload: input.payload,
+                        headers: [],
+                      }),
+                    ),
+                  { once: true },
+                );
+                socket.addEventListener(
+                  "error",
+                  () => {
+                    clearTimeout(timer);
+                    socket.close();
+                    reject(new Error("App RPC failed"));
+                  },
+                  { once: true },
+                );
+                socket.addEventListener(
+                  "message",
+                  (event: MessageEvent<string>) => {
+                    clearTimeout(timer);
+                    socket.close();
+                    resolve(event.data);
+                  },
+                  { once: true },
+                );
+              }),
+            {
+              url: run.url,
+              token: run.token,
+              tag,
+              payload: { key, ...(turnId === undefined ? {} : { turnId }) },
+            },
+          );
+          const decoded = Schema.decodeSync(
+            Schema.fromJsonString(Schema.Union([Exit, Schema.Array(Exit)])),
+          )(text);
+          const result = Schema.is(Exit)(decoded) ? decoded : decoded[0];
+          if (result === undefined) throw new Error("App RPC returned no result");
+          return result.exit.value;
+        };
+        const shown = await ownerCall("fixers.get");
+        expect(shown.turns.length).toBe(20);
+        expect(shown.turns.some((turn) => turn.id === old)).toBe(false);
+        expect(shown.turns.some((turn) => turn.id === recent)).toBe(true);
+        for (const turnId of [old, recent]) {
+          const read = await bridge.call("read_fix_turn", {
+            url: PR_9,
+            accountId: account,
+            turnId,
+          });
+          expect(
+            Schema.decodeUnknownSync(FixTurnResult)("json" in read ? read.json : null).turn.work
+              ._tag,
+          ).toBe("revert");
+          const refused = await bridge.call("retry_fix", { url: PR_9, accountId: account, turnId });
+          log.note(`retry_fix ${turnId === old ? "outside latest 20" : "recent"}`, refused);
+          expect(refused).toMatchObject({
+            isError: true,
+            text: "Reverts run again only from prkit, by the owner.",
+          });
+        }
+        expect(readRows(run.home, "SELECT COUNT(*) AS count FROM fixer_turns")).toEqual([
+          { count: 22 },
+        ]);
+        const retried = await ownerCall("fixers.retry", old);
+        expect(
+          retried.turns.some((turn) => turn.work._tag === "revert" && turn.trigger === "retry"),
+        ).toBe(true);
+        expect(readRows(run.home, "SELECT COUNT(*) AS count FROM fixer_turns")).toEqual([
+          { count: 23 },
+        ]);
+        log.note("app retry", retried);
+      } finally {
+        try {
+          await bridge?.stop();
+          const writes = await fake.writes();
+          const pushes = git.pushes();
+          log.note("final write attempts", { writes, pushes });
+          log.save();
+          expect(writes).toEqual([]);
+          expect(pushes).toEqual([]);
+        } finally {
+          try {
+            stopFakeInstance(name, { keepHome: false });
+          } finally {
+            fake.stop();
+          }
+        }
+      }
+    },
+  );
+
+  test(
     "a client drives prkit through its launcher, at the level the owner set, and never reaches GitHub",
     { timeout: 300_000 },
     async ({ app, screen, browser }) => {
       const name = "outside-agents";
       const log = transcript("outside-agents");
       const fake = await startFakeGitHub(name);
+      const git = outsideGit(name, { fetches: false });
       const claude = setUpFakeClaude(name);
       let bridge: Bridge | null = null;
       try {
-        let run = startFakeInstance(name, fake, ["--claude", claude.file]);
+        let run = git.start(() => startFakeInstance(name, fake, ["--claude", claude.file]));
         const fixtures = { app, screen, browser };
         // The launcher is there from the first launch, and holds no secret.
         const launcher = NodeFS.readFileSync(NodePath.join(run.home, "bin", "prkit-mcp"), "utf8");
@@ -289,7 +523,7 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
         stopFakeInstance(name, { keepHome: true });
         await statusSettles(bridge, NOT_OPEN);
         log.note("prkit_status while prkit is closed", await bridge.call("prkit_status"));
-        run = startFakeInstance(name, fake, ["--claude", claude.file]);
+        run = git.start(() => startFakeInstance(name, fake, ["--claude", claude.file]));
         await statusSettles(bridge, null);
         await toolsSettle(bridge, ALL);
         log.note("prkit_status after a restart", await bridge.call("prkit_status"));
@@ -307,10 +541,15 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
         expect(writes).toEqual([]);
         log.note("bridge stderr", bridge.stderr() || "(empty)");
       } finally {
-        log.save();
         await bridge?.stop();
+        const writes = await fake.writes();
+        const pushes = git.pushes();
+        log.note("final write attempts", { writes, pushes });
+        log.save();
         stopFakeInstance(name, { keepHome: false });
         fake.stop();
+        expect(writes).toEqual([]);
+        expect(pushes).toEqual([]);
       }
     },
   );
@@ -322,9 +561,10 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
       const name = "outside-agents-accounts";
       const log = transcript("outside-agents-accounts");
       const fake = await startFakeGitHub(name, { secondAccount: true });
+      const git = outsideGit(name, { fetches: false });
       let bridge: Bridge | null = null;
       try {
-        const run = startFakeInstance(name, fake);
+        const run = git.start(() => startFakeInstance(name, fake));
         await app.open(run.openUrl);
         await openOutsideSettings({ app, screen, browser });
         await switchOn({ app, screen, browser }, true);
@@ -386,24 +626,31 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
           "prkit has no account github.com/octocat on github.com",
         );
       } finally {
-        log.save();
         await bridge?.stop();
+        const writes = await fake.writes();
+        const pushes = git.pushes();
+        log.note("final write attempts", { writes, pushes });
+        log.save();
         stopFakeInstance(name, { keepHome: false });
         fake.stop();
+        expect(writes).toEqual([]);
+        expect(pushes).toEqual([]);
       }
     },
   );
 
   test(
     "a guide and a fix started by a client are written, and the fix waits for Push",
-    { timeout: 300_000, skip: NEEDS_FIXTURE },
+    { timeout: 300_000 },
     async ({ app, screen, browser }) => {
       const name = "outside-agents-fixture";
       const log = transcript("outside-agents-fixture");
       const claude = setUpFakeClaude(name);
+      const fake = await startFakeGitHub(name);
+      const git = outsideGit(name);
       let bridge: Bridge | null = null;
       try {
-        const run = startInstance(name, ["--claude", claude.file]);
+        const run = git.start(() => startFakeInstance(name, fake, ["--claude", claude.file]));
         const fixtures = { app, screen, browser };
         await app.open(run.openUrl);
         await openOutsideSettings(fixtures);
@@ -416,8 +663,8 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
         await bridge.initialize();
         await toolsSettle(bridge, ALL);
         const pr = {
-          url: `https://github.com/${FIXTURE_REPO}/pull/1`,
-          accountId: FIXTURE_ACCOUNT,
+          url: "https://github.com/budget/fixtures/pull/1",
+          accountId: await accountOf(bridge),
         };
 
         const started = await bridge.call("generate_guide", pr);
@@ -471,7 +718,7 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
         ).toEqual([{ status: "ready", started_by: CLIENT }]);
 
         await app.open(
-          `${run.url}/pr/github.com/${FIXTURE_REPO}/1?account=${encodeURIComponent(FIXTURE_ACCOUNT)}&tab=fixes`,
+          `${run.url}/pr/github.com/budget/fixtures/1?account=${encodeURIComponent(pr.accountId ?? "")}&tab=fixes`,
         );
         const turn = screen.getByRole("list", "Fixes").getByRole("article").first();
         await expect(turn).toContainText(`Started from ${CLIENT}`, { timeout: 30_000 });
@@ -479,26 +726,32 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
         await app.screenshot("outside-agents-fix-waits-for-push");
         log.note("bridge stderr", bridge.stderr() || "(empty)");
       } finally {
-        log.save();
         await bridge?.stop();
+        const writes = await fake.writes();
+        const pushes = git.pushes();
+        log.note("final write attempts", { writes, pushes });
+        log.save();
         stopFakeInstance(name, { keepHome: false });
+        fake.stop();
+        expect(writes).toEqual([]);
+        expect(pushes).toEqual([]);
       }
     },
   );
 
   test(
     "a change a client asks for on the owner's ready fix waits for Push, even where pushes are automatic",
-    { timeout: 420_000, skip: NEEDS_FIXTURE },
+    { timeout: 420_000 },
     async ({ app, screen, browser }) => {
       const name = "outside-agents-revise";
       const log = transcript("outside-agents-revise");
       const claude = setUpFakeClaude(name);
-      let fixture: FixFixture | null = null;
+      const fake = await startFakeGitHub(name);
+      const git = outsideGit(name);
       let bridge: Bridge | null = null;
       try {
-        fixture = createFixFixture(`outside-${Date.now()}`);
-        const pushedHead = pullState(fixture.number).head;
-        const run = startInstance(name, ["--claude", claude.file]);
+        const pushedHead = (await fake.pull(9)).head;
+        const run = git.start(() => startFakeInstance(name, fake, ["--claude", claude.file]));
         const fixtures = { app, screen, browser };
         await app.open(run.openUrl);
         await openOutsideSettings(fixtures);
@@ -509,8 +762,15 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
         });
 
         // The owner's own fix, sent from prkit, waits at ready.
-        await app.open(`${run.url}${prPath(FIXTURE_REPO, fixture.number, "files")}`);
-        await draftOn(fixtures, 3, "Name the limit.");
+        await screen.getByRole("link", "Inbox").tap();
+        bridge = startBridge(run.home, CLIENT);
+        await bridge.initialize();
+        await toolsSettle(bridge, ALL);
+        const account = await accountOf(bridge);
+        await app.open(
+          `${run.url}/pr/github.com/budget/fixtures/9?account=${encodeURIComponent(account)}&tab=files`,
+        );
+        await draftOn(fixtures, 3, "Name the limit.", "src/limits.ts");
         const dialog = await openSendToAgent(fixtures, 1);
         await dialog.getByRole("button", "Send 1 comment to agent").tap();
         await expect(screen.getByText("Sent to the agent")).toBeVisible({ timeout: 30_000 });
@@ -522,6 +782,10 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
         await expect
           .poll(turns, { timeout: 180_000, interval: 2_000 })
           .toEqual([{ status: "ready", started_by: null, rounds: 0 }]);
+        const commit = () =>
+          readRows(run.home, "SELECT commit_sha FROM fixer_turns")[0]?.commit_sha;
+        const ownerCommit = commit();
+        expect(typeof ownerCommit).toBe("string");
 
         // Then the owner turns on Push fixes automatically for the repository.
         const db = new DatabaseSync(NodePath.join(run.home, "prkit.sqlite"));
@@ -530,16 +794,13 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
              (repository, push_automatically, resolve_automatically, run_scripts_anywhere)
            VALUES (?, 1, 0, 0)
            ON CONFLICT (repository) DO UPDATE SET push_automatically = 1`,
-        ).run(`github.com/${FIXTURE_REPO}`);
+        ).run("github.com/budget/fixtures");
         db.close();
 
         // A client asks for a change: the turn is now its work too, and waits for Push.
-        bridge = startBridge(run.home, CLIENT);
-        await bridge.initialize();
-        await toolsSettle(bridge, ALL);
         const pr = {
-          url: `https://github.com/${FIXTURE_REPO}/pull/${fixture.number}`,
-          accountId: FIXTURE_ACCOUNT,
+          url: "https://github.com/budget/fixtures/pull/9",
+          accountId: account,
         };
         const asked = await bridge.call("ask_fix_agent_to_change", {
           ...pr,
@@ -551,10 +812,11 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
         await expect
           .poll(turns, { timeout: 180_000, interval: 2_000 })
           .toEqual([{ status: "ready", started_by: CLIENT, rounds: 1 }]);
+        expect(commit()).not.toBe(ownerCommit);
         const fix = await bridge.call("read_fix", pr);
         log.note("read_fix", fix);
         expect("json" in fix ? fix.json : null).toMatchObject({ state: "waiting-for-push" });
-        expect(pullState(fixture.number).head).toBe(pushedHead);
+        expect((await fake.pull(9)).head).toBe(pushedHead);
         expect(
           readRows(run.home, "SELECT text FROM fixer_activity").some(
             (row) => typeof row.text === "string" && row.text.startsWith(`${CLIENT} asked:`),
@@ -566,16 +828,23 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
         log.note("stop_fix", stopped);
         expect(stopped).toMatchObject({ isError: false });
         expect(turns()).toEqual([{ status: "ready", started_by: CLIENT, rounds: 1 }]);
-        await app.open(`${run.url}${prPath(FIXTURE_REPO, fixture.number, "fixes")}`);
+        await app.open(
+          `${run.url}/pr/github.com/budget/fixtures/9?account=${encodeURIComponent(account)}&tab=fixes`,
+        );
         const turn = screen.getByRole("list", "Fixes").getByRole("article").first();
         await expect(turn.getByRole("button", /^Push/).first()).toBeVisible({ timeout: 30_000 });
         await app.screenshot("outside-agents-revise-waits-for-push");
         log.note("bridge stderr", bridge.stderr() || "(empty)");
       } finally {
-        log.save();
         await bridge?.stop();
+        const writes = await fake.writes();
+        const pushes = git.pushes();
+        log.note("final write attempts", { writes, pushes });
+        log.save();
         stopFakeInstance(name, { keepHome: false });
-        if (fixture !== null) closeFixFixture(fixture);
+        fake.stop();
+        expect(writes).toEqual([]);
+        expect(pushes).toEqual([]);
       }
     },
   );

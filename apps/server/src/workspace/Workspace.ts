@@ -107,17 +107,19 @@ export const make = Effect.gen(function* () {
           }),
         )
         .pipe(
-          Effect.tap((next) =>
-            announce === undefined
-              ? Effect.void
-              : PubSub.publish(announced, {
-                  workspace: next,
-                  focus:
-                    announce.focus && input.kind === "open"
-                      ? { key: input.key, accountId: input.accountId }
-                      : null,
-                }),
-          ),
+          Effect.tap((next) => {
+            if (announce === undefined) return Effect.void;
+            const focused = next.open.find((row) => row.key === next.activeKey);
+            return PubSub.publish(announced, {
+              workspace: next,
+              focus:
+                announce.focus &&
+                (input.kind === "open" || input.kind === "activate") &&
+                focused !== undefined
+                  ? { key: focused.key, accountId: focused.accountId }
+                  : null,
+            });
+          }),
         )
         .pipe(
           Effect.catchTag("SqlError", () =>

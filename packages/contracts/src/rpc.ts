@@ -40,6 +40,7 @@ import {
   FixerSnapshot,
   FixerStateError,
   FixerTurnId,
+  FixerWorkRefused,
   FixTarget,
   PushAccess,
   RepositoryFixerSettings,
@@ -638,7 +639,7 @@ export const WsRpcGroup = RpcGroup.make(
   Rpc.make(WS_METHODS.fixersRetry, {
     payload: Schema.Struct({ key: PullRequestKey, turnId: FixerTurnId }),
     success: FixerSnapshot,
-    error: Schema.Union([FixerError, FixerStateError]),
+    error: Schema.Union([FixerError, FixerStateError, FixerWorkRefused]),
   }),
   Rpc.make(WS_METHODS.fixersRevert, {
     payload: Schema.Struct({ key: PullRequestKey, turnId: FixerTurnId }),

@@ -235,8 +235,10 @@ const plant = async () => {
 
 const fix = async (prompt: string) => {
   const ids =
-    /one entry for each of (.+), then end your turn\./.exec(prompt)?.[1]?.split(", ") ?? [];
-  NodeFS.writeFileSync("stand-in.md", "Written by the stand-in agent.\n");
+    /one entry for each of (.+), (?:then|and) end your turn\./.exec(prompt)?.[1]?.split(", ") ?? [];
+  if (prompt.includes("Then call `finish_fixes` again"))
+    NodeFS.appendFileSync("stand-in.md", "Revised by the stand-in agent.\n");
+  else NodeFS.writeFileSync("stand-in.md", "Written by the stand-in agent.\n");
   await plant();
   const reported = await mcp("tools/call", {
     name: "finish_fixes",
@@ -329,6 +331,10 @@ const turn = async (prompt: string) => {
     arguments: {
       summary: "A guide written by the stand-in agent.",
       chapters: [{ title: "Every change", files }],
+      focusAreas: [...prompt.matchAll(/^- `([^`]+)` .+: .+$/gm)].map((match) => ({
+        id: match[1] ?? "",
+        verdict: "nothing-notable",
+      })),
     },
   });
   return finish(submitted.ok ? null : `submit_guide was refused: ${submitted.text.slice(0, 300)}`);

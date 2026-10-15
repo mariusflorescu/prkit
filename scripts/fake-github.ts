@@ -75,6 +75,7 @@ import {
   writes,
 } from "./fake-github/model.ts";
 import { home, values } from "./fake-github/options.ts";
+import { recordGraphqlAttempt, recordRestAttempt } from "./fake-github/writeAttempts.ts";
 import { rest } from "./fake-github/rest.ts";
 
 const LIMIT = 5000;
@@ -130,6 +131,8 @@ const control = (url: URL, method: string, response: NodeHttp.ServerResponse) =>
     response.end(encodeJson(body));
   };
   const name = url.pathname.slice("/__fake/".length);
+  if (method === "GET" && name === "budget")
+    return answer({ core: remaining("core"), graphql: remaining("graphql") });
   if (method === "GET" && name === "stats") return answer(stats);
   if (method === "GET" && name === "writes") return answer(writes);
   if (name === "reset-stats") {
@@ -139,7 +142,12 @@ const control = (url: URL, method: string, response: NodeHttp.ServerResponse) =>
   const pull = pulls.get(Number(url.searchParams.get("pr")));
   if (name === "comment" && pull !== undefined) {
     const id = nextComment++;
-    pull.comments.push({ id, body: `Comment ${id} from the fake`, at: Date.now() });
+    const size = Math.min(20_000, Math.max(0, Number(url.searchParams.get("size") ?? "0")));
+    pull.comments.push({
+      id,
+      body: size > 0 ? '"\\ 😀\n'.repeat(size) : `Comment ${id} from the fake`,
+      at: Date.now(),
+    });
     pull.updatedAt = Date.now();
     return answer({ ok: true, id });
   }
@@ -222,13 +230,24 @@ const server = NodeHttp.createServer((request, response) => {
     control(url, request.method ?? "GET", response);
     return;
   }
-  if (url.pathname === "/graphql" && request.method === "POST") {
+  if (url.pathname === "/graphql") {
     let body = "";
     request.setEncoding("utf8");
     request.on("data", (chunk: string) => {
       body += chunk;
     });
     request.on("end", () => {
+      recordGraphqlAttempt(request.method ?? "GET", url, body);
+      if (request.method !== "POST") {
+        count("graphql:unsupported-method", 405, 0);
+        send(
+          response,
+          "graphql",
+          405,
+          '{"errors":[{"message":"The fake accepts GraphQL POST requests only."}]}',
+        );
+        return;
+      }
       if (remaining("graphql") === 0) {
         count("graphql:limited", 200, 0);
         send(
@@ -265,6 +284,7 @@ const server = NodeHttp.createServer((request, response) => {
     text += chunk;
   });
   request.on("end", () => {
+    recordRestAttempt(request.method ?? "GET", url.pathname, text);
     if (remaining("core") === 0) {
       count("rest:limited", 403, 0);
       send(response, "core", 403, '{"message":"API rate limit exceeded for user ID 1."}');

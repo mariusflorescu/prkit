@@ -24,7 +24,6 @@ import {
   stats,
   TOOLS_PULL,
   WITHHELD,
-  wrote,
 } from "./model.ts";
 import { STACKS } from "./options.ts";
 
@@ -34,7 +33,7 @@ const GraphQLRequest = Schema.fromJsonString(
     variables: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
   }),
 );
-const decodeRequest = Schema.decodeUnknownSync(GraphQLRequest);
+const decodeRequest = Schema.decodeUnknownOption(GraphQLRequest);
 
 const searchNode = (pull: Pull) => ({
   ...stackFields(pull),
@@ -358,7 +357,6 @@ const mutation = (
     errors: [{ type: "UNPROCESSABLE", message }],
   });
   if (query.includes("enablePullRequestAutoMerge")) {
-    wrote("enablePullRequestAutoMerge", variables);
     if (pull === undefined) return refused("Could not resolve to a node.");
     if (mergeState(pull) !== "BLOCKED")
       return refused(`Pull request is in ${mergeState(pull).toLowerCase()} status`);
@@ -372,7 +370,6 @@ const mutation = (
     };
   }
   if (query.includes("disablePullRequestAutoMerge")) {
-    wrote("disablePullRequestAutoMerge", variables);
     if (pull === undefined || pull.autoMerge === null)
       return refused("Auto-merge is not enabled for this pull request.");
     pull.autoMerge = null;
@@ -383,7 +380,6 @@ const mutation = (
       data: { disablePullRequestAutoMerge: { clientMutationId: null } },
     };
   }
-  wrote("unknown mutation", variables);
   return refused("The fake GitHub doesn't answer this mutation.");
 };
 
@@ -391,10 +387,57 @@ const mutation = (
 export const graphql = (
   body: string,
 ): { kind: string; cost: number; data: Schema.Json; errors?: Schema.Json } => {
-  const request = decodeRequest(body);
-  const query = request.query;
-  const variables = request.variables ?? {};
+  const decoded = decodeRequest(body);
+  if (Option.isNone(decoded))
+    return {
+      kind: "graphql:unsupported",
+      cost: 0,
+      data: null,
+      errors: [{ type: "BAD_USER_INPUT", message: "The fake expects one GraphQL request." }],
+    };
+  const query = decoded.value.query;
+  const variables = decoded.value.variables ?? {};
   const pullFrom = (value: Schema.Json | undefined) => pulls.get(Number(value));
+  if (query.includes("PrkitPushAccess")) {
+    const pull = pullFrom(variables["number"]);
+    return {
+      kind: "graphql:push-access",
+      cost: 1,
+      data: {
+        viewer: { login: LOGIN },
+        repository: {
+          viewerPermission: "WRITE",
+          pullRequest:
+            pull === undefined
+              ? null
+              : {
+                  state: pull.state,
+                  headRefName: `feature-${pull.number}`,
+                  isCrossRepository: pull.headRepo !== `${OWNER}/${REPO}`,
+                  maintainerCanModify: true,
+                  headRepository: {
+                    nameWithOwner: pull.headRepo,
+                    isArchived: false,
+                    viewerPermission: "WRITE",
+                  },
+                },
+        },
+      },
+    };
+  }
+  if (query.includes("PrkitAssignableUsers"))
+    return {
+      kind: "graphql:assignable-users",
+      cost: 1,
+      data: {
+        repository: {
+          assignableUsers: {
+            nodes: [{ login: LOGIN, name: "Fixture reviewer", avatarUrl: "" }],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      },
+    };
   if (!STACKS && query.includes("stackEntry"))
     return {
       kind: "graphql:no-stacks",
