@@ -25,7 +25,9 @@
  * the stand-in `tests/fakeClaude.ts` sets up, so a guide spends no subscription.
  * `--cursor-manifest <file>` installs the stand-in Cursor SDK packages it lists instead of
  * npm's (the server's PRKIT_CURSOR_SDK_MANIFEST, read only with `--e2e`), as
- * `tests/fakeCursor.ts` lays them out.
+ * `tests/fakeCursor.ts` lays them out. `--cursor-sdk <dir>` loads Cursor's SDK from that package
+ * folder instead of an installed one (the server's PRKIT_CURSOR_SDK_PATH), such as the real
+ * development dependency for a live run.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
@@ -139,6 +141,7 @@ interface StartOptions {
   readonly ghHome: string | undefined;
   readonly claude: string | undefined;
   readonly cursorManifest: string | undefined;
+  readonly cursorSdk: string | undefined;
 }
 
 const start = async (options: StartOptions) => {
@@ -201,6 +204,7 @@ const start = async (options: StartOptions) => {
         ...(options.cursorManifest === undefined
           ? {}
           : { PRKIT_CURSOR_SDK_MANIFEST: options.cursorManifest }),
+        ...(options.cursorSdk === undefined ? {} : { PRKIT_CURSOR_SDK_PATH: options.cursorSdk }),
       },
       stdio: ["ignore", "pipe", logFd],
     },
@@ -282,6 +286,7 @@ const startDetached = async (options: StartOptions) => {
     ...(options.ghHome === undefined ? [] : ["--gh-home", options.ghHome]),
     ...(options.claude === undefined ? [] : ["--claude", options.claude]),
     ...(options.cursorManifest === undefined ? [] : ["--cursor-manifest", options.cursorManifest]),
+    ...(options.cursorSdk === undefined ? [] : ["--cursor-sdk", options.cursorSdk]),
   ];
   const child = NodeChildProcess.spawn(process.execPath, args, {
     cwd: repoRoot,
@@ -392,6 +397,7 @@ const { positionals, values } = NodeUtil.parseArgs({
     "gh-home": { type: "string" },
     claude: { type: "string" },
     "cursor-manifest": { type: "string" },
+    "cursor-sdk": { type: "string" },
   },
 });
 const command = positionals[0];
@@ -423,6 +429,8 @@ switch (command) {
         values["cursor-manifest"] === undefined
           ? undefined
           : NodePath.resolve(values["cursor-manifest"]),
+      cursorSdk:
+        values["cursor-sdk"] === undefined ? undefined : NodePath.resolve(values["cursor-sdk"]),
     });
     break;
   case "doctor":

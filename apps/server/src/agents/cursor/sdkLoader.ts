@@ -34,15 +34,18 @@ export const sdkPackageDir = (
 
 const entryOf = (packageDir: string) => `${packageDir}/dist/esm/index.js`;
 
-/** The SDK's package folder when it is there to load, else null. */
+/**
+ * The SDK's package folder when it is there to load, else null. Links are resolved, so a pnpm
+ * dev dependency is loaded from the store folder that holds its platform package too.
+ */
 export const findSdk = (home: string, env: Readonly<Record<string, string | undefined>>) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const packageDir = sdkPackageDir(path, home, env);
-    return (yield* fs.exists(entryOf(packageDir)).pipe(Effect.orElseSucceed(() => false)))
-      ? packageDir
-      : null;
+    if (!(yield* fs.exists(entryOf(packageDir)).pipe(Effect.orElseSucceed(() => false))))
+      return null;
+    return yield* fs.realPath(packageDir).pipe(Effect.orElseSucceed(() => packageDir));
   });
 
 /**
