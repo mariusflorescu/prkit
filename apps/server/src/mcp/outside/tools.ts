@@ -51,20 +51,6 @@ const read = <Name extends string, Config extends ToolConfig, R>(
     .annotate(Tool.Idempotent, true)
     .annotate(Tool.OpenWorld, false);
 
-/** A tool that starts work in prkit: listed and callable only at "Read and start work". */
-const work = <Name extends string, Config extends ToolConfig, R>(
-  tool: Tool.Tool<Name, Config, R>,
-  title: string,
-  idempotent: boolean,
-) =>
-  tool
-    .annotate(OutsideToolLevel, "starts-work")
-    .annotate(Tool.Title, title)
-    .annotate(Tool.Readonly, false)
-    .annotate(Tool.Destructive, false)
-    .annotate(Tool.Idempotent, idempotent)
-    .annotate(Tool.OpenWorld, false);
-
 const PrkitStatus = read(
   Tool.make("prkit_status", {
     description:
@@ -147,113 +133,126 @@ const WaitFor = read(
   "Wait for a guide or fix",
 );
 
-const OpenPullRequest = work(
-  Tool.make("open_pull_request", {
-    description: `Opens a pull request as a tab in prkit and shows it in prkit's window, which comes forward.${TARGET_HINT}`,
-    parameters: OpenInput,
-    success: OpenPullRequestsResult,
-    failure: OutsideToolFailure,
-  }),
-  "Open a pull request in prkit",
-  true,
-);
-
-const GenerateGuide = work(
-  Tool.make("generate_guide", {
-    description: `Starts prkit's agent writing a guide for a pull request, or a new one on a finished guide. It takes minutes and queues behind other agent work: call wait_for, then read_guide. instance and model pick the agent (prkit_status lists them); otherwise the pull request's own or prkit's default. Refused with the reason when that agent isn't ready.${TARGET_HINT}`,
-    parameters: GenerateGuideInput,
-    success: GuideStatus,
-    failure: OutsideToolFailure,
-  }),
-  "Generate a guide",
-  false,
-);
-
-const StopGuide = work(
-  Tool.make("stop_guide", {
-    description: `Stops a pull request's guide: the running attempt ends, and prkit stops watching the pull request for new commits. Written guides stay readable.${TARGET_HINT}`,
-    parameters: TargetInput,
-    success: GuideStatus,
-    failure: OutsideToolFailure,
-  }),
-  "Stop the guide",
-  true,
-);
-
-const AddReviewComment = work(
-  Tool.make("add_review_comment", {
-    description: `Adds a draft review comment in prkit on lines of a pull request's diff. It stays in prkit: nothing is posted to GitHub. Send it to the fix agent with send_to_fix_agent; posting it is the owner's click in prkit.${TARGET_HINT}`,
-    parameters: AddCommentInput,
-    success: AddedComment,
-    failure: OutsideToolFailure,
-  }),
-  "Add a draft comment",
-  false,
-);
-
-const SendToFixAgent = work(
-  Tool.make("send_to_fix_agent", {
-    description: `Sends prkit draft comments and GitHub review threads to prkit's fix agent, which edits the pull request's branch in its own checkout and commits in prkit. Work started here never pushes by itself: it waits for the owner to push it from prkit. Call wait_for, then read_fix.${TARGET_HINT}`,
-    parameters: SendToFixInput,
-    success: StartedTurn,
-    failure: OutsideToolFailure,
-  }),
-  "Send to the fix agent",
-  false,
-);
-
-const AskFixAgentToChange = work(
-  Tool.make("ask_fix_agent_to_change", {
-    description: `Asks the fix agent to change a fix that waits for Push (the latest one unless turnId says), in its own words. The new result waits for Push too.${TARGET_HINT}`,
-    parameters: ReviseInput,
-    success: StartedTurn,
-    failure: OutsideToolFailure,
-  }),
-  "Ask the fix agent to change",
-  false,
-);
-
-const StopFix = work(
-  Tool.make("stop_fix", {
-    description: `Stops the fix agent on a pull request and ends its session. Commits waiting for Push are discarded with it; nothing reaches GitHub.${TARGET_HINT}`,
-    parameters: TargetInput,
-    success: FixResult,
-    failure: OutsideToolFailure,
-  }),
-  "Stop the fix agent",
-  true,
-);
-
-const RetryFix = work(
-  Tool.make("retry_fix", {
-    description: `Runs a failed fix again (the latest failed one unless turnId says).${TARGET_HINT}`,
-    parameters: TurnInput,
-    success: FixResult,
-    failure: OutsideToolFailure,
-  }),
-  "Retry a fix",
-  false,
-);
-
-const ResolveConflicts = work(
-  Tool.make("resolve_conflicts", {
-    description: `Asks the fix agent to resolve a pull request's merge conflicts by merging the base in (or rebasing, on the owner's own pull requests only). The result waits for Push in prkit.${TARGET_HINT}`,
-    parameters: ConflictsInput,
-    success: FixResult,
-    failure: OutsideToolFailure,
-  }),
-  "Resolve conflicts",
-  false,
-);
-
 /**
- * The outside endpoint's tools. "Starts work" tools are listed only while `canStartWork`
- * says so; their handlers check again on every call (access.ts).
+ * The outside endpoint's tools. A "starts work" tool is declared with `work`, which sets its
+ * level and hides it while `canStartWork` says no, in one step; handlers check the level again
+ * on every call (access.ts).
  */
 export const makeOutsideToolkit = (canStartWork: () => boolean) => {
-  const gated = <Name extends string, Config extends ToolConfig, R>(
+  /** A tool that starts work in prkit: listed and callable only at "Read and start work". */
+  const work = <Name extends string, Config extends ToolConfig, R>(
     tool: Tool.Tool<Name, Config, R>,
-  ) => tool.annotate(McpSchema.EnabledWhen, () => canStartWork());
+    title: string,
+    idempotent: boolean,
+  ) =>
+    tool
+      .annotate(OutsideToolLevel, "starts-work")
+      .annotate(McpSchema.EnabledWhen, () => canStartWork())
+      .annotate(Tool.Title, title)
+      .annotate(Tool.Readonly, false)
+      .annotate(Tool.Destructive, false)
+      .annotate(Tool.Idempotent, idempotent)
+      .annotate(Tool.OpenWorld, false);
+
+  const OpenPullRequest = work(
+    Tool.make("open_pull_request", {
+      description: `Opens a pull request as a tab in prkit and shows it in prkit's window, which comes forward.${TARGET_HINT}`,
+      parameters: OpenInput,
+      success: OpenPullRequestsResult,
+      failure: OutsideToolFailure,
+    }),
+    "Open a pull request in prkit",
+    true,
+  );
+
+  const GenerateGuide = work(
+    Tool.make("generate_guide", {
+      description: `Starts prkit's agent writing a guide for a pull request, or a new one on a finished guide. It takes minutes and queues behind other agent work: call wait_for, then read_guide. instance and model pick the agent (prkit_status lists them); otherwise the pull request's own or prkit's default. Refused with the reason when that agent isn't ready.${TARGET_HINT}`,
+      parameters: GenerateGuideInput,
+      success: GuideStatus,
+      failure: OutsideToolFailure,
+    }),
+    "Generate a guide",
+    false,
+  );
+
+  const StopGuide = work(
+    Tool.make("stop_guide", {
+      description: `Stops a pull request's guide: the running attempt ends, and prkit stops watching the pull request for new commits. Written guides stay readable.${TARGET_HINT}`,
+      parameters: TargetInput,
+      success: GuideStatus,
+      failure: OutsideToolFailure,
+    }),
+    "Stop the guide",
+    true,
+  );
+
+  const AddReviewComment = work(
+    Tool.make("add_review_comment", {
+      description: `Adds a draft review comment in prkit on lines of a pull request's diff. It stays in prkit: nothing is posted to GitHub. Send it to the fix agent with send_to_fix_agent; posting it is the owner's click in prkit.${TARGET_HINT}`,
+      parameters: AddCommentInput,
+      success: AddedComment,
+      failure: OutsideToolFailure,
+    }),
+    "Add a draft comment",
+    false,
+  );
+
+  const SendToFixAgent = work(
+    Tool.make("send_to_fix_agent", {
+      description: `Sends prkit draft comments and GitHub review threads to prkit's fix agent, which edits the pull request's branch in its own checkout and commits in prkit. Work started here never pushes by itself: it waits for the owner to push it from prkit. Call wait_for, then read_fix.${TARGET_HINT}`,
+      parameters: SendToFixInput,
+      success: StartedTurn,
+      failure: OutsideToolFailure,
+    }),
+    "Send to the fix agent",
+    false,
+  );
+
+  const AskFixAgentToChange = work(
+    Tool.make("ask_fix_agent_to_change", {
+      description: `Asks the fix agent to change a fix that waits for Push (the latest one unless turnId says), in its own words. The new result waits for Push too.${TARGET_HINT}`,
+      parameters: ReviseInput,
+      success: StartedTurn,
+      failure: OutsideToolFailure,
+    }),
+    "Ask the fix agent to change",
+    false,
+  );
+
+  const StopFix = work(
+    Tool.make("stop_fix", {
+      description: `Stops the fix agent's queued and running work on a pull request. Commits waiting for Push stay, and so does one it is changing: discarding them, and ending the session, are the owner's clicks in prkit.${TARGET_HINT}`,
+      parameters: TargetInput,
+      success: FixResult,
+      failure: OutsideToolFailure,
+    }),
+    "Stop the fix agent",
+    true,
+  );
+
+  const RetryFix = work(
+    Tool.make("retry_fix", {
+      description: `Runs a failed fix or conflict resolution again (the latest failed one unless turnId says). Reverts run again only from prkit.${TARGET_HINT}`,
+      parameters: TurnInput,
+      success: FixResult,
+      failure: OutsideToolFailure,
+    }),
+    "Retry a fix",
+    false,
+  );
+
+  const ResolveConflicts = work(
+    Tool.make("resolve_conflicts", {
+      description: `Asks the fix agent to resolve a pull request's merge conflicts by merging the base in (or rebasing, on the owner's own pull requests only). The result waits for Push in prkit.${TARGET_HINT}`,
+      parameters: ConflictsInput,
+      success: FixResult,
+      failure: OutsideToolFailure,
+    }),
+    "Resolve conflicts",
+    false,
+  );
+
   return Toolkit.make(
     PrkitStatus,
     ListInbox,
@@ -263,15 +262,15 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
     ListReviewComments,
     ReadFix,
     WaitFor,
-    gated(OpenPullRequest),
-    gated(GenerateGuide),
-    gated(StopGuide),
-    gated(AddReviewComment),
-    gated(SendToFixAgent),
-    gated(AskFixAgentToChange),
-    gated(StopFix),
-    gated(RetryFix),
-    gated(ResolveConflicts),
+    OpenPullRequest,
+    GenerateGuide,
+    StopGuide,
+    AddReviewComment,
+    SendToFixAgent,
+    AskFixAgentToChange,
+    StopFix,
+    RetryFix,
+    ResolveConflicts,
   );
 };
 

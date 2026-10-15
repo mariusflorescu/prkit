@@ -13,6 +13,7 @@ import {
   type ReviewSnapshot,
 } from "@prkit/contracts";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -21,6 +22,7 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
+import { Hex } from "effect/encoding";
 
 import { GitHubAccounts } from "../accounts/GitHubAccounts.ts";
 import { Agents } from "../agents/Agents.ts";
@@ -31,6 +33,7 @@ import { PullRequests } from "../pullRequests/PullRequests.ts";
 import { ReviewComments } from "../reviewComments/ReviewComments.ts";
 import { Reviews } from "../reviews/Reviews.ts";
 import { Workspace } from "../workspace/Workspace.ts";
+import { StartedBy } from "./StartedBy.ts";
 import { OutsideAgents } from "./OutsideAgents.ts";
 import {
   AddedComment,
@@ -48,6 +51,9 @@ import {
   Target,
   type TargetInput,
   type WaitResult,
+  HOST_NAME,
+  OWNER_NAME,
+  REPO_NAME,
 } from "./schemas.ts";
 
 /** Errors whose message is written for the owner and may reach a client as it is. */
@@ -99,6 +105,13 @@ const webUrl = (key: PullRequestKey) => {
   return ref === null ? "" : `https://${ref.host}/${ref.owner}/${ref.repo}/pull/${ref.number}`;
 };
 
+const StoredRequests = Schema.Array(
+  Schema.Struct({ input_hash: Schema.String, result: Schema.String }),
+);
+const encodeFingerprint = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Array(Schema.NullOr(Schema.Union([Schema.String, Schema.Number])))),
+);
+
 /**
  * What outside agents can ask of prkit, one method per MCP tool, each a thin layer over the
  * service the app's own buttons use (docs/features/outside-agents.md). Reads answer from
@@ -120,7 +133,24 @@ export const make = Effect.gen(function* () {
   const reviewComments = yield* ReviewComments;
   const fixers = yield* Fixers;
   const outsideAgents = yield* OutsideAgents;
-  const once = yield* Semaphore.make(1);
+  const crypto = yield* Crypto.Crypto;
+  /** One lock per request key: a slow call holds back only its own retries. */
+  const locks = new Map<string, { readonly lock: Semaphore.Semaphore; users: number }>();
+  const withLock = <A, E, R>(key: string, work: Effect.Effect<A, E, R>) =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const entry = locks.get(key) ?? { lock: Semaphore.makeUnsafe(1), users: 0 };
+        entry.users += 1;
+        locks.set(key, entry);
+        return entry;
+      }),
+      (entry) => entry.lock.withPermits(1)(work),
+      (entry) =>
+        Effect.sync(() => {
+          entry.users -= 1;
+          if (entry.users === 0) locks.delete(key);
+        }),
+    );
 
   /**
    * The account a PR is read through: the one asked for, else the one prkit already bound it
@@ -140,7 +170,13 @@ export const make = Effect.gen(function* () {
                 number: input.number,
               }
           : parseUrl(input.url);
-      if (ref === null || ref.number < 1)
+      if (
+        ref === null ||
+        ref.number < 1 ||
+        !HOST_NAME.test(ref.host) ||
+        !OWNER_NAME.test(ref.owner) ||
+        !REPO_NAME.test(ref.repo)
+      )
         return yield* fail(
           "invalid",
           "Name the pull request by its URL, or by owner, repo and number (and host when it isn't github.com).",
@@ -603,32 +639,60 @@ export const make = Effect.gen(function* () {
 
   // Work. Each is the same service call the app's own button makes.
 
-  /** Runs `work` once per client request id; a retry with the same id gets the first answer. */
+  /**
+   * Runs `work` once per client request: the tool, the client, the pull request and its
+   * `clientRequestId`. A retry gets the first answer; the same id with other input is a
+   * conflict. Answers are kept a day.
+   */
   const idempotent = <A, I, E, R>(
-    tool: string,
-    clientRequestId: string | undefined,
+    request: {
+      readonly tool: string;
+      readonly clientRequestId: string | undefined;
+      readonly key: PullRequestKey;
+      /** The input that names the request, in a fixed order. */
+      readonly input: ReadonlyArray<string | number | null>;
+    },
     schema: Schema.Codec<A, I>,
     work: Effect.Effect<A, E, R>,
   ) => {
+    const { tool, clientRequestId, key } = request;
     if (clientRequestId === undefined) return work;
     const json = Schema.fromJsonString(schema);
-    return once.withPermits(1)(
-      Effect.gen(function* () {
-        const rows = yield* sql`SELECT result FROM outside_requests
-          WHERE tool = ${tool} AND client_request_id = ${clientRequestId}`.pipe(
-          Effect.flatMap(
-            Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ result: Schema.String }))),
-          ),
-        );
-        const earlier = rows[0];
-        if (earlier !== undefined) return yield* Schema.decodeEffect(json)(earlier.result);
-        const result = yield* work;
-        const at = DateTime.formatIso(yield* DateTime.now);
-        yield* sql`INSERT INTO outside_requests (tool, client_request_id, result, created_at)
-          VALUES (${tool}, ${clientRequestId}, ${yield* Schema.encodeEffect(json)(result)}, ${at})`;
-        return result;
-      }),
-    );
+    return Effect.gen(function* () {
+      const client = (yield* StartedBy) ?? "";
+      const hash = yield* crypto
+        .digest("SHA-256", new TextEncoder().encode(encodeFingerprint(request.input)))
+        .pipe(Effect.map(Hex.encode));
+      return yield* withLock(
+        [tool, client, key, clientRequestId].join("\u0000"),
+        Effect.gen(function* () {
+          const rows = yield* sql`SELECT input_hash, result FROM outside_requests
+            WHERE tool = ${tool} AND client = ${client} AND pr_key = ${key}
+              AND client_request_id = ${clientRequestId}`.pipe(
+            Effect.flatMap(Schema.decodeUnknownEffect(StoredRequests)),
+          );
+          const earlier = rows[0];
+          if (earlier !== undefined) {
+            if (earlier.input_hash !== hash)
+              return yield* fail(
+                "conflict",
+                "This clientRequestId was used for a different request. Use a new one.",
+              );
+            return yield* Schema.decodeEffect(json)(earlier.result);
+          }
+          const result = yield* work;
+          const now = yield* DateTime.now;
+          const at = DateTime.formatIso(now);
+          const cutoff = DateTime.formatIso(DateTime.subtract(now, { days: 1 }));
+          yield* sql`DELETE FROM outside_requests WHERE created_at < ${cutoff}`;
+          yield* sql`INSERT INTO outside_requests
+            (tool, client, pr_key, client_request_id, input_hash, result, created_at)
+            VALUES (${tool}, ${client}, ${key}, ${clientRequestId}, ${hash},
+              ${yield* Schema.encodeEffect(json)(result)}, ${at})`;
+          return result;
+        }),
+      );
+    });
   };
 
   const open = (input: TargetInput & { readonly focus?: boolean }) =>
@@ -687,8 +751,18 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const target = yield* resolve(input);
       return yield* idempotent(
-        "add_review_comment",
-        input.clientRequestId,
+        {
+          tool: "add_review_comment",
+          clientRequestId: input.clientRequestId,
+          key: target.key,
+          input: [
+            input.path,
+            input.line,
+            input.startLine ?? input.line,
+            input.side ?? "new",
+            input.body,
+          ],
+        },
         AddedComment,
         Effect.gen(function* () {
           const files = yield* pullRequests.files(target.key, target.accountId);
@@ -747,27 +821,35 @@ export const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       const target = yield* resolve(input);
-      // Neither named: every draft still waiting, as Send to agent in prkit sends them.
-      const draftIds =
-        input.draftIds === undefined && input.threadIds === undefined
-          ? (yield* reviewComments.list(target.key, target.accountId)).comments
-              .filter((comment) => comment.state === "draft")
-              .map((comment) => comment.id)
-          : (input.draftIds ?? []);
-      const targets: Array<FixTarget> = [
-        ...draftIds.map((id): FixTarget => ({ _tag: "draft", id })),
-        ...(input.threadIds ?? []).map((threadId): FixTarget => ({ _tag: "thread", threadId })),
-      ];
-      if (targets.length === 0)
-        return yield* fail(
-          "invalid",
-          "There is nothing to send: no draft comments wait on this pull request. Add one with add_review_comment, or pass threadIds from list_review_comments.",
-        );
       return yield* idempotent(
-        "send_to_fix_agent",
-        input.clientRequestId,
+        {
+          tool: "send_to_fix_agent",
+          clientRequestId: input.clientRequestId,
+          key: target.key,
+          input: [
+            input.draftIds === undefined ? null : input.draftIds.join(","),
+            input.threadIds === undefined ? null : input.threadIds.join(","),
+            input.instructions ?? null,
+          ],
+        },
         StartedTurn,
         Effect.gen(function* () {
+          // Neither named: every draft still waiting, as Send to agent in prkit sends them.
+          const draftIds =
+            input.draftIds === undefined && input.threadIds === undefined
+              ? (yield* reviewComments.list(target.key, target.accountId)).comments
+                  .filter((comment) => comment.state === "draft")
+                  .map((comment) => comment.id)
+              : (input.draftIds ?? []);
+          const targets: Array<FixTarget> = [
+            ...draftIds.map((id): FixTarget => ({ _tag: "draft", id })),
+            ...(input.threadIds ?? []).map((threadId): FixTarget => ({ _tag: "thread", threadId })),
+          ];
+          if (targets.length === 0)
+            return yield* fail(
+              "invalid",
+              "There is nothing to send: no draft comments wait on this pull request. Add one with add_review_comment, or pass threadIds from list_review_comments.",
+            );
           const snapshot = yield* fixers.send(target.key, target.accountId, {
             targets,
             note: input.instructions ?? null,
@@ -791,8 +873,12 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const target = yield* resolve(input);
       return yield* idempotent(
-        "ask_fix_agent_to_change",
-        input.clientRequestId,
+        {
+          tool: "ask_fix_agent_to_change",
+          clientRequestId: input.clientRequestId,
+          key: target.key,
+          input: [input.instructions, input.turnId ?? null],
+        },
         StartedTurn,
         Effect.gen(function* () {
           const snapshot = yield* fixers.get(target.key);
@@ -815,7 +901,7 @@ export const make = Effect.gen(function* () {
   const stopFix = (input: TargetInput) =>
     Effect.gen(function* () {
       const target = yield* resolve(input);
-      const snapshot = yield* fixers.stop(target.key);
+      const snapshot = yield* fixers.stopWorking(target.key);
       return fixResultOf(snapshot, null);
     }).pipe(Effect.mapError(asFailure));
 
@@ -830,6 +916,9 @@ export const make = Effect.gen(function* () {
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.id;
       if (turnId === undefined)
         return yield* fail("conflict", "No fix failed, so there is nothing to retry.");
+      // A revert undoes pushed work on the branch; running one again is the owner's click.
+      if (before.turns.find((turn) => turn.id === turnId)?.work._tag === "revert")
+        return yield* fail("not-allowed", "Reverts run again only from prkit, by the owner.");
       return fixResultOf(yield* fixers.retry(target.key, turnId), null);
     }).pipe(Effect.mapError(asFailure));
 

@@ -16,6 +16,14 @@ describe("work an outside agent started", () => {
     expect(pushesItself(true, retried)).toBe(false);
   });
 
+  it("waits for Push once a client asks to change the owner's ready turn", () => {
+    const revised = startedByFor(null, "Claude Code");
+    expect(pushesItself(true, revised)).toBe(false);
+    // The owner's own change keeps whatever the turn was.
+    expect(startedByFor(null, null)).toBeNull();
+    expect(startedByFor("Claude Code", null)).toBe("Claude Code");
+  });
+
   it("counts as the client's when a client retries the owner's own turn", () => {
     expect(startedByFor(null, "Codex")).toBe("Codex");
     expect(startedByFor(null, null)).toBeNull();

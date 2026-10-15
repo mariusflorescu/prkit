@@ -37,6 +37,11 @@ const describe = <S extends Schema.Top>(schema: S, description: string) =>
   schema.annotate({ description });
 
 /** A pull request by URL or by host, owner, repo and number, and optionally the account to read it through. */
+/** GitHub's rules: a login or organization, and a repository name ("." and ".." aren't one). */
+export const OWNER_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
+export const REPO_NAME = /^(?!\.\.?$)[A-Za-z0-9._-]{1,100}$/;
+export const HOST_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(?::\d{1,5})?$/;
+
 export const TargetFields = {
   url: Schema.optionalKey(
     describe(
@@ -44,9 +49,14 @@ export const TargetFields = {
       "The pull request's URL, such as https://github.com/acme/widgets/pull/42.",
     ),
   ),
-  host: Schema.optionalKey(describe(Schema.String, "GitHub host; github.com when omitted.")),
-  owner: Schema.optionalKey(Schema.String),
-  repo: Schema.optionalKey(Schema.String),
+  host: Schema.optionalKey(
+    describe(
+      Schema.String.check(Schema.isPattern(HOST_NAME)),
+      "GitHub host; github.com when omitted.",
+    ),
+  ),
+  owner: Schema.optionalKey(Schema.String.check(Schema.isPattern(OWNER_NAME))),
+  repo: Schema.optionalKey(Schema.String.check(Schema.isPattern(REPO_NAME))),
   number: Schema.optionalKey(Schema.Int),
   accountId: Schema.optionalKey(
     describe(

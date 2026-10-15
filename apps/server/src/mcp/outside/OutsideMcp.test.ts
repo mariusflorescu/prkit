@@ -177,12 +177,14 @@ describe("outside agents' MCP endpoint", () => {
           const bearer = { authorization: "Bearer right" };
           const reader = await session(base, OUTSIDE_MCP_PATH, bearer);
           expect(names(await reader.call("tools/list"))).toEqual([...READS].sort());
-          const refused = await reader.call("tools/call", {
-            name: "open_pull_request",
-            arguments: { url: "https://github.com/acme/widgets/pull/1" },
-          });
-          // Hidden at Read only, so the server doesn't know it for this client.
-          expect(refused.error?.message).toContain("not found");
+          // Every starts-work tool is hidden at Read only, so the server doesn't know it here.
+          for (const name of STARTS_WORK) {
+            const refused = await reader.call("tools/call", {
+              name,
+              arguments: { url: "https://github.com/acme/widgets/pull/1" },
+            });
+            expect(refused.error?.message).toBe(`Tool '${name}' not found`);
+          }
 
           settings = { ...settings, access: "work" };
           expect(names(await reader.call("tools/list"))).toEqual([...READS, ...STARTS_WORK].sort());

@@ -307,6 +307,34 @@ export const make = Effect.gen(function* () {
       return yield* snapshotOf(key);
     }).pipe(Effect.catchTags(dbFailures));
 
+  /**
+   * Stop for an outside agent: drops the turns still queued or working on fresh work, and
+   * nothing else. The session stays, and so does every commit waiting for Push, including
+   * one the agent is changing (docs/features/outside-agents.md).
+   */
+  const stopWorking = (key: PullRequestKey) =>
+    Effect.gen(function* () {
+      const fixer = yield* findFixer(key);
+      if (fixer === null || fixer.ended !== null)
+        return yield* new FixerStateError({ key, message: "No agent works on this pull request." });
+      const caller = yield* StartedBy;
+      const fresh: ReadonlyArray<FixerTurnState> = ["queued", "preparing", "running"];
+      for (const row of yield* turnsOf(fixer.id, fresh))
+        if (row.rounds === 0)
+          yield* dropTurn(
+            fixer,
+            row,
+            {
+              _tag: "discarded",
+              reason: "user",
+              message: caller === null ? "Stopped" : `Stopped from ${caller}`,
+            },
+            fresh,
+          );
+      yield* advance(fixer.id);
+      return yield* snapshotOf(key);
+    }).pipe(Effect.catchTags(dbFailures));
+
   const revise = (key: PullRequestKey, turnId: FixerTurnId, note: string) =>
     Effect.gen(function* () {
       const { row, fixer, outcome } = yield* commandTurn(key, turnId, "revise");
@@ -321,11 +349,20 @@ export const make = Effect.gen(function* () {
       if (cleaned === "")
         return yield* new FixerError({ message: "Say what the agent should change." });
       const at = yield* now;
+      // A change an outside agent asks for makes the turn its work too, so it waits for Push.
+      const caller = yield* StartedBy;
+      const startedBy = startedByFor(row.started_by, caller);
       const moved = yield* sql`UPDATE fixer_turns SET status = ${encodeStatus({ _tag: "running" })},
-        rounds = rounds + 1, run_id = ${runId}, started_at = ${at}, finished_at = NULL
+        rounds = rounds + 1, run_id = ${runId}, started_at = ${at}, finished_at = NULL,
+        started_by = ${startedBy}
         WHERE id = ${turnId} AND json_extract(status, '$._tag') = 'ready' RETURNING id`;
       if (moved.length === 0) return yield* snapshotOf(key);
-      yield* appendActivity(key, turnId, "note", `You asked: ${clip(cleaned, 300)}`);
+      yield* appendActivity(
+        key,
+        turnId,
+        "note",
+        `${caller === null ? "You" : caller} asked: ${clip(cleaned, 300)}`,
+      );
       yield* launch(fixer, turnId, reviseBody(turnId, cleaned));
       return yield* snapshotOf(key);
     }).pipe(Effect.catchTags(dbFailures));
@@ -506,6 +543,7 @@ export const make = Effect.gen(function* () {
     resolveConflicts,
     push: (key: PullRequestKey, turnId: FixerTurnId) => pushTurn(key, turnId),
     discard,
+    stopWorking,
     revise,
     retry,
     revert,

@@ -1,6 +1,7 @@
 import * as NodeFS from "node:fs";
 import * as NodeHttp from "node:http";
 import * as NodePath from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { describe, test } from "@e2e-dev/web";
 import { expect } from "e2e";
@@ -14,8 +15,9 @@ import {
   startInstance,
   stopFakeInstance,
 } from "./fakeGitHub.ts";
-import { type Fixtures } from "./fixActions.ts";
-import { FIXTURE_ACCOUNT, FIXTURE_REPO, NEEDS_FIXTURE, readRows } from "./fixturePr.ts";
+import { draftOn, type Fixtures, openSendToAgent } from "./fixActions.ts";
+import { closeFixFixture, createFixFixture, type FixFixture, pullState } from "./fixFixture.ts";
+import { FIXTURE_ACCOUNT, FIXTURE_REPO, NEEDS_FIXTURE, prPath, readRows } from "./fixturePr.ts";
 import { type Bridge, startBridge } from "./outsideBridge.ts";
 
 const READS = [
@@ -361,6 +363,20 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
         expect("json" in named ? named.json : null).toMatchObject({
           accountId: "github.com/budget-second",
         });
+        // Names outside GitHub's rules are refused before anything is read.
+        const dots = await bridge.call("read_pull_request", {
+          url: "https://github.com/../widgets/pull/1",
+        });
+        log.note("read_pull_request with .. as the owner", dots);
+        expect(dots).toMatchObject({ isError: true });
+        expect("text" in dots ? dots.text : "").toContain("Name the pull request by its URL");
+        const slashed = await bridge.call("read_pull_request", {
+          owner: "budget",
+          repo: "fixtures/../tools",
+          number: 1,
+        });
+        log.note("read_pull_request with a slash in the repo", slashed);
+        expect("text" in slashed ? slashed.isError : true).toBe(true);
         const stranger = await bridge.call("read_pull_request", {
           url: PR_9,
           accountId: "github.com/octocat",
@@ -466,6 +482,100 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
         log.save();
         await bridge?.stop();
         stopFakeInstance(name, { keepHome: false });
+      }
+    },
+  );
+
+  test(
+    "a change a client asks for on the owner's ready fix waits for Push, even where pushes are automatic",
+    { timeout: 420_000, skip: NEEDS_FIXTURE },
+    async ({ app, screen, browser }) => {
+      const name = "outside-agents-revise";
+      const log = transcript("outside-agents-revise");
+      const claude = setUpFakeClaude(name);
+      let fixture: FixFixture | null = null;
+      let bridge: Bridge | null = null;
+      try {
+        fixture = createFixFixture(`outside-${Date.now()}`);
+        const pushedHead = pullState(fixture.number).head;
+        const run = startInstance(name, ["--claude", claude.file]);
+        const fixtures = { app, screen, browser };
+        await app.open(run.openUrl);
+        await openOutsideSettings(fixtures);
+        await switchOn(fixtures, true);
+        await screen.getByRole("radio", "Read and start work").tap();
+        await expect(screen.getByText("Outside agents can read and start work")).toBeVisible({
+          timeout: 15_000,
+        });
+
+        // The owner's own fix, sent from prkit, waits at ready.
+        await app.open(`${run.url}${prPath(FIXTURE_REPO, fixture.number, "files")}`);
+        await draftOn(fixtures, 3, "Name the limit.");
+        const dialog = await openSendToAgent(fixtures, 1);
+        await dialog.getByRole("button", "Send 1 comment to agent").tap();
+        await expect(screen.getByText("Sent to the agent")).toBeVisible({ timeout: 30_000 });
+        const turns = () =>
+          readRows(
+            run.home,
+            "SELECT json_extract(status, '$._tag') AS status, started_by, rounds FROM fixer_turns",
+          );
+        await expect
+          .poll(turns, { timeout: 180_000, interval: 2_000 })
+          .toEqual([{ status: "ready", started_by: null, rounds: 0 }]);
+
+        // Then the owner turns on Push fixes automatically for the repository.
+        const db = new DatabaseSync(NodePath.join(run.home, "prkit.sqlite"));
+        db.prepare(
+          `INSERT INTO fixer_repository_settings
+             (repository, push_automatically, resolve_automatically, run_scripts_anywhere)
+           VALUES (?, 1, 0, 0)
+           ON CONFLICT (repository) DO UPDATE SET push_automatically = 1`,
+        ).run(`github.com/${FIXTURE_REPO}`);
+        db.close();
+
+        // A client asks for a change: the turn is now its work too, and waits for Push.
+        bridge = startBridge(run.home, CLIENT);
+        await bridge.initialize();
+        await toolsSettle(bridge, ALL);
+        const pr = {
+          url: `https://github.com/${FIXTURE_REPO}/pull/${fixture.number}`,
+          accountId: FIXTURE_ACCOUNT,
+        };
+        const asked = await bridge.call("ask_fix_agent_to_change", {
+          ...pr,
+          instructions: "Also say why the limit is what it is.",
+          clientRequestId: "revise-1",
+        });
+        log.note("ask_fix_agent_to_change", asked);
+        expect(asked).toMatchObject({ isError: false });
+        await expect
+          .poll(turns, { timeout: 180_000, interval: 2_000 })
+          .toEqual([{ status: "ready", started_by: CLIENT, rounds: 1 }]);
+        const fix = await bridge.call("read_fix", pr);
+        log.note("read_fix", fix);
+        expect("json" in fix ? fix.json : null).toMatchObject({ state: "waiting-for-push" });
+        expect(pullState(fixture.number).head).toBe(pushedHead);
+        expect(
+          readRows(run.home, "SELECT text FROM fixer_activity").some(
+            (row) => typeof row.text === "string" && row.text.startsWith(`${CLIENT} asked:`),
+          ),
+        ).toBe(true);
+
+        // Stop from outside leaves the commit waiting for Push alone.
+        const stopped = await bridge.call("stop_fix", pr);
+        log.note("stop_fix", stopped);
+        expect(stopped).toMatchObject({ isError: false });
+        expect(turns()).toEqual([{ status: "ready", started_by: CLIENT, rounds: 1 }]);
+        await app.open(`${run.url}${prPath(FIXTURE_REPO, fixture.number, "fixes")}`);
+        const turn = screen.getByRole("list", "Fixes").getByRole("article").first();
+        await expect(turn.getByRole("button", /^Push/).first()).toBeVisible({ timeout: 30_000 });
+        await app.screenshot("outside-agents-revise-waits-for-push");
+        log.note("bridge stderr", bridge.stderr() || "(empty)");
+      } finally {
+        log.save();
+        await bridge?.stop();
+        stopFakeInstance(name, { keepHome: false });
+        if (fixture !== null) closeFixFixture(fixture);
       }
     },
   );

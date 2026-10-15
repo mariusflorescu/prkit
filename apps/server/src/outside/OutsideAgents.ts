@@ -10,6 +10,9 @@ import {
   type OutsideDiscovery,
   OutsideDiscoveryJson,
 } from "@prkit/contracts";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- timingSafeEqual has no effect equivalent
+import * as NodeCrypto from "node:crypto";
+
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -72,33 +75,39 @@ export const make = Effect.gen(function* () {
   let port: number | null = null;
   const clients = new Map<string, OutsideClient>();
 
+  /** Written whole or not at all: a fresh owner-only temporary file, then renamed over. */
   const writeDiscovery = (file: OutsideDiscovery) =>
     Effect.gen(function* () {
       const text = yield* Schema.encodeEffect(OutsideDiscoveryJson)(file);
       const temporary = `${discoveryPath}.${process.pid}.tmp`;
-      yield* fs.writeFileString(temporary, text, { mode: 0o600 });
-      yield* fs.chmod(temporary, 0o600);
+      yield* fs.remove(temporary, { force: true });
+      yield* fs.writeFileString(temporary, text, { flag: "wx", mode: 0o600 });
       yield* fs.rename(temporary, discoveryPath);
     });
 
-  /** Writes the file for the current settings with a new token, or with none while off. */
-  const publish = Effect.gen(function* () {
-    if (port === null) return;
-    if (!settings.enabled) {
-      tokenHash = null;
-      return yield* writeDiscovery({ _tag: "off", pid: process.pid, version: config.version });
-    }
-    const token = Base64Url.encode(yield* crypto.randomBytes(32));
-    tokenHash = yield* digest(token);
-    yield* writeDiscovery({
-      _tag: "on",
-      port,
-      token,
-      pid: process.pid,
-      version: config.version,
-      access: settings.access,
+  /**
+   * Writes the file for `next`, with a new token while on, and returns the hash to accept.
+   * Nothing in memory changes here: callers swap in the hash only once the file is written.
+   */
+  const publish = (next: OutsideAgentsSettings) =>
+    Effect.gen(function* () {
+      if (port === null) return null;
+      if (!next.enabled) {
+        yield* writeDiscovery({ _tag: "off", pid: process.pid, version: config.version });
+        return null;
+      }
+      const token = Base64Url.encode(yield* crypto.randomBytes(32));
+      const hash = yield* digest(token);
+      yield* writeDiscovery({
+        _tag: "on",
+        port,
+        token,
+        pid: process.pid,
+        version: config.version,
+        access: next.access,
+      });
+      return hash;
     });
-  });
 
   const state = Effect.gen(function* () {
     const now = yield* DateTime.now;
@@ -114,22 +123,32 @@ export const make = Effect.gen(function* () {
 
   const get = () => gate.withPermits(1)(state);
 
+  /**
+   * Saves the settings and, when the switch or level changed, writes the file with a new
+   * token, in one transaction: a failed write leaves the settings, the file and the token as
+   * they were, and the error reaches the UI.
+   */
   const update = (next: OutsideAgentsSettings) =>
     gate.withPermits(1)(
       Effect.gen(function* () {
         const text = yield* Schema.encodeEffect(SettingsJson)(next);
-        yield* sql`INSERT INTO settings (key, value) VALUES (${SETTINGS_KEY}, ${text})
-          ON CONFLICT (key) DO UPDATE SET value = excluded.value`;
         const changed = next.enabled !== settings.enabled || next.access !== settings.access;
+        const hash = yield* sql.withTransaction(
+          Effect.gen(function* () {
+            yield* sql`INSERT INTO settings (key, value) VALUES (${SETTINGS_KEY}, ${text})
+              ON CONFLICT (key) DO UPDATE SET value = excluded.value`;
+            return changed ? yield* publish(next) : tokenHash;
+          }),
+        );
         settings = next;
-        if (changed) yield* publish;
+        tokenHash = hash;
         return yield* state;
       }).pipe(
         Effect.catchTags({
           SqlError: failure("prkit couldn't save this setting. Try again."),
           SchemaError: failure("prkit couldn't save this setting. Try again."),
           PlatformError: failure(
-            "prkit saved the setting but couldn't write its file for outside agents. Try again.",
+            "prkit couldn't write its file for outside agents, so nothing changed. Try again.",
           ),
         }),
       ),
@@ -139,8 +158,9 @@ export const make = Effect.gen(function* () {
   const reset = () =>
     gate.withPermits(1)(
       Effect.gen(function* () {
+        const hash = yield* publish(settings);
+        tokenHash = hash;
         clients.clear();
-        yield* publish;
         yield* Effect.logInfo("Outside agents' access reset");
         return yield* state;
       }).pipe(
@@ -156,13 +176,17 @@ export const make = Effect.gen(function* () {
     );
 
   /** Whether a bearer token is the current one. Off, nothing is. */
-  const accepts = (token: string) =>
-    tokenHash === null || token === ""
+  const accepts = (token: string) => {
+    const current = tokenHash;
+    return current === null || token === ""
       ? Effect.succeed(false)
       : digest(token).pipe(
-          Effect.map((hash) => hash === tokenHash),
+          Effect.map((hash) =>
+            NodeCrypto.timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(current, "hex")),
+          ),
           Effect.orElseSucceed(() => false),
         );
+  };
 
   /** Records a request from a client, by the name it gave in `initialize`. */
   const seen = (bridgeId: string, name: string) =>
@@ -186,7 +210,7 @@ export const make = Effect.gen(function* () {
           yield* fs.makeDirectory(path.dirname(launcher), { recursive: true });
           yield* fs.writeFileString(launcher, launcherScript(config.home), { mode: 0o700 });
           yield* fs.chmod(launcher, 0o700);
-          yield* publish;
+          tokenHash = yield* publish(settings);
         }),
       ),
       () =>

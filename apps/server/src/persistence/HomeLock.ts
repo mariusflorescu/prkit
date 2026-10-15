@@ -62,7 +62,9 @@ export const layer = Layer.effectDiscard(
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const stdio = yield* Stdio.Stdio;
-    yield* fs.makeDirectory(home, { recursive: true });
+    // Owner-only when prkit creates it: it holds tokens' hashes, sessions and the discovery
+    // file. An existing home keeps the mode its owner gave it.
+    yield* fs.makeDirectory(home, { recursive: true, mode: 0o700 });
     yield* Effect.acquireRelease(
       acquire(path.join(home, "prkit.lock"), home).pipe(
         Effect.tapError((error) =>

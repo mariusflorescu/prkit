@@ -86,14 +86,25 @@ export const runBridge = async (home: string) => {
   };
   const send = (message: object) => write(JSON.stringify(message));
 
+  /**
+   * The file's text, only when it is a regular file of this user's that nobody else can read
+   * or write: a symlink, another owner's file or a loose mode counts as no file.
+   */
+  const readTrusted = () => {
+    try {
+      const stat = NodeFs.lstatSync(discoveryPath);
+      if (!stat.isFile() || stat.uid !== process.getuid?.() || (stat.mode & 0o077) !== 0)
+        return null;
+      return NodeFs.readFileSync(discoveryPath, "utf8");
+    } catch {
+      return null;
+    }
+  };
+
   /** The file as it says now; a missing, damaged or stale (dead pid) file means not open. */
   const discover = (): Reachable | Unreachable => {
-    let text: string;
-    try {
-      text = NodeFs.readFileSync(discoveryPath, "utf8");
-    } catch {
-      return { _tag: "not-open" };
-    }
+    const text = readTrusted();
+    if (text === null) return { _tag: "not-open" };
     const file = Option.getOrUndefined(decodeDiscovery(text));
     if (file === undefined || !alive(file.pid)) return { _tag: "not-open" };
     return file._tag === "off"
@@ -102,12 +113,8 @@ export const runBridge = async (home: string) => {
   };
   /** What changes the tools a client should see: reachable or not, and the level. */
   const fingerprint = () => {
-    let text = "";
-    try {
-      text = NodeFs.readFileSync(discoveryPath, "utf8");
-    } catch {
-      return "not-open";
-    }
+    const text = readTrusted();
+    if (text === null) return "not-open";
     const file = Option.getOrUndefined(decodeDiscovery(text));
     if (file === undefined || !alive(file.pid)) return "not-open";
     return file._tag === "off" ? "off" : `on:${file.access}`;
