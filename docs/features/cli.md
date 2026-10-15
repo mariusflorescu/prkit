@@ -8,11 +8,11 @@ The CLI calls the existing `/mcp/outside` tools. It uses the bridge's trusted di
 
 The server writes its owner-only launcher at `$PRKIT_HOME/bin/prkit` on every launch. The installed link follows that launcher across app updates. In a packaged app the launcher uses the app's own Electron binary in Node mode, with the server entry's `cli` fast path.
 
-On macOS the link goes in `/usr/local/bin/prkit` when that directory exists and is writable without administrator access. Otherwise it goes in `$HOME/.local/bin/prkit`. `PRKIT_CLI_INSTALL_PATH` overrides the complete destination path, which must be absolute and end in `prkit`. Verification always sets this override inside a temporary HOME.
+On macOS the link goes in `/usr/local/bin/prkit` when that directory is owned by the current user, writable without administrator access, and not writable by group or others. Otherwise it goes in `$HOME/.local/bin/prkit`. `PRKIT_CLI_INSTALL_PATH` overrides the complete destination path, which must be absolute and end in `prkit`. The same ownership and permission checks apply to the override's folder. A missing folder is created with mode 0755. Verification always sets this override inside a temporary HOME.
 
 prkit checks its process PATH and macOS's `/etc/paths`; it never executes a shell or reads startup files for this check. A terminal with a customized PATH may differ. When the folder is missing from both, Settings shows the exact `export PATH=...` line with Copy. Add it to your own shell profile and open a new terminal. prkit never edits profiles or requests administrator access.
 
-An existing file, directory or foreign link is shown and left alone. Uninstall removes only a link targeting this home's launcher. Uninstalling the command leaves the app and its data in place.
+An existing file, directory or foreign link is shown and left alone. Uninstall moves the entry aside and checks it again before deleting only a link targeting this home's launcher. If the entry changed, prkit restores it and reports the change. Uninstalling the command leaves the app and its data in place.
 
 ## Commands
 
@@ -40,7 +40,7 @@ Also available: `guide stop`, `fix stop` and `fix retry`. PRs accept HTTPS URLs 
 
 `apps/server/src/cli/commands.ts` is the command map. Flags and validation come from each outside tool's parameter schema; the parity test fails when a tool has no command or a command has no tool. As outside tools acquire filters or new options, their commands acquire those flags. A new tool needs a map entry.
 
-Plain output uses tables and labelled fields, without terminal color codes. `--json` returns the tool's structured result unchanged on stdout; failures go to stderr. Exit codes are 0 for success, 1 for a tool or protocol failure, 2 for invalid usage, 3 for a closed app, Outside agents off or an unreachable app (including a sandbox), and 4 for insufficient access. `wait` returning `finished: false` is a successful timeout, not a failed guide, and never stops work.
+Plain output uses tables and labelled fields, without terminal color codes. `--json` returns the tool's structured result unchanged on stdout; failures go to stderr. Exit codes are 0 for success, 1 for a tool or protocol failure, 2 for invalid usage, 3 for a closed app, Outside agents off or an unreachable app (including a sandbox), 4 for insufficient access, and 130 for interruption by SIGINT or SIGTERM. Interruption cancels the HTTP request and closes the MCP session; it never stops guide or fix work. `wait` returning `finished: false` is a successful timeout, not a failed guide, and never stops work.
 
 A disconnected action is never automatically replayed, since it may already have run. Use the same `--request-id` to retry `comments add`, `fix send` or `fix change` safely. Authentication rejections before dispatch may reconnect once using the new discovery file. Each CLI invocation closes its MCP session before exiting.
 

@@ -2,6 +2,7 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Resolve the launcher home before any server runtime loads.
 import * as NodePath from "node:path";
 
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -69,7 +70,7 @@ const target = (
     : Effect.succeed({ owner, repo, number, host: host ?? "github.com" });
 };
 
-export const main = async () => {
+export const main = () => {
   const home = NodePath.resolve(
     process.env.PRKIT_HOME ?? NodePath.join(process.env.HOME ?? "", ".prkit"),
   );
@@ -146,7 +147,7 @@ export const main = async () => {
     Effect.sync(() => {
       process.exitCode = 2;
     });
-  await Effect.runPromise(
+  NodeRuntime.runMain(
     Command.runWith(root.pipe(Command.withSubcommands(commands)), {
       version: process.env.PRKIT_APP_VERSION ?? packageJson.version,
     })(process.argv.slice(3)).pipe(

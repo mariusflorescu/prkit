@@ -1,4 +1,6 @@
 import { childEnv, CliInstallError, type CliInstallState } from "@prkit/contracts";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Uninstall needs lstat and empty-directory-only cleanup, which FileSystem does not expose.
+import * as NodeFs from "node:fs/promises";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -18,6 +20,32 @@ export class CliInstall extends Context.Service<CliInstall, Effect.Success<typeo
   "@prkit/server/cli/CliInstall",
 ) {}
 
+const directoryProblem = (fs: FileSystem.FileSystem, directory: string, allowMissing = false) =>
+  Effect.gen(function* () {
+    const info = yield* fs.stat(directory);
+    if (info.type !== "Directory") return "it isn't a folder";
+    const uid = process.getuid?.();
+    if (uid === undefined || Option.isNone(info.uid) || info.uid.value !== uid)
+      return "it isn't owned by the current user";
+    if ((info.mode & 0o022) !== 0) return "it is writable by group or others";
+    yield* fs.access(directory, { writable: true });
+    return null;
+  }).pipe(
+    Effect.catchTag("PlatformError", (error) =>
+      Effect.succeed(
+        error.reason._tag === "NotFound" && allowMissing
+          ? null
+          : "prkit couldn't inspect or write to it",
+      ),
+    ),
+  );
+
+export const preferredInstallDirectory = (preferred: string, fallback: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    return (yield* directoryProblem(fs, preferred)) === null ? preferred : fallback;
+  });
+
 export const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -27,23 +55,30 @@ export const make = Effect.gen(function* () {
   const launcher = path.join(config.home, "bin", "prkit");
   const skillCommand = skillInstallCommand(skillBuild.repository, skillBuild.ref);
   const fail = (message: string) => Effect.fail(new CliInstallError({ message }));
+  const requireDirectory = (directory: string, allowMissing = false) =>
+    directoryProblem(fs, directory, allowMissing).pipe(
+      Effect.flatMap((problem) =>
+        problem === null ? Effect.void : fail(`prkit can't use ${directory}: ${problem}.`),
+      ),
+    );
   const location = Effect.gen(function* () {
     const override = process.env.PRKIT_CLI_INSTALL_PATH;
     if (override !== undefined) {
       if (!path.isAbsolute(override) || path.basename(override) !== "prkit")
         return yield* fail("PRKIT_CLI_INSTALL_PATH must be an absolute file path ending in prkit.");
-      return path.normalize(override);
+      const file = path.normalize(override);
+      yield* requireDirectory(path.dirname(file), true);
+      return file;
     }
-    const local = "/usr/local/bin";
-    const writable =
-      process.platform === "darwin" &&
-      (yield* fs.access(local, { writable: true }).pipe(
-        Effect.as(true),
-        Effect.catchTag("PlatformError", () => Effect.succeed(false)),
-      ));
-    return writable
-      ? path.join(local, "prkit")
-      : path.join(process.env.HOME ?? "", ".local", "bin", "prkit");
+    const fallback = path.join(process.env.HOME ?? "", ".local", "bin");
+    const directory =
+      process.platform === "darwin"
+        ? yield* preferredInstallDirectory("/usr/local/bin", fallback).pipe(
+            Effect.provideService(FileSystem.FileSystem, fs),
+          )
+        : fallback;
+    yield* requireDirectory(directory, true);
+    return path.join(directory, "prkit");
   });
 
   const get = () =>
@@ -115,11 +150,69 @@ export const make = Effect.gen(function* () {
             `${state.existing} is at ${state.path}. prkit left it alone. Move it yourself before installing.`,
           );
         if (install && state.status === "absent") {
-          yield* fs.makeDirectory(path.dirname(state.path), { recursive: true });
+          yield* fs.makeDirectory(path.dirname(state.path), { recursive: true, mode: 0o755 });
+          yield* requireDirectory(path.dirname(state.path));
           // symlink is exclusive: a file appearing after get() is never overwritten.
           yield* fs.symlink(launcher, state.path);
         } else if (!install && state.status === "installed") {
-          yield* fs.remove(state.path);
+          const temporary = yield* fs.makeTempDirectory({
+            directory: path.dirname(state.path),
+            prefix: ".prkit-uninstall-",
+          });
+          const moved = path.join(temporary, "prkit");
+          let needsRestore = false;
+          const restore = Effect.gen(function* () {
+            if (!needsRestore) return;
+            if (
+              (yield* fs.readDirectory(path.dirname(state.path))).includes(
+                path.basename(state.path),
+              )
+            )
+              return yield* fail(
+                `${state.path} changed during uninstall. prkit preserved the moved entry at ${moved} because the original location is occupied.`,
+              );
+            yield* fs
+              .rename(moved, state.path)
+              .pipe(
+                Effect.catchTag("PlatformError", () =>
+                  fail(
+                    `prkit couldn't restore ${state.path}. The moved entry is safe at ${moved}.`,
+                  ),
+                ),
+              );
+            needsRestore = false;
+          });
+          yield* Effect.gen(function* () {
+            yield* fs.rename(state.path, moved);
+            needsRestore = true;
+            const info = yield* Effect.tryPromise({
+              try: () => NodeFs.lstat(moved),
+              catch: () => new CliInstallError({ message: `prkit couldn't inspect ${moved}.` }),
+            });
+            const own =
+              info.isSymbolicLink() &&
+              path.resolve(path.dirname(state.path), yield* fs.readLink(moved)) === launcher;
+            if (!own) {
+              yield* restore;
+              return yield* fail(
+                `${state.path} changed during uninstall. prkit restored it and left it alone.`,
+              );
+            }
+            yield* fs.remove(moved);
+            needsRestore = false;
+          }).pipe(
+            Effect.catchTags({
+              PlatformError: (error) => restore.pipe(Effect.andThen(Effect.fail(error))),
+              CliInstallError: (error) => restore.pipe(Effect.andThen(Effect.fail(error))),
+            }),
+            Effect.ensuring(
+              Effect.tryPromise({
+                try: () => NodeFs.rmdir(temporary),
+                catch: () => new CliInstallError({ message: `prkit left ${temporary} alone.` }),
+              }).pipe(Effect.ignore),
+            ),
+            Effect.uninterruptible,
+          );
         }
         return yield* get();
       }).pipe(

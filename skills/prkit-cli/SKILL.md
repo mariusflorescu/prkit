@@ -22,6 +22,7 @@ Exit codes tell you what to do next:
 | 2    | Usage error                                                        | Check `prkit <command> --help`.                                                                                                                 |
 | 3    | prkit isn't open, Outside agents is off, or the CLI can't reach it | Tell the user what the message says, e.g. to open prkit and turn on Settings > Outside agents. Don't try to launch or configure prkit yourself. |
 | 4    | Needs "Read and start work"                                        | prkit is set to Read only. Tell the user; don't look for a way around it.                                                                       |
+| 130  | Interrupted by SIGINT or SIGTERM                                   | The CLI closed its session. Guide and fix work continue in prkit.                                                                               |
 
 If you run inside a sandbox that blocks network (Codex's default sandbox does), `prkit` can't reach the app and exits with 3, saying so. Ask the user to allow this command outside the sandbox, or to allow network for it.
 

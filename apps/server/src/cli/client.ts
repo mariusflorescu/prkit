@@ -67,9 +67,10 @@ export const callTool = (home: string, name: string, args: Schema.Json) =>
       });
       const request = (id: number | undefined, method: string, params: Schema.Json) =>
         Effect.gen(function* () {
-          const response = yield* Effect.tryPromise({
-            try: () =>
-              fetch(`http://127.0.0.1:${found.port}${OUTSIDE_MCP_PATH}`, {
+          let receivedHeaders = false;
+          const { response, text } = yield* Effect.tryPromise({
+            try: async (signal) => {
+              const response = await fetch(`http://127.0.0.1:${found.port}${OUTSIDE_MCP_PATH}`, {
                 method: "POST",
                 headers: {
                   "content-type": "application/json",
@@ -81,22 +82,21 @@ export const callTool = (home: string, name: string, args: Schema.Json) =>
                   "mcp-protocol-version": protocol,
                 },
                 body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
-                signal: AbortSignal.timeout(name === "wait_for" ? 610_000 : 60_000),
-              }),
+                signal: AbortSignal.any([
+                  signal,
+                  AbortSignal.timeout(name === "wait_for" ? 610_000 : 60_000),
+                ]),
+              });
+              session = response.headers.get("mcp-session-id") ?? session;
+              receivedHeaders = true;
+              return { response, text: await response.text() };
+            },
             catch: () =>
               new CliFailure({
-                code: 3,
-                message:
-                  "prkit couldn't be reached. Open prkit and try again. Inside a coding agent sandbox, allow network access to 127.0.0.1 (Codex: sandbox_workspace_write.network_access = true; Claude Code: allow local network access).",
-              }),
-          });
-          session = response.headers.get("mcp-session-id") ?? session;
-          const text = yield* Effect.tryPromise({
-            try: () => response.text(),
-            catch: () =>
-              new CliFailure({
-                code: 1,
-                message: "prkit's answer was interrupted. Check its state before retrying work.",
+                code: receivedHeaders ? 1 : 3,
+                message: receivedHeaders
+                  ? "prkit's answer was interrupted. Check its state before retrying work."
+                  : "prkit couldn't be reached. Open prkit and try again. Inside a coding agent sandbox, allow network access to 127.0.0.1 (Codex: sandbox_workspace_write.network_access = true; Claude Code: allow local network access).",
               }),
           });
           if ([401, 403, 404].includes(response.status)) return { _tag: "reconnect" } as const;
