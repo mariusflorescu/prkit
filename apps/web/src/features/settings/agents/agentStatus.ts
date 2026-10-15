@@ -33,6 +33,7 @@ export const agentStatus = (
     case "keychain-login":
       return { headline: "Not signed in", detail: state.message, tone: "problem" };
     case "not-subscription":
+    case "secrets":
       return { headline: "Needs attention", detail: state.message, tone: "problem" };
     case "error":
     case "off":

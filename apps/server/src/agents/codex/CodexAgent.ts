@@ -211,7 +211,7 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
               stdin: "ignore",
             }),
           );
-          const [output, errors, code] = yield* Effect.all(
+          const [, errors, code] = yield* Effect.all(
             [
               child.stdout.pipe(Stream.decodeText(), Stream.mkString),
               child.stderr.pipe(Stream.decodeText(), Stream.mkString),
@@ -220,7 +220,8 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
             { concurrency: "unbounded" },
           );
           if (code === 0) return "signed-in" as const;
-          if (/\bnot logged in\b/i.test(`${output}\n${errors}`)) return "signed-out" as const;
+          // Only Codex's own answer counts: a non-zero exit with exactly this on stderr.
+          if (errors.trim() === "Not logged in") return "signed-out" as const;
           // Codex's own error line says what went wrong; any other output could name a key.
           const error = /^Error\b.{0,200}/m.exec(errors)?.[0];
           return yield* unknown(`exit ${code}${error === undefined ? "" : `: ${error}`}`);

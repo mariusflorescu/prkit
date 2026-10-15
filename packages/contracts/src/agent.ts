@@ -21,6 +21,8 @@ export const AgentUnavailableReason = Schema.Literals([
   "error",
   /** Turned off in Settings > Agents. */
   "off",
+  /** prkit couldn't read the sensitive values saved for it, so it won't run without them. */
+  "secrets",
 ]);
 export type AgentUnavailableReason = typeof AgentUnavailableReason.Type;
 

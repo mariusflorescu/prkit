@@ -70,6 +70,11 @@ const FakeAgents = Layer.effectDiscard(
     process.env.PRKIT_CLAUDE_PATH = `${folder}/claude`;
     process.env.PRKIT_CODEX_PATH = `${folder}/codex`;
     process.env.PRKIT_TEST_HANGING_CODEX = `${folder}/hanging-codex`;
+    // The agents' own folders too: no test reads or links the caller's real logins.
+    yield* fs.makeDirectory(`${folder}/codex-home`);
+    yield* fs.makeDirectory(`${folder}/claude-config`);
+    process.env.CODEX_HOME = `${folder}/codex-home`;
+    process.env.CLAUDE_CONFIG_DIR = `${folder}/claude-config`;
   }),
 );
 
@@ -261,7 +266,11 @@ describe("Agents", () => {
 });
 
 describe("setupOf", () => {
-  const resolved = (config: AgentInstanceConfig) => ({ config, environment: {} });
+  const resolved = (config: AgentInstanceConfig) => ({
+    config,
+    environment: {},
+    secretsLost: false,
+  });
 
   it("lets a default without a folder keep the one the server started with", () => {
     expect(
@@ -347,7 +356,7 @@ describe("AgentInstances secrets", () => {
         yield* fs.remove(file);
         yield* fs.makeDirectory(file);
         const unreadable = yield* store.create(work({ environment: [secret] })).pipe(Effect.flip);
-        expect(unreadable.message).toContain("couldn't read agent-secrets.json");
+        expect(unreadable.message).toContain(`couldn't read ${file}`);
         expect((yield* fs.stat(file)).type).toBe("Directory");
 
         // Only a missing file counts as empty.
@@ -356,6 +365,65 @@ describe("AgentInstances secrets", () => {
         expect(yield* Schema.decodeEffect(Secrets)(yield* fs.readFileString(file))).toEqual({
           claude_work: { MY_TOKEN: "s3cret" },
         });
+      }),
+    ));
+
+  it("starts every agent with a damaged secrets file, and flags only those that had secrets", () =>
+    run(
+      Effect.gen(function* () {
+        const store = yield* AgentInstancesStore.AgentInstances;
+        const fs = yield* FileSystem.FileSystem;
+        const { home } = yield* ServerConfig.ServerConfig;
+        const file = `${home}/agent-secrets.json`;
+        yield* store.create(
+          work({
+            environment: [
+              { name: "MY_TOKEN", value: "s3cret", sensitive: true, valueRedacted: false },
+            ],
+          }),
+        );
+        yield* store.create(work({ id: id("claude_plain"), label: "Plain" }));
+        yield* fs.writeFileString(file, "{ not json");
+
+        // A fresh start: nothing built yet, the file unreadable.
+        const agents = yield* Agents.make;
+        const catalog = yield* agents.catalog();
+        expect(catalog.providers.map((entry) => entry.instance)).toEqual([
+          "claude",
+          "claude_plain",
+          "claude_work",
+          "codex",
+        ]);
+        const reasons = Object.fromEntries(
+          catalog.providers.map((entry) => [
+            entry.instance,
+            entry.state._tag === "unavailable" ? entry.state.reason : "ready",
+          ]),
+        );
+        expect(reasons["claude_work"]).toBe("secrets");
+        expect(reasons["claude_plain"]).not.toBe("secrets");
+        expect(reasons["claude"]).not.toBe("secrets");
+        const lost = catalog.providers.find((entry) => entry.instance === "claude_work");
+        expect(lost?.state._tag === "unavailable" && lost.state.message).toContain(
+          "couldn't read its saved secrets",
+        );
+        expect(
+          (yield* store.resolved).find((e) => e.config.id === "claude_work")?.environment,
+        ).toEqual({});
+
+        // Turning a default off still works and leaves the file alone; a secret save doesn't.
+        yield* store.update({ ...defaultInstanceConfig("claude"), enabled: false });
+        const refused = yield* store
+          .update(
+            work({
+              environment: [
+                { name: "MY_TOKEN", value: "new", sensitive: true, valueRedacted: false },
+              ],
+            }),
+          )
+          .pipe(Effect.flip);
+        expect(refused.message).toContain(`${file}, where prkit keeps`);
+        expect(yield* fs.readFileString(file)).toBe("{ not json");
       }),
     ));
 

@@ -16,6 +16,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -40,6 +41,9 @@ const InstanceRow = Schema.Struct({
   login: AgentLogin,
 });
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(InstanceRow));
+const decodeEnvironments = Schema.decodeUnknownEffect(
+  Schema.Array(Schema.Struct({ environment: InstanceRow.fields.environment })),
+);
 const encodeEnvironment = Schema.encodeSync(Schema.fromJsonString(Schema.Array(StoredVariable)));
 const isKind = Schema.is(AgentProviderKind);
 /** Sensitive values by instance id, then variable name. */
@@ -49,11 +53,14 @@ const Secrets = Schema.fromJsonString(
 const decodeSecrets = Schema.decodeUnknownEffect(Secrets);
 type SecretMap = Readonly<Record<string, Readonly<Record<string, string>>>>;
 const encodeSecrets = Schema.encodeSync(Secrets);
+const NO_SECRETS: SecretMap = {};
 
 /** An instance with its real environment, for the server only: sensitive values included. */
 export interface ResolvedInstance {
   readonly config: AgentInstanceConfig;
   readonly environment: Readonly<Record<string, string>>;
+  /** It has sensitive variables, and the secrets file couldn't be read: they are missing. */
+  readonly secretsLost: boolean;
 }
 
 /** What the app may see of an instance: sensitive values blanked and marked redacted. */
@@ -98,10 +105,10 @@ export const make = Effect.gen(function* () {
         error.reason._tag === "NotFound"
           ? Effect.succeed<SecretMap>({})
           : fail(
-              "prkit couldn't read agent-secrets.json in its folder, where it keeps sensitive values. Check that file's permissions, then try again.",
+              `prkit couldn't read ${secretsFile}, where it keeps agents' sensitive values, so it left it as it is. Fix its permissions, or move it aside and enter the sensitive values again.`,
             )(),
       SchemaError: fail(
-        "agent-secrets.json in prkit's folder is damaged, so prkit left it as it is. Fix or remove that file, then try again.",
+        `${secretsFile}, where prkit keeps agents' sensitive values, is damaged, so prkit left it as it is. Move it aside, then enter the sensitive values again.`,
       ),
     }),
   );
@@ -127,7 +134,17 @@ export const make = Effect.gen(function* () {
   /** Every instance with its real environment: each kind's default first, then the user's. */
   const resolved = Effect.gen(function* () {
     const stored = yield* rows;
-    const secrets = yield* readSecrets;
+    // An unreadable secrets file loses only the sensitive values: every agent still builds,
+    // and one that had any says so instead of running without them.
+    const { secrets, unreadable } = yield* readSecrets.pipe(
+      Effect.map((secrets) => ({ secrets, unreadable: false })),
+      Effect.catchTag("AgentInstanceError", (error) =>
+        Effect.logWarning("Couldn't read the agents' sensitive values").pipe(
+          Effect.annotateLogs({ message: error.message }),
+          Effect.as({ secrets: NO_SECRETS, unreadable: true }),
+        ),
+      ),
+    );
     const toResolved = (config: AgentInstanceConfig): ResolvedInstance => {
       const own = secrets[config.id] ?? {};
       const environment: Record<string, string> = {};
@@ -137,7 +154,11 @@ export const make = Effect.gen(function* () {
         if (value !== undefined && environmentNameProblem(variable.name) === null)
           environment[variable.name] = value;
       }
-      return { config: redact(config, own), environment };
+      return {
+        config: redact(config, own),
+        environment,
+        secretsLost: unreadable && config.environment.some((variable) => variable.sensitive),
+      };
     };
     const fromRow = (row: (typeof stored)[number]): AgentInstanceConfig | null =>
       isKind(row.kind)
@@ -169,7 +190,11 @@ export const make = Effect.gen(function* () {
     }),
   );
 
-  const checkConfig = (config: AgentInstanceConfig) =>
+  /**
+   * `saved` holds the names the instance already has. One a newer rule refuses isn't checked
+   * again, so turning the agent on or off never fails on it; `resolved` still never passes it.
+   */
+  const checkConfig = (config: AgentInstanceConfig, saved: ReadonlySet<string>) =>
     Effect.gen(function* () {
       if (isDefaultInstance(config.id) && config.id !== config.kind)
         return yield* new AgentInstanceError({
@@ -177,7 +202,7 @@ export const make = Effect.gen(function* () {
         });
       const names = new Set<string>();
       for (const variable of config.environment) {
-        const problem = environmentNameProblem(variable.name);
+        const problem = saved.has(variable.name) ? null : environmentNameProblem(variable.name);
         if (problem !== null)
           return yield* new AgentInstanceError({ message: `${variable.name}: ${problem}` });
         if (names.has(variable.name))
@@ -196,7 +221,14 @@ export const make = Effect.gen(function* () {
     writing
       .withPermits(1)(
         Effect.gen(function* () {
-          yield* checkConfig(config);
+          const savedRows =
+            yield* sql`SELECT environment FROM agent_instances WHERE id = ${config.id}`.pipe(
+              Effect.flatMap(decodeEnvironments),
+            );
+          yield* checkConfig(
+            config,
+            new Set(savedRows.flatMap((row) => row.environment.map((variable) => variable.name))),
+          );
           // Ids are unique whatever their case: `Claude_Work` would pass for `claude_work`.
           const existing = yield* sql<{
             readonly id: string;
@@ -215,8 +247,13 @@ export const make = Effect.gen(function* () {
             return yield* new AgentInstanceError({
               message: "An instance can't change which agent it runs.",
             });
-          const secrets = yield* readSecrets;
-          const held = secrets[config.id] ?? {};
+          // With no sensitive values to keep, a secrets file prkit can't read stays untouched,
+          // so turning an agent on or off still works; any other save refuses to rewrite it.
+          const hasSecrets = config.environment.some((variable) => variable.sensitive);
+          const readable = hasSecrets
+            ? yield* readSecrets
+            : Option.getOrNull(yield* Effect.option(readSecrets));
+          const held = readable?.[config.id] ?? {};
           const kept: Record<string, string> = {};
           for (const variable of config.environment) {
             if (!variable.sensitive) continue;
@@ -244,7 +281,7 @@ export const make = Effect.gen(function* () {
             enabled = excluded.enabled, config_dir = excluded.config_dir,
             binary_path = excluded.binary_path, environment = excluded.environment,
             login = excluded.login, updated_at = excluded.updated_at`;
-          yield* writeSecrets(withSecrets(secrets, config.id, kept));
+          if (readable !== null) yield* writeSecrets(withSecrets(readable, config.id, kept));
           yield* Effect.logInfo(mode === "create" ? "Added an agent" : "Changed an agent").pipe(
             Effect.annotateLogs({
               instance: config.id,
@@ -259,6 +296,7 @@ export const make = Effect.gen(function* () {
       .pipe(
         Effect.catchTags({
           SqlError: fail("prkit couldn't save that agent. Try again."),
+          SchemaError: fail("prkit read a damaged agent setting. Check Settings > Agents."),
           PlatformError: fail("prkit couldn't save that agent's sensitive values. Try again."),
         }),
       );
@@ -268,8 +306,9 @@ export const make = Effect.gen(function* () {
     writing
       .withPermits(1)(
         Effect.gen(function* () {
-          yield* sql`DELETE FROM agent_instances WHERE id = ${id}`;
+          // Read first: a secrets file prkit can't read stops the removal before anything goes.
           const secrets = yield* readSecrets;
+          yield* sql`DELETE FROM agent_instances WHERE id = ${id}`;
           if (secrets[id] !== undefined) yield* writeSecrets(withSecrets(secrets, id, {}));
         }),
       )
@@ -279,6 +318,15 @@ export const make = Effect.gen(function* () {
           PlatformError: fail("prkit couldn't remove that agent's sensitive values. Try again."),
         }),
       );
+
+  /** Turns an added instance on or off and nothing else; false when it has no row. */
+  const setEnabled = (id: AgentInstanceId, enabled: boolean) =>
+    Effect.gen(function* () {
+      const at = DateTime.formatIso(yield* DateTime.now);
+      const rows = yield* sql`UPDATE agent_instances SET enabled = ${enabled ? 1 : 0},
+        updated_at = ${at} WHERE id = ${id} RETURNING id`;
+      return rows.length > 0;
+    }).pipe(Effect.catchTag("SqlError", fail("prkit couldn't change that agent. Try again.")));
 
   /** Whether a guide attempt or a fix turn is running on `id` now. */
   const busy = (id: AgentInstanceId) =>
@@ -298,6 +346,7 @@ export const make = Effect.gen(function* () {
   return {
     resolved,
     busy,
+    setEnabled,
     create: (config: AgentInstanceConfig) => save(config, "create"),
     update: (config: AgentInstanceConfig) => save(config, "update"),
     drop,

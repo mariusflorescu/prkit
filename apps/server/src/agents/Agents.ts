@@ -84,6 +84,15 @@ const off = (label: string): AgentProviderState => ({
   ownLogin: false,
 });
 
+const SECRETS_LOST: AgentProviderState = {
+  _tag: "unavailable",
+  reason: "secrets",
+  message:
+    "prkit couldn't read its saved secrets (agent-secrets.json in prkit's folder). Move that file aside, then enter them again in Edit.",
+  fix: null,
+  ownLogin: false,
+};
+
 /** Display order: kind, its default first, then label, then id. */
 const order = (left: AgentInstanceConfig, right: AgentInstanceConfig) =>
   AGENT_KINDS.indexOf(left.kind) - AGENT_KINDS.indexOf(right.kind) ||
@@ -111,6 +120,8 @@ interface Built {
   readonly key: string;
   readonly config: AgentInstanceConfig;
   readonly provider: AgentProvider;
+  /** Its sensitive values couldn't be read, so it isn't offered until they are entered again. */
+  readonly secretsLost: boolean;
 }
 
 export const make = Effect.gen(function* () {
@@ -137,13 +148,18 @@ export const make = Effect.gen(function* () {
       const next = new Map<AgentInstanceId, Built>();
       for (const instance of resolved) {
         const setup = setupOf(instance, process.env);
-        const key = settingsKey(instance.config, setup);
+        const key = `${settingsKey(instance.config, setup)}\u0000${String(instance.secretsLost)}`;
         const known = built.get(instance.config.id);
         next.set(
           instance.config.id,
           known !== undefined && known.key === key
             ? { ...known, config: instance.config }
-            : { key, config: instance.config, provider: yield* build(instance.config.kind, setup) },
+            : {
+                key,
+                config: instance.config,
+                provider: yield* build(instance.config.kind, setup),
+                secretsLost: instance.secretsLost,
+              },
         );
       }
       built = next;
@@ -212,6 +228,13 @@ export const make = Effect.gen(function* () {
       };
       if (!config.enabled)
         return { ...base, version: yield* provider.version, state: off(config.label), models: [] };
+      if (entry.secretsLost)
+        return {
+          ...base,
+          version: yield* provider.version,
+          state: SECRETS_LOST,
+          models: [],
+        };
       const [state, version] = yield* Effect.all([provider.check, provider.version], {
         concurrency: "unbounded",
       });
@@ -310,7 +333,11 @@ export const make = Effect.gen(function* () {
   const update = (config: AgentInstanceConfig) =>
     store.update(config).pipe(Effect.andThen(catalog(true, config.id)));
 
-  /** Removes an added instance: its prkit-held login and folder first, then its settings. */
+  /**
+   * Removes an added instance: its prkit-held login and folder first, then its settings. It is
+   * turned off first, so no guide or fix can start on it while the busy check and the sign-out
+   * run; if either refuses, it goes back to how it was.
+   */
   const remove = (id: AgentInstanceId) =>
     Effect.gen(function* () {
       if (isDefaultInstance(id))
@@ -318,15 +345,20 @@ export const make = Effect.gen(function* () {
           message: "A default agent can't be removed. Reset it or turn it off instead.",
         });
       const found = (yield* instances).find((entry) => entry.config.id === id);
-      if (yield* store.busy(id))
-        return yield* new AgentInstanceError({
-          message: `${found?.config.label ?? id} is busy with a guide or fix. Try again when it's done.`,
-        });
-      if (found !== undefined)
-        yield* found.provider.retire.pipe(
-          Effect.mapError((error) => new AgentInstanceError({ message: error.message })),
-        );
-      yield* store.drop(id);
+      const wasEnabled = found?.config.enabled ?? false;
+      if (wasEnabled) yield* store.setEnabled(id, false);
+      const restore = wasEnabled ? store.setEnabled(id, true).pipe(Effect.ignore) : Effect.void;
+      yield* Effect.gen(function* () {
+        if (yield* store.busy(id))
+          return yield* new AgentInstanceError({
+            message: `${found?.config.label ?? id} is busy with a guide or fix. Try again when it's done.`,
+          });
+        if (found !== undefined)
+          yield* found.provider.retire.pipe(
+            Effect.mapError((error) => new AgentInstanceError({ message: error.message })),
+          );
+      }).pipe(Effect.tapError(() => restore));
+      yield* store.drop(id).pipe(Effect.tapError(() => restore));
       yield* Effect.logInfo("Removed an agent").pipe(Effect.annotateLogs({ instance: id }));
       return yield* catalog();
     });
