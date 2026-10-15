@@ -24,7 +24,6 @@ import {
   stats,
   TOOLS_PULL,
   WITHHELD,
-  wrote,
 } from "./model.ts";
 import { STACKS } from "./options.ts";
 
@@ -358,7 +357,6 @@ const mutation = (
     errors: [{ type: "UNPROCESSABLE", message }],
   });
   if (query.includes("enablePullRequestAutoMerge")) {
-    wrote("enablePullRequestAutoMerge", variables);
     if (pull === undefined) return refused("Could not resolve to a node.");
     if (mergeState(pull) !== "BLOCKED")
       return refused(`Pull request is in ${mergeState(pull).toLowerCase()} status`);
@@ -372,7 +370,6 @@ const mutation = (
     };
   }
   if (query.includes("disablePullRequestAutoMerge")) {
-    wrote("disablePullRequestAutoMerge", variables);
     if (pull === undefined || pull.autoMerge === null)
       return refused("Auto-merge is not enabled for this pull request.");
     pull.autoMerge = null;
@@ -383,7 +380,6 @@ const mutation = (
       data: { disablePullRequestAutoMerge: { clientMutationId: null } },
     };
   }
-  wrote("unknown mutation", variables);
   return refused("The fake GitHub doesn't answer this mutation.");
 };
 

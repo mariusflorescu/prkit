@@ -5,6 +5,7 @@ import { test } from "@e2e-dev/web";
 import { expect } from "e2e";
 import * as Schema from "effect/Schema";
 
+import { ResponseFragment } from "../apps/server/src/outside/responseSchemas.ts";
 import * as Results from "../apps/server/src/outside/paritySchemas.ts";
 import {
   AddedComment,
@@ -120,6 +121,43 @@ test(
         }),
       );
       expect(empty.total).toBe(0);
+      // Changing a cached list invalidates old cursors instead of moving their offsets.
+      await fake.comment(9);
+      await fake.comment(9);
+      const beforeChange = Schema.decodeUnknownSync(Results.ConversationResult)(
+        await ok("read_conversation", { ...ninth, refresh: true, limit: 1 }),
+      );
+      if (beforeChange.nextCursor === null) throw new Error("Expected a conversation cursor");
+      await fake.comment(9);
+      await ok("read_conversation", { ...ninth, refresh: true, limit: 1 });
+      await refusal(
+        "read_conversation",
+        { ...ninth, cursor: beforeChange.nextCursor, limit: 1 },
+        "list changed, start again",
+      );
+      // A single large comment must use bounded wire fragments, with no lost text.
+      await fake.comment(9, 12_000);
+      const ordinary = Schema.decodeUnknownSync(Results.ConversationResult)(
+        await ok("read_conversation", { ...ninth, refresh: true, limit: 100 }),
+      );
+      if (ordinary.nextCursor === null)
+        throw new Error("Expected the oversized comment on the next page");
+      let encoded = "";
+      let response = Schema.decodeUnknownSync(ResponseFragment)(
+        await ok("read_conversation", { ...ninth, cursor: ordinary.nextCursor, limit: 100 }),
+      );
+      while (true) {
+        expect(response.offset).toBe(encoded.length);
+        encoded += response.text;
+        if (response.nextResponseCursor === null) break;
+        response = Schema.decodeUnknownSync(ResponseFragment)(
+          await ok("read_conversation", { responseCursor: response.nextResponseCursor }),
+        );
+      }
+      const reconstructed = Schema.decodeUnknownSync(
+        Schema.fromJsonString(Results.ConversationResult),
+      )(encoded);
+      expect(reconstructed.items.some((comment) => comment.body.length > 48_000)).toBe(true);
       const agents = Schema.decodeUnknownSync(Results.AgentsResult)(await ok("list_agents"));
       expect(JSON.stringify(agents)).not.toContain("environment");
       const agent = agents.items.find((entry) => entry.kind === "claude" && entry.ready);
@@ -141,7 +179,7 @@ test(
         ["read_checks", ninth],
         ["read_conversation", ninth],
         ["read_stack", pr],
-        ["read_pull_request_candidates", ninth],
+        ["read_pull_request_action_candidates", ninth],
         ["list_reviews", {}],
         ["list_guide_revisions", pr],
         ["read_guide_progress", pr],
@@ -182,11 +220,19 @@ test(
       const tabs = Schema.decodeUnknownSync(OpenPullRequestsResult)(
         await ok("list_open_pull_requests"),
       );
-      await ok("reorder_pull_requests", { keys: tabs.open.map((entry) => entry.key).toReversed() });
-      await ok("focus_pull_request", pr);
+      await ok("reorder_pull_request_tabs", {
+        keys: tabs.open.map((entry) => entry.key).toReversed(),
+      });
+      await ok("focus_pull_request_tab", pr);
       await expect(screen.getByRole("heading", "Budget fixture 1")).toBeVisible();
       await app.screenshot("outside-parity-focused-tab");
-      await ok("close_pull_request", ninth);
+      await ok("open_pull_request", { ...ninth, focus: false });
+      await expect(screen.getByRole("heading", "Budget fixture 1")).toBeVisible();
+      await ok("close_pull_request_tab", pr);
+      await expect(screen.getByRole("heading", "Keyboard fixture 9")).toBeVisible();
+      await app.screenshot("outside-parity-close-shown-tab");
+      await ok("open_pull_request", { ...pr, focus: true });
+      await ok("close_pull_request_tab", ninth);
 
       const settings = Schema.decodeUnknownSync(Results.GuideSettingsResult)(
         await ok("read_guide_settings", pr),
@@ -334,10 +380,9 @@ test(
       );
       expect(patch.items.map((part) => part.text).join("")).toContain("stand-in.md");
       await ok("list_fixes");
-      expect(await fake.writes()).toEqual([]);
       lines.push(`## Fake GitHub budget\n${JSON.stringify(await fake.stats(), null, 2)}`);
       await ok("list_accounts");
-      await ok("close_pull_request", pr);
+      await ok("close_pull_request_tab", pr);
       await expect(screen.getByRole("heading", "Inbox")).toBeVisible();
       await app.screenshot("outside-parity-closed-last-tab");
       lines.push(`## Fake GitHub writes\n${JSON.stringify(await fake.writes())}`);
@@ -348,8 +393,12 @@ test(
       NodeFS.mkdirSync(dir, { recursive: true });
       NodeFS.writeFileSync(NodePath.join(dir, "parity.md"), `${lines.join("\n\n")}\n`);
       await bridge?.stop();
+      const writes = await fake.writes();
+      const pushes = git.pushes();
       stopFakeInstance(name, { keepHome: false });
       fake.stop();
+      expect(writes).toEqual([]);
+      expect(pushes).toEqual([]);
     }
   },
 );

@@ -220,7 +220,16 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
     persist: true,
     changed: (cacheKey) => options.stackChanged(cacheKey.accountId),
   });
-  const mergeBases = new Map<string, string>();
+  const MergeBase = Schema.Struct({ merge_base_commit: Schema.Struct({ sha: Schema.String }) });
+  const mergeBases = yield* makeReadCache({
+    name: "merge-base",
+    json: Schema.fromJsonString(MergeBase),
+    maxEntries: 256,
+    maxBytes: 128 * 1024,
+    freshMs: 24 * 60 * 60_000,
+    persist: false,
+    changed: () => Effect.void,
+  });
   const fail = (
     key: PullRequestKey,
     accountId: AccountId,
@@ -557,6 +566,29 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
       });
       return cached.value;
     }).pipe(readError(key, accountId));
+  const mergeBaseOf = (
+    key: PullRequestKey,
+    accountId: AccountId,
+    snapshot: { readonly baseSha: string; readonly headSha: string },
+  ) =>
+    Effect.gen(function* () {
+      const { root, account } = yield* binding(key, accountId);
+      const range = `${snapshot.baseSha}...${snapshot.headSha}`;
+      const cached = yield* mergeBases.read(
+        { accountId, configDir: account.configDir, key: `${root}/compare/${range}` },
+        api.rest(accountId, `${root}/compare/${range}`, MergeBase),
+      );
+      return cached.value.merge_base_commit.sha;
+    });
+  const fileDiffIdentity = (key: PullRequestKey, accountId: AccountId) =>
+    Effect.gen(function* () {
+      const snapshot = yield* files(key, accountId);
+      return {
+        headSha: snapshot.headSha,
+        baseSha: snapshot.baseSha,
+        mergeBaseSha: yield* mergeBaseOf(key, accountId, snapshot),
+      };
+    }).pipe(readError(key, accountId));
   const fileContents = (key: PullRequestKey, accountId: AccountId, path: string, side: FileSide) =>
     Effect.gen(function* () {
       const { root, account } = yield* binding(key, accountId);
@@ -574,15 +606,7 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
         (side === "new" && file.status === "removed")
       )
         return { content: "", sha: snapshot.headSha };
-      const range = `${snapshot.baseSha}...${snapshot.headSha}`;
-      const mergeBase =
-        mergeBases.get(range) ??
-        (yield* api.rest(
-          accountId,
-          `${root}/compare/${range}`,
-          Schema.Struct({ merge_base_commit: Schema.Struct({ sha: Schema.String }) }),
-        )).merge_base_commit.sha;
-      mergeBases.set(range, mergeBase);
+      const mergeBase = yield* mergeBaseOf(key, accountId, snapshot);
       const sha = side === "new" ? snapshot.headSha : mergeBase;
       const readPath = side === "old" ? (file.previousPath ?? path) : path;
       const fetch = Effect.gen(function* () {
@@ -783,6 +807,7 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
     current,
     files,
     fileContents,
+    fileDiffIdentity,
     timeline,
     invalidate,
     checksChanged,

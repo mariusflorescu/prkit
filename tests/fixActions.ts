@@ -30,11 +30,16 @@ export const openPull = async ({ app, screen }: Fixtures, fixture: FixFixture, t
   });
 };
 
-/** Writes a draft on one line of `src/limits.js` from the Files tab's gutter. */
-export const draftOn = async ({ screen, browser }: Fixtures, number: number, body: string) => {
+/** Writes a draft on one line from the Files tab's gutter. */
+export const draftOn = async (
+  { screen, browser }: Fixtures,
+  number: number,
+  body: string,
+  path = LIMITS_PATH,
+) => {
   const line = (at: number) =>
-    browser.locator(`[data-path="${LIMITS_PATH}"] [data-column-number="${at}"]`);
-  const gutterButton = browser.locator(`[data-path="${LIMITS_PATH}"] [data-utility-button]`);
+    browser.locator(`[data-path="${path}"] [data-column-number="${at}"]`);
+  const gutterButton = browser.locator(`[data-path="${path}"] [data-utility-button]`);
   // The diff re-renders once highlighted, which can drop an early hover.
   await expect
     .poll(
@@ -50,7 +55,7 @@ export const draftOn = async ({ screen, browser }: Fixtures, number: number, bod
   await screen.getByRole("textbox", `Comment on line ${number}`).fill(body);
   await screen.getByRole("textbox", `Comment on line ${number}`).press("Meta+Enter");
   await expect(
-    screen.getByRole("article", `Pending comment on ${LIMITS_PATH} line ${number}`),
+    screen.getByRole("article", `Pending comment on ${path} line ${number}`),
   ).toBeVisible();
 };
 

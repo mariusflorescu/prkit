@@ -1,4 +1,4 @@
-import type { OpenPullRequest } from "@prkit/contracts";
+import { refFromKey, type OpenPullRequest } from "@prkit/contracts";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouterState } from "@tanstack/react-router";
 import { useEffect, useEffectEvent } from "react";
@@ -28,8 +28,14 @@ export function useWorkspaceChanges(show: (row: OpenPullRequest | null) => void)
         if (focus === null) {
           if (
             pathname.startsWith("/pr/") &&
-            previous?.activeKey &&
-            !change.workspace.open.some((row) => row.key === previous.activeKey)
+            previous?.open.some((row) => {
+              const ref = refFromKey(row.key);
+              return (
+                ref !== null &&
+                pathname === `/pr/${ref.host}/${ref.owner}/${ref.repo}/${ref.number}` &&
+                !change.workspace.open.some((next) => next.key === row.key)
+              );
+            })
           )
             reveal(
               change.workspace.open.find((row) => row.key === change.workspace.activeKey) ?? null,

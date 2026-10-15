@@ -1,6 +1,8 @@
 import * as Schema from "effect/Schema";
+import { ResponseFields } from "./responseSchemas.ts";
 
 export const PageFields = {
+  ...ResponseFields,
   cursor: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2000))),
   limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
 };

@@ -2,10 +2,11 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
+import * as Schema from "effect/Schema";
 import { repoRoot } from "../scripts/verify-run.ts";
 
 /** Real local git objects behind a transport stand-in; no production transport changes. */
-export const outsideGit = (name: string) => {
+export const outsideGit = (name: string, { fetches = true } = {}) => {
   const root = NodePath.join(repoRoot, ".e2e", "fake", `${name}-git`);
   NodeFS.rmSync(root, { recursive: true, force: true });
   NodeFS.mkdirSync(root, { recursive: true });
@@ -52,6 +53,7 @@ export const outsideGit = (name: string) => {
     git("commit", "-qm", `Fixture ${number}`);
     git("update-ref", `refs/pull/${number}/head`, "HEAD");
   }
+  const pushLog = NodePath.join(root, "pushes.jsonl");
   const bin = NodePath.join(root, "bin");
   NodeFS.mkdirSync(bin);
   // Redirect fetches to this fixture only. Keep the app's pinned git config and real git
@@ -60,9 +62,11 @@ export const outsideGit = (name: string) => {
     NodePath.join(bin, "git"),
     `#!${process.execPath}
 import * as cp from "node:child_process";
+import * as fs from "node:fs";
 const args = process.argv.slice(2).filter((arg) => arg !== "--filter=blob:none");
-if (args.includes("push")) { process.stderr.write("Fixture refuses pushes\\n"); process.exit(1); }
+if (args.includes("push")) { fs.appendFileSync(${JSON.stringify(pushLog)}, JSON.stringify(args) + "\\n"); process.stderr.write("Fixture refuses pushes\\n"); process.exit(1); }
 if (args.includes("fetch") || args.includes("ls-remote")) {
+  if (!${String(fetches)}) { process.stderr.write("Fixture refuses fetches\\n"); process.exit(1); }
   const at = args.findIndex((arg) => arg === "origin" || arg === "https://github.com/budget/fixtures.git");
   if (at < 0) { process.stderr.write("Fixture refuses another remote\\n"); process.exit(1); }
   args[at] = ${JSON.stringify(source)};
@@ -85,5 +89,16 @@ process.exit(result.status ?? 1);
       else process.env.PATH = previous;
     }
   };
-  return { start };
+  return {
+    start,
+    pushes: () =>
+      NodeFS.existsSync(pushLog)
+        ? NodeFS.readFileSync(pushLog, "utf8")
+            .trim()
+            .split("\n")
+            .map((line) =>
+              Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))(line),
+            )
+        : [],
+  };
 };

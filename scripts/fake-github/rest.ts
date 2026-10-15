@@ -16,7 +16,6 @@ import {
   sha,
   STACK,
   start,
-  wrote,
 } from "./model.ts";
 import { STACKS } from "./options.ts";
 
@@ -151,7 +150,6 @@ export const rest = (
       };
     if (tail === "reviews" && method === "POST") {
       const input = decodeBody(text || "{}");
-      wrote(`POST pulls/${pull.number}/reviews`, input);
       if (pull.author === LOGIN && input["event"] !== "COMMENT")
         return {
           kind: "rest:review-refused",
@@ -218,7 +216,6 @@ export const rest = (
     if (owner === undefined || run === undefined)
       return { kind: "rest:unknown", status: 404, body: { message: "Not Found" } };
     if (action === "approve" && method === "POST") {
-      wrote(`POST actions/runs/${run.id}/approve`, {});
       if (run.conclusion !== "action_required")
         return {
           kind: "rest:run-approve-refused",

@@ -30,11 +30,11 @@ The inventory covers every WebSocket RPC and the app's local presentation action
 | Expand file contents | pullRequests.fileContents | `read_file_contents` | Read |
 | Conversation comments/reviews, checks, timeline | pullRequests.timeline | `read_conversation`, `read_checks`, `read_timeline` | Read |
 | Stack strip and layers | pullRequests.stack | `read_stack` | Read |
-| Available reviewers, teams and labels | pullRequests.candidates | `read_pull_request_candidates` | Read |
+| Available reviewers, teams and labels | pullRequests.candidates | `read_pull_request_action_candidates` | Read |
 | GitHub PR actions | pullRequests.execute | Excluded A: merge/squash/rebase, enable/disable auto-merge, close/reopen, draft/ready, edit title/body, reviewers/teams/labels, assignees/milestones, update/delete branch, approve workflows, revert PR | Excluded |
 | Workspace and open tabs | workspace.get | `list_open_pull_requests` (tabs, not repository PRs) | Read |
 | Open/reopen a PR tab | workspace.open | `open_pull_request` | Work |
-| Close/focus/reorder tabs | workspace.close, workspace.activate, workspace.reorder | `close_pull_request`, `focus_pull_request`, `reorder_pull_requests` | Work |
+| Close/focus/reorder tabs | workspace.close, workspace.activate, workspace.reorder | `close_pull_request_tab`, `focus_pull_request_tab`, `reorder_pull_request_tabs` | Work |
 | Save Inbox presentation filters | workspace.saveInboxFilters | `save_inbox_filters` | Work |
 | Generate, regenerate and retry a guide | reviews.generate, reviews.retry | `generate_guide` with instance, model, options, guidance, focus and version checks; retries use the same generation service | Work |
 | Generate stack guides | reviews.generateStack | `generate_guide` with stack this-pr / whole-stack / chosen-layers, layers and regenerate | Work |
@@ -73,9 +73,11 @@ The inventory covers every WebSocket RPC and the app's local presentation action
 
 ### Tool parameters
 
-All PR tools accept `url`, or `owner`, `repo`, `number` and optional `host`, plus `accountId` when needed. Paged reads accept `cursor` and `limit` (1-100, default 20). Use `nextCursor` until null. A cursor is tied to the read and its relevant identity; an invalid or changed-diff cursor asks the client to start again. `refresh: true` spends budget on the first page only. Source truncation (`githubTruncated`, `githubTotal`, or per-account repository totals) is separate from the tool's pagination.
+All PR tools accept `url`, or `owner`, `repo`, `number` and optional `host`, plus `accountId` when needed. Paged reads accept `cursor` and `limit` (1-100, default 20). Use `nextCursor` until null. Every list cursor hashes the full ordered result contents and read identity. File-diff identity includes head, base and merge-base SHAs. An invalid cursor answers invalid; a changed result answers conflict: "The list changed, start again without cursor." `refresh: true` spends budget on the first page only. Source truncation (`githubTruncated`, `githubTotal`, or per-account repository totals) is separate from the tool's pagination.
 
-Diffs, file contents and patch text are split into fragments of at most 8,000 characters. Pages target 48,000 encoded bytes, leaving room for enclosing metadata. `offset` is a character offset; concatenate fragments in order. A file's `complete` marks its last patch fragment. A truncated page explicitly says to read `nextCursor`. Binary and oversized upstream patches keep their tagged representation rather than pretending to contain text.
+Diffs, file contents and patch text are split into fragments of at most 8,000 characters. The endpoint caps each complete successful MCP tool response at 48,000 encoded bytes, including the text and structured-content copies, JSON escaping and envelope headroom. This applies to metadata too, including the full attempt and draft from `read_guide_progress`. `offset` is a character offset; concatenate fragments in order. A file's `complete` marks its last patch fragment. A truncated page explicitly says to read `nextCursor`. Binary and oversized upstream patches keep their tagged representation rather than pretending to contain text.
+
+When a complete result is too large, the success value is a typed `_tag: "response-fragment"` with `encoding: "json"`, `offset`, `text`, `totalCharacters` and `nextResponseCursor`. Concatenate `text` by offset and decode the original tool success schema. Repeat the original parameters on the same tool with `responseCursor: nextResponseCursor` until null. These calls read an immutable response snapshot and never repeat the tool action or GitHub read. Snapshots are bound to the tool and client, retained for five minutes under a 32 MB total limit; an expired/evicted cursor answers conflict and requires a new read. A result larger than 32 MB fails explicitly and asks for a narrower read. List pagination and response fragmentation are separate: reconstruct each list page before following its `nextCursor`.
 
 | Tool | Level | Parameters beyond the PR target |
 | --- | --- | --- |
@@ -90,7 +92,7 @@ Diffs, file contents and patch text are split into fragments of at most 8,000 ch
 | `read_checks` | Read | `PagedTargetInput` schema |
 | `read_conversation` | Read | `PagedTargetInput` schema |
 | `read_stack` | Read | `PagedTargetInput` schema |
-| `read_pull_request_candidates` | Read | `TargetInput` schema |
+| `read_pull_request_action_candidates` | Read | `TargetInput` schema |
 | `list_reviews` | Read | `ListInput` schema (no PR target) |
 | `list_guide_revisions` | Read | `PagedTargetInput` schema |
 | `read_guide_revision` | Read | `RevisionInput` schema |
@@ -107,9 +109,9 @@ Diffs, file contents and patch text are split into fragments of at most 8,000 ch
 | `read_fix_patch` | Read | `FixTurnInput` schema |
 | `read_fix_access` | Read | `TargetInput` schema |
 | `read_settings` | Read | `SettingsInput` schema (no PR target) |
-| `close_pull_request` | Work | `TargetInput` schema |
-| `focus_pull_request` | Work | `TargetInput` schema |
-| `reorder_pull_requests` | Work | `ReorderInput` schema |
+| `close_pull_request_tab` | Work | `TargetInput` schema |
+| `focus_pull_request_tab` | Work | `TargetInput` schema |
+| `reorder_pull_request_tabs` | Work | `ReorderInput` schema |
 | `save_inbox_filters` | Work | `SaveInboxFiltersInput` schema |
 | `save_pull_request_guide_settings` | Work | `SaveGuideSettingsInput` schema |
 | `edit_review_comment` | Work | `EditCommentInput` schema |
@@ -123,9 +125,9 @@ The CLI is built separately from this surface using one command map. Until its b
 
 Each tool is declared once with its level (`apps/server/src/mcp/outside/tools.ts`): `reads` or `startsWork` wraps the handler, and the server refuses to start when a handler's level differs from its tool's. A tool above the client's level is hidden from `tools/list` and unknown to `tools/call`, checked again on every call, so lowering the level takes effect at once. Other failures come back as tool errors with a code (`invalid`, `not-found`, `account-needed`, `not-allowed`, `not-ready`, `conflict`, `github`, `failed`) and a plain message.
 
-Never offered: pushing, merging or any other pull request action, submitting a review, replying to or resolving threads, deleting or discarding anything, reverting, and any change to agents, accounts or settings. These are the owner's, in the app. So `stop_fix` stops only queued and running work: the session stays, and so does every commit waiting for Push, including one the agent is changing. `retry_fix` refuses a revert.
+Never offered: pushing, merging or any other pull request action, submitting a review, replying to or resolving threads, deleting or discarding anything, reverting, and changes to agents, accounts or settings except `save_inbox_filters` (presentation state) and `save_pull_request_guide_settings` (PR scope only, including the PR guidance/focus saved by `generate_guide`). These are the owner's, in the app. So `stop_fix` stops only queued and running work: the session stays, and so does every commit waiting for Push, including one the agent is changing. `retry_fix` refuses a revert.
 
-One case reaches GitHub without a click, and it is the owner's own opt-in. In a repository with both "Resolve conflicts automatically" and "Push fixes automatically" on, the watcher resolves a conflicting PR it watches (an open tab, a watched guide or an active fix session) and pushes the result (`FixerWatcher`, `conflictTurn`). So `open_pull_request`, `generate_guide`, `send_to_fix_agent` or `resolve_conflicts` on such a PR can lead to that push, exactly as doing the same in the app does. The turn is the watcher's, not the client's, and there is no extra guard: the two settings are what the owner chose for that repository.
+One case reaches GitHub without a click, and it is the owner's own opt-in. In a repository with both "Resolve conflicts automatically" and "Push fixes automatically" on, the watcher resolves a conflicting PR it watches (an open tab, a watched guide or an active fix session) and pushes the result (`FixerWatcher`, `conflictTurn`). So `open_pull_request`, `generate_guide`, `send_to_fix_agent` or `resolve_conflicts` on such a PR can lead to that push, exactly as doing the same in the app does. Opening tabs or using `generate_guide` for several stack layers makes each of those PRs one the watcher may resolve and push, just as doing the same in the app does. The turn is the watcher's, not the client's, and there is no extra guard: the two settings are what the owner chose for that repository.
 
 `add_review_comment`, `send_to_fix_agent` and `ask_fix_agent_to_change` take a `clientRequestId`. A request is the tool, the client, the pull request and that id (`outside_requests`, kept a day): a retry gets the first answer, looked up before anything else, instead of doing it twice; the same id with other input answers `conflict`. Each key has its own lock, so one slow call holds back only its own retries.
 

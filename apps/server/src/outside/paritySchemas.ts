@@ -50,6 +50,7 @@ import {
 } from "@prkit/contracts";
 import * as Schema from "effect/Schema";
 
+import { ResponseFields } from "./responseSchemas.ts";
 import { PageFields, PageInfo, pageSchema } from "./pageSchemas.ts";
 import {
   GuideStatus,
@@ -171,6 +172,7 @@ export const ProgressResult = Schema.Struct({
   draft: Schema.NullOr(DraftGuideResult),
 });
 export const DurationInput = Schema.Struct({
+  ...ResponseFields,
   instance: AgentInstanceId,
   lines: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
@@ -181,7 +183,7 @@ export const GuideSettingsResult = Schema.Struct({
   skipped: Schema.Array(SkippedFile),
   reviewedFiles: Schema.Int,
 });
-export const ScopeInput = Schema.Struct({ scope: GuideScope });
+export const ScopeInput = Schema.Struct({ ...ResponseFields, scope: GuideScope });
 export const GuideRepositoriesResult = pageSchema(GuideRepository);
 export const SaveGuideSettingsInput = Schema.Struct({
   ...TargetFields,
@@ -193,8 +195,11 @@ export const GenerateResult = Schema.Struct({
   ...GuideStatus.fields,
   stack: Schema.NullOr(StackGuidesResult),
 });
-export const ReorderInput = Schema.Struct({ keys: Schema.Array(PullRequestKey) });
-export const SaveInboxFiltersInput = InboxFilters;
+export const ReorderInput = Schema.Struct({
+  ...ResponseFields,
+  keys: Schema.Array(PullRequestKey),
+});
+export const SaveInboxFiltersInput = Schema.Struct({ ...InboxFilters.fields, ...ResponseFields });
 export const SavedFiltersResult = SavedInboxFilters;
 export const EditCommentInput = Schema.Struct({
   ...TargetFields,

@@ -19,6 +19,7 @@ import {
   ReviewCommentId,
 } from "@prkit/contracts";
 import * as Schema from "effect/Schema";
+import { ResponseFields } from "./responseSchemas.ts";
 import { PageFields, PageInfo } from "./pageSchemas.ts";
 
 /** What every outside tool fails with: a code a client can act on and a plain sentence. */
@@ -52,6 +53,7 @@ export const REPO_NAME = /^(?!\.\.?$)[A-Za-z0-9._-]{1,100}$/;
 export const HOST_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(?::\d{1,5})?$/;
 
 export const TargetFields = {
+  ...ResponseFields,
   url: Schema.optionalKey(
     describe(
       Schema.String,

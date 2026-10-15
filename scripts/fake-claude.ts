@@ -235,8 +235,10 @@ const plant = async () => {
 
 const fix = async (prompt: string) => {
   const ids =
-    /one entry for each of (.+), then end your turn\./.exec(prompt)?.[1]?.split(", ") ?? [];
-  NodeFS.writeFileSync("stand-in.md", "Written by the stand-in agent.\n");
+    /one entry for each of (.+), (?:then|and) end your turn\./.exec(prompt)?.[1]?.split(", ") ?? [];
+  if (prompt.includes("Then call `finish_fixes` again"))
+    NodeFS.appendFileSync("stand-in.md", "Revised by the stand-in agent.\n");
+  else NodeFS.writeFileSync("stand-in.md", "Written by the stand-in agent.\n");
   await plant();
   const reported = await mcp("tools/call", {
     name: "finish_fixes",

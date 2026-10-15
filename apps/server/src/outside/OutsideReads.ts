@@ -24,6 +24,7 @@ import { GuideSettingsStore } from "../reviews/GuideSettingsStore.ts";
 import { Reviews } from "../reviews/Reviews.ts";
 import { OutsideAgents } from "./OutsideAgents.ts";
 import { asFailure, fail } from "./errors.ts";
+import { resultJson } from "./responses.ts";
 import { makePager, textParts, type PageInput } from "./paging.ts";
 import type * as Inputs from "./paritySchemas.ts";
 import type { GuideStatus, OutsideToolFailure, Target, TargetInput } from "./schemas.ts";
@@ -189,11 +190,12 @@ export const makeOutsideReads = (
       Effect.gen(function* () {
         const target = yield* refreshedTarget(input);
         const result = yield* pulls.files(target.key, target.accountId);
+        const identity = yield* pulls.fileDiffIdentity(target.key, target.accountId);
         return {
           ...(yield* page(
             fileParts(result.files),
             input,
-            `files:${target.accountId}:${target.key}:${result.headSha}`,
+            `files:${target.accountId}:${target.key}:${resultJson(identity)}`,
           )),
           headSha: result.headSha,
           baseSha: result.baseSha,
@@ -358,7 +360,7 @@ export const makeOutsideReads = (
           ...(yield* page(
             snapshot.activity,
             input,
-            `progress:${target.key}:${snapshot.attempt?.id ?? "none"}`,
+            `progress:${target.key}:${resultJson([snapshot, draft])}`,
           )),
           draft,
         };
@@ -477,7 +479,7 @@ export const makeOutsideReads = (
           ...(yield* page(
             yield* fixes.turnActivity(target.key, turn.id),
             input,
-            `fix-turn:${target.key}:${turn.id}`,
+            `fix-turn:${target.key}:${resultJson([turn, snapshot.settings])}`,
           )),
           settings: snapshot.settings,
           autoResolvePaused: snapshot.autoResolvePaused,
