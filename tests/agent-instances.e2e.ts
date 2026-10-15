@@ -211,7 +211,11 @@ test(
       await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r3 · ", {
         timeout: 90_000,
       });
-      expect(lastRun()).toMatchObject({ configDir: null, resumed: false });
+      // The default Claude keeps the folder the server was started with, if any.
+      expect(lastRun()).toMatchObject({
+        configDir: process.env.CLAUDE_CONFIG_DIR ?? null,
+        resumed: false,
+      });
       expect(review()?.instance_id).toBe("claude");
       expect(review()?.session_id).not.toBe(first?.session_id);
 

@@ -154,7 +154,9 @@ const start = async (options: StartOptions) => {
   note(`starting ${options.name} on port ${port}, home ${paths.home}`);
 
   // childEnv drops the caller's PRKIT_*, GH_TOKEN and GITHUB_TOKEN: the server reads
-  // GitHub through the gh config dirs, never through a token in the environment.
+  // GitHub through the gh config dirs, never through a token in the environment. Each
+  // agent's own config folder carries over, so the default instances use the caller's
+  // setup, as the desktop app does, and journeys find its sessions where it saved them.
   const server = NodeChildProcess.spawn(
     process.execPath,
     [
@@ -170,7 +172,10 @@ const start = async (options: StartOptions) => {
     {
       cwd: repoRoot,
       env: {
-        ...childEnv(process.env, { CODEX_HOME: process.env.CODEX_HOME }),
+        ...childEnv(process.env, {
+          CODEX_HOME: process.env.CODEX_HOME,
+          CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
+        }),
         PRKIT_HOME: paths.home,
         PRKIT_AUTH_TOKEN: token,
         ...(options.watchInterval === null
