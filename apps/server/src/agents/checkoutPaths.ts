@@ -260,6 +260,9 @@ export const checkoutPaths = (
             if (!(yield* reads(target, path.resolve(where.checkout, from)))) return target.path;
           return null;
         }),
+      /** Where prkit's own file tools read: the checkout or an extra readable directory, never `.git`. */
+      reads: (targets: ReadonlyArray<string>) =>
+        every(targets, where.checkout, (at) => at === "checkout" || at === "readable"),
       /** A fix may change files in its checkout, never anything named `.git`. */
       writable: (targets: ReadonlyArray<string>) =>
         every(targets, where.checkout, (at) => at === "checkout"),

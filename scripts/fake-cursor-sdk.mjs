@@ -8,12 +8,16 @@
  *   approve-login  a sign-in waiting in the browser finishes
  *   reject-keys    Cursor turns every key down
  *   hold           a turn keeps writing until the file is removed
+ *   probe.json     calls a turn makes first, `[{ "tool": "read_file", "args": {...} }]`
  *   runs.log       each turn appends what it was started with: tools, setting sources, sandbox,
- *                  MCP server names, cwd, and whether it resumed
+ *                  MCP servers, custom tool names, cwd, and whether it resumed
+ *   calls.log      each custom tool call: its name, arguments, whether it worked, and its text
  *
- * A guide turn reports progress and submits a guide with one chapter holding every file the
- * prompt lists, through prkit's MCP server; a fix adds `stand-in.md` and reports every comment
- * fixed. Keys are `stand-in-...`; anything else is turned down.
+ * Like Cursor, it offers the model only the custom tools it was given, under the
+ * `custom-user-tools` server, and runs them in the host process. A guide turn reads the first
+ * file the prompt lists, reports progress and submits a guide with one chapter holding every
+ * file; a fix writes `stand-in.md` and reports every comment fixed. Keys are `stand-in-...`;
+ * anything else is turned down.
  */
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
@@ -133,53 +137,6 @@ const changedFiles = (prompt) => {
   });
 };
 
-/** One JSON-RPC call to an MCP server over streamable HTTP; the answer is JSON or one SSE event. */
-const mcpClient = (server) => {
-  let session = null;
-  let nextId = 1;
-  return async (method, params, notification = false) => {
-    const response = await fetch(server.url, {
-      method: "POST",
-      headers: {
-        ...server.headers,
-        "content-type": "application/json",
-        accept: "application/json, text/event-stream",
-        "mcp-protocol-version": "2025-06-18",
-        ...(session === null ? {} : { "mcp-session-id": session }),
-      },
-      body: JSON.stringify(
-        notification
-          ? { jsonrpc: "2.0", method, params }
-          : { jsonrpc: "2.0", id: nextId++, method, params },
-      ),
-    });
-    session = response.headers.get("mcp-session-id") ?? session;
-    const text = await response.text();
-    if (notification) return { ok: response.ok, text };
-    const body = text.includes("data:")
-      ? text
-          .split("\n")
-          .filter((line) => line.startsWith("data:"))
-          .map((line) => line.slice(5).trim())
-          .join("")
-      : text;
-    let reply = null;
-    try {
-      reply = JSON.parse(body);
-    } catch {
-      reply = null;
-    }
-    return {
-      ok:
-        response.ok &&
-        reply !== null &&
-        reply.error === undefined &&
-        reply.result?.isError !== true,
-      text: body,
-    };
-  };
-};
-
 class StandInAgent {
   constructor(agentId, options) {
     this.agentId = agentId;
@@ -187,52 +144,53 @@ class StandInAgent {
   }
   async send(message, sendOptions = {}) {
     const onDelta = sendOptions.onDelta ?? (() => {});
-    const servers = sendOptions.mcpServers ?? this.options.mcpServers ?? {};
-    const [name, server] = Object.entries(servers)[0] ?? [null, null];
+    const tools = sendOptions.local?.customTools ?? this.options.local?.customTools ?? {};
     const state = { cancelled: false };
-    const call = async (mcp, tool, args) => {
+    const call = async (tool, args) => {
       const callId = NodeCrypto.randomUUID();
-      const toolCall = { type: "mcp", args: { providerIdentifier: name, toolName: tool, args } };
+      const toolCall = {
+        type: "mcp",
+        args: { providerIdentifier: "custom-user-tools", toolName: tool, args },
+      };
       await onDelta({ update: { type: "tool-call-started", callId, toolCall } });
-      const result = await mcp("tools/call", { name: tool, arguments: args });
+      const found = tools[tool];
+      const result =
+        found === undefined
+          ? { content: [{ type: "text", text: `No tool named ${tool}` }], isError: true }
+          : await found.execute(args, { toolCallId: callId });
+      const ok = result.isError !== true;
+      const text = (result.content ?? []).map((part) => part.text ?? "").join("\n");
+      if (CONTROL !== "")
+        NodeFS.appendFileSync(
+          NodePath.join(CONTROL, "calls.log"),
+          `${JSON.stringify({ tool, args, ok, text })}\n`,
+        );
       await onDelta({
         update: {
           type: "tool-call-completed",
           callId,
-          toolCall: { ...toolCall, result: { status: result.ok ? "success" : "error" } },
+          toolCall: { ...toolCall, result: { status: ok ? "success" : "error" } },
         },
       });
-      return result;
+      return { ok, text };
     };
     const work = async () => {
-      if (server === null) return { status: "error" };
-      const mcp = mcpClient(server);
-      await mcp("initialize", {
-        protocolVersion: "2025-06-18",
-        capabilities: {},
-        clientInfo: { name: "fake-cursor", version: "0" },
-      });
-      await mcp("notifications/initialized", {}, true);
+      const probe = NodePath.join(CONTROL, "probe.json");
+      if (CONTROL !== "" && NodeFS.existsSync(probe))
+        for (const step of JSON.parse(NodeFS.readFileSync(probe, "utf8")))
+          await call(step.tool, step.args);
       await onDelta({ update: { type: "text-delta", text: "Reading the change." } });
-      await call(mcp, "report_progress", { message: "Reading the change with a stand-in Cursor" });
+      await call("report_progress", { message: "Reading the change with a stand-in Cursor" });
       while (flagged("hold") && !state.cancelled) await sleep(200);
       if (state.cancelled) return { status: "cancelled" };
       if (message.includes("`finish_fixes`")) {
         const ids =
           /one entry for each of (.+), then end your turn\./.exec(message)?.[1]?.split(", ") ?? [];
-        const callId = NodeCrypto.randomUUID();
-        const file = NodePath.join(this.options.local.cwd, "stand-in.md");
-        const toolCall = { type: "edit", args: { path: file } };
-        await onDelta({ update: { type: "tool-call-started", callId, toolCall } });
-        NodeFS.writeFileSync(file, "Written by the stand-in Cursor.\n");
-        await onDelta({
-          update: {
-            type: "tool-call-completed",
-            callId,
-            toolCall: { ...toolCall, result: { status: "success", value: {} } },
-          },
+        await call("write_file", {
+          path: "stand-in.md",
+          content: "Written by the stand-in Cursor.\n",
         });
-        const reported = await call(mcp, "finish_fixes", {
+        const reported = await call("finish_fixes", {
           summary: "Add the stand-in Cursor's note",
           perComment: ids.map((commentId) => ({
             commentId,
@@ -242,9 +200,11 @@ class StandInAgent {
         });
         return { status: reported.ok ? "finished" : "error" };
       }
-      const submitted = await call(mcp, "submit_guide", {
+      const files = changedFiles(message);
+      if (files[0] !== undefined) await call("read_file", { path: files[0] });
+      const submitted = await call("submit_guide", {
         summary: "A guide written by the stand-in Cursor.",
-        chapters: [{ title: "Every change", files: changedFiles(message) }],
+        chapters: [{ title: "Every change", files }],
       });
       return { status: submitted.ok ? "finished" : "error" };
     };
@@ -269,6 +229,7 @@ const record = (options, resumed) => {
       settingSources: options.local?.settingSources ?? null,
       sandbox: options.local?.sandboxOptions?.enabled ?? null,
       mcpServers: Object.keys(options.mcpServers ?? {}),
+      customTools: Object.keys(options.local?.customTools ?? {}).sort(),
       cwd: options.local?.cwd ?? null,
       home: process.env.HOME ?? null,
       resumed,

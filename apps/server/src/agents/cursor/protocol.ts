@@ -25,10 +25,14 @@ export const TurnRequest = Schema.Struct({
   /** Null runs Cursor's own pick, as the catalog shows it (models.ts). */
   model: Schema.NullOr(Schema.String),
   params: Schema.Array(Schema.Struct({ id: Schema.String, value: Schema.String })),
-  /** The built-in tools Cursor may offer: never shell or task (tools.ts). */
-  tools: Schema.Array(Schema.String),
-  /** prkit's MCP server, under a name picked at random for the turn. */
-  mcp: Schema.Struct({ name: Schema.String, url: Schema.String, token: Schema.String }),
+  /** prkit's file tools Cursor gets (fileTools.ts); none of Cursor's own (tools.ts). */
+  fileTools: Schema.Array(Schema.String),
+  /** prkit's MCP server and the tools of it this turn may call, through the runner (prkitTools.ts). */
+  mcp: Schema.Struct({
+    url: Schema.String,
+    token: Schema.String,
+    tools: Schema.Array(Schema.String),
+  }),
 });
 export type TurnRequest = typeof TurnRequest.Type;
 
@@ -91,14 +95,14 @@ export const Event = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("tool"),
     callId: Schema.String,
-    /** Cursor's tool name: read, grep, glob, ls, edit, mcp... */
+    /** One of prkit's file tools (read_file, grep...), `prkit` for its MCP tools, else `other`. */
     tool: Schema.String,
-    /** The file or folder the call works on, when it names one. */
+    /** The tool's own name: submit_guide for a `prkit` call. */
+    name: Schema.String,
+    /** The file or folder the call works on, when it names one, resolved against the checkout. */
     path: Schema.NullOr(Schema.String),
     /** The search pattern, for grep and glob. */
     pattern: Schema.NullOr(Schema.String),
-    /** For an MCP call: the server and tool names. */
-    mcp: Schema.NullOr(Schema.Struct({ server: Schema.String, tool: Schema.String })),
   }),
   Schema.Struct({ type: Schema.Literal("tool-done"), callId: Schema.String, ok: Schema.Boolean }),
   Schema.Struct({

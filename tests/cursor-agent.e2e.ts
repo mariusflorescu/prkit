@@ -6,7 +6,7 @@ import { expect, type Screen, type TestFixtures } from "e2e";
 
 import { setUpFakeClaude } from "./fakeClaude.ts";
 import { draftOn } from "./fixActions.ts";
-import { setUpFakeCursor } from "./fakeCursor.ts";
+import { type ProbeStep, setUpFakeCursor } from "./fakeCursor.ts";
 import {
   startFakeGitHub,
   startFakeInstance,
@@ -21,6 +21,32 @@ import { LIMITS_PATH } from "./reviewFixture.ts";
 const NAME = "cursor-agent";
 const CURSOR_REASON =
   "Cursor fixes edit files only: Cursor can't ask before each command, so it never runs this repository's scripts.";
+
+/** prkit's file tools Cursor gets for every turn, and its MCP tools for a guide and a fix. */
+const READ_TOOLS = ["read_file", "list_dir", "glob", "grep"];
+const GUIDE_TOOLS = [
+  "submit_guide",
+  "revise_guide",
+  "submit_draft",
+  "note_file",
+  "report_progress",
+];
+const FIX_TOOLS = ["finish_fixes", "finish_conflicts", "report_progress"];
+/** Some of Cursor's own tools, every one of them refused. */
+const NEVER = ["read_tool_call", "edit_tool_call", "shell_tool_call", "web_fetch_tool_call"];
+/** Reads and writes past the checkout, into its git data, and into Cursor's settings. */
+const PROBE: ReadonlyArray<ProbeStep> = [
+  { tool: "read_file", args: { path: "../escape.txt" } },
+  { tool: "read_file", args: { path: "/etc/hosts" } },
+  { tool: "read_file", args: { path: ".git/config" } },
+  { tool: "list_dir", args: { path: ".." } },
+  { tool: "glob", args: { pattern: "../**" } },
+  { tool: "grep", args: { pattern: "localhost", path: "/etc" } },
+  { tool: "write_file", args: { path: "../escape.txt", content: "out" } },
+  { tool: "write_file", args: { path: ".cursor/sandbox.json", content: "{}" } },
+  { tool: "write_file", args: { path: "sandbox.json", content: "{}" } },
+  { tool: "edit_file", args: { path: ".git/config", old_string: "[", new_string: "[" } },
+];
 
 const modifierOf = (browser: Browser) =>
   browser.evaluate(() => (/Mac|iPhone|iPad/.test(navigator.platform) ? "Meta" : "Control"));
@@ -249,8 +275,11 @@ test(
       await expect(screen.getByRole("link", "Inbox")).toBeVisible({ timeout: 30_000 });
       await installAndSignIn({ app, screen, browser }, cursor, false);
 
-      // A guide on Cursor: read-only tools, none of the user's or the repository's settings,
-      // the sandbox on, and prkit's MCP server under a name of its own.
+      // Every turn first tries to reach past the checkout through each of prkit's tools.
+      cursor.probe(PROBE);
+
+      // A guide on Cursor: none of Cursor's own tools, prkit's reading tools and its MCP tools
+      // through the runner, none of the user's or the repository's settings, the sandbox on.
       await app.open(`${run.url}${prPath(FIXTURE_REPO, fixture.number, "guide")}`);
       const setup = screen.getByRole("form", "Start a guide");
       await setup.getByRole("button", /^Agent and model: /).tap({ timeout: 60_000 });
@@ -261,14 +290,18 @@ test(
       await expect(screen.getByLabel("Guide status")).toContainText("Stand-in 1");
       const guide = cursor.runs().at(-1);
       expect(guide).toMatchObject({
-        tools: ["read", "grep", "glob", "ls", "mcp", "updateTodos", "readTodos"],
-        disallowedTools: ["shell", "task"],
+        tools: ["mcp_tool_call", "get_mcp_tools_tool_call"],
+        mcpServers: [],
+        customTools: [...READ_TOOLS, ...GUIDE_TOOLS].sort(),
         settingSources: [],
         sandbox: true,
         home,
         resumed: false,
       });
-      expect(guide?.mcpServers).toEqual([expect.stringMatching(/^prkit_[0-9a-f]{8,}$/)]);
+      expect(guide?.disallowedTools).toEqual(expect.arrayContaining(NEVER));
+      const guideCalls = cursor.calls();
+      expect(guideCalls.slice(0, PROBE.length).filter((call) => call.ok)).toEqual([]);
+      expect(guideCalls.find((call) => call.tool === "read_file" && call.ok)).toBeDefined();
 
       // An edit-only fix on your own PR: the agent edits, prkit commits, nothing runs.
       await app.open(`${run.url}${prPath(FIXTURE_REPO, fixture.number, "files")}`);
@@ -298,13 +331,21 @@ test(
       await expect(fixes.getByRole("region", "stand-in.md")).toBeVisible();
       const fix = cursor.runs().at(-1);
       expect(fix).toMatchObject({
-        tools: ["read", "grep", "glob", "ls", "mcp", "updateTodos", "readTodos", "edit"],
-        disallowedTools: ["shell", "task"],
+        tools: ["mcp_tool_call", "get_mcp_tools_tool_call"],
+        mcpServers: [],
+        customTools: [...READ_TOOLS, "edit_file", "write_file", ...FIX_TOOLS].sort(),
         settingSources: [],
         sandbox: true,
         home,
       });
+      expect(fix?.disallowedTools).toEqual(expect.arrayContaining(NEVER));
       expect(fix?.cwd).not.toBe(guide?.cwd);
+      const fixCalls = cursor.calls().slice(guideCalls.length);
+      expect(fixCalls.slice(0, PROBE.length).filter((call) => call.ok)).toEqual([]);
+      const cwd = fix?.cwd ?? "";
+      expect(NodeFS.existsSync(NodePath.join(NodePath.dirname(cwd), "escape.txt"))).toBe(false);
+      expect(NodeFS.existsSync(NodePath.join(cwd, ".cursor", "sandbox.json"))).toBe(false);
+      expect(NodeFS.existsSync(NodePath.join(cwd, "sandbox.json"))).toBe(false);
       expect(
         readRows(
           run.home,

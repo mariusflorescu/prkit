@@ -5,7 +5,6 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import * as Random from "effect/Random";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -25,7 +24,7 @@ import { Event, Request } from "./protocol.ts";
 import { layOutHome, workspaceSandboxProblem } from "./sandbox.ts";
 import { findSdk } from "./sdkLoader.ts";
 import { CURSOR_SDK_VERSION } from "./sdkPackages.ts";
-import { describeToolCall, toolSetFor } from "./tools.ts";
+import { describeToolCall, fileToolsFor } from "./tools.ts";
 
 export const NOT_INSTALLED =
   "Cursor support isn't installed. Install it from Settings > Agents to use Cursor.";
@@ -347,8 +346,6 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
         const watch = yield* watchTurn(input.turn).pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         );
-        // A name the agent can't guess from one turn to the next.
-        const serverName = `prkit_${(yield* Random.nextIntBetween(0x10000000, 0xffffffff)).toString(16)}`;
         const params = input.options.flatMap((option) =>
           typeof option.value === "string" ? [{ id: option.id, value: option.value }] : [],
         );
@@ -362,8 +359,8 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
             resumeSessionId: input.resumeSessionId,
             model: input.model,
             params,
-            tools: toolSetFor(input.access),
-            mcp: { name: serverName, url: input.mcp.url, token: input.mcp.bearerToken },
+            fileTools: [...fileToolsFor(input.access)],
+            mcp: { url: input.mcp.url, token: input.mcp.bearerToken, tools: [...input.tools] },
           }),
           {
             cwd: input.cwd,
@@ -373,7 +370,7 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
         watch.follow(pid);
         yield* Effect.logInfo(
           input.resumeSessionId === null ? "Cursor turn started" : "Cursor turn resumed",
-        ).pipe(Effect.annotateLogs({ instance: setup.id, pid, tools: toolSetFor(input.access) }));
+        ).pipe(Effect.annotateLogs({ instance: setup.id, pid, tools: fileToolsFor(input.access) }));
         const roots = [input.cwd, ...input.readableDirs];
         const relative = (target: string) => {
           for (const root of roots)
@@ -389,7 +386,7 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
               case "text":
                 return Stream.make({ _tag: "text", text: event.text });
               case "tool":
-                return Stream.fromIterable(describeToolCall(event, serverName, relative));
+                return Stream.fromIterable(describeToolCall(event, relative));
               case "tool-done":
                 return Stream.make({ _tag: "tool-done", id: event.callId, ok: event.ok });
               case "finished":

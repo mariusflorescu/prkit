@@ -19,11 +19,18 @@ import { ChildProcessSpawner } from "effect/process";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
 import * as ServerConfig from "../../config.ts";
-import type { AgentEvent, AgentProvider, TurnInput } from "../AgentProvider.ts";
+import {
+  type AgentEvent,
+  type AgentProvider,
+  FIX_TOOLS,
+  GUIDE_TOOLS,
+  PRKIT_TOOLS,
+  type TurnInput,
+} from "../AgentProvider.ts";
 import { checkoutFor } from "../../repo/gitRun.ts";
 import * as CursorAgent from "./CursorAgent.ts";
 import { SDK_PATH_VARIABLE } from "./sdkLoader.ts";
-import { FIX_TOOL_SET, GUIDE_TOOL_SET } from "./tools.ts";
+import { ALLOWED_TOOLS, DENIED_TOOLS } from "./tools.ts";
 
 const Run = Schema.fromJsonString(
   Schema.Struct({
@@ -32,6 +39,7 @@ const Run = Schema.fromJsonString(
     settingSources: Schema.NullOr(Schema.Array(Schema.String)),
     sandbox: Schema.NullOr(Schema.Boolean),
     mcpServers: Schema.Array(Schema.String),
+    customTools: Schema.Array(Schema.String),
     cwd: Schema.NullOr(Schema.String),
     home: Schema.NullOr(Schema.String),
     resumed: Schema.Boolean,
@@ -68,10 +76,12 @@ const mcpServer = NodeHttp.createServer((request, response) => {
       auth: request.headers.authorization === `Bearer ${TOKEN}`,
     });
     if (parsed.id === undefined) return response.writeHead(202).end();
+    const result =
+      parsed.method === "tools/list"
+        ? { tools: PRKIT_TOOLS.map((name) => ({ name, inputSchema: { type: "object" } })) }
+        : { content: [], isError: false };
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(
-      JSON.stringify({ jsonrpc: "2.0", id: parsed.id, result: { content: [], isError: false } }),
-    );
+    response.end(JSON.stringify({ jsonrpc: "2.0", id: parsed.id, result }));
   });
 });
 
@@ -246,7 +256,7 @@ const turnInput = async (
     mcp: { url: mcpUrl, bearerToken: TOKEN },
     env: {},
     access,
-    tools: [],
+    tools: access._tag === "write" ? FIX_TOOLS : GUIDE_TOOLS,
   };
   return input;
 };
@@ -319,7 +329,7 @@ describe("Cursor's status", () => {
 });
 
 describe("Cursor turns", () => {
-  it("writes a guide with read-only tools, prkit's MCP under a random name, and no settings", async () => {
+  it("writes a guide with prkit's reading tools and MCP tools only, and no settings", async () => {
     const provider = await instance("cursor_guide", { env: { CURSOR_API_KEY: "stand-in-key" } });
     mcpCalls.length = 0;
     const before = (await runs()).length;
@@ -330,30 +340,34 @@ describe("Cursor turns", () => {
       "session",
       "text",
       "tool-done",
+      "tool",
+      "tool-done",
       "composing-guide",
       "tool",
       "tool-done",
       "finished",
     ]);
-    expect(all.find((event) => event._tag === "tool")).toMatchObject({
-      label: "Submitted the guide",
-    });
+    expect(all.filter((event) => event._tag === "tool").map((event) => event.label)).toEqual([
+      "Read src/a.js",
+      "Submitted the guide",
+    ]);
     expect(all.at(-1)).toEqual({ _tag: "finished", outcome: "completed", message: null });
     const [started] = (await runs()).slice(before);
-    expect(started?.tools).toEqual(GUIDE_TOOL_SET);
-    expect(started?.tools).not.toContain("shell");
-    expect(started?.disallowedTools).toEqual(["shell", "task"]);
+    expect(started?.tools).toEqual(ALLOWED_TOOLS);
+    expect(started?.disallowedTools).toEqual(DENIED_TOOLS);
+    expect(started?.mcpServers).toEqual([]);
+    expect(started?.customTools).toEqual(
+      [...GUIDE_TOOLS, "glob", "grep", "list_dir", "read_file"].sort(),
+    );
     expect(started?.settingSources).toEqual([]);
     expect(started?.sandbox).toBe(true);
-    expect(started?.mcpServers).toHaveLength(1);
-    expect(started?.mcpServers[0]).toMatch(/^prkit_[0-9a-f]{8}$/);
     expect(started?.home).toBe(`${home}/cursor-instances/cursor_guide/home`);
     expect(
       mcpCalls.filter((call) => call.method === "tools/call").map((call) => call.tool),
     ).toEqual(["report_progress", "submit_guide"]);
     expect(mcpCalls.every((call) => call.auth)).toBe(true);
 
-    // The next turn resumes the conversation, under a new server name.
+    // The next turn resumes the conversation.
     const session = all.find((event) => event._tag === "session");
     const sessionId = session?._tag === "session" ? session.sessionId : "";
     expect(await Effect.runPromise(provider.hasSession(sessionId, input.cwd))).toBe(true);
@@ -361,10 +375,9 @@ describe("Cursor turns", () => {
     await events(provider, await turnInput("guide", input.access, sessionId));
     const [, resumed] = (await runs()).slice(before);
     expect(resumed?.resumed).toBe(true);
-    expect(resumed?.mcpServers[0]).not.toBe(started?.mcpServers[0]);
   });
 
-  it("edits files in a fix, and never offers a shell", async () => {
+  it("edits files in a fix through prkit's tools, and never offers a command", async () => {
     const provider = await instance("cursor_fix", { env: { CURSOR_API_KEY: "stand-in-key" } });
     const before = (await runs()).length;
     const input = await turnInput("fix", {
@@ -380,9 +393,18 @@ describe("Cursor turns", () => {
       "Edited stand-in.md",
       "Reported the fixes",
     ]);
+    const written = await fsRun(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        return yield* fs.readFileString(`${input.cwd}/stand-in.md`);
+      }),
+    );
+    expect(written).toBe("Written by the stand-in Cursor.\n");
     const [started] = (await runs()).slice(before);
-    expect(started?.tools).toEqual(FIX_TOOL_SET);
-    expect(started?.tools).not.toContain("shell");
+    expect(started?.tools).toEqual(ALLOWED_TOOLS);
+    expect(started?.customTools).toEqual(
+      [...FIX_TOOLS, "edit_file", "glob", "grep", "list_dir", "read_file", "write_file"].sort(),
+    );
   });
 
   it("refuses a checkout with its own .cursor/sandbox.json, before Cursor starts", async () => {

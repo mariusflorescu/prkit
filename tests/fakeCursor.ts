@@ -17,11 +17,21 @@ const Run = Schema.fromJsonString(
     settingSources: Schema.NullOr(Schema.Array(Schema.String)),
     sandbox: Schema.NullOr(Schema.Boolean),
     mcpServers: Schema.Array(Schema.String),
+    customTools: Schema.Array(Schema.String),
     cwd: Schema.NullOr(Schema.String),
     home: Schema.NullOr(Schema.String),
     resumed: Schema.Boolean,
   }),
 );
+const Call = Schema.fromJsonString(
+  Schema.Struct({ tool: Schema.String, ok: Schema.Boolean, text: Schema.String }),
+);
+
+/** One call a stand-in turn makes before its work: a tool name and its arguments. */
+export interface ProbeStep {
+  readonly tool: string;
+  readonly args: Readonly<Record<string, string>>;
+}
 
 /** An npm-style tarball of `files` under `package/`, and its sha512 integrity. */
 const pack = (dir: string, name: string, files: Readonly<Record<string, string>>) => {
@@ -81,16 +91,21 @@ export const setUpFakeCursor = (name: string) => {
     on
       ? NodeFS.writeFileSync(NodePath.join(control, what), "")
       : NodeFS.rmSync(NodePath.join(control, what), { force: true });
+  const lines = (name: string) => {
+    const file = NodePath.join(control, name);
+    if (!NodeFS.existsSync(file)) return [];
+    return NodeFS.readFileSync(file, "utf8")
+      .split("\n")
+      .filter((line) => line !== "");
+  };
   return {
     manifest,
     approveLogin: () => flag("approve-login", true),
-    runs: () => {
-      const file = NodePath.join(control, "runs.log");
-      if (!NodeFS.existsSync(file)) return [];
-      return NodeFS.readFileSync(file, "utf8")
-        .split("\n")
-        .filter((line) => line !== "")
-        .map((line) => Schema.decodeUnknownSync(Run)(line));
-    },
+    runs: () => lines("runs.log").map((line) => Schema.decodeUnknownSync(Run)(line)),
+    /** Every custom tool call the stand-in made, with whether it worked and what it returned. */
+    calls: () => lines("calls.log").map((line) => Schema.decodeUnknownSync(Call)(line)),
+    /** Calls each later turn makes first, as an agent trying its tools would. */
+    probe: (steps: ReadonlyArray<ProbeStep>) =>
+      NodeFS.writeFileSync(NodePath.join(control, "probe.json"), JSON.stringify(steps)),
   };
 };

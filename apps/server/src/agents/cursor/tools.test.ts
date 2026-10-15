@@ -1,39 +1,55 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  describeToolCall,
-  FIX_TOOL_SET,
-  GUIDE_TOOL_SET,
-  NEVER_TOOLS,
-  toolSetFor,
-} from "./tools.ts";
+import { ALLOWED_TOOLS, DENIED_TOOLS, describeToolCall, fileToolsFor } from "./tools.ts";
 
 const call = (tool: string, fields: Partial<Parameters<typeof describeToolCall>[0]> = {}) =>
   describeToolCall(
-    { type: "tool", callId: "c1", tool, path: null, pattern: null, mcp: null, ...fields },
-    "prkit_1a2b3c4d",
+    { type: "tool", callId: "c1", tool, name: tool, path: null, pattern: null, ...fields },
     (path) => path.replace("/work/checkout/", ""),
   );
 
 describe("Cursor's tools", () => {
-  it("offers a guide reading tools only, and a fix edits too; never a shell or sub-agents", () => {
-    expect(toolSetFor({ _tag: "read-only", tmpDir: "/tmp/t" })).toEqual(GUIDE_TOOL_SET);
+  it("keeps none of Cursor's own tools, only the two that carry prkit's", () => {
+    expect(ALLOWED_TOOLS).toEqual(["mcp_tool_call", "get_mcp_tools_tool_call"]);
+    for (const tool of ALLOWED_TOOLS) expect(DENIED_TOOLS).not.toContain(tool);
+    expect(DENIED_TOOLS).toEqual(
+      expect.arrayContaining([
+        "read_tool_call",
+        "edit_tool_call",
+        "delete_tool_call",
+        "ls_tool_call",
+        "grep_tool_call",
+        "glob_tool_call",
+        "shell_tool_call",
+        "write_shell_stdin_tool_call",
+        "task_tool_call",
+        "web_fetch_tool_call",
+        "web_search_tool_call",
+        "fetch_tool_call",
+        "read_mcp_resource_tool_call",
+        "update_todos_tool_call",
+      ]),
+    );
+  });
+
+  it("gives a guide prkit's reading tools, and a fix writing too, never a command", () => {
+    expect(fileToolsFor({ _tag: "read-only", tmpDir: "/tmp/t" })).toEqual([
+      "read_file",
+      "list_dir",
+      "glob",
+      "grep",
+    ]);
     expect(
-      toolSetFor({
+      fileToolsFor({
         _tag: "write",
         scripts: { _tag: "allowed", names: ["test"] },
         tmpDir: "/tmp/t",
       }),
-    ).toEqual(FIX_TOOL_SET);
-    for (const never of NEVER_TOOLS) {
-      expect(GUIDE_TOOL_SET).not.toContain(never);
-      expect(FIX_TOOL_SET).not.toContain(never);
-    }
-    expect(GUIDE_TOOL_SET).not.toContain("edit");
+    ).toEqual(["read_file", "list_dir", "glob", "grep", "write_file", "edit_file"]);
   });
 
   it("names each call in plain words, and counts a whole-file read", () => {
-    expect(call("read", { path: "/work/checkout/src/a.js" })).toEqual([
+    expect(call("read_file", { path: "/work/checkout/src/a.js" })).toEqual([
       {
         _tag: "tool",
         id: "c1",
@@ -48,20 +64,18 @@ describe("Cursor's tools", () => {
     expect(call("glob", { pattern: "**/*.ts" })[0]).toMatchObject({
       label: "Listed files matching **/*.ts",
     });
-    expect(call("edit", { path: "/work/checkout/src/a.js" })[0]).toMatchObject({
+    expect(call("edit_file", { path: "/work/checkout/src/a.js" })[0]).toMatchObject({
       label: "Edited src/a.js",
     });
-    expect(call("updateTodos")).toEqual([]);
   });
 
-  it("knows prkit's tools by the turn's server name, and keeps the quiet ones out of the log", () => {
-    const prkit = (tool: string) => call("mcp", { mcp: { server: "prkit_1a2b3c4d", tool } });
+  it("labels prkit's tools, and keeps the quiet ones out of the log", () => {
+    const prkit = (name: string) => call("prkit", { name });
     expect(prkit("report_progress")).toEqual([]);
     expect(prkit("submit_guide").map((event) => event._tag)).toEqual(["composing-guide", "tool"]);
     expect(prkit("finish_fixes")[0]).toMatchObject({ label: "Reported the fixes" });
-    // The same tool name from another server is someone else's tool.
-    expect(call("mcp", { mcp: { server: "prkit", tool: "submit_guide" } })).toEqual([
-      { _tag: "tool", id: "c1", label: "Used submit_guide", detail: null, reads: [] },
+    expect(call("other", { name: "shell" })).toEqual([
+      { _tag: "tool", id: "c1", label: "Used shell", detail: null, reads: [] },
     ]);
   });
 });

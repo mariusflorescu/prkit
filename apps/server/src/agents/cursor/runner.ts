@@ -2,12 +2,24 @@
 // Cursor's runner: the child process that hosts Cursor's SDK for one check, sign-in or turn, so
 // the SDK never runs inside prkit's server. prkit starts it with HOME set to the instance's own
 // home, writes one request line on stdin, and reads event lines (protocol.ts) until it exits.
-import type { AgentOptions, InteractionUpdate, SDKAgent } from "@cursor/sdk";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- a child process outside the Effect runtime, resolving the checkout's real path
+import * as NodeFs from "node:fs/promises";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- a child process outside the Effect runtime, resolving a tool's path for the log
+import * as NodePath from "node:path";
+
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import type { AgentOptions, InteractionUpdate, SDKAgent, SDKCustomTool } from "@cursor/sdk";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
+import { checkoutPaths } from "../checkoutPaths.ts";
+import { makeFileTools, type ToolResult } from "./fileTools.ts";
+import { connectPrkitTools } from "./prkitTools.ts";
 import { type Event, Request, type TurnRequest } from "./protocol.ts";
 import { loadSdk } from "./sdkLoader.ts";
-import { NEVER_TOOLS } from "./tools.ts";
+import { ALLOWED_TOOLS, CUSTOM_TOOLS_SERVER, DENIED_TOOLS } from "./tools.ts";
 
 /** Where Cursor's own sign-in sends keys. A saved login for anywhere else is refused. */
 const CURSOR_BACKEND = "https://api2.cursor.sh";
@@ -105,8 +117,11 @@ const hasSession = async (sdk: Sdk, apiKey: string | null, sessionId: string, cw
   }
 };
 
-/** A tool call's update as the runner reports it. Only names, paths and patterns: never content. */
-const toolEvent = (update: InteractionUpdate): Event | null => {
+/**
+ * A tool call's update as the runner reports it. Only names, paths and patterns: never content.
+ * Every call Cursor makes is one of the custom tools the turn gave it (customToolsFor).
+ */
+const toolEvent = (update: InteractionUpdate, cwd: string): Event | null => {
   if (update.type === "text-delta") return { type: "text", text: update.text };
   if (update.type === "tool-call-completed")
     return {
@@ -116,33 +131,68 @@ const toolEvent = (update: InteractionUpdate): Event | null => {
     };
   if (update.type !== "tool-call-started") return null;
   const call = update.toolCall;
-  const base = { type: "tool", callId: update.callId, tool: call.type } as const;
-  switch (call.type) {
-    case "read":
-    case "edit":
-    case "write":
-    case "delete":
-    case "ls":
-      return { ...base, path: call.args.path, pattern: null, mcp: null };
-    case "grep":
-      return { ...base, path: call.args.path ?? null, pattern: call.args.pattern, mcp: null };
-    case "glob":
-      return {
-        ...base,
-        path: call.args.targetDirectory ?? null,
-        pattern: call.args.globPattern,
-        mcp: null,
-      };
-    case "mcp":
-      return {
-        ...base,
-        path: null,
-        pattern: null,
-        mcp: { server: call.args.providerIdentifier ?? "", tool: call.args.toolName ?? "" },
-      };
-    default:
-      return { ...base, path: null, pattern: null, mcp: null };
+  const base = { type: "tool", callId: update.callId, path: null, pattern: null } as const;
+  if (call.type !== "mcp") return { ...base, tool: "other", name: call.type };
+  const name = call.args.toolName ?? "";
+  if (call.args.providerIdentifier !== CUSTOM_TOOLS_SERVER) return { ...base, tool: "other", name };
+  const field = (key: string) => {
+    const value = call.args.args?.[key];
+    return typeof value === "string" ? value : null;
+  };
+  if (!FILE_TOOLS.has(name)) return { ...base, tool: "prkit", name };
+  const path = field("path");
+  return {
+    ...base,
+    tool: name,
+    name,
+    path: path === null ? null : NodePath.resolve(cwd, path),
+    pattern: field("pattern"),
+  };
+};
+
+const FILE_TOOLS = new Set(["read_file", "list_dir", "glob", "grep", "write_file", "edit_file"]);
+
+const asCustomTool = (tool: {
+  readonly description: string;
+  readonly inputSchema: Readonly<Record<string, Schema.MutableJson>>;
+  readonly readOnly: boolean;
+  readonly run: (args: Readonly<Record<string, Schema.Json>>) => Promise<ToolResult>;
+}): SDKCustomTool => ({
+  description: tool.description,
+  inputSchema: tool.inputSchema,
+  annotations: { readOnlyHint: tool.readOnly, openWorldHint: false },
+  execute: async (args) => {
+    const result = await tool.run(args);
+    return { content: [{ type: "text", text: result.text }], isError: !result.ok };
+  },
+});
+
+/**
+ * The only tools Cursor gets for a turn: prkit's file tools, confined to the checkout, and
+ * prkit's MCP tools, called by the runner with the token Cursor never sees.
+ */
+const customToolsFor = async (request: TurnRequest) => {
+  const checkout = await NodeFs.realpath(request.cwd);
+  const paths = await Effect.runPromise(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      return yield* checkoutPaths(fs, path, { checkout, readable: request.readableDirs });
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+  const files = makeFileTools({
+    checkout,
+    paths,
+    writes: request.fileTools.includes("write_file"),
+  });
+  const tools: Record<string, SDKCustomTool> = {};
+  for (const name of request.fileTools) {
+    const tool = files[name];
+    if (tool !== undefined) tools[name] = asCustomTool(tool);
   }
+  const prkit = await connectPrkitTools(request.mcp, request.mcp.tools);
+  for (const tool of prkit) tools[tool.name] = asCustomTool({ ...tool, readOnly: false });
+  return tools;
 };
 
 /** The model the catalog marks as default (models.ts): Cursor's "auto" when listed, else its first. */
@@ -163,13 +213,7 @@ const turn = async (sdk: Sdk, request: TurnRequest) => {
       reason: "auth",
       message: "Cursor isn't signed in. Sign in with Cursor in Settings > Agents, then retry.",
     });
-  const mcpServers: NonNullable<AgentOptions["mcpServers"]> = {
-    [request.mcp.name]: {
-      type: "http",
-      url: request.mcp.url,
-      headers: { Authorization: `Bearer ${request.mcp.token}` },
-    },
-  };
+  const customTools = await customToolsFor(request);
   const model = {
     id: request.model ?? (await defaultModel(sdk, key.key)),
     params: [...request.params],
@@ -177,15 +221,15 @@ const turn = async (sdk: Sdk, request: TurnRequest) => {
   const options: AgentOptions = {
     apiKey: key.key,
     model,
-    tools: [...request.tools],
-    disallowedTools: [...NEVER_TOOLS],
-    mcpServers,
+    tools: [...ALLOWED_TOOLS],
+    disallowedTools: [...DENIED_TOOLS],
     local: {
       cwd: request.cwd,
       dirs: [...request.readableDirs],
       store: agentStore(sdk),
       settingSources: [],
       sandboxOptions: { enabled: true },
+      customTools,
     },
   };
   const agent: SDKAgent =
@@ -195,9 +239,9 @@ const turn = async (sdk: Sdk, request: TurnRequest) => {
   emit({ type: "session", sessionId: agent.agentId });
   const run = await agent.send(request.message, {
     model,
-    mcpServers,
+    local: { customTools },
     onDelta: ({ update }) => {
-      const event = toolEvent(update);
+      const event = toolEvent(update, request.cwd);
       if (event !== null) emit(event);
     },
   });
