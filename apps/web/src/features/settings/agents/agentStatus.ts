@@ -28,11 +28,10 @@ export const agentStatus = (
       : { headline: `Signed in · ${state.detail}`, detail: null, tone: "ready" };
   switch (state.reason) {
     case "not-installed":
-      return {
-        headline: entry.kind === "cursor" ? "Not installed" : "Not found",
-        detail: state.message,
-        tone: "problem",
-      };
+      // Cursor's card offers the install itself, saying what it does.
+      return entry.kind === "cursor"
+        ? { headline: "Not installed", detail: null, tone: "problem" }
+        : { headline: "Not found", detail: state.message, tone: "problem" };
     case "logged-out":
     case "keychain-login":
       return { headline: "Not signed in", detail: state.message, tone: "problem" };

@@ -1,4 +1,3 @@
-import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 import { CursorSdkInstallError } from "@prkit/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -67,4 +66,4 @@ export const make = Effect.gen(function* () {
   return { install: run };
 });
 
-export const layer = Layer.effect(CursorSdk, make).pipe(Layer.provide(NodeHttpClient.layerUndici));
+export const layer = Layer.effect(CursorSdk, make);

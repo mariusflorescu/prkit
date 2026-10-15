@@ -1,0 +1,96 @@
+import * as NodeChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import * as NodeUrl from "node:url";
+
+import * as Schema from "effect/Schema";
+
+import { repoRoot } from "../scripts/verify-run.ts";
+
+const VERSION = "1.0.37";
+
+const Run = Schema.fromJsonString(
+  Schema.Struct({
+    tools: Schema.NullOr(Schema.Array(Schema.String)),
+    disallowedTools: Schema.NullOr(Schema.Array(Schema.String)),
+    settingSources: Schema.NullOr(Schema.Array(Schema.String)),
+    sandbox: Schema.NullOr(Schema.Boolean),
+    mcpServers: Schema.Array(Schema.String),
+    cwd: Schema.NullOr(Schema.String),
+    home: Schema.NullOr(Schema.String),
+    resumed: Schema.Boolean,
+  }),
+);
+
+/** An npm-style tarball of `files` under `package/`, and its sha512 integrity. */
+const pack = (dir: string, name: string, files: Readonly<Record<string, string>>) => {
+  const staging = NodePath.join(dir, "staging", name);
+  for (const [file, content] of Object.entries(files)) {
+    NodeFS.mkdirSync(NodePath.dirname(NodePath.join(staging, "package", file)), {
+      recursive: true,
+    });
+    NodeFS.writeFileSync(NodePath.join(staging, "package", file), content);
+  }
+  const tarball = NodePath.join(dir, `${name}-${VERSION}.tgz`);
+  NodeChildProcess.execFileSync("/usr/bin/tar", ["-czf", tarball, "-C", staging, "package"]);
+  const integrity = `sha512-${NodeCrypto.createHash("sha512").update(NodeFS.readFileSync(tarball)).digest("base64")}`;
+  return { url: NodeUrl.pathToFileURL(tarball).href, integrity };
+};
+
+/**
+ * The stand-in Cursor SDK of scripts/fake-cursor-sdk.mjs, packed as the tarballs prkit installs:
+ * pass `manifest` to `verify-app start --e2e --cursor-manifest`, and "Install Cursor support"
+ * unpacks them from file URLs, checked like npm's, without the network. `approveLogin` finishes
+ * a sign-in waiting in the browser; `runs` lists every turn the stand-in started.
+ */
+export const setUpFakeCursor = (name: string) => {
+  const dir = NodePath.join(repoRoot, ".e2e", "fake", `${name}-cursor`);
+  NodeFS.rmSync(dir, { recursive: true, force: true });
+  const control = NodePath.join(dir, "control");
+  NodeFS.mkdirSync(control, { recursive: true });
+  const source = NodeFS.readFileSync(
+    NodePath.join(repoRoot, "scripts", "fake-cursor-sdk.mjs"),
+    "utf8",
+  );
+  const sdk = pack(dir, "sdk", {
+    "package.json": JSON.stringify({ name: "@cursor/sdk", version: VERSION, type: "module" }),
+    "dist/esm/index.js": source.replace(
+      'process.env.FAKE_CURSOR_CONTROL ?? ""',
+      JSON.stringify(control),
+    ),
+  });
+  const platform = (arch: string) => ({
+    name: `@cursor/sdk-darwin-${arch}`,
+    version: VERSION,
+    platform: `darwin-${arch}`,
+    ...pack(dir, `sdk-darwin-${arch}`, {
+      "package.json": JSON.stringify({ name: `@cursor/sdk-darwin-${arch}`, version: VERSION }),
+    }),
+  });
+  const manifest = NodePath.join(dir, "manifest.json");
+  NodeFS.writeFileSync(
+    manifest,
+    JSON.stringify([
+      { name: "@cursor/sdk", version: VERSION, ...sdk },
+      platform("arm64"),
+      platform("x64"),
+    ]),
+  );
+  const flag = (what: string, on: boolean) =>
+    on
+      ? NodeFS.writeFileSync(NodePath.join(control, what), "")
+      : NodeFS.rmSync(NodePath.join(control, what), { force: true });
+  return {
+    manifest,
+    approveLogin: () => flag("approve-login", true),
+    runs: () => {
+      const file = NodePath.join(control, "runs.log");
+      if (!NodeFS.existsSync(file)) return [];
+      return NodeFS.readFileSync(file, "utf8")
+        .split("\n")
+        .filter((line) => line !== "")
+        .map((line) => Schema.decodeUnknownSync(Run)(line));
+    },
+  };
+};

@@ -23,6 +23,9 @@
  * config and gh binary, so the real accounts and tokens on this machine are never read.
  * `--claude <file>` runs that file as Claude Code (the server's PRKIT_CLAUDE_PATH), such as
  * the stand-in `tests/fakeClaude.ts` sets up, so a guide spends no subscription.
+ * `--cursor-manifest <file>` installs the stand-in Cursor SDK packages it lists instead of
+ * npm's (the server's PRKIT_CURSOR_SDK_MANIFEST, read only with `--e2e`), as
+ * `tests/fakeCursor.ts` lays them out.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
@@ -135,6 +138,7 @@ interface StartOptions {
   readonly githubApi: string | undefined;
   readonly ghHome: string | undefined;
   readonly claude: string | undefined;
+  readonly cursorManifest: string | undefined;
 }
 
 const start = async (options: StartOptions) => {
@@ -194,6 +198,9 @@ const start = async (options: StartOptions) => {
               PRKIT_GITHUB_API_URL: options.githubApi,
             }),
         ...(options.claude === undefined ? {} : { PRKIT_CLAUDE_PATH: options.claude }),
+        ...(options.cursorManifest === undefined
+          ? {}
+          : { PRKIT_CURSOR_SDK_MANIFEST: options.cursorManifest }),
       },
       stdio: ["ignore", "pipe", logFd],
     },
@@ -274,6 +281,7 @@ const startDetached = async (options: StartOptions) => {
     ...(options.githubApi === undefined ? [] : ["--github-api", options.githubApi]),
     ...(options.ghHome === undefined ? [] : ["--gh-home", options.ghHome]),
     ...(options.claude === undefined ? [] : ["--claude", options.claude]),
+    ...(options.cursorManifest === undefined ? [] : ["--cursor-manifest", options.cursorManifest]),
   ];
   const child = NodeChildProcess.spawn(process.execPath, args, {
     cwd: repoRoot,
@@ -383,6 +391,7 @@ const { positionals, values } = NodeUtil.parseArgs({
     "github-api": { type: "string" },
     "gh-home": { type: "string" },
     claude: { type: "string" },
+    "cursor-manifest": { type: "string" },
   },
 });
 const command = positionals[0];
@@ -410,6 +419,10 @@ switch (command) {
       githubApi: values["github-api"],
       ghHome: values["gh-home"] === undefined ? undefined : NodePath.resolve(values["gh-home"]),
       claude: values.claude === undefined ? undefined : NodePath.resolve(values.claude),
+      cursorManifest:
+        values["cursor-manifest"] === undefined
+          ? undefined
+          : NodePath.resolve(values["cursor-manifest"]),
     });
     break;
   case "doctor":

@@ -93,7 +93,8 @@ const layerReviews = Layer.mergeAll(ReviewWatcher.layer, AutoGuides.layer).pipe(
     Layer.mergeAll(
       RepoCache.layer,
       Agents.layer,
-      CursorSdk.layer,
+      // Downloads from npm with the same HTTP client; nothing of GitHub's goes with it.
+      CursorSdk.layer.pipe(Layer.provide(GitHubHttpClient.layer)),
       McpTokens.layer,
       GuideSettingsStore.layer,
       GuideConfigStore.layer,

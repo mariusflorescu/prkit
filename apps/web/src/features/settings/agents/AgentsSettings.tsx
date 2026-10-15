@@ -33,7 +33,7 @@ export function AgentsSettings() {
   return (
     <SettingsSection
       title="Agents"
-      description="Guides and fixes are written by Claude Code or Codex, signed in with your own subscription on this machine. Add another setup of one to use a second account."
+      description="Guides and fixes are written by Claude Code, Codex or Cursor, signed in with your own plan on this machine. Add another setup of one to use a second account."
       action={
         <div className="flex shrink-0 items-center gap-1">
           <Button

@@ -19,7 +19,7 @@ export function figure() {
   const svg = k.figureSvg({
     width: W,
     height: H,
-    label: `Local first, as a diagram of the software on your Mac. A dashed boundary for your Mac holds prkit's window with its inbox, prkit's memory holding one GitHub token for each of ${ACCOUNTS.length} accounts, your agent's terminal, whose environment has no GitHub token, and prkit's data folder, where a search for a GitHub token finds nothing. One line leaves for GitHub's API. Your agent, its cursor in rose, has its own line to the Claude or Codex login it runs on. A dashed, crossed-out empty frame stands where a prkit server would be, joined to nothing.`,
+    label: `Local first, as a diagram of the software on your Mac. A dashed boundary for your Mac holds prkit's window with its inbox, prkit's memory holding one GitHub token for each of ${ACCOUNTS.length} accounts, your agent's terminal, whose environment has no GitHub token, and prkit's data folder, where a search for a GitHub token finds nothing. One line leaves for GitHub's API. Your agent, its cursor in rose, has its own line to the Claude, Codex or Cursor login it runs on. A dashed, crossed-out empty frame stands where a prkit server would be, joined to nothing.`,
     body: [
       `<style>${DIGITAL_CSS}.lo-halo{fill:var(--anatomy-paper);fill-opacity:.85;stroke:var(--anatomy-faint);stroke-width:.5;vector-effect:non-scaling-stroke}</style>`,
       drawing(),
