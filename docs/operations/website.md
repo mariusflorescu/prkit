@@ -35,11 +35,13 @@ None of these is a secret.
   - `--ignore-scripts` skips the root `prepare` script, which patches a TypeScript that `--prod` didn't install. `sharp` needs no script: it ships prebuilt binaries for each platform.
   - The result is about 220 MB of `node_modules`, against 740 MB with the root's tooling.
 - **Build:** `pnpm run build` (`astro build`), output `dist`.
-- **Ignored Build Step:** `git diff --quiet ${VERCEL_GIT_PREVIOUS_SHA:-HEAD^} HEAD -- . ../../assets/brand ../../package.json ../../pnpm-lock.yaml ../../pnpm-workspace.yaml`
-  - It runs in the Root Directory and compares the commit with the last one this project deployed on the branch (`HEAD^` on a branch's first deployment).
+- **Ignored Build Step:** `[ -n "$VERCEL_GIT_PREVIOUS_SHA" ] && git diff --quiet "$VERCEL_GIT_PREVIOUS_SHA" HEAD -- . ../../assets/brand ../../package.json ../../pnpm-lock.yaml ../../pnpm-workspace.yaml`
+  - It runs in the Root Directory and compares the commit with this project's last successful deployment on the branch. Without a previous SHA, it builds because there is no successful deployment to compare against, even if the latest commit only changes docs.
   - Exit 0 (nothing the site reads changed) skips the deployment, and exit 1 builds. A git error also exits non-zero, so when in doubt it builds.
   - The paths are the site, the brand kit it imports, and the files that decide what gets installed.
   - Vercel's own "skip unaffected projects" for monorepos may skip a commit first. It agrees with this list, because a change outside the pnpm workspace (like `assets/brand`) counts for every project.
+
+If a build is skipped by mistake, open **Deployments > ... > Redeploy** and uncheck **Use project's Ignore Build Step** to build it anyway.
 
 ## Preview deployments
 
