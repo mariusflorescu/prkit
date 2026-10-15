@@ -118,6 +118,7 @@ const checkCommand = (file: string, words: Word[], allowGroup: boolean) => {
   let target = false;
   let generic = false;
   let invalidPath = false;
+  let flagsEnded = false;
   let candidates = mappings;
   const problem = (word: Word, kind: string) =>
     errors.push(`${file}:${word.line}: ${kind} ${word.value}`);
@@ -125,7 +126,11 @@ const checkCommand = (file: string, words: Word[], allowGroup: boolean) => {
   for (let index = 0; index < words.length; index++) {
     const word = words[index];
     if (word === undefined) break;
-    if (isFlag(word)) {
+    if (!flagsEnded && word.value === "--") {
+      flagsEnded = true;
+      continue;
+    }
+    if (!flagsEnded && isFlag(word)) {
       usedFlags.push(word);
       const name = word.value.replace(/^--?/, "").split("=")[0] ?? "";
       const flags = flagsFor(candidates);
@@ -252,8 +257,10 @@ it("reads inline commands, continuations, optional flags and quoted shell values
     "prkit pr open <pr> --no-focus",
     'prkit inbox filters save --search "" --account null --repo null --json',
     "prkit guide settings save <pr> --expected-version 0 --edit '{}'",
+    "prkit guide generate <pr> --stack chosen-layers --layers 1 --layers 3",
+    "prkit pr files --limit 20 -- <pr>",
     "```",
     "Not a command: `$PRKIT_HOME/bin/prkit` or `echo 'prkit nope --bad'`.",
   ].join("\n");
-  expect(documentationProblems("example.md", markdown)).toEqual({ commands: 7, errors: [] });
+  expect(documentationProblems("example.md", markdown)).toEqual({ commands: 9, errors: [] });
 });

@@ -77,7 +77,7 @@ prkit pr checks <pr> --json
 ### Write a guide and report back
 
 1. Pick the agent. Read `prkit agents --json`, follow its pages, and choose a ready, enabled instance with an unblocked model. Use its `instance` for `--agent`, its model `slug` for `--model`, and only option ids and values advertised by that model. Repeat `--option key=value`; `true` and `false` are booleans. Leave selection out for the PR's configured agent or prkit's default.
-2. For a stack, read `prkit pr stack <pr> --json` before choosing. `--stack this` covers this PR, `--stack all` covers the stack, and `--stack 1,3` selects its numbered layers. `--regenerate` includes layers that already have guides.
+2. For a stack, read `prkit pr stack <pr> --json` before choosing. `--stack this` covers this PR, `--stack all` covers the stack, and `--stack 1,3` selects its numbered layers. Use `--stack` once; numbered selection cannot be combined with `--layers`. The native form is `--stack chosen-layers --layers 1 --layers 3`. `--regenerate` includes layers that already have guides.
 3. Start it:
    ```sh
    prkit guide generate <pr> --agent <instance> --model <model> --option effort=high --stack this

@@ -24,6 +24,8 @@ import { continuationOutput, humanOutput } from "./output.ts";
 type Value = Option.Option<Schema.Json>;
 type Input = Record<string, Flag.Flag<Value> | Argument.Argument<Value>>;
 const JsonText = Schema.fromJsonString(Schema.Json);
+const stackUsage =
+  "Use --stack once: --stack this|all, --stack 1,2, or --stack chosen-layers --layers 1 --layers 2. Do not combine numbered --stack with --layers.";
 
 const textValue = (text: string, ast: SchemaAST.AST): Schema.Json => {
   if (ast._tag === "Objects" || ast._tag === "Arrays") return Schema.decodeSync(JsonText)(text);
@@ -128,8 +130,13 @@ export const main = () => {
         Argument.map((value) => Option.some<Schema.Json>(value)),
       );
     for (const field of commandParameters(name, mapping)) {
-      const flag = parameter(field.name, field.ast).pipe(
-        Flag.withDescription(SchemaAST.resolveDescription(field.ast) ?? field.key),
+      const stack = name === "generate_guide" && field.key === "stack";
+      const flag = (
+        stack ? Flag.String(field.name).pipe(Flag.atLeast(0)) : parameter(field.name, field.ast)
+      ).pipe(
+        Flag.withDescription(
+          stack ? stackUsage : (SchemaAST.resolveDescription(field.ast) ?? field.key),
+        ),
       );
       input[field.key] = flag.pipe(Flag.optional);
     }
@@ -196,9 +203,16 @@ export const main = () => {
           }
         }
         if (name === "generate_guide") {
+          if (Array.isArray(args.stack)) {
+            if (args.stack.length !== 1)
+              return yield* new CliFailure({ code: 2, message: stackUsage });
+            args.stack = args.stack[0] ?? null;
+          }
           if (args.stack === "this") args.stack = "this-pr";
           else if (args.stack === "all") args.stack = "whole-stack";
           else if (typeof args.stack === "string" && /^\d+(?:,\d+)*$/.test(args.stack)) {
+            if (args.layers !== undefined)
+              return yield* new CliFailure({ code: 2, message: stackUsage });
             args.layers = args.stack.split(",").map(Number);
             args.stack = "chosen-layers";
           }

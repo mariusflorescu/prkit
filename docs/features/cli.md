@@ -61,7 +61,7 @@ PRs accept HTTPS URLs or `owner/repo#number`, with `--host` for an Enterprise sh
 
 Pick a ready, enabled agent instance from the paged `prkit agents --json` result, an unblocked model's slug, and only the option ids and values that model advertises. Repeated `--option id=value` flags select options; `true` and `false` are booleans. Repeated `--draft-ids` and `--thread-ids` select comments for fix send.
 
-For guides, read stack layers first. `--stack this` maps to this PR, `--stack all` to the whole stack, and `--stack 1,3` to chosen layer numbers. The native values `this-pr`, `whole-stack` and `chosen-layers` also work, with repeated `--layers` for the last. `--regenerate` includes layers with guides. `--guidance` and `--focus` accept versioned JSON section edits, not plain strings. Read `prkit guide settings acme/widgets#42 --json` first and use the PR section's current version as `expectedVersion`; a stale version is refused. The command reference shows the full JSON shapes and the standalone PR settings save.
+For guides, read stack layers first. `--stack this` maps to this PR, `--stack all` to the whole stack, and `--stack 1,3` to chosen layer numbers. Use `--stack` once; numbered selection cannot be combined with `--layers`. The native values `this-pr`, `whole-stack` and `chosen-layers` also work, with repeated `--layers` for the last. `--regenerate` includes layers with guides. `--guidance` and `--focus` accept versioned JSON section edits, not plain strings. Read `prkit guide settings acme/widgets#42 --json` first and use the PR section's current version as `expectedVersion`; a stale version is refused. The command reference shows the full JSON shapes and the standalone PR settings save.
 
 `apps/server/src/cli/commands.ts` is the command map. Flags and validation come from each outside tool's parameter schema; the parity test fails when a tool has no command or a command has no tool. As outside tools acquire filters or new options, their commands acquire those flags. A new tool needs a map entry.
 
@@ -70,6 +70,8 @@ The documentation drift test extracts command snippets from the public skill and
 ## Paging and output
 
 Paged reads take `--limit` from 1 to 100 and `--cursor`. Repeat the same command, target and filters with `nextCursor` verbatim until it is null. Plain output prints how to request the next page. File patch fragments for one path have `offset` and `complete`; join their text in offset order. File contents and fix patches are text pages joined by offset. A true `githubTruncated` or `threadsTruncated` means upstream data is missing even after local paging is finished. The current PR diff comes from PR files; PR diff with an attempt id is the immutable guide snapshot.
+
+Flags go before a `--` terminator, as in `prkit pr files --limit 20 -- acme/widgets#42`. Printed continuation commands keep the cursor flag before it and preserve the positional target.
 
 Any large answer can be an outer `response-fragment`. Keep the logical page's cursor and arguments unchanged and use `nextResponseCursor` as `--response-cursor`. Join `text` fragments by `offset` and parse the complete JSON before following its `nextCursor`. The response cursor continues one encoded answer; the page cursor advances the list. `--json` preserves each response unchanged so clients can implement both continuations.
 

@@ -50,3 +50,27 @@ it("continues a response fragment at the same page without changing its text", (
   );
   expect(continuationOutput({ nextCursor: null }, [])).toBe("");
 });
+
+it.each([false, true])(
+  "inserts a continuation before -- and preserves every positional word (fragment: %s)",
+  (fragment) => {
+    const result = fragment
+      ? { _tag: "response-fragment", nextResponseCursor: "next ' cursor" }
+      : { nextCursor: "next ' cursor" };
+    const output = continuationOutput(result, [
+      "pr",
+      "files",
+      "--cursor=page",
+      "--response-cursor",
+      "old",
+      "--",
+      "acme/widgets#42",
+      "--cursor",
+      "literal",
+      "--response-cursor=literal",
+    ]);
+    expect(output.split("\n").at(-1)).toBe(
+      `prkit pr files${fragment ? " --cursor=page" : ""} ${fragment ? "--response-cursor" : "--cursor"} 'next '\\'' cursor' -- 'acme/widgets#42' --cursor literal --response-cursor=literal`,
+    );
+  },
+);

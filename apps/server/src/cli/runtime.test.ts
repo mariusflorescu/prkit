@@ -10,6 +10,8 @@ import * as Schema from "effect/Schema";
 import { expect, it } from "vite-plus/test";
 
 import type { ToolName } from "./commands.ts";
+import { continuationOutput } from "./output.ts";
+import { shellQuote } from "../outside/launcher.ts";
 
 const cases = [
   {
@@ -107,6 +109,28 @@ const cases = [
       "generate",
       "acme/widgets#42",
       "--stack",
+      "chosen-layers",
+      "--layers",
+      "1",
+      "--layers",
+      "3",
+    ],
+    name: "generate_guide",
+    expected: {
+      owner: "acme",
+      repo: "widgets",
+      number: 42,
+      host: "github.com",
+      stack: "chosen-layers",
+      layers: [1, 3],
+    },
+  },
+  {
+    args: [
+      "guide",
+      "generate",
+      "acme/widgets#42",
+      "--stack",
       "1,3",
       "--option",
       "effort=high",
@@ -157,6 +181,47 @@ const cases = [
   },
 ] satisfies ReadonlyArray<{ args: string[]; name: ToolName; expected: Schema.Json }>;
 
+const cursor = "opaque ' cursor $(printf unsafe)";
+const continuations = [false, true].flatMap((terminator) =>
+  [false, true].map((fragment) => {
+    const args = [
+      "pr",
+      "files",
+      "--json",
+      "--cursor=page",
+      "--response-cursor",
+      "old-fragment",
+      ...(terminator ? ["--"] : []),
+      "acme/widgets#42",
+    ];
+    const value = fragment
+      ? { _tag: "response-fragment", nextResponseCursor: cursor }
+      : { nextCursor: cursor };
+    return {
+      name: "read_pull_request_files" as const,
+      expected: {
+        owner: "acme",
+        repo: "widgets",
+        number: 42,
+        host: "github.com",
+        ...(fragment ? { cursor: "page", responseCursor: cursor } : { cursor }),
+      },
+      invocation: {
+        _tag: "shell" as const,
+        command: continuationOutput(value, args).split("\n").at(-1) ?? "",
+      },
+    };
+  }),
+);
+const runtimeCases = [
+  ...cases.map(({ name, expected, args }) => ({
+    name,
+    expected,
+    invocation: { _tag: "args" as const, args },
+  })),
+  ...continuations,
+];
+
 const decodeRequest = Schema.decodeOption(
   Schema.fromJsonString(
     Schema.Struct({
@@ -168,7 +233,7 @@ const decodeRequest = Schema.decodeOption(
 );
 const decodeJson = Schema.decodeSync(Schema.fromJsonString(Schema.Json));
 
-it.each(cases)("sends the schema arguments for $name ($args)", async (test) => {
+it.each(runtimeCases)("sends the schema arguments for $name ($invocation)", async (test) => {
   const directory = NodePath.resolve(".e2e", "unit-cli");
   NodeFs.mkdirSync(directory, { recursive: true });
   const home = NodeFs.mkdtempSync(NodePath.join(directory, "runtime-"));
@@ -229,13 +294,23 @@ it.each(cases)("sends the schema arguments for $name ($args)", async (test) => {
       }),
       { mode: 0o600 },
     );
+    NodeFs.writeFileSync(
+      NodePath.join(home, "prkit"),
+      `#!/bin/sh\nexec ${[process.execPath, new URL("../bin.ts", import.meta.url).pathname, "cli"].map(shellQuote).join(" ")} "$@"\n`,
+      { mode: 0o700 },
+    );
     const result = await new Promise<{ stdout: string; stderr: string; code: number | null }>(
       (resolve, reject) => {
+        const invocation = test.invocation;
         const child = NodeChildProcess.spawn(
-          process.execPath,
-          [new URL("../bin.ts", import.meta.url).pathname, "cli", ...test.args, "--json"],
+          invocation._tag === "args" ? process.execPath : "/bin/sh",
+          invocation._tag === "args"
+            ? [new URL("../bin.ts", import.meta.url).pathname, "cli", ...invocation.args, "--json"]
+            : ["-c", invocation.command],
           {
+            cwd: home,
             env: childEnv(process.env, {
+              PATH: `${home}:${process.env.PATH ?? "/usr/bin:/bin"}`,
               HOME: home,
               PRKIT_HOME: home,
               PRKIT_CLI_INSTALL_PATH: NodePath.join(home, "local-bin", "prkit"),
@@ -263,6 +338,47 @@ it.each(cases)("sends the schema arguments for $name ($args)", async (test) => {
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error === undefined ? resolve() : reject(error))),
     );
+    NodeFs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+it.each(
+  [
+    ["--stack", "1", "--stack", "2"],
+    ["--stack=1", "--stack=2"],
+    ["--stack", "1,2", "--layers", "3"],
+    ["--layers", "3", "--stack=1,2"],
+  ].map((args) => ({ args })),
+)("rejects ambiguous stack selection before connecting: $args", ({ args }) => {
+  const directory = NodePath.resolve(".e2e", "unit-cli");
+  NodeFs.mkdirSync(directory, { recursive: true });
+  const home = NodeFs.mkdtempSync(NodePath.join(directory, "invalid-stack-"));
+  try {
+    const result = NodeChildProcess.spawnSync(
+      process.execPath,
+      [
+        new URL("../bin.ts", import.meta.url).pathname,
+        "cli",
+        "guide",
+        "generate",
+        "acme/widgets#42",
+        ...args,
+      ],
+      {
+        encoding: "utf8",
+        env: childEnv(process.env, {
+          HOME: home,
+          PRKIT_HOME: home,
+          PRKIT_CLI_INSTALL_PATH: NodePath.join(home, "local-bin", "prkit"),
+        }),
+      },
+    );
+    expect(result.status).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain(
+      "Use --stack once: --stack this|all, --stack 1,2, or --stack chosen-layers --layers 1 --layers 2.",
+    );
+  } finally {
     NodeFs.rmSync(home, { recursive: true, force: true });
   }
 });

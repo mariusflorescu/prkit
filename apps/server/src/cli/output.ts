@@ -79,13 +79,16 @@ export const continuationOutput = (value: Schema.Json, args: readonly string[]) 
       : "";
   const flag = fragment ? "--response-cursor" : "--cursor";
   const oldFlags = fragment ? [flag] : [flag, "--response-cursor"];
-  const words = args.filter(
+  const terminator = args.indexOf("--");
+  const options = terminator < 0 ? args : args.slice(0, terminator);
+  const positionals = terminator < 0 ? [] : args.slice(terminator);
+  const words = options.filter(
     (word, index) =>
       !oldFlags.includes(word) &&
       !oldFlags.some((old) => word.startsWith(`${old}=`)) &&
-      !oldFlags.includes(args[index - 1] ?? ""),
+      !oldFlags.includes(options[index - 1] ?? ""),
   );
   const quote = (word: string) => (/^[A-Za-z0-9_./:@%+=,-]+$/.test(word) ? word : shellQuote(word));
-  const command = ["prkit", ...words, flag, cursor].map(quote).join(" ");
+  const command = ["prkit", ...words, flag, cursor, ...positionals].map(quote).join(" ");
   return `${fragment ? "Continue this response using the server's cursor. Join text fragments in offset order before decoding the complete JSON." : "Next page:"}\n${command}`;
 };

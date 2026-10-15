@@ -56,7 +56,11 @@ Inbox flags are `--reason review-requested|authored|involved`, `--repo owner/rep
 | `prkit guide repositories --json`                                       | Paged repositories with guide configuration.                                               |
 | `prkit guide repository owner/repo --account github.com/octocat --json` | Stable repository id for a repository scope.                                               |
 
-Generation accepts `--agent <instance> --model <slug>` and repeated `--option key=value`. Use only catalog-supported selections from `prkit agents --json`. For a stack, read its layers first: `--stack this`, `--stack all` or `--stack 1,3`; `--regenerate` includes layers with guides. Native values `this-pr`, `whole-stack` and `chosen-layers` are also accepted; the last takes repeated `--layers <number>`.
+Generation accepts `--agent <instance> --model <slug>` and repeated `--option key=value`. Use only catalog-supported selections from `prkit agents --json`. For a stack, read its layers first: `--stack this`, `--stack all` or `--stack 1,3`; `--regenerate` includes layers with guides. Use `--stack` once; numbered selection cannot be combined with `--layers`. Native values `this-pr`, `whole-stack` and `chosen-layers` are also accepted; the last takes repeated `--layers <number>`:
+
+```sh
+prkit guide generate <pr> --stack chosen-layers --layers 1 --layers 3
+```
 
 Read `prkit guide settings <pr> --json` before editing settings. `scopes.pullRequest` contains `ignore`, `focus` and `guidance`, each with its own `version`. The `expectedVersion` must be the current version of the section being edited; the numbers below illustrate the shape, not a version to assume. Preserve existing ids and overrides unless changing them is the user's intent. New focus or ignore items have `id: null`.
 

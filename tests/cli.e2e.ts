@@ -130,6 +130,14 @@ test(
       expect(cli(["guide", "generate", "--help"]).stdout).toContain("--option");
       expect(cli(["--completions", "zsh"]).code).toBe(0);
       expect(cli(["wait", "budget/fixtures#9", "--for", "bad"]).code).toBe(2);
+      for (const args of [
+        ["--stack", "1", "--stack", "2"],
+        ["--stack", "1,2", "--layers", "3"],
+      ]) {
+        const rejected = cli(["guide", "generate", "budget/fixtures#9", ...args]);
+        expect(rejected.code).toBe(2);
+        expect(rejected.stderr).toContain("Use --stack once:");
+      }
       expect(cli(["status"]).code).toBe(3);
       expect(cli(["not-a-command"]).code).toBe(2);
       const lockBefore = NodeFS.statSync(NodePath.join(run.home, "prkit.lock")).mtimeMs;
@@ -267,10 +275,28 @@ test(
       expect(secondPage.items.length).toBe(1);
       expect(secondPage.items[0]?.path).not.toBe(firstPage.items[0]?.path);
       expect(secondPage.nextCursor).toBe(null);
-      const readableFiles = cli(["pr", "files", "budget/fixtures#1", "--limit", "1"]);
+      const readableFiles = cli(["pr", "files", "--limit", "1", "--", "budget/fixtures#1"]);
       expect(readableFiles.code).toBe(0);
       expect(readableFiles.stdout).toContain("prkit pr files");
       expect(readableFiles.stdout).toContain("--cursor");
+      const nextFiles = readableFiles.stdout.split("\n").find((line) => line.startsWith("prkit "));
+      if (nextFiles === undefined) throw new Error("Expected a next-page command.");
+      expect(nextFiles.indexOf("--cursor")).toBeLessThan(nextFiles.indexOf(" -- "));
+      const continued = NodeChildProcess.spawnSync("/bin/sh", ["-c", nextFiles], {
+        cwd: fake.home,
+        encoding: "utf8",
+        env: {
+          HOME: fake.home,
+          PATH: `${NodePath.dirname(install)}:${process.env.PATH ?? "/usr/bin:/bin"}`,
+          PRKIT_CLI_INSTALL_PATH: install,
+          NO_COLOR: "1",
+        },
+      });
+      log.push(`$ ${nextFiles}\nexit ${continued.status}\n${continued.stdout}${continued.stderr}`);
+      expect(continued.status).toBe(0);
+      const nextPath = secondPage.items[0]?.path;
+      if (nextPath === undefined) throw new Error("Expected a second file.");
+      expect(continued.stdout).toContain(nextPath);
       await fake.comment(9, 12_000);
       let response = Schema.decodeSync(Schema.fromJsonString(ResponseFragment))(
         cli(["pr", "conversation", "budget/fixtures#9", "--limit", "100", "--json"]).stdout,
