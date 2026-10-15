@@ -314,6 +314,11 @@ describe("Cursor's status", () => {
       ["auto", true],
       ["stand-in-1", false],
     ]);
+    // A list longer than a pipe takes at once still arrives whole.
+    await flag("many-models", true);
+    const many = await Effect.runPromise(provider.models(state));
+    await flag("many-models", false);
+    expect(many).toHaveLength(402);
     expect(models[1]?.options).toEqual([
       {
         id: "effort",

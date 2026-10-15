@@ -8,6 +8,7 @@
  *   approve-login  a sign-in waiting in the browser finishes
  *   reject-keys    Cursor turns every key down
  *   hold           a turn keeps writing until the file is removed
+ *   many-models    Cursor lists 400 more models, more than a pipe takes at once
  *   probe.json     calls a turn makes first, `[{ "tool": "read_file", "args": {...} }]`
  *   runs.log       each turn appends what it was started with: tools, setting sources, sandbox,
  *                  MCP servers, custom tool names, cwd, and whether it resumed
@@ -101,6 +102,13 @@ export const Cursor = {
             { params: [{ id: "effort", value: "high" }], displayName: "High", isDefault: true },
           ],
         },
+        ...(flagged("many-models")
+          ? Array.from({ length: 400 }, (_, index) => ({
+              id: `stand-in-extra-${index}`,
+              displayName: `Stand-in extra ${index}`,
+              description: "A stand-in model listed to make the list long. ".repeat(4),
+            }))
+          : []),
       ];
     },
   },

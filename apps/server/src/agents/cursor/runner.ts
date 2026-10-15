@@ -303,11 +303,14 @@ const main = async () => {
   }
 };
 
+/** Exits once every event line has reached prkit: a pipe takes a long line (the models) in parts. */
+const exit = (code?: number) => process.stdout.write("", () => process.exit(code));
+
 // prkit stops a turn with SIGTERM, then kills the runner's whole process group.
 process.on("SIGTERM", () => {
-  void (stop?.() ?? Promise.resolve()).finally(() => process.exit(143));
+  void (stop?.() ?? Promise.resolve()).finally(() => exit(143));
 });
 
 await main();
 // The SDK keeps timers and sockets open; the runner's work is done once main returns.
-process.exit();
+exit();

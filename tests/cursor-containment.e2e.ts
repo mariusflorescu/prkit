@@ -326,8 +326,12 @@ describe("Cursor's agent, live", { tags: ["agent", "cursor"], skip: NEEDS_FIXTUR
         await app.open(`${run.url}${prPath(FIXTURE_REPO, fixture.number, "guide")}`);
         const setup = screen.getByRole("form", "Start a guide");
         await setup.getByRole("button", /^Agent and model: /).tap({ timeout: 60_000 });
-        await screen.getByRole("combobox", "Search models").fill("cursor");
-        await screen.getByRole("option").first().tap();
+        // Search matches model names; Cursor's are its own ("Auto"...), so pick from its group.
+        await screen
+          .getByRole("group", /^Cursor/)
+          .getByRole("option")
+          .first()
+          .tap({ timeout: 60_000 });
         await setup.getByRole("button", "Generate guide").tap();
         await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r1 · ", {
           timeout: 600_000,
