@@ -21,16 +21,17 @@ const PR = /#1 Validate links and count clicks/;
 const modifierOf = (browser: Browser) =>
   browser.evaluate(() => (/Mac|iPhone|iPad/.test(navigator.platform) ? "Meta" : "Control"));
 
-/** Light and dark, once an open dialog has faded in. */
+/** Light and dark, once every open dialog and toast has faded in. */
 const shoot = async (app: TestFixtures["app"], browser: Browser, name: string) => {
   await expect
     .poll(() =>
-      browser.evaluate(() => {
-        const popup = document.querySelector('[role="dialog"], [role="alertdialog"]');
-        return popup === null ? "1" : getComputedStyle(popup).opacity;
-      }),
+      browser.evaluate(() =>
+        [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].every(
+          (popup) => getComputedStyle(popup).opacity === "1",
+        ),
+      ),
     )
-    .toBe("1");
+    .toBe(true);
   await screenshotLightAndDark(app, browser, name);
 };
 
