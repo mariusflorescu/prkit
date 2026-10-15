@@ -5,7 +5,7 @@ This directory is the maintained source for verifying what a prkit user sees. Re
 One line per feature, kept in this order. Add or edit only your own line (no table: aligned columns made every new row rewrite the others and conflict in every parallel PR).
 
 - [Shell](./shell.md). Route: `/`. Journeys: `shell.e2e.ts`, `auth.e2e.ts`, `verification.e2e.ts`. Covers: Title bar mark and wash, inset frame and tab material, Inbox tab, shortcuts, token, server info, build doctor.
-- [Settings](./settings.md). Route: `/settings/<section>`. Journeys: `settings.e2e.ts`, `shell.e2e.ts`, `smoke:desktop`. Covers: The closeable Settings tab, section nav, Cmd+, memory, reload, Escape after popups, Agents, Guides, shortcuts list.
+- [Settings](./settings.md). Route: `/settings/<section>`. Journeys: `settings.e2e.ts`, `agent-instances.e2e.ts`, `shell.e2e.ts`, `smoke:desktop`. Covers: The closeable Settings tab, section nav, Cmd+, memory, reload, Escape after popups, Agents and their instances, Guides, shortcuts list.
 - [Settings > Accounts](./settings-accounts.md). Route: `/settings/accounts`. Journeys: `accounts-inbox.e2e.ts`. Covers: Discovery, directory validation, add and remove.
 - [Settings > Appearance](./settings-appearance.md). Route: `/settings/appearance`. Journeys: `settings.e2e.ts`, `smoke:desktop`. Covers: System, Light, Dark; first paint; desktop theme by script.
 - [Inbox](./inbox.md). Route: `/`. Journeys: `accounts-inbox.e2e.ts`, `inbox-filters.e2e.ts`. Covers: Groups, account filters, loading skeleton, account error and recovery; repository filter, compact header, row action and empty groups (`inbox-filters`, mostly on the fake GitHub).

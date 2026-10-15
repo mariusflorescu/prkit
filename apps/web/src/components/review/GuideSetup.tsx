@@ -1,9 +1,9 @@
 import {
-  effectiveSelection,
   everythingSkippedMessage,
   type PullRequestDetail,
   type Review,
   selectionProblem,
+  sessionSelection,
 } from "@prkit/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
@@ -106,12 +106,17 @@ export function GuideSetup({
   const own =
     review?.model == null
       ? null
-      : { instance: review.instance, model: review.model, options: review.modelOptions };
+      : {
+          instance: review.instance,
+          kind: review.provider,
+          model: review.model,
+          options: review.modelOptions,
+        };
   const selection =
     picked ??
     (catalog.data === undefined || settings.data === undefined
       ? null
-      : effectiveSelection(catalog.data, own ?? settings.data.defaultAgent));
+      : sessionSelection(catalog.data, own, settings.data.defaultAgent));
   const problem =
     catalog.data === undefined || selection === null
       ? null

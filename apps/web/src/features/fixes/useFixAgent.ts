@@ -1,10 +1,10 @@
 import {
   type AgentSelection,
-  effectiveSelection,
   findAgentModel,
   keepsConversation,
   type PullRequestKey,
   selectionProblem,
+  sessionSelection,
 } from "@prkit/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -28,12 +28,17 @@ export function useFixAgent(key: PullRequestKey, picked: AgentSelection | null) 
   const own =
     session?.model == null
       ? null
-      : { instance: session.instance, model: session.model, options: session.modelOptions };
+      : {
+          instance: session.instance,
+          kind: session.provider,
+          model: session.model,
+          options: session.modelOptions,
+        };
   const selection =
     picked ??
     (catalog.data === undefined || settings.data === undefined
       ? null
-      : effectiveSelection(catalog.data, own ?? settings.data.defaultAgent));
+      : sessionSelection(catalog.data, own, settings.data.defaultAgent));
   const problem =
     catalog.data === undefined || selection === null
       ? null

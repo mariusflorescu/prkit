@@ -117,7 +117,7 @@ test(
       "SELECT value FROM settings WHERE key = 'guides.defaultAgent'",
     );
     expect(saved).toEqual({
-      value: '{"provider":"claude","model":"claude-sonnet-5-5","options":[]}',
+      value: '{"instance":"claude","model":"claude-sonnet-5-5","options":[]}',
     });
     await openFixtureGuide({ app, screen });
     await expect(screen.getByRole("button", "Agent and model: Claude Sonnet 5.5")).toBeVisible({

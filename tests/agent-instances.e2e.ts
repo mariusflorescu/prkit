@@ -1,0 +1,257 @@
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+
+import { type Browser, test } from "@e2e-dev/web";
+import { expect, type Screen, type TestFixtures } from "e2e";
+
+import { repoRoot } from "../scripts/verify-run.ts";
+import { setUpFakeClaude } from "./fakeClaude.ts";
+import { startInstance, stopFakeInstance } from "./fakeGitHub.ts";
+import { FIXTURE_NAME, NEEDS_FIXTURE, readRows } from "./fixturePr.ts";
+import { emulateOsColorScheme, screenshotLightAndDark } from "./osColorScheme.ts";
+
+const NAME = "agent-instances";
+const PR = /#1 Validate links and count clicks/;
+
+const modifierOf = (browser: Browser) =>
+  browser.evaluate(() => (/Mac|iPhone|iPad/.test(navigator.platform) ? "Meta" : "Control"));
+
+/** Light and dark, once an open dialog has faded in. */
+const shoot = async (app: TestFixtures["app"], browser: Browser, name: string) => {
+  await expect
+    .poll(() =>
+      browser.evaluate(() => {
+        const popup = document.querySelector('[role="dialog"], [role="alertdialog"]');
+        return popup === null ? "1" : getComputedStyle(popup).opacity;
+      }),
+    )
+    .toBe("1");
+  await screenshotLightAndDark(app, browser, name);
+};
+
+const openAgents = async (screen: Screen, browser: Browser) => {
+  await browser.keyboard.press(`${await modifierOf(browser)}+Comma`);
+  await screen.getByRole("navigation", "Settings sections").getByRole("link", "Agents").tap();
+  return screen.getByRole("region", "Agents");
+};
+
+const openGuide = async (screen: Screen) => {
+  await screen.getByRole("navigation", "Workspace tabs").getByRole("link", PR).tap();
+  await screen.getByRole("navigation", "Pull request tabs").getByRole("link", "Guide").tap();
+};
+
+/** Adds a Claude Code instance through the three steps of the Add dialog. */
+const addClaude = async (screen: Screen, label: string, folder: string) => {
+  await screen.getByRole("region", "Agents").getByRole("button", "Add agent").tap();
+  const dialog = screen.getByRole("dialog", "Add agent");
+  await dialog.getByRole("radio", /^Claude Code/).tap();
+  await dialog.getByRole("button", "Next").tap();
+  await dialog.getByRole("textbox", "Label").fill(label);
+  await dialog.getByRole("button", "Next").tap();
+  await dialog.getByRole("textbox", "Config folder (CLAUDE_CONFIG_DIR)").fill(folder);
+  await dialog.getByRole("button", "Add agent").tap();
+  await expect(dialog).toBeHidden({ timeout: 30_000 });
+};
+
+/** Picks a model of one instance in the Guide's setup, then starts the guide with `submit`. */
+const generateOn = async (screen: Screen, instance: string, submit: string) => {
+  const setup = screen.getByRole("form", "Start a guide");
+  await setup.getByRole("button", /^Agent and model: /).tap({ timeout: 30_000 });
+  await screen.getByRole("combobox", "Search models").fill(instance);
+  await screen.getByRole("option", /Claude Sonnet 5\.5/).tap();
+  await setup.getByRole("button", submit).tap();
+};
+
+test(
+  "agent instances: add a second Claude, write a guide on it, switch, edit, turn off and remove",
+  { skip: NEEDS_FIXTURE, timeout: 300_000 },
+  async ({ app, screen, browser }) => {
+    const claude = setUpFakeClaude(NAME);
+    // The second instance's config folder, where the stand-in saves its sessions.
+    const work = NodePath.join(repoRoot, ".e2e", "fake", `${NAME}-work`);
+    NodeFS.rmSync(work, { recursive: true, force: true });
+    NodeFS.mkdirSync(work, { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(work, "fake-plan"), "pro");
+    const run = startInstance(NAME, ["--claude", claude.file]);
+    const review = () =>
+      readRows(
+        run.home,
+        "SELECT instance_id, session_id FROM reviews WHERE pr_key LIKE '%#1' ORDER BY created_at DESC LIMIT 1",
+      )[0];
+    const lastRun = () => claude.runs().at(-1);
+    try {
+      await emulateOsColorScheme(browser, "light");
+      await browser.setViewport({ width: 1280, height: 860 });
+      await app.open(run.openUrl);
+      await screen.getByRole("link", "Inbox").tap();
+      await screen.getByRole("searchbox", "Search pull requests").fill(FIXTURE_NAME);
+      await screen.getByRole("region", "Yours").getByRole("link", PR).tap({ timeout: 45_000 });
+
+      // The Add dialog: each step, and what it says when Next can't go on.
+      const agents = await openAgents(screen, browser);
+      const list = agents.getByRole("list", "Agents");
+      await expect(list.getByRole("listitem", "Claude")).toBeVisible({ timeout: 30_000 });
+      await agents.getByRole("button", "Add agent").tap();
+      const dialog = screen.getByRole("dialog", "Add agent");
+      await expect(dialog.getByRole("radio", /^Claude Code/)).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      await shoot(app, browser, "u67-add-agent-kind");
+      await dialog.getByRole("button", "Next").tap();
+      await expect(dialog.getByRole("textbox", "Instance ID")).toHaveValue("claude_2");
+      await dialog.getByRole("textbox", "Label").fill("Work");
+      await expect(dialog.getByRole("textbox", "Instance ID")).toHaveValue("claude_work");
+      await dialog.getByRole("textbox", "Instance ID").fill("claude");
+      await dialog.getByRole("button", "Next").tap();
+      await expect(dialog.getByRole("alert")).toHaveText(
+        "An instance named 'claude' already exists.",
+      );
+      await shoot(app, browser, "u67-add-agent-name-error");
+      await dialog.getByRole("textbox", "Instance ID").fill("claude_work");
+      await expect(dialog.getByRole("alert")).toHaveCount(0);
+      await shoot(app, browser, "u67-add-agent-name");
+      await dialog.getByRole("button", "Next").tap();
+      const folder = dialog.getByRole("textbox", "Config folder (CLAUDE_CONFIG_DIR)");
+      await folder.fill("claude-work");
+      await dialog.getByRole("button", "Add agent").tap();
+      await expect(dialog.getByRole("alert")).toHaveText(
+        "Use an absolute path or one starting with ~/.",
+      );
+      await shoot(app, browser, "u67-add-agent-setup-error");
+      await folder.fill(work);
+      await dialog.getByRole("button", "Add agent").tap();
+      await expect(dialog).toBeHidden({ timeout: 30_000 });
+
+      const added = list.getByRole("listitem", "Work");
+      await expect(added).toHaveAttribute("data-instance", "claude_work");
+      await expect(added.getByRole("status", "Work status")).toHaveText(
+        "Signed in · Claude Pro subscription",
+        { timeout: 30_000 },
+      );
+      await expect(list.getByRole("listitem", "Claude").getByRole("status")).toHaveText(
+        "Signed in · Claude Max subscription",
+      );
+      await shoot(app, browser, "u67-agents-list");
+
+      // The pickers group by instance and say which one is picked.
+      await openGuide(screen);
+      const setup = screen.getByRole("form", "Start a guide");
+      await setup.getByRole("button", /^Agent and model: /).tap({ timeout: 30_000 });
+      await screen.getByRole("combobox", "Search models").fill("sonnet");
+      await expect(screen.getByRole("option", /Claude Sonnet 5\.5/)).toHaveCount(2);
+      await shoot(app, browser, "u67-picker-two-claudes");
+      await browser.keyboard.press("Escape");
+
+      // A guide on the new instance runs with its config folder.
+      await generateOn(screen, "claude_work", "Generate guide");
+      await expect(screen.getByRole("heading", "Every change")).toBeVisible({ timeout: 90_000 });
+      await expect(screen.getByLabel("Guide status")).toContainText(
+        "Claude Sonnet 5.5 · High · Work",
+      );
+      expect(lastRun()).toMatchObject({ configDir: work, resumed: false });
+      const first = review();
+      expect(first?.instance_id).toBe("claude_work");
+      expect(NodeFS.readdirSync(NodePath.join(work, "projects"))).toHaveLength(1);
+
+      // Another instance on the same folder keeps the conversation.
+      await openAgents(screen, browser);
+      await addClaude(screen, "Same", work);
+      await openGuide(screen);
+      await screen.getByRole("button", "Generate again with other settings").tap();
+      await generateOn(screen, "claude_same", "Generate again");
+      await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r2 · ", {
+        timeout: 90_000,
+      });
+      expect(lastRun()).toMatchObject({
+        configDir: work,
+        session: first?.session_id,
+        resumed: true,
+      });
+      expect(review()).toMatchObject({ instance_id: "claude_same", session_id: first?.session_id });
+
+      // Edit in place: label and accent.
+      await openAgents(screen, browser);
+      await list.getByRole("listitem", "Work").getByRole("button", "Edit").tap();
+      const edit = screen.getByRole("form", "Edit Work");
+      await edit.getByRole("textbox", "Label").fill("Day job");
+      await edit.getByLabel("Accent").fill("#2f7d6d");
+      await shoot(app, browser, "u67-edit-agent");
+      await edit.getByRole("button", "Save").tap();
+      await expect(screen.getByText("Saved Day job")).toBeVisible({ timeout: 30_000 });
+      await expect(list.getByRole("listitem", "Day job")).toHaveAttribute(
+        "data-instance",
+        "claude_work",
+      );
+      expect(
+        readRows(run.home, "SELECT label, accent FROM agent_instances WHERE id = 'claude_work'"),
+      ).toEqual([{ label: "Day job", accent: "#2f7d6d" }]);
+
+      // Off: gone from the pickers, and the PR moves to Claude's default instance with a new
+      // conversation, since that one keeps its sessions in another folder.
+      await list.getByRole("switch", "Same on").tap();
+      await expect(list.getByRole("listitem", "Same").getByRole("status")).toHaveText("Off");
+      await openGuide(screen);
+      await screen.getByRole("button", "Generate again with other settings").tap();
+      const fallback = screen.getByRole("form", "Start a guide");
+      await expect(
+        fallback.getByRole("button", "Agent and model: Claude Sonnet 5.5 · Claude"),
+      ).toBeVisible({ timeout: 30_000 });
+      await fallback.getByRole("button", /^Agent and model: /).tap();
+      await screen.getByRole("combobox", "Search models").fill("sonnet");
+      await expect(screen.getByRole("option", /Claude Sonnet 5\.5/)).toHaveCount(2);
+      await screen.getByRole("combobox", "Search models").fill("claude_same");
+      await expect(screen.getByRole("option")).toHaveCount(0);
+      await browser.keyboard.press("Escape");
+      await fallback.getByRole("button", "Generate again").tap();
+      await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r3 · ", {
+        timeout: 90_000,
+      });
+      expect(lastRun()).toMatchObject({ configDir: null, resumed: false });
+      expect(review()?.instance_id).toBe("claude");
+      expect(review()?.session_id).not.toBe(first?.session_id);
+
+      // Remove asks first, and leaves the config folder alone.
+      await openAgents(screen, browser);
+      await list.getByRole("listitem", "Day job").getByRole("button", "Remove").tap();
+      const confirm = screen.getByRole("alertdialog", "Remove Day job?");
+      await expect(confirm).toContainText(
+        "Its config folder and Claude Code login stay as they are.",
+      );
+      await shoot(app, browser, "u67-remove-agent");
+      await confirm.getByRole("button", "Remove").tap();
+      await expect(confirm).toBeHidden({ timeout: 30_000 });
+      await expect(list.getByRole("listitem", "Day job")).toHaveCount(0, { timeout: 30_000 });
+      expect(readRows(run.home, "SELECT id FROM agent_instances ORDER BY id")).toEqual([
+        { id: "claude_same" },
+      ]);
+      expect(NodeFS.existsSync(NodePath.join(work, "projects"))).toBe(true);
+      // A default instance can be reset, never removed.
+      await expect(list.getByRole("listitem", "Claude").getByRole("button", "Remove")).toHaveCount(
+        0,
+      );
+
+      // A Codex instance's prkit home goes with it.
+      await agents.getByRole("button", "Add agent").tap();
+      await dialog.getByRole("radio", /^Codex, set up by hand/).tap();
+      await dialog.getByRole("button", "Next").tap();
+      await dialog.getByRole("textbox", "Label").fill("Side");
+      await dialog.getByRole("button", "Next").tap();
+      await dialog.getByRole("textbox", "Codex home (CODEX_HOME)").fill(work);
+      await dialog.getByRole("button", "Add agent").tap();
+      const side = list.getByRole("listitem", "Side");
+      await expect(side.getByRole("status")).not.toHaveText("Checking…", { timeout: 30_000 });
+      const sideHome = NodePath.join(run.home, "codex-instances", "codex_side");
+      NodeFS.mkdirSync(sideHome, { recursive: true });
+      await side.getByRole("button", "Remove").tap();
+      const removeSide = screen.getByRole("alertdialog", "Remove Side?");
+      await removeSide.getByRole("button", "Remove").tap();
+      await expect(removeSide).toBeHidden({ timeout: 30_000 });
+      await expect(side).toHaveCount(0);
+      expect(NodeFS.existsSync(sideHome)).toBe(false);
+    } finally {
+      stopFakeInstance(NAME, { keepHome: false });
+      NodeFS.rmSync(work, { recursive: true, force: true });
+    }
+  },
+);

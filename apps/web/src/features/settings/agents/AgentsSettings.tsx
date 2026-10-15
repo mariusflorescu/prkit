@@ -42,7 +42,7 @@ export function AgentsSettings() {
             onClick={() => checkAgain.mutate()}
           >
             <RefreshCwIcon className="size-3.5" />
-            {checkAgain.isPending ? "Checking..." : "Check again"}
+            {checkAgain.isPending ? "Checking…" : "Check again"}
           </Button>
           <Button
             size="sm"

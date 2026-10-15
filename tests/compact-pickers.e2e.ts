@@ -100,7 +100,7 @@ test("every picker lists compact rows, and the app uses no native select", async
     const sections = screen.getByRole("navigation", "Settings sections");
     for (const [section, loaded] of [
       ["Accounts", screen.getByRole("region", "GitHub accounts").getByText("Ready").first()],
-      ["Agents", screen.getByRole("list", "Agent sign-in status").getByText("Codex")],
+      ["Agents", screen.getByRole("list", "Agents").getByRole("listitem", "Codex")],
       ["Appearance", screen.getByRole("radiogroup", "Theme")],
       ["Keyboard shortcuts", screen.getByRole("list", "General")],
       ["About", screen.getByRole("region", "About prkit").getByText(/^Build /)],

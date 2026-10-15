@@ -4,7 +4,7 @@ Review comments and merge conflicts go to a writable agent session per PR (Claud
 
 ## Sub-features
 
-- `fix-send` sends drafts or open GitHub threads from Review > Send to agent, or from a draft's or thread's own bot button, with an optional note, the agent and model, and replies on GitHub after the push.
+- `fix-send` sends drafts or open GitHub threads from Review > Send to agent, or from a draft's or thread's own bot button, with an optional note, the agent instance and model, and replies on GitHub after the push. Picking an instance in another conversation group than the session's says `A different agent starts a new conversation for this pull request.`; one in the same group says nothing and resumes. The Fixes header names the instance when another one of that agent is on.
 - `fix-panel` is the Fixes tab, shown once the PR had something sent (a fix or a resolution, running, waiting or ended; `FixerFeedEntry.turns` from the fixer feed). Before that a `tab=fixes` link or a remembered tab opens Conversation, without painting any of Fixes first. The page waits at most 3 seconds for the feed's index, then opens Conversation too, and Fixes appears once the feed says so. It shows the session's agent, the queue newest first, progress with Stop and discard, per-comment or per-file results, the commit's diff, Push, Discard, Ask the agent to change, Copy patch, Retry.
 - `fix-conflicts` is the header's Resolve conflicts on a conflicting PR: merge the base (default) or, on your own PR, rebase; the resolution diff compared with each side; needs-human files; Revert resolution after a pushed merge.
 - `fix-push` checks GitHub push access, refuses when the branch moved and queues a redo, records a push a crash cut off, and marks fixed drafts resolved-by-agent.

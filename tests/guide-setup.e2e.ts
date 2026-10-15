@@ -116,11 +116,12 @@ test("the Guide tab sets a guide up in one quiet block: agent, effort, a focus t
     expect(
       readRows(
         run.home,
-        `SELECT provider, model, model_options FROM reviews WHERE pr_key = '${KEY}#3'`,
+        `SELECT provider, instance_id, model, model_options FROM reviews WHERE pr_key = '${KEY}#3'`,
       ),
     ).toEqual([
       {
         provider: "claude",
+        instance_id: "claude",
         model: "claude-opus-5-5",
         model_options: expect.stringContaining('"value":"high"'),
       },

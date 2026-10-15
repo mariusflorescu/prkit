@@ -4,7 +4,7 @@ The guide agent only reads. The fix agent writes: it fixes review comments and r
 
 ## Sessions and turns
 
-`Fixers` owns one session per PR (`fixers`, unique on the PR key). It stores the account the PR was opened through, the agent and model, and the provider's native session id, which every turn resumes. Picking a different provider starts a new conversation. A session ends when the PR is merged or closed (the fix watcher), or when the owner stops it.
+`Fixers` owns one session per PR (`fixers`, unique on the PR key). It stores the account the PR was opened through, the agent instance and model, and the provider's native session id, which every turn resumes. Each turn records the instance it ran on. Picking an instance in another conversation group (another kind, or another config folder; see [Agents](../features/agents.md)) starts a new conversation, and the send form says so; an instance in the same group keeps it. A turn whose instance was turned off or removed runs on its kind's default instance, else the default agent. A session ends when the PR is merged or closed (the fix watcher), or when the owner stops it.
 
 Work arrives as turns (`fixer_turns`), queued per PR:
 

@@ -7,6 +7,7 @@ import {
   AgentInstanceId,
   AgentLogin,
   AgentProviderKind,
+  defaultInstanceId,
 } from "./agentInstance.ts";
 import { ModelOptionDescriptor, ModelOptionSelection, resolveModelOptions } from "./model.ts";
 
@@ -151,6 +152,30 @@ export const effectiveSelection = (
     if (model !== undefined) return { instance: provider.instance, model: model.slug, options: [] };
   }
   return null;
+};
+
+/**
+ * What a PR's guide or fix session runs on next, as the server picks it: its own instance while
+ * that is on, else its kind's default instance while that is on, else `fallback` (the default
+ * agent). Each is then checked as `effectiveSelection` checks it.
+ */
+export const sessionSelection = (
+  catalog: AgentCatalog,
+  own:
+    | (AgentSelection & {
+        readonly kind: AgentProviderKind;
+      })
+    | null,
+  fallback: AgentSelection | null,
+) => {
+  if (own === null) return effectiveSelection(catalog, fallback);
+  const selection = { model: own.model, options: own.options };
+  if (findAgentEntry(catalog, own.instance)?.enabled === true)
+    return effectiveSelection(catalog, { ...selection, instance: own.instance });
+  const kindDefault = defaultInstanceId(own.kind);
+  if (findAgentEntry(catalog, kindDefault)?.enabled === true)
+    return effectiveSelection(catalog, { ...selection, instance: kindDefault });
+  return effectiveSelection(catalog, fallback);
 };
 
 /**
