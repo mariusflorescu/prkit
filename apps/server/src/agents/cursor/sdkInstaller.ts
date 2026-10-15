@@ -119,12 +119,21 @@ export const install = (options: {
       const list = packagesFor(options.packages, options.platform);
       const total = list.length;
       const parent = path.dirname(root);
-      /** Other versions' folders: a version prkit no longer pins is never loaded again. */
+      /**
+       * Other versions' folders: a version prkit no longer pins is never loaded again. Only
+       * tidying, so one it can't remove stays, and the install still counts.
+       */
       const removeStale = Effect.gen(function* () {
         for (const name of yield* fs.readDirectory(parent))
           if (name !== path.basename(root) && !name.startsWith(PARTIAL))
             yield* fs.remove(path.join(parent, name), { recursive: true, force: true });
-      });
+      }).pipe(
+        Effect.catchTag("PlatformError", (error) =>
+          Effect.logWarning("prkit couldn't remove an old Cursor SDK").pipe(
+            Effect.annotateLogs({ message: error.message }),
+          ),
+        ),
+      );
       if (yield* fs.exists(entry)) {
         yield* removeStale;
         return Stream.make({ name: null, done: total, total });

@@ -176,6 +176,29 @@ describe("installing Cursor's SDK", () => {
     expect(await listing(home)).toEqual(["1.0.37"]);
   });
 
+  it("still installs when an old version's folder can't be removed", async () => {
+    const home = `${root}/home-stuck`;
+    const stuck = `${home}/cursor-sdk/1.0.29/node_modules`;
+    await run(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        yield* fs.makeDirectory(`${stuck}/@cursor/sdk`, { recursive: true });
+        yield* fs.chmod(stuck, 0o500);
+      }),
+    );
+    const sdk = await tarball("@cursor/sdk", SDK_FILES);
+    const platform = await tarball("@cursor/sdk-darwin-arm64", {}, "darwin-arm64");
+    const exit = await runExit(installAll(home, [sdk, platform]));
+    await run(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        yield* fs.chmod(stuck, 0o700);
+      }),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(await listing(home)).toEqual(["1.0.29", "1.0.37"]);
+  });
+
   it("does nothing when the SDK is already installed", async () => {
     const home = `${root}/home-ok`;
     const unreadable: SdkPackage = {
