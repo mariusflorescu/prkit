@@ -126,14 +126,16 @@ export const install = (options: {
       const removeStale = Effect.gen(function* () {
         for (const name of yield* fs.readDirectory(parent))
           if (name !== path.basename(root) && !name.startsWith(PARTIAL))
-            yield* fs.remove(path.join(parent, name), { recursive: true, force: true });
-      }).pipe(
-        Effect.catchTag("PlatformError", (error) =>
-          Effect.logWarning("prkit couldn't remove an old Cursor SDK").pipe(
-            Effect.annotateLogs({ message: error.message }),
-          ),
-        ),
-      );
+            yield* fs
+              .remove(path.join(parent, name), { recursive: true, force: true })
+              .pipe(
+                Effect.catchTag("PlatformError", (error) =>
+                  Effect.logWarning("prkit couldn't remove an old Cursor SDK").pipe(
+                    Effect.annotateLogs({ version: name, message: error.message }),
+                  ),
+                ),
+              );
+      }).pipe(Effect.catchTag("PlatformError", () => Effect.void));
       if (yield* fs.exists(entry)) {
         yield* removeStale;
         return Stream.make({ name: null, done: total, total });

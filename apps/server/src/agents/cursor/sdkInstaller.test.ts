@@ -182,6 +182,8 @@ describe("installing Cursor's SDK", () => {
     await run(
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
+        // One old version can go, the other can't: each is tidied on its own.
+        yield* fs.makeDirectory(`${home}/cursor-sdk/1.0.30/node_modules`, { recursive: true });
         yield* fs.makeDirectory(`${stuck}/@cursor/sdk`, { recursive: true });
         yield* fs.chmod(stuck, 0o500);
       }),
