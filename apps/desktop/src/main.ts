@@ -116,6 +116,15 @@ ipcMain.on("prkit:notify", (event, payload) => {
   native.show();
 });
 
+// An outside agent opened a PR with focus: the page asks for its window to come forward.
+ipcMain.on("prkit:bring-forward", (event) => {
+  const origin = URL.parse(event.senderFrame?.url ?? "")?.origin;
+  if (windowOptions === undefined || origin !== windowOptions.url.origin) return;
+  // Another app has the focus when an agent asks, so macOS needs prkit to take it.
+  app.focus({ steal: true });
+  bringForward();
+});
+
 // Settings > Appearance: native chrome (title bar, menus, the Dock icon) follows the chosen
 // theme, and `prefers-color-scheme` in the page follows it too. `system` follows macOS live.
 ipcMain.on("prkit:set-theme", (event, payload) => {

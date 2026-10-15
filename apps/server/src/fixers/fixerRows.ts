@@ -53,7 +53,7 @@ export type FixerRow = typeof FixerRow.Type;
 
 /** Every turn column but the diff, which only the Fixes panel's diff view reads. */
 export const TURN_COLUMNS =
-  "id, fixer_id, work, trigger, status, provider, instance_id, model, run_id, agent_pid, agent_started, head_sha, base_sha, head_ref, base_ref, head_repo, commit_sha, commit_parents, commit_message, report, conflicted, scripts, narration, rounds, created_at, started_at, finished_at";
+  "id, fixer_id, work, trigger, status, provider, instance_id, model, run_id, agent_pid, agent_started, head_sha, base_sha, head_ref, base_ref, head_repo, commit_sha, commit_parents, commit_message, report, conflicted, scripts, narration, rounds, started_by, created_at, started_at, finished_at";
 
 export const TurnRow = Schema.Struct({
   id: FixerTurnId,
@@ -80,6 +80,7 @@ export const TurnRow = Schema.Struct({
   scripts: Schema.NullOr(Schema.fromJsonString(TurnScripts)),
   narration: Schema.NullOr(Schema.String),
   rounds: Schema.Int,
+  started_by: Schema.NullOr(Schema.String),
   created_at: Schema.String,
   started_at: Schema.NullOr(Schema.String),
   finished_at: Schema.NullOr(Schema.String),
@@ -170,6 +171,7 @@ export const toTurn = (row: TurnRow): FixerTurn => ({
   scripts: row.scripts,
   narration: row.narration,
   rounds: row.rounds,
+  startedBy: row.started_by,
   createdAt: row.created_at,
   startedAt: row.started_at,
   finishedAt: row.finished_at,

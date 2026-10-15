@@ -16,6 +16,7 @@ import { AboutSettings } from "~/features/settings/AboutSettings";
 import { AgentsSettings } from "~/features/settings/agents/AgentsSettings";
 import { AppearanceSettings } from "~/features/settings/appearance/AppearanceSettings";
 import { VISIBLE_SETTINGS_SECTIONS } from "~/features/settings/settingsSections";
+import { OutsideAgentsSettings } from "~/features/settings/outsideAgents/OutsideAgentsSettings";
 import { KeyboardShortcutsSettings } from "~/features/settings/shortcuts/KeyboardShortcutsSettings";
 import { UpdatesSettings } from "~/features/updates/UpdatesSettings";
 import { updatesBridge } from "~/lib/desktop";
@@ -57,6 +58,11 @@ const settingsSectionRoutes = [
   }),
   createRoute({ getParentRoute: () => settingsRoute, path: "agents", component: AgentsSettings }),
   createRoute({ getParentRoute: () => settingsRoute, path: "guides", component: GuidesSettings }),
+  createRoute({
+    getParentRoute: () => settingsRoute,
+    path: "outside-agents",
+    component: OutsideAgentsSettings,
+  }),
   createRoute({
     getParentRoute: () => settingsRoute,
     path: "appearance",

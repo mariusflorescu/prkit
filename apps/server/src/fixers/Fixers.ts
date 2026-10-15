@@ -27,17 +27,25 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { processHost } from "../agents/turnEnd.ts";
 import { GitHubApi } from "../github/GitHubApi.ts";
 import { PullRequests } from "../pullRequests/PullRequests.ts";
+import { StartedBy } from "../outside/StartedBy.ts";
 import { RepoCache } from "../repo/RepoCache.ts";
 import { reviewTarget } from "../reviews/reviewTarget.ts";
 import { makeAgentRuns } from "./agentRuns.ts";
 import { makeConflictTurn } from "./conflictTurn.ts";
-import { decodeDiff, decodeFixers, encodeStatus, type FixerRow } from "./fixerRows.ts";
+import {
+  decodeDiff,
+  decodeFixers,
+  encodeStatus,
+  type FixerRow,
+  type TurnRow,
+} from "./fixerRows.ts";
 import { clip, decodeCount, makeFixerState } from "./fixerState.ts";
 import { makeFixTools } from "./fixTools.ts";
 import { makeFixWatch } from "./fixWatch.ts";
 import { makePushes } from "./pushes.ts";
 import { makeScriptAccess } from "./scriptAccess.ts";
 import { makeSessions } from "./sessions.ts";
+import { startedByFor } from "./turnRules.ts";
 import { makeTurnBodies } from "./turnBodies.ts";
 import { makeTurnLeftovers } from "./turnLeftovers.ts";
 import { makeTurnQueue, type TurnBody } from "./turnQueue.ts";
@@ -328,6 +336,13 @@ export const make = Effect.gen(function* () {
       if (outcome._tag === "reject")
         return yield* new FixerStateError({ key, message: outcome.message });
       if (outcome._tag === "noop") return yield* snapshotOf(key);
+      const startedBy = startedByFor(row.started_by, yield* StartedBy);
+      return yield* retryWork(key, row, fixer).pipe(Effect.provideService(StartedBy, startedBy));
+    }).pipe(Effect.catchTags(dbFailures));
+
+  /** Runs a turn's work again, as a new turn. */
+  const retryWork = (key: PullRequestKey, row: TurnRow, fixer: FixerRow) =>
+    Effect.gen(function* () {
       switch (row.work._tag) {
         case "fix":
           return yield* send(

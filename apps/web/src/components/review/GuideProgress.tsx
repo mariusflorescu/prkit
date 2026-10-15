@@ -60,6 +60,9 @@ export function GuideProgress({
           onStop={() => stop.mutate()}
         />
         <ProgressBar fraction={progress.fraction} label={progress.label} />
+        {attempt.startedBy !== null && (
+          <p className="text-xs text-muted-foreground">Started from {attempt.startedBy}</p>
+        )}
         {stop.error && (
           <p role="alert" className="text-xs text-error-foreground">
             {stop.error.message}{" "}

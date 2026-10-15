@@ -14,6 +14,7 @@ import { isSettingsPath } from "~/features/settings/settingsSections";
 import { desktopBridge } from "~/lib/desktop";
 
 import { useWorkspaceSession } from "./sessionStore";
+import { useWorkspaceChanges } from "./useWorkspaceChanges";
 import { WorkspaceContext } from "./workspaceContext";
 
 const mutationKey = ["workspace-change"];
@@ -44,6 +45,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       search: { account: row.accountId, tab },
     });
   };
+  useWorkspaceChanges(go);
   const send = (command: WorkspaceCommand) => {
     void client.cancelQueries({ queryKey: workspaceQuery.queryKey });
     const before = client.getQueryData(workspaceQuery.queryKey);

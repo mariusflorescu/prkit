@@ -31,7 +31,8 @@ export function FixTurnCard({
 }) {
   const state = turn.status._tag;
   const title = turnTitle(turn);
-  const trigger = TRIGGER_NOTE[turn.trigger];
+  const trigger =
+    turn.startedBy !== null ? `Started from ${turn.startedBy}` : TRIGGER_NOTE[turn.trigger];
   const summary =
     turn.work._tag === "conflicts" && turn.work.report !== null ? turn.work.report.summary : null;
   return (

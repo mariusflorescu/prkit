@@ -5,6 +5,7 @@ import {
   refFromKey,
   SavedInboxFilters,
   Workspace as WorkspaceSchema,
+  type WorkspaceChange,
   WorkspaceError,
   type WorkspaceCommand,
 } from "@prkit/contracts";
@@ -13,9 +14,11 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Stream from "effect/Stream";
 
 const StoredFilters = Schema.fromJsonString(SavedInboxFilters);
 const UNSAVED: SavedInboxFilters = { ...NO_INBOX_FILTERS, savedAt: null };
@@ -32,6 +35,8 @@ export class Workspace extends Context.Service<Workspace, Effect.Success<typeof 
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const gate = yield* Semaphore.make(1);
+  /** Changes made other than through a window's own RPC, which windows apply as they come. */
+  const announced = yield* PubSub.unbounded<WorkspaceChange>();
   const read = () =>
     Effect.gen(function* () {
       const open =
@@ -62,7 +67,11 @@ export const make = Effect.gen(function* () {
           }),
       ),
     );
-  const command = (input: WorkspaceCommand) =>
+  /**
+   * Applies one change to the open PRs. A change no window asked for (an outside agent's)
+   * is `announce`d, so every window shows it; `focus` asks them to show that PR.
+   */
+  const command = (input: WorkspaceCommand, announce?: { readonly focus: boolean }) =>
     gate.withPermits(1)(
       sql
         .withTransaction(
@@ -98,6 +107,19 @@ export const make = Effect.gen(function* () {
           }),
         )
         .pipe(
+          Effect.tap((next) =>
+            announce === undefined
+              ? Effect.void
+              : PubSub.publish(announced, {
+                  workspace: next,
+                  focus:
+                    announce.focus && input.kind === "open"
+                      ? { key: input.key, accountId: input.accountId }
+                      : null,
+                }),
+          ),
+        )
+        .pipe(
           Effect.catchTag("SqlError", () =>
             Effect.fail(
               new WorkspaceError({
@@ -119,7 +141,8 @@ export const make = Effect.gen(function* () {
         () => new WorkspaceError({ message: "Couldn't save your Inbox filters. Try again." }),
       ),
     );
-  return { get: () => gate.withPermits(1)(read()), command, saveInboxFilters };
+  const changes = (): Stream.Stream<WorkspaceChange> => Stream.fromPubSub(announced);
+  return { get: () => gate.withPermits(1)(read()), command, saveInboxFilters, changes };
 });
 
 export const layer = Layer.effect(Workspace, make);

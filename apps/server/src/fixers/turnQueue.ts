@@ -20,6 +20,7 @@ import type { SqlError } from "effect/sql/SqlError";
 import { Agents } from "../agents/Agents.ts";
 import { turnTmpDir } from "../agents/commandReach.ts";
 import { McpTokens } from "../mcp/McpTokens.ts";
+import { StartedBy } from "../outside/StartedBy.ts";
 import {
   type GitTampered,
   type LinkRefused,
@@ -237,26 +238,36 @@ export const makeTurnQueue = (
       trigger: FixerTrigger,
       input: {
         readonly createdAt?: string;
+        /** The outside agent the work comes from; the call's own `StartedBy` when absent. */
+        readonly startedBy?: string | null;
         readonly prepare?: (turnId: FixerTurnId) => Effect.Effect<void, FixerError | SqlError>;
       } = {},
     ) =>
       Effect.gen(function* () {
         const turnId = FixerTurnId.make(yield* newId);
         const at = yield* now;
+        const startedBy = input.startedBy === undefined ? yield* StartedBy : input.startedBy;
         yield* sql.withTransaction(
           Effect.gen(function* () {
             yield* sql`
               INSERT INTO fixer_turns (id, fixer_id, kind, work, trigger, status, provider, instance_id, model,
-                created_at)
+                started_by, created_at)
               VALUES (${turnId}, ${fixer.id}, ${work._tag}, ${encodeWork(work)}, ${trigger},
                 ${encodeStatus({ _tag: "queued" })}, ${fixer.provider}, ${fixer.instance_id}, ${fixer.model},
-                ${input.createdAt ?? at})`;
+                ${startedBy}, ${input.createdAt ?? at})`;
             if (input.prepare !== undefined) yield* input.prepare(turnId);
           }),
         );
         yield* Effect.logInfo("Fix turn queued").pipe(
           Effect.annotateLogs({ fixerId: fixer.id, turnId, kind: work._tag, trigger }),
         );
+        if (startedBy !== null)
+          yield* appendActivity(
+            fixer.pr_key,
+            turnId,
+            "note",
+            `Started from ${startedBy}. It waits for Push in prkit`,
+          );
         yield* advance(fixer.id);
         yield* publish(fixer.pr_key);
         return turnId;

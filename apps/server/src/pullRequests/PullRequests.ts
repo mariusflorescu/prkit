@@ -8,6 +8,7 @@ import {
   type InboxRead,
   InboxResult,
   type PullRequestKey,
+  pullRequestKey,
   type PullRequestStatus,
   refFromKey,
 } from "@prkit/contracts";
@@ -206,6 +207,31 @@ export const make = Effect.gen(function* () {
       ),
     );
 
+  /**
+   * Every account whose last inbox has this PR, from the cache alone. The merged inbox keeps
+   * one account per PR, so asking it would hide that a second account reaches it too.
+   */
+  const inboxAccountsOf = (key: PullRequestKey) =>
+    Effect.gen(function* () {
+      const known = (yield* accounts.list()).accounts;
+      const found = yield* Effect.forEach(known, (account) =>
+        inboxCache
+          .peek({ accountId: account.id, configDir: account.configDir, key: "" })
+          .pipe(
+            Effect.map((cached) =>
+              (cached?.value.entries ?? []).some((entry) => pullRequestKey(entry.ref) === key)
+                ? [account.id]
+                : [],
+            ),
+          ),
+      );
+      return found.flat();
+    }).pipe(
+      Effect.catchTag("AccountsError", (error) =>
+        Effect.fail(new InboxError({ message: error.message })),
+      ),
+    );
+
   /** What a stack strip shows of this PR changed: its stack, old and new, is read again. */
   const restack = (
     key: PullRequestKey,
@@ -294,6 +320,7 @@ export const make = Effect.gen(function* () {
 
   return {
     inbox,
+    inboxAccountsOf,
     repositories: repositoryReads.list,
     repositoryPullRequests: repositoryReads.pulls,
     observe,

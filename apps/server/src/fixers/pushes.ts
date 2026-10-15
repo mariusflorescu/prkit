@@ -102,6 +102,7 @@ export const makePushes = (state: FixerState, queue: TurnQueue, sessions: Sessio
           const bound = yield* rebindOrKeep(fixer);
           yield* enqueue(bound, row.work, "redo", {
             createdAt: row.created_at,
+            startedBy: row.started_by,
             // The batch's drafts stay with the agent, now for the redo.
             prepare: (redoId) =>
               sql`UPDATE pending_comments SET fixer_turn_id = ${redoId} WHERE fixer_turn_id = ${turnId}`.pipe(

@@ -16,6 +16,7 @@ export * from "./github.ts";
 export * from "./ids.ts";
 export * from "./inbox.ts";
 export * from "./model.ts";
+export * from "./outsideAgents.ts";
 export * from "./pullRequest.ts";
 export * from "./pullRequestActions.ts";
 export * from "./pullRequestActionPolicy.ts";

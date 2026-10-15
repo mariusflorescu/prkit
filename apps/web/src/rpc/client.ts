@@ -24,7 +24,10 @@ import {
   type InboxFilters,
   type SavedInboxFilters,
   type Workspace,
+  type WorkspaceChange,
   type WorkspaceCommand,
+  type OutsideAgentsSettings,
+  type OutsideAgentsState,
   type AgentCatalog,
   type AgentInstanceConfig,
   type AgentInstanceId,
@@ -180,6 +183,21 @@ export const getWorkspace = (): Promise<Workspace> =>
   call((client) => client[WS_METHODS.workspaceGet]({}));
 export const saveInboxFilters = (filters: InboxFilters): Promise<SavedInboxFilters> =>
   call((client) => client[WS_METHODS.workspaceSaveInboxFilters](filters));
+/** Hears open PRs changed elsewhere (an outside agent) until the returned function is called. */
+export const watchWorkspace = (onChange: (change: WorkspaceChange) => void): (() => void) => {
+  const current = getRuntime();
+  if (current === null) return () => {};
+  const fiber = current.runFork(
+    WsClient.use((client) =>
+      client[WS_METHODS.workspaceChanges]({}).pipe(
+        Stream.runForEach((change) => Effect.sync(() => onChange(change))),
+      ),
+    ).pipe(Effect.ignore, Effect.andThen(Effect.sleep("2 seconds")), Effect.forever),
+  );
+  return () => {
+    current.runFork(Fiber.interrupt(fiber));
+  };
+};
 export const changeWorkspace = (command: WorkspaceCommand): Promise<Workspace> => {
   switch (command.kind) {
     case "open":
@@ -340,6 +358,13 @@ export const getAppearance = (): Promise<AppearanceSettings> =>
   call((client) => client[WS_METHODS.appearanceGet]({}));
 export const updateAppearance = (theme: ThemePreference): Promise<AppearanceSettings> =>
   call((client) => client[WS_METHODS.appearanceUpdate]({ theme }));
+// Outside agents (docs/features/outside-agents.md).
+export const getOutsideAgents = (): Promise<OutsideAgentsState> =>
+  call((client) => client[WS_METHODS.outsideAgentsGet]({}));
+export const updateOutsideAgents = (settings: OutsideAgentsSettings): Promise<OutsideAgentsState> =>
+  call((client) => client[WS_METHODS.outsideAgentsUpdate](settings));
+export const resetOutsideAgents = (): Promise<OutsideAgentsState> =>
+  call((client) => client[WS_METHODS.outsideAgentsReset]({}));
 // Guide settings (docs/internals/architecture.md "Guide settings").
 export const getGuideScope = (scope: GuideScope): Promise<ScopeConfig> =>
   call((client) => client[WS_METHODS.guideConfigScope]({ scope }));

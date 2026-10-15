@@ -200,6 +200,11 @@ export const FixerTurn = Schema.Struct({
   narration: Schema.NullOr(Schema.String),
   /** How many times the owner asked the agent to change the result. */
   rounds: Schema.Int,
+  /**
+   * The outside agent that started it, by the name it gave; null when started in prkit. Such
+   * a turn never pushes by itself: it waits for Push in prkit.
+   */
+  startedBy: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
   startedAt: Schema.NullOr(Schema.String),
   finishedAt: Schema.NullOr(Schema.String),

@@ -1,0 +1,866 @@
+import {
+  type AccountId,
+  type FixerSnapshot,
+  type FixerTurn,
+  type FixerTurnId,
+  type FixTarget,
+  type PullRequestKey,
+  pullRequestKey,
+  rangeRows,
+  diffRows,
+  refFromKey,
+  type ReviewCommentId,
+  type ReviewSnapshot,
+} from "@prkit/contracts";
+import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/sql/SqlClient";
+
+import { GitHubAccounts } from "../accounts/GitHubAccounts.ts";
+import { Agents } from "../agents/Agents.ts";
+import * as ServerConfig from "../config.ts";
+import { Fixers } from "../fixers/Fixers.ts";
+import { GitHubApi } from "../github/GitHubApi.ts";
+import { PullRequests } from "../pullRequests/PullRequests.ts";
+import { ReviewComments } from "../reviewComments/ReviewComments.ts";
+import { Reviews } from "../reviews/Reviews.ts";
+import { Workspace } from "../workspace/Workspace.ts";
+import { OutsideAgents } from "./OutsideAgents.ts";
+import {
+  AddedComment,
+  type CommentsResult,
+  type FixResult,
+  type GuideResult,
+  type GenerateGuideInput,
+  type GuideStatus,
+  type InboxListResult,
+  type OpenPullRequestsResult,
+  OutsideToolFailure,
+  type PullRequestResult,
+  StartedTurn,
+  type StatusResult,
+  Target,
+  type TargetInput,
+  type WaitResult,
+} from "./schemas.ts";
+
+/** Errors whose message is written for the owner and may reach a client as it is. */
+const PLAIN_ERRORS: Record<string, OutsideToolFailure["code"]> = {
+  ReviewError: "failed",
+  ReviewStateError: "conflict",
+  GuideNotFoundError: "not-found",
+  PullRequestReadError: "github",
+  InboxError: "github",
+  AccountsError: "failed",
+  WorkspaceError: "failed",
+  ReviewCommentsError: "failed",
+  FixerError: "failed",
+  FixerStateError: "conflict",
+};
+
+/** Turns any service error into a failure a client may read: never a cause, a path or a stack. */
+const isFailure = Schema.is(OutsideToolFailure);
+const asFailure = (error: { readonly _tag: string; readonly message: string }) => {
+  if (isFailure(error)) return error;
+  const code = PLAIN_ERRORS[error._tag];
+  return new OutsideToolFailure(
+    code === undefined
+      ? { code: "failed", message: "prkit couldn't do that. Try again." }
+      : { code, message: error.message },
+  );
+};
+const fail = (code: OutsideToolFailure["code"], message: string) =>
+  Effect.fail(new OutsideToolFailure({ code, message }));
+
+const WAIT_DEFAULT_SECONDS = 50;
+const DIFF_LIMIT = 60_000;
+const WORKING_TURNS = new Set(["queued", "preparing", "running", "pushing"]);
+
+/** A PR URL: `https://<host>/<owner>/<repo>/pull/<number>`, anything after the number ignored. */
+const parseUrl = (url: string) => {
+  const match = /^https?:\/\/([^/\s]+)\/([^/\s]+)\/([^/\s]+)\/pull\/([1-9]\d*)(?:[/?#].*)?$/.exec(
+    url.trim(),
+  );
+  if (match === null) return null;
+  const [, host, owner, repo, number] = match;
+  if (host === undefined || owner === undefined || repo === undefined || number === undefined)
+    return null;
+  return { host: host.toLowerCase(), owner, repo, number: Number(number) };
+};
+
+const webUrl = (key: PullRequestKey) => {
+  const ref = refFromKey(key);
+  return ref === null ? "" : `https://${ref.host}/${ref.owner}/${ref.repo}/pull/${ref.number}`;
+};
+
+/**
+ * What outside agents can ask of prkit, one method per MCP tool, each a thin layer over the
+ * service the app's own buttons use (docs/features/outside-agents.md). Reads answer from
+ * prkit's cache; work counts as a click and queues behind the agent slots like one.
+ */
+export class OutsideWork extends Context.Service<OutsideWork, Effect.Success<typeof make>>()(
+  "@prkit/server/outside/OutsideWork",
+) {}
+
+export const make = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const config = yield* ServerConfig.ServerConfig;
+  const accounts = yield* GitHubAccounts;
+  const github = yield* GitHubApi;
+  const agents = yield* Agents;
+  const pullRequests = yield* PullRequests;
+  const workspace = yield* Workspace;
+  const reviews = yield* Reviews;
+  const reviewComments = yield* ReviewComments;
+  const fixers = yield* Fixers;
+  const outsideAgents = yield* OutsideAgents;
+  const once = yield* Semaphore.make(1);
+
+  /**
+   * The account a PR is read through: the one asked for, else the one prkit already bound it
+   * to or whose inbox has it. Never "whichever token works": with none or several, the
+   * client must say which (AGENTS.md "The right account, every time").
+   */
+  const resolve = (input: TargetInput) =>
+    Effect.gen(function* () {
+      const ref =
+        input.url === undefined
+          ? input.owner === undefined || input.repo === undefined || input.number === undefined
+            ? null
+            : {
+                host: (input.host ?? "github.com").toLowerCase(),
+                owner: input.owner,
+                repo: input.repo,
+                number: input.number,
+              }
+          : parseUrl(input.url);
+      if (ref === null || ref.number < 1)
+        return yield* fail(
+          "invalid",
+          "Name the pull request by its URL, or by owner, repo and number (and host when it isn't github.com).",
+        );
+      const key = pullRequestKey(ref);
+      const known = (yield* accounts.list()).accounts.filter(
+        (account) => account.host === ref.host,
+      );
+      const names = known.map((account) => account.id).join(", ") || "none";
+      if (input.accountId !== undefined) {
+        if (!known.some((account) => account.id === input.accountId))
+          return yield* fail(
+            "account-needed",
+            `prkit has no account ${input.accountId} on ${ref.host}. Accounts there: ${names}.`,
+          );
+        return { key, accountId: input.accountId, url: webUrl(key) } satisfies typeof Target.Type;
+      }
+      const found = new Set<AccountId>();
+      const open = (yield* workspace.get()).open.find((row) => row.key === key);
+      if (open !== undefined) found.add(open.accountId);
+      const review = (yield* reviews.get(key)).review;
+      if (review !== null) found.add(review.accountId);
+      const fixer = (yield* fixers.get(key)).fixer;
+      if (fixer !== null && fixer.status._tag === "active") found.add(fixer.accountId);
+      for (const accountId of yield* pullRequests.inboxAccountsOf(key)) found.add(accountId);
+      // Found by none, the one ready account on the host reads it, as pasting a URL does in prkit.
+      const ready = known.filter((account) => account.status._tag === "ready");
+      if (found.size === 0 && ready.length === 1 && ready[0] !== undefined) found.add(ready[0].id);
+      const [only, ...others] = [...found];
+      if (only !== undefined && others.length === 0)
+        return { key, accountId: only, url: webUrl(key) } satisfies typeof Target.Type;
+      return yield* fail(
+        "account-needed",
+        only === undefined
+          ? `No account's inbox in prkit has ${key}. Pass accountId, one of: ${names}.`
+          : `Several accounts reach ${key}: ${[only, ...others].join(", ")}. Pass accountId to say which.`,
+      );
+    }).pipe(Effect.mapError(asFailure));
+
+  // Reads.
+
+  const status = () =>
+    Effect.gen(function* () {
+      const list = yield* accounts.list();
+      const budget = yield* github.budget;
+      const catalog = yield* agents.catalog();
+      const counts = yield* sql`
+        SELECT
+          (SELECT COUNT(*) FROM reviews WHERE json_extract(status, '$._tag') = 'writing') AS guidesRunning,
+          (SELECT COUNT(*) FROM reviews WHERE json_extract(status, '$._tag') = 'preparing') AS guidesQueued,
+          (SELECT COUNT(*) FROM fixer_turns WHERE json_extract(status, '$._tag') IN ('preparing', 'running', 'pushing')) AS fixesRunning,
+          (SELECT COUNT(*) FROM fixer_turns WHERE json_extract(status, '$._tag') = 'queued') AS fixesQueued,
+          (SELECT COUNT(*) FROM fixer_turns WHERE json_extract(status, '$._tag') = 'ready') AS fixesWaitingForPush`.pipe(
+        Effect.flatMap(
+          Schema.decodeUnknownEffect(
+            Schema.Array(
+              Schema.Struct({
+                guidesRunning: Schema.Int,
+                guidesQueued: Schema.Int,
+                fixesRunning: Schema.Int,
+                fixesQueued: Schema.Int,
+                fixesWaitingForPush: Schema.Int,
+              }),
+            ),
+          ),
+        ),
+      );
+      const result: StatusResult = {
+        version: config.version,
+        access: outsideAgents.current().access,
+        accounts: list.accounts.map((account) => ({
+          accountId: account.id,
+          login: account.login,
+          host: account.host,
+          ready: account.status._tag === "ready",
+          problem: account.status._tag === "error" ? account.status.message : null,
+          budget: budget.accounts.find((entry) => entry.accountId === account.id)?.limits ?? [],
+        })),
+        agents: catalog.providers.map((entry) => ({
+          instance: entry.instance,
+          label: entry.label,
+          kind: entry.kind,
+          enabled: entry.enabled,
+          isDefault: entry.isDefault,
+          ready: entry.state._tag === "ready",
+          problem: entry.state._tag === "unavailable" ? entry.state.message : null,
+          models: entry.models.map((model) => ({ slug: model.slug, name: model.name })),
+        })),
+        work: counts[0] ?? {
+          guidesRunning: 0,
+          guidesQueued: 0,
+          fixesRunning: 0,
+          fixesQueued: 0,
+          fixesWaitingForPush: 0,
+        },
+      };
+      return result;
+    }).pipe(Effect.mapError(asFailure));
+
+  const inbox = (input: { readonly refresh?: boolean; readonly accountId?: AccountId }) =>
+    Effect.gen(function* () {
+      const result = yield* pullRequests.inbox(
+        input.refresh === true ? { _tag: "refresh" } : { _tag: "cached" },
+      );
+      const feed = new Map<string, string>();
+      for (const entry of result.entries) {
+        const key = pullRequestKey(entry.ref);
+        const guide = (yield* reviews.get(key)).review?.status._tag;
+        if (guide !== undefined) feed.set(key, guide);
+      }
+      const listed: InboxListResult = {
+        accounts: result.accounts
+          .filter((row) => input.accountId === undefined || row.accountId === input.accountId)
+          .map((row) => {
+            const entries = result.entries.filter((entry) => entry.accountId === row.accountId);
+            const reasons = ["review-requested", "authored", "involved"] as const;
+            return {
+              accountId: row.accountId,
+              fetchedAt: row.fetchedAt,
+              problem: row.problem,
+              sections: reasons
+                .map((reason) => ({
+                  reason,
+                  pullRequests: entries
+                    .filter((entry) => entry.reasons[0] === reason)
+                    .map((entry) => {
+                      const key = pullRequestKey(entry.ref);
+                      return {
+                        key,
+                        url: entry.url,
+                        title: entry.title,
+                        author: entry.author?.login ?? null,
+                        state: entry.state,
+                        isDraft: entry.isDraft,
+                        updatedAt: entry.updatedAt,
+                        checks: entry.checks,
+                        reviewDecision: entry.reviewDecision,
+                        reasons: entry.reasons,
+                        stack:
+                          entry.stack === null
+                            ? null
+                            : `Stack ${entry.stack.position}/${entry.stack.size}`,
+                        guide: feed.get(key) ?? null,
+                      };
+                    }),
+                }))
+                .filter((section) => section.pullRequests.length > 0),
+            };
+          }),
+      };
+      return listed;
+    }).pipe(Effect.mapError(asFailure));
+
+  const openPullRequests = () =>
+    workspace.get().pipe(
+      Effect.map((current): OpenPullRequestsResult => ({
+        active: current.activeKey,
+        open: current.open.map((row) => ({
+          key: row.key,
+          accountId: row.accountId,
+          url: webUrl(row.key),
+        })),
+      })),
+      Effect.mapError(asFailure),
+    );
+
+  const pullRequest = (input: TargetInput & { readonly refresh?: boolean }) =>
+    Effect.gen(function* () {
+      const target = yield* resolve(input);
+      if (input.refresh === true) yield* pullRequests.refresh(target.key, target.accountId);
+      const detail = yield* pullRequests.detail(target.key, target.accountId);
+      const files = yield* pullRequests.files(target.key, target.accountId);
+      const stack =
+        detail.stack === null ? null : yield* pullRequests.stack(target.key, target.accountId);
+      const count = (state: "passing" | "failing" | "pending") =>
+        detail.checks.filter((check) => check.status === state).length;
+      const result: PullRequestResult = {
+        key: target.key,
+        accountId: target.accountId,
+        url: detail.url,
+        title: detail.title,
+        body: detail.body,
+        state: detail.state,
+        isDraft: detail.isDraft,
+        author: detail.author?.login ?? null,
+        headBranch: detail.headBranch,
+        baseBranch: detail.baseBranch,
+        headSha: detail.headSha,
+        mergeability: detail.mergeability,
+        reviewDecision: detail.reviewDecision,
+        checks: {
+          passing: count("passing"),
+          failing: count("failing"),
+          pending: count("pending"),
+          failingNames: detail.checks
+            .filter((check) => check.status === "failing")
+            .map((check) => check.name),
+        },
+        additions: detail.additions,
+        deletions: detail.deletions,
+        changedFiles: detail.changedFiles,
+        files: files.files.map((file) => ({
+          path: file.path,
+          previousPath: file.previousPath,
+          status: file.status,
+          additions: file.additions,
+          deletions: file.deletions,
+        })),
+        stack:
+          detail.stack === null || stack === null
+            ? null
+            : {
+                position: detail.stack.position,
+                size: detail.stack.size,
+                layers: stack.layers.map((layer) => ({
+                  position: layer.position,
+                  number: layer.number,
+                  title: layer.title,
+                  state: layer.state,
+                })),
+              },
+        fetchedAt: detail.freshness.fetchedAt,
+      };
+      return result;
+    }).pipe(Effect.mapError(asFailure));
+
+  const guideStatusOf = (snapshot: ReviewSnapshot): GuideStatus => {
+    const review = snapshot.review;
+    const attempt = snapshot.attempt;
+    const running =
+      review !== null && (review.status._tag === "preparing" || review.status._tag === "writing");
+    return {
+      key: snapshot.key,
+      state: review === null ? "none" : review.status._tag,
+      message:
+        review === null
+          ? "No guide yet. Start one with generate_guide."
+          : review.status._tag === "failed"
+            ? review.status.message
+            : review.status._tag === "done"
+              ? `Done: ${review.status.reason}.`
+              : review.watchProblem,
+      latestRevision: review?.latestRevision ?? null,
+      agent: review === null ? null : { instance: review.instance, model: review.model },
+      startedBy: attempt?.startedBy ?? null,
+      progress:
+        running && attempt !== null
+          ? {
+              narration: attempt.narration,
+              filesRead: attempt.files.filter((file) => file.read !== null).length,
+              files: attempt.files.length,
+            }
+          : null,
+    };
+  };
+
+  const guide = (input: TargetInput) =>
+    Effect.gen(function* () {
+      const target = yield* resolve(input);
+      const snapshot = yield* reviews.get(target.key);
+      const revision =
+        snapshot.review?.latestRevision == null
+          ? null
+          : yield* reviews.guide(target.key, undefined);
+      const result: GuideResult = {
+        status: guideStatusOf(snapshot),
+        guide:
+          revision === null
+            ? null
+            : {
+                revision: revision.revision,
+                headSha: revision.headSha,
+                createdAt: revision.createdAt,
+                content: revision.normalized,
+              },
+      };
+      return result;
+    }).pipe(Effect.mapError(asFailure));
+
+  const comments = (input: TargetInput) =>
+    Effect.gen(function* () {
+      const target = yield* resolve(input);
+      const drafts = yield* reviewComments.list(target.key, target.accountId);
+      const threads = yield* pullRequests.threads(target.key, target.accountId);
+      const result: CommentsResult = {
+        drafts: drafts.comments.map((comment) => ({
+          id: comment.id,
+          path: comment.anchor.path,
+          side: comment.anchor.end.side,
+          startLine: comment.anchor.start.line,
+          line: comment.anchor.end.line,
+          body: comment.body,
+          state: comment.state,
+        })),
+        threads: threads.threads.map((thread) => ({
+          id: thread.id,
+          path: thread.path,
+          line: thread.anchor?.end.line ?? thread.originalLine,
+          outdated: thread.anchor === null,
+          resolved: thread.resolved,
+          comments: thread.comments.map((comment) => ({
+            author: comment.author?.login ?? null,
+            body: comment.body,
+            url: comment.url,
+          })),
+        })),
+        threadsTruncated: threads.truncated,
+      };
+      return result;
+    }).pipe(Effect.mapError(asFailure));
+
+  const turnMessage = (turn: FixerTurn) => {
+    switch (turn.status._tag) {
+      case "failed":
+      case "discarded":
+        return turn.status.message;
+      case "ready":
+        return "Committed in prkit. It waits for the owner to push it from prkit.";
+      case "unchanged":
+        return "The agent changed nothing.";
+      default:
+        return null;
+    }
+  };
+
+  const fixResultOf = (snapshot: FixerSnapshot, diff: FixResult["latestDiff"]): FixResult => {
+    const turns = [...snapshot.turns].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const working = turns.some((turn) => WORKING_TURNS.has(turn.status._tag));
+    const waiting = turns.some((turn) => turn.status._tag === "ready");
+    return {
+      key: snapshot.key,
+      state:
+        snapshot.fixer === null
+          ? "none"
+          : snapshot.fixer.status._tag === "done"
+            ? "done"
+            : working
+              ? "working"
+              : waiting
+                ? "waiting-for-push"
+                : "idle",
+      turns: turns.slice(0, 10).map((turn) => ({
+        id: turn.id,
+        kind: turn.work._tag,
+        state: turn.status._tag,
+        message: turnMessage(turn),
+        waitingForPush: turn.status._tag === "ready",
+        startedBy: turn.startedBy,
+        narration: turn.narration,
+        commit:
+          turn.commit === null ? null : { sha: turn.commit.sha, message: turn.commit.message },
+        comments:
+          turn.work._tag === "fix"
+            ? turn.work.comments.map((comment) => {
+                const reported =
+                  turn.work._tag === "fix"
+                    ? turn.work.report?.perComment.find((entry) => entry.commentId === comment.id)
+                    : undefined;
+                return {
+                  id:
+                    comment.source._tag === "draft"
+                      ? comment.source.draftId
+                      : comment.source.threadId,
+                  path: comment.path,
+                  status: reported?.status ?? null,
+                  note: reported?.note ?? null,
+                };
+              })
+            : [],
+        createdAt: turn.createdAt,
+      })),
+      latestDiff: diff,
+    };
+  };
+
+  /** The latest committed turn's diff as patch text, cut at 60,000 characters. */
+  const latestDiff = (key: PullRequestKey, snapshot: FixerSnapshot) =>
+    Effect.gen(function* () {
+      const latest = [...snapshot.turns]
+        .filter((turn) => turn.commit !== null)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+      if (latest === undefined) return null;
+      const diff = yield* fixers.diff(key, latest.id).pipe(Effect.option);
+      if (Option.isNone(diff)) return null;
+      const files = diff.value._tag === "commit" ? diff.value.diff.files : diff.value.ours.files;
+      const text = files
+        .map((file) =>
+          file.patch._tag === "text"
+            ? `--- ${file.previousPath ?? file.path}\n+++ ${file.path}\n${file.patch.patch}`
+            : `${file.path}: ${file.patch._tag === "binary" ? "binary file" : "too large to show"}`,
+        )
+        .join("\n");
+      return {
+        turnId: latest.id,
+        diff: text.slice(0, DIFF_LIMIT),
+        cut: text.length > DIFF_LIMIT,
+      };
+    });
+
+  const fix = (input: TargetInput) =>
+    Effect.gen(function* () {
+      const target = yield* resolve(input);
+      const snapshot = yield* fixers.get(target.key);
+      return fixResultOf(snapshot, yield* latestDiff(target.key, snapshot));
+    }).pipe(Effect.mapError(asFailure));
+
+  /**
+   * Waits on the same streams the app's views watch, so nothing reads GitHub. A timeout
+   * stops the waiting, never the work.
+   */
+  const waitFor = (
+    input: TargetInput & {
+      readonly what: "guide" | "fix";
+      readonly timeoutSeconds?: number;
+    },
+  ) =>
+    Effect.gen(function* () {
+      const target = yield* resolve(input);
+      const timeout = `${input.timeoutSeconds ?? WAIT_DEFAULT_SECONDS} seconds` as const;
+      if (input.what === "guide") {
+        const start = yield* reviews.get(target.key);
+        if (start.review === null)
+          return yield* fail("not-found", "No guide was started for this pull request.");
+        const settled = yield* reviews.watch(target.key).pipe(
+          Stream.map((event) => (event._tag === "snapshot" ? event.snapshot.review : event.review)),
+          Stream.filter(
+            (review) =>
+              review !== null &&
+              review.status._tag !== "preparing" &&
+              review.status._tag !== "writing",
+          ),
+          Stream.runHead,
+          Effect.timeoutOption(timeout),
+        );
+        const now = yield* reviews.get(target.key);
+        const result: WaitResult = {
+          finished: Option.isSome(settled) && Option.isSome(settled.value),
+          guide: guideStatusOf(now),
+          fix: null,
+        };
+        return result;
+      }
+      const busy = (snapshot: FixerSnapshot) =>
+        snapshot.turns.some((turn) => WORKING_TURNS.has(turn.status._tag));
+      if ((yield* fixers.get(target.key)).fixer === null)
+        return yield* fail("not-found", "Nothing was sent to the fix agent for this pull request.");
+      const settled = yield* fixers.watch(target.key).pipe(
+        Stream.filter((snapshot) => !busy(snapshot)),
+        Stream.runHead,
+        Effect.timeoutOption(timeout),
+      );
+      const snapshot = yield* fixers.get(target.key);
+      const result: WaitResult = {
+        finished: Option.isSome(settled) && Option.isSome(settled.value),
+        guide: null,
+        fix: fixResultOf(snapshot, yield* latestDiff(target.key, snapshot)),
+      };
+      return result;
+    }).pipe(Effect.mapError(asFailure));
+
+  // Work. Each is the same service call the app's own button makes.
+
+  /** Runs `work` once per client request id; a retry with the same id gets the first answer. */
+  const idempotent = <A, I, E, R>(
+    tool: string,
+    clientRequestId: string | undefined,
+    schema: Schema.Codec<A, I>,
+    work: Effect.Effect<A, E, R>,
+  ) => {
+    if (clientRequestId === undefined) return work;
+    const json = Schema.fromJsonString(schema);
+    return once.withPermits(1)(
+      Effect.gen(function* () {
+        const rows = yield* sql`SELECT result FROM outside_requests
+          WHERE tool = ${tool} AND client_request_id = ${clientRequestId}`.pipe(
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ result: Schema.String }))),
+          ),
+        );
+        const earlier = rows[0];
+        if (earlier !== undefined) return yield* Schema.decodeEffect(json)(earlier.result);
+        const result = yield* work;
+        const at = DateTime.formatIso(yield* DateTime.now);
+        yield* sql`INSERT INTO outside_requests (tool, client_request_id, result, created_at)
+          VALUES (${tool}, ${clientRequestId}, ${yield* Schema.encodeEffect(json)(result)}, ${at})`;
+        return result;
+      }),
+    );
+  };
+
+  const open = (input: TargetInput & { readonly focus?: boolean }) =>
+    Effect.gen(function* () {
+      const target = yield* resolve(input);
+      yield* workspace.command(
+        { kind: "open", key: target.key, accountId: target.accountId },
+        { focus: input.focus !== false },
+      );
+      return yield* openPullRequests();
+    }).pipe(Effect.mapError(asFailure));
+
+  const generateGuide = (input: typeof GenerateGuideInput.Type) =>
+    Effect.gen(function* () {
+      const target = yield* resolve(input);
+      if (input.instance !== undefined && input.model === undefined)
+        return yield* fail(
+          "invalid",
+          "Pass model with instance: one of the slugs prkit_status lists for it.",
+        );
+      const catalog = yield* agents.catalog();
+      const entry = catalog.providers.find((provider) => provider.instance === input.instance);
+      if (input.instance !== undefined && entry === undefined)
+        return yield* fail(
+          "not-ready",
+          `prkit has no agent ${input.instance}. prkit_status lists the agents it has.`,
+        );
+      const snapshot = yield* reviews.generate(
+        target.key,
+        target.accountId,
+        entry === undefined || input.model === undefined
+          ? {}
+          : {
+              agent: { instance: entry.instance, model: input.model, options: input.options ?? [] },
+            },
+      );
+      return guideStatusOf(snapshot);
+    }).pipe(Effect.mapError(asFailure));
+
+  const stopGuide = (input: TargetInput) =>
+    Effect.gen(function* () {
+      const target = yield* resolve(input);
+      return guideStatusOf(yield* reviews.stop(target.key));
+    }).pipe(Effect.mapError(asFailure));
+
+  const addComment = (
+    input: TargetInput & {
+      readonly path: string;
+      readonly line: number;
+      readonly startLine?: number;
+      readonly side?: "new" | "old";
+      readonly body: string;
+      readonly clientRequestId?: string;
+    },
+  ) =>
+    Effect.gen(function* () {
+      const target = yield* resolve(input);
+      return yield* idempotent(
+        "add_review_comment",
+        input.clientRequestId,
+        AddedComment,
+        Effect.gen(function* () {
+          const files = yield* pullRequests.files(target.key, target.accountId);
+          const file = files.files.find((entry) => entry.path === input.path);
+          if (file === undefined)
+            return yield* fail(
+              "invalid",
+              `${input.path} isn't among this pull request's changed files.`,
+            );
+          if (file.patch._tag !== "text")
+            return yield* fail("invalid", `${input.path} has no text diff to comment on.`);
+          const side = input.side ?? "new";
+          const range = rangeRows(
+            diffRows(file.patch.patch),
+            { side, line: input.startLine ?? input.line },
+            { side, line: input.line },
+          );
+          if (range === null)
+            return yield* fail(
+              "invalid",
+              `Lines ${input.startLine ?? input.line}-${input.line} on the ${side} side of ${input.path} aren't inside one hunk of the diff. GitHub takes comments only there.`,
+            );
+          const before = new Set(
+            (yield* reviewComments.list(target.key, target.accountId)).comments.map(
+              (comment) => comment.id,
+            ),
+          );
+          const after = yield* reviewComments.add(
+            target.key,
+            target.accountId,
+            {
+              anchor: { path: input.path, start: range.start, end: range.end },
+              snippet: range.snippet,
+              commitSha: files.headSha,
+            },
+            input.body,
+          );
+          const added = after.comments.find((comment) => !before.has(comment.id));
+          if (added === undefined)
+            return yield* fail("failed", "prkit couldn't save the comment. Try again.");
+          return { id: added.id, key: target.key };
+        }),
+      );
+    }).pipe(Effect.mapError(asFailure));
+
+  const latestTurnId = (snapshot: FixerSnapshot) =>
+    [...snapshot.turns].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.id;
+
+  const sendToFix = (
+    input: TargetInput & {
+      readonly draftIds?: ReadonlyArray<ReviewCommentId>;
+      readonly threadIds?: ReadonlyArray<string>;
+      readonly instructions?: string;
+      readonly clientRequestId?: string;
+    },
+  ) =>
+    Effect.gen(function* () {
+      const target = yield* resolve(input);
+      // Neither named: every draft still waiting, as Send to agent in prkit sends them.
+      const draftIds =
+        input.draftIds === undefined && input.threadIds === undefined
+          ? (yield* reviewComments.list(target.key, target.accountId)).comments
+              .filter((comment) => comment.state === "draft")
+              .map((comment) => comment.id)
+          : (input.draftIds ?? []);
+      const targets: Array<FixTarget> = [
+        ...draftIds.map((id): FixTarget => ({ _tag: "draft", id })),
+        ...(input.threadIds ?? []).map((threadId): FixTarget => ({ _tag: "thread", threadId })),
+      ];
+      if (targets.length === 0)
+        return yield* fail(
+          "invalid",
+          "There is nothing to send: no draft comments wait on this pull request. Add one with add_review_comment, or pass threadIds from list_review_comments.",
+        );
+      return yield* idempotent(
+        "send_to_fix_agent",
+        input.clientRequestId,
+        StartedTurn,
+        Effect.gen(function* () {
+          const snapshot = yield* fixers.send(target.key, target.accountId, {
+            targets,
+            note: input.instructions ?? null,
+            replyAfterPush: false,
+          });
+          const turnId = latestTurnId(snapshot);
+          if (turnId === undefined)
+            return yield* fail("failed", "prkit couldn't queue the fix. Try again.");
+          return { key: target.key, turnId };
+        }),
+      );
+    }).pipe(Effect.mapError(asFailure));
+
+  const revise = (
+    input: TargetInput & {
+      readonly instructions: string;
+      readonly turnId?: FixerTurnId;
+      readonly clientRequestId?: string;
+    },
+  ) =>
+    Effect.gen(function* () {
+      const target = yield* resolve(input);
+      return yield* idempotent(
+        "ask_fix_agent_to_change",
+        input.clientRequestId,
+        StartedTurn,
+        Effect.gen(function* () {
+          const snapshot = yield* fixers.get(target.key);
+          const turnId =
+            input.turnId ??
+            [...snapshot.turns]
+              .filter((turn) => turn.status._tag === "ready")
+              .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.id;
+          if (turnId === undefined)
+            return yield* fail(
+              "conflict",
+              "No fix is waiting for Push, so there is nothing to change.",
+            );
+          yield* fixers.revise(target.key, turnId, input.instructions);
+          return { key: target.key, turnId };
+        }),
+      );
+    }).pipe(Effect.mapError(asFailure));
+
+  const stopFix = (input: TargetInput) =>
+    Effect.gen(function* () {
+      const target = yield* resolve(input);
+      const snapshot = yield* fixers.stop(target.key);
+      return fixResultOf(snapshot, null);
+    }).pipe(Effect.mapError(asFailure));
+
+  const retryFix = (input: TargetInput & { readonly turnId?: FixerTurnId }) =>
+    Effect.gen(function* () {
+      const target = yield* resolve(input);
+      const before = yield* fixers.get(target.key);
+      const turnId =
+        input.turnId ??
+        [...before.turns]
+          .filter((turn) => turn.status._tag === "failed")
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.id;
+      if (turnId === undefined)
+        return yield* fail("conflict", "No fix failed, so there is nothing to retry.");
+      return fixResultOf(yield* fixers.retry(target.key, turnId), null);
+    }).pipe(Effect.mapError(asFailure));
+
+  const resolveConflicts = (input: TargetInput & { readonly strategy?: "merge" | "rebase" }) =>
+    Effect.gen(function* () {
+      const target = yield* resolve(input);
+      const snapshot = yield* fixers.resolveConflicts(target.key, target.accountId, {
+        strategy: input.strategy ?? "merge",
+      });
+      return fixResultOf(snapshot, null);
+    }).pipe(Effect.mapError(asFailure));
+
+  return {
+    status,
+    inbox,
+    openPullRequests,
+    pullRequest,
+    guide,
+    comments,
+    fix,
+    waitFor,
+    open,
+    generateGuide,
+    stopGuide,
+    addComment,
+    sendToFix,
+    revise,
+    stopFix,
+    retryFix,
+    resolveConflicts,
+  };
+});
+
+export const layer = Layer.effect(OutsideWork, make);

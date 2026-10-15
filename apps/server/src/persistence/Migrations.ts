@@ -22,6 +22,7 @@ import Migration0013 from "./Migrations/013_FixerScriptTrust.ts";
 import Migration0014 from "./Migrations/014_InboxFilters.ts";
 import Migration0015 from "./Migrations/015_FixerTurnEnds.ts";
 import Migration0016 from "./Migrations/016_AgentInstances.ts";
+import Migration0017 from "./Migrations/017_OutsideAgents.ts";
 
 export const migrationEntries = [
   [1, "Meta", Migration0001],
@@ -40,6 +41,7 @@ export const migrationEntries = [
   [14, "InboxFilters", Migration0014],
   [15, "FixerTurnEnds", Migration0015],
   [16, "AgentInstances", Migration0016],
+  [17, "OutsideAgents", Migration0017],
 ] as const;
 
 const loader = Migrator.fromRecord(

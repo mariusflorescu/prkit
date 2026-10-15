@@ -10,6 +10,7 @@ import { type ReviewTarget, reviewTarget } from "../reviews/reviewTarget.ts";
 import { encodeDiff, encodeParents, type FixerRow } from "./fixerRows.ts";
 import { type FixerState, reportSummary, short } from "./fixerState.ts";
 import type { Pushes } from "./pushes.ts";
+import { pushesItself } from "./turnRules.ts";
 
 const UserProfile = Schema.Struct({
   id: Schema.Int,
@@ -111,7 +112,7 @@ export const makeTurnSteps = (state: FixerState, pushes: Pushes) =>
           "note",
           `Committed ${short(input.sha)}. Review it, then push`,
         );
-        if (input.autoPush && turn !== null) {
+        if (turn !== null && pushesItself(input.autoPush, turn.started_by)) {
           const pushed = yield* pushTurn(fixer.pr_key, turnId, true).pipe(
             Effect.as(true),
             Effect.catchTags({
