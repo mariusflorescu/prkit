@@ -140,6 +140,19 @@ const control = (url: URL, method: string, response: NodeHttp.ServerResponse) =>
     return answer({ ok: true });
   }
   const pull = pulls.get(Number(url.searchParams.get("pr")));
+  const gitHead = url.searchParams.get("sha");
+  if (
+    name === "git-head" &&
+    method === "POST" &&
+    pull !== undefined &&
+    gitHead !== null &&
+    /^[a-f0-9]{40}$/.test(gitHead)
+  ) {
+    pull.heads = [
+      { sha: gitHead, at: pull.heads[0]?.at ?? Date.now(), message: "Local fixture head" },
+    ];
+    return answer({ ok: true });
+  }
   if (name === "comment" && pull !== undefined) {
     const id = nextComment++;
     const size = Math.min(20_000, Math.max(0, Number(url.searchParams.get("size") ?? "0")));

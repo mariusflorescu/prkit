@@ -184,6 +184,12 @@ const start = async (options: StartOptions) => {
           CODEX_HOME: process.env.CODEX_HOME,
           CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
         }),
+        ...(process.env.PRKIT_CLI_INSTALL_PATH === undefined
+          ? {}
+          : { PRKIT_CLI_INSTALL_PATH: process.env.PRKIT_CLI_INSTALL_PATH }),
+        ...(process.env.PRKIT_TERMINAL_PATH === undefined
+          ? {}
+          : { PRKIT_TERMINAL_PATH: process.env.PRKIT_TERMINAL_PATH }),
         PRKIT_HOME: paths.home,
         PRKIT_AUTH_TOKEN: token,
         ...(options.watchInterval === null

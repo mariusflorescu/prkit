@@ -4,6 +4,7 @@ import { Button } from "~/components/ui/button";
 
 import { SettingsAlert } from "../SettingsAlert";
 import { SettingsSection } from "../SettingsSection";
+import { CommandLineSettings } from "./CommandLineSettings";
 import { OutsideAgentsForm } from "./OutsideAgentsForm";
 import { OutsideClientsList } from "./OutsideClientsList";
 import { OutsideSetupCommands } from "./OutsideSetupCommands";
@@ -60,14 +61,25 @@ export function OutsideAgentsSettings() {
             saving={update.isPending}
             onSave={(settings) => update.mutate(settings)}
           />
+          <CommandLineSettings enabled={state.data.enabled} access={state.data.access} />
+          {state.data.launcherProblem !== null && (
+            <SettingsAlert
+              message={state.data.launcherProblem}
+              retry={() => void state.refetch()}
+            />
+          )}
           {state.data.enabled && (
             <>
-              <OutsideSetupCommands launcher={state.data.launcher} />
+              {state.data.launcherProblem === null && (
+                <OutsideSetupCommands launcher={state.data.launcher} />
+              )}
               <OutsideClientsList clients={state.data.clients} />
-              <p className="border-t border-border/60 py-3 text-xs text-muted-foreground">
-                Reset access makes a new key; anything using a copied key stops working. Clients
-                added with the command above pick up the new key by themselves.
-              </p>
+              {state.data.launcherProblem === null && (
+                <p className="border-t border-border/60 py-3 text-xs text-muted-foreground">
+                  Reset access makes a new key; anything using a copied key stops working. Clients
+                  added with the command above pick up the new key by themselves.
+                </p>
+              )}
             </>
           )}
         </>

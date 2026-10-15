@@ -27,3 +27,7 @@ It can read your inbox, open PRs, start guides and send comments to the fix agen
 How it fits together: [docs/internals/architecture.md](docs/internals/architecture.md).
 
 The website lives in [apps/www](apps/www): `vp run dev:www` serves it, `vp run build:www` builds it.
+
+## Command line and coding agents
+
+Install `prkit` from Settings > Outside agents > Command line, or the command palette's **Install command line tool** action. Turn Outside agents on, then run `prkit status`, `prkit inbox`, or `prkit --help`. Use `--json` for scripts. The same Settings block opens the pinned installer for the `prkit-cli` skill in your terminal, where you choose the agents to install it for. See [the CLI guide](docs/features/cli.md) for commands, access levels and sandbox setup.

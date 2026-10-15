@@ -29,3 +29,5 @@ export * from "./workspace.ts";
 export * from "./review.ts";
 export * from "./rpc.ts";
 export * from "./server.ts";
+
+export * from "./cliInstall.ts";

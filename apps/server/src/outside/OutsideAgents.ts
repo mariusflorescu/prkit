@@ -27,6 +27,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { Base64Url, Hex } from "effect/encoding";
 
 import * as ServerConfig from "../config.ts";
+import { trustedFolderProblem } from "../trustedFolder.ts";
 import { launcherScript } from "./launcher.ts";
 
 const SETTINGS_KEY = "outsideAgents.settings";
@@ -71,6 +72,7 @@ export const make = Effect.gen(function* () {
   );
   let settings: OutsideAgentsSettings = stored;
   let tokenHash: string | null = null;
+  let launcherProblem: string | null = null;
   /** The bound port, once the server listens; nothing is written before. */
   let port: number | null = null;
   const clients = new Map<string, OutsideClient>();
@@ -81,20 +83,51 @@ export const make = Effect.gen(function* () {
    * The file's next version in a fresh owner-only temporary file, not yet in place. Whatever
    * fails on the way, no temporary file holding a token is left behind.
    */
-  const stage = (file: OutsideDiscovery) =>
+  const stage = (destination: string, text: string, mode: number) =>
     Effect.gen(function* () {
-      const text = yield* Schema.encodeEffect(OutsideDiscoveryJson)(file);
-      const temporary = `${discoveryPath}.${process.pid}.tmp`;
-      yield* fs.remove(temporary, { force: true });
+      const temporary = `${destination}.${NodeCrypto.randomUUID()}.tmp`;
       yield* fs
-        .writeFileString(temporary, text, { flag: "wx", mode: 0o600 })
+        .writeFileString(temporary, text, { flag: "wx", mode })
         .pipe(Effect.onError(() => removeQuietly(temporary)));
       return temporary;
     });
 
   /** Puts a staged file in place, last, so the file changes whole or not at all. */
-  const place = (temporary: string) =>
-    fs.rename(temporary, discoveryPath).pipe(Effect.onError(() => removeQuietly(temporary)));
+  const place = (temporary: string, destination = discoveryPath) =>
+    fs.rename(temporary, destination).pipe(Effect.onError(() => removeQuietly(temporary)));
+
+  const writeLauncher = (destination: string, mode: "mcp-bridge" | "cli") =>
+    Effect.gen(function* () {
+      const temporary = yield* stage(
+        destination,
+        launcherScript(config.home, mode, config.version),
+        0o700,
+      );
+      yield* place(temporary, destination);
+    }).pipe(Effect.uninterruptible);
+
+  const writeLaunchers = Effect.gen(function* () {
+    const directory = path.dirname(launcher);
+    const before = yield* trustedFolderProblem(directory, { allowMissing: true });
+    if (before !== null) return before;
+    yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
+    const problem = yield* trustedFolderProblem(directory);
+    if (problem !== null) return problem;
+    yield* writeLauncher(launcher, "mcp-bridge");
+    yield* writeLauncher(path.join(directory, "prkit"), "cli");
+    return null;
+  }).pipe(
+    Effect.catchTag("PlatformError", () =>
+      Effect.succeed(
+        `prkit couldn't write its launchers in ${path.dirname(launcher)}. Check the folder's permissions.`,
+      ),
+    ),
+  );
+
+  const stageDiscovery = (file: OutsideDiscovery) =>
+    Schema.encodeEffect(OutsideDiscoveryJson)(file).pipe(
+      Effect.flatMap((text) => stage(discoveryPath, text, 0o600)),
+    );
 
   /**
    * Stages the file for `next`, with a new token while on, and the hash to accept with it.
@@ -104,7 +137,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if (port === null) return { temporary: null, hash: null };
       if (!next.enabled) {
-        const temporary = yield* stage({
+        const temporary = yield* stageDiscovery({
           _tag: "off",
           pid: process.pid,
           version: config.version,
@@ -113,7 +146,7 @@ export const make = Effect.gen(function* () {
       }
       const token = Base64Url.encode(yield* crypto.randomBytes(32));
       const hash = yield* digest(token);
-      const temporary = yield* stage({
+      const temporary = yield* stageDiscovery({
         _tag: "on",
         port,
         token,
@@ -141,6 +174,7 @@ export const make = Effect.gen(function* () {
       ...settings,
       clients: [...clients.values()].sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt)),
       launcher,
+      launcherProblem,
     };
   });
 
@@ -242,9 +276,10 @@ export const make = Effect.gen(function* () {
       gate.withPermits(1)(
         Effect.gen(function* () {
           port = boundPort;
-          yield* fs.makeDirectory(path.dirname(launcher), { recursive: true });
-          yield* fs.writeFileString(launcher, launcherScript(config.home), { mode: 0o700 });
-          yield* fs.chmod(launcher, 0o700);
+          const problem = yield* writeLaunchers;
+          launcherProblem =
+            problem === null ? null : `${problem} Fix the folder, then restart prkit.`;
+          if (launcherProblem !== null) yield* Effect.logWarning(launcherProblem);
           tokenHash = yield* publish(settings);
         }),
       ),
@@ -270,6 +305,7 @@ export const make = Effect.gen(function* () {
     current: () => settings,
     discoveryPath,
     launcher,
+    launcherProblem: () => launcherProblem,
     port: () => Option.fromNullishOr(port),
   };
 });

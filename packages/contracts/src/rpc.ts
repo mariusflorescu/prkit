@@ -1,3 +1,4 @@
+import { CliInstallError, CliInstallState } from "./cliInstall.ts";
 import * as Schema from "effect/Schema";
 import { PullRequestTimeline } from "./pullRequestTimeline.ts";
 import * as Rpc from "effect/rpc/Rpc";
@@ -181,6 +182,10 @@ export const WS_METHODS = {
   fixersScriptAccess: "fixers.scriptAccess",
   fixerSettingsList: "fixerSettings.list",
   fixerSettingsUpdate: "fixerSettings.update",
+  cliInstallGet: "cliInstall.get",
+  cliInstall: "cliInstall.install",
+  cliUninstall: "cliInstall.uninstall",
+  cliSkillInstall: "cliInstall.skill",
   outsideAgentsGet: "outsideAgents.get",
   outsideAgentsUpdate: "outsideAgents.update",
   outsideAgentsReset: "outsideAgents.reset",
@@ -711,5 +716,25 @@ export const WsRpcGroup = RpcGroup.make(
     payload: Schema.Struct({}),
     success: OutsideAgentsState,
     error: OutsideAgentsError,
+  }),
+  Rpc.make(WS_METHODS.cliInstallGet, {
+    payload: Schema.Struct({}),
+    success: CliInstallState,
+    error: CliInstallError,
+  }),
+  Rpc.make(WS_METHODS.cliInstall, {
+    payload: Schema.Struct({}),
+    success: CliInstallState,
+    error: CliInstallError,
+  }),
+  Rpc.make(WS_METHODS.cliUninstall, {
+    payload: Schema.Struct({}),
+    success: CliInstallState,
+    error: CliInstallError,
+  }),
+  Rpc.make(WS_METHODS.cliSkillInstall, {
+    payload: Schema.Struct({}),
+    success: Schema.Void,
+    error: CliInstallError,
   }),
 );

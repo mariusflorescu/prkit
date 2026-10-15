@@ -30,6 +30,7 @@ export const OutsideAgentsState = Schema.Struct({
   clients: Schema.Array(OutsideClient),
   /** The launcher every client runs; it holds no secret. */
   launcher: Schema.String,
+  launcherProblem: Schema.NullOr(Schema.String),
 });
 export type OutsideAgentsState = typeof OutsideAgentsState.Type;
 
