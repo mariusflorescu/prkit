@@ -200,7 +200,7 @@ it("rejects a writable folder owned by another uid", () =>
             .pipe(
               Effect.map((info) =>
                 file === folder
-                  ? { ...info, uid: Option.some((process.getuid?.() ?? 0) + 1) }
+                  ? Object.assign({}, info, { uid: Option.some((process.getuid?.() ?? 0) + 1) })
                   : info,
               ),
             ),
