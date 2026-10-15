@@ -1,5 +1,6 @@
 import {
   AccountId,
+  AgentInstanceId,
   AgentProviderKind,
   ConflictedFile,
   ConflictReport,
@@ -40,6 +41,7 @@ export const FixerRow = Schema.Struct({
   pr_key: PullRequestKey,
   account_id: AccountId,
   provider: AgentProviderKind,
+  instance_id: AgentInstanceId,
   model: Schema.NullOr(Schema.String),
   model_options: Schema.fromJsonString(Schema.Array(ModelOptionSelection)),
   session_id: Schema.NullOr(Schema.String),
@@ -51,7 +53,7 @@ export type FixerRow = typeof FixerRow.Type;
 
 /** Every turn column but the diff, which only the Fixes panel's diff view reads. */
 export const TURN_COLUMNS =
-  "id, fixer_id, work, trigger, status, provider, model, run_id, agent_pid, agent_started, head_sha, base_sha, head_ref, base_ref, head_repo, commit_sha, commit_parents, commit_message, report, conflicted, scripts, narration, rounds, created_at, started_at, finished_at";
+  "id, fixer_id, work, trigger, status, provider, instance_id, model, run_id, agent_pid, agent_started, head_sha, base_sha, head_ref, base_ref, head_repo, commit_sha, commit_parents, commit_message, report, conflicted, scripts, narration, rounds, created_at, started_at, finished_at";
 
 export const TurnRow = Schema.Struct({
   id: FixerTurnId,
@@ -60,6 +62,7 @@ export const TurnRow = Schema.Struct({
   trigger: FixerTrigger,
   status: Schema.fromJsonString(FixerTurnStatus),
   provider: AgentProviderKind,
+  instance_id: AgentInstanceId,
   model: Schema.NullOr(Schema.String),
   run_id: Schema.NullOr(Schema.String),
   agent_pid: Schema.NullOr(Schema.Int),
@@ -115,6 +118,7 @@ export const toFixer = (row: FixerRow): Fixer => ({
   key: row.pr_key,
   accountId: row.account_id,
   provider: row.provider,
+  instance: row.instance_id,
   model: row.model,
   modelOptions: row.model_options,
   sessionId: row.session_id,
@@ -149,6 +153,7 @@ export const toTurn = (row: TurnRow): FixerTurn => ({
   trigger: row.trigger,
   status: row.status,
   provider: row.provider,
+  instance: row.instance_id,
   model: row.model,
   headSha: row.head_sha,
   baseSha: row.base_sha,

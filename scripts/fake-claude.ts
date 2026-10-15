@@ -4,7 +4,8 @@
  * writes the wrapper that runs this script with FAKE_CLAUDE_DIR set.
  *
  *   claude --version                a version every bundled model accepts
- *   claude auth status --json       signed in with a Claude Max subscription
+ *   claude auth status --json       signed in with a Claude Max subscription, or the plan a
+ *                                   `fake-plan` file in CLAUDE_CONFIG_DIR names
  *   claude ... --input-format stream-json
  *       answers the Agent SDK's control requests, says prkit's MCP server is connected, then,
  *       through prkit's own MCP server, reports progress and submits a guide with one chapter
@@ -21,6 +22,10 @@
  *   todo      the rest of the stopped rebase's todo, in reverse
  *   linger    a `sleep` that a command left in the background; the command runs in a session
  *             of its own for a second, as Claude Code runs commands. Its PID goes in `linger.pid`
+ *
+ * Every turn appends `{configDir, session, resumed}` to `runs.log` there. With CLAUDE_CONFIG_DIR
+ * set to a folder under `.e2e/`, it also saves the session as Claude Code does, under `projects/`,
+ * so prkit can resume it with `--resume`. Any other folder is the user's own: it saves nothing.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
@@ -38,12 +43,17 @@ if (args[0] === "--version") {
   process.stdout.write("2.1.999 (Claude Code)\n");
   process.exit(0);
 }
+const configDir = process.env.CLAUDE_CONFIG_DIR ?? null;
 if (args[0] === "auth" && args[1] === "status") {
+  const planFile = configDir === null ? null : NodePath.join(configDir, "fake-plan");
   write({
     loggedIn: true,
     authMethod: "claude.ai",
     apiProvider: "firstParty",
-    subscriptionType: "max",
+    subscriptionType:
+      planFile !== null && NodeFS.existsSync(planFile)
+        ? NodeFS.readFileSync(planFile, "utf8").trim()
+        : "max",
   });
   process.exit(0);
 }
@@ -102,7 +112,31 @@ const McpReply = Schema.fromJsonString(
   }),
 );
 
-const sessionId = NodeCrypto.randomUUID();
+/** The SDK passes `--resume=<id>`; the CLI also takes `--resume <id>`. */
+const resumed =
+  args.find((arg) => arg.startsWith("--resume="))?.slice("--resume=".length) ??
+  (args.includes("--resume") ? (args[args.indexOf("--resume") + 1] ?? null) : null);
+const sessionId = resumed ?? NodeCrypto.randomUUID();
+/** Which folder this turn ran with, and the session it saved there as Claude Code would. */
+const record = () => {
+  if (control !== "")
+    NodeFS.appendFileSync(
+      NodePath.join(control, "runs.log"),
+      `${JSON.stringify({ configDir, session: sessionId, resumed: resumed !== null })}\n`,
+    );
+  const scratch = NodePath.resolve(import.meta.dirname, "..", ".e2e") + NodePath.sep;
+  if (configDir === null || !NodePath.resolve(configDir).startsWith(scratch)) return;
+  const project = NodePath.join(
+    configDir,
+    "projects",
+    process.cwd().replaceAll(/[^a-zA-Z0-9]/g, "-"),
+  );
+  NodeFS.mkdirSync(project, { recursive: true });
+  NodeFS.appendFileSync(
+    NodePath.join(project, `${sessionId}.jsonl`),
+    `${JSON.stringify({ type: "summary", sessionId })}\n`,
+  );
+};
 let mcpSession: string | null = null;
 let nextId = 1;
 /** One JSON-RPC call to prkit's MCP server; the answer comes as JSON or as one SSE event. */
@@ -260,6 +294,7 @@ const resolve = async (prompt: string) => {
 };
 
 const turn = async (prompt: string) => {
+  record();
   write({
     type: "system",
     subtype: "init",

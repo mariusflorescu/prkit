@@ -2,7 +2,6 @@ import {
   type AccountId,
   type AgentSelection,
   type ConflictStrategy,
-  effectiveSelection,
   FIXER_BUSY,
   type FixComment,
   FixerError,
@@ -16,7 +15,6 @@ import {
   type FixTarget,
   type PullRequestKey,
   refFromKey,
-  selectionProblem,
 } from "@prkit/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -26,12 +24,10 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { Agents } from "../agents/Agents.ts";
 import { processHost } from "../agents/turnEnd.ts";
 import { GitHubApi } from "../github/GitHubApi.ts";
 import { PullRequests } from "../pullRequests/PullRequests.ts";
 import { RepoCache } from "../repo/RepoCache.ts";
-import { GuideSettingsStore } from "../reviews/GuideSettingsStore.ts";
 import { reviewTarget } from "../reviews/reviewTarget.ts";
 import { makeAgentRuns } from "./agentRuns.ts";
 import { makeConflictTurn } from "./conflictTurn.ts";
@@ -56,10 +52,8 @@ export class Fixers extends Context.Service<Fixers, Effect.Success<typeof make>>
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const repo = yield* RepoCache;
-  const agents = yield* Agents;
   const api = yield* GitHubApi;
   const pullRequests = yield* PullRequests;
-  const guideSettings = yield* GuideSettingsStore;
 
   const state = yield* makeFixerState;
   const {
@@ -82,9 +76,18 @@ export const make = Effect.gen(function* () {
   );
   const { advance, enqueue, launch } = queue;
   const sessions = yield* makeSessions(state, queue, leftovers);
-  const { boundFixer, dropTurn, ensureFixer, reconcile, stop } = sessions;
+  const {
+    boundFixer,
+    chooseAgent,
+    chooseAgentOrKeep,
+    dropTurn,
+    ensureFixer,
+    rebindOrKeep,
+    reconcile,
+    stop,
+  } = sessions;
   const runs = yield* makeAgentRuns(state, leftovers);
-  const pushes = yield* makePushes(state, queue);
+  const pushes = yield* makePushes(state, queue, sessions);
   const { pushAccess, pushTurn } = pushes;
   const steps = yield* makeTurnSteps(state, pushes);
   const access = yield* makeScriptAccess(state);
@@ -92,35 +95,6 @@ export const make = Effect.gen(function* () {
   const bodies = yield* makeTurnBodies(state, runs, steps, conflicts, sessions, access, leftovers);
   const { reviseBody } = bodies;
   const { finishFixes, finishConflicts, reportProgress } = yield* makeFixTools(state, conflicts);
-
-  /**
-   * The agent for a new turn: the one asked for (checked against the catalog),
-   * else the session's own, else the default from Settings > Agents.
-   */
-  const chooseAgent = (requested: AgentSelection | undefined, fixer: FixerRow | null) =>
-    Effect.gen(function* () {
-      if (requested === undefined && fixer !== null)
-        return { provider: fixer.provider, model: fixer.model, options: fixer.model_options };
-      const catalog = yield* agents.catalog();
-      if (requested !== undefined) {
-        const problem = selectionProblem(catalog, requested);
-        if (problem !== null) return yield* new FixerError({ message: problem });
-        return requested;
-      }
-      const stored = yield* guideSettings
-        .get()
-        .pipe(
-          Effect.catchTag("GuideSettingsError", (error) =>
-            Effect.fail(new FixerError({ message: error.message })),
-          ),
-        );
-      const chosen = effectiveSelection(catalog, stored.defaultAgent);
-      if (chosen === null)
-        return yield* new FixerError({
-          message: "No agent is ready. Sign in to Claude Code or Codex, then check again.",
-        });
-      return chosen;
-    });
 
   const get = (key: PullRequestKey) => snapshotOf(key).pipe(Effect.catchTags(dbFailures));
 
@@ -378,7 +352,8 @@ export const make = Effect.gen(function* () {
             "retry",
           );
         case "revert": {
-          yield* enqueue(fixer, row.work, "retry");
+          // A revert runs no agent: no agent being ready never blocks it.
+          yield* enqueue(yield* rebindOrKeep(fixer), row.work, "retry");
           return yield* snapshotOf(key);
         }
       }
@@ -391,12 +366,8 @@ export const make = Effect.gen(function* () {
         return yield* new FixerStateError({ key, message: outcome.message });
       if (row.commit_sha === null)
         return yield* new FixerError({ message: "There is no merge to revert." });
-      yield* ensureFixer(key, fixer.account_id, {
-        provider: fixer.provider,
-        model: fixer.model,
-        options: fixer.model_options,
-      });
-      yield* enqueue(fixer, { _tag: "revert", turnId, sha: row.commit_sha }, "user");
+      const bound = yield* ensureFixer(key, fixer.account_id, yield* chooseAgentOrKeep(fixer));
+      yield* enqueue(bound, { _tag: "revert", turnId, sha: row.commit_sha }, "user");
       return yield* snapshotOf(key);
     }).pipe(Effect.catchTags(dbFailures));
 

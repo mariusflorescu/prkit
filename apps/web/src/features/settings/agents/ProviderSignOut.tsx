@@ -1,4 +1,4 @@
-import type { AgentProviderKind } from "@prkit/contracts";
+import type { AgentInstanceId } from "@prkit/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "~/components/ui/button";
@@ -6,10 +6,10 @@ import { signOutAgent } from "~/rpc/client";
 import { agentCatalogQuery } from "~/rpc/queries";
 
 /** Signs out the login prkit holds for an agent. The user's own login is a different one and stays. */
-export function ProviderSignOut({ provider }: { provider: AgentProviderKind }) {
+export function ProviderSignOut({ instance }: { instance: AgentInstanceId }) {
   const client = useQueryClient();
   const signOut = useMutation({
-    mutationFn: () => signOutAgent(provider),
+    mutationFn: () => signOutAgent(instance),
     onSuccess: (catalog) => client.setQueryData(agentCatalogQuery.queryKey, catalog),
   });
   return (

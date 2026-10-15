@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-import { AgentProviderKind } from "./agent.ts";
+import { AgentInstanceId, AgentProviderKind } from "./agentInstance.ts";
 import { DiffSnapshot } from "./diffSnapshot.ts";
 import { AccountId, PullRequestKey, ReviewCommentId } from "./ids.ts";
 import { ModelOptionSelection } from "./model.ts";
@@ -186,6 +186,7 @@ export const FixerTurn = Schema.Struct({
   trigger: FixerTrigger,
   status: FixerTurnStatus,
   provider: AgentProviderKind,
+  instance: AgentInstanceId,
   model: Schema.NullOr(Schema.String),
   /** The PR head and base the turn was built on, known once fetched. */
   headSha: Schema.NullOr(Schema.String),
@@ -216,6 +217,7 @@ export const Fixer = Schema.Struct({
   key: PullRequestKey,
   accountId: AccountId,
   provider: AgentProviderKind,
+  instance: AgentInstanceId,
   model: Schema.NullOr(Schema.String),
   modelOptions: Schema.Array(ModelOptionSelection),
   sessionId: Schema.NullOr(Schema.String),

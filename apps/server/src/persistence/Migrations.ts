@@ -21,8 +21,9 @@ import Migration0012 from "./Migrations/012_Stacks.ts";
 import Migration0013 from "./Migrations/013_FixerScriptTrust.ts";
 import Migration0014 from "./Migrations/014_InboxFilters.ts";
 import Migration0015 from "./Migrations/015_FixerTurnEnds.ts";
+import Migration0016 from "./Migrations/016_AgentInstances.ts";
 
-const migrationEntries = [
+export const migrationEntries = [
   [1, "Meta", Migration0001],
   [2, "GitHubConfigDirs", Migration0002],
   [3, "Workspace", Migration0003],
@@ -38,6 +39,7 @@ const migrationEntries = [
   [13, "FixerScriptTrust", Migration0013],
   [14, "InboxFilters", Migration0014],
   [15, "FixerTurnEnds", Migration0015],
+  [16, "AgentInstances", Migration0016],
 ] as const;
 
 const loader = Migrator.fromRecord(

@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "~/components/ui/button";
 import { agentCatalogQuery } from "~/rpc/queries";
 
-import { agentLabel } from "./agent/agentSelection";
+import { agentLabel, agentName } from "./agent/agentSelection";
 import { AttemptFileList } from "./AttemptFileList";
 import { DraftView } from "./DraftView";
 import { guideProgress } from "./progressModel";
@@ -31,9 +31,7 @@ export function GuideProgress({
   const { stop } = useReviewActions(detail.key);
   const catalog = useQuery(agentCatalogQuery);
   const progress = guideProgress(attempt);
-  const name =
-    catalog.data?.providers.find((entry) => entry.kind === review.provider)?.label ??
-    (review.provider === "claude" ? "Claude" : "Codex");
+  const name = agentName(catalog.data, review);
   const title =
     progress.stage === "reading"
       ? `${name} is reading this PR`
@@ -51,6 +49,7 @@ export function GuideProgress({
         <ProgressHeader
           title={title}
           agent={agentLabel(catalog.data, {
+            instance: review.instance,
             provider: review.provider,
             model: review.model,
             options: review.modelOptions,

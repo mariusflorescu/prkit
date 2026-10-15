@@ -1,5 +1,6 @@
 export * from "./accounts.ts";
 export * from "./agent.ts";
+export * from "./agentInstance.ts";
 export * from "./appearance.ts";
 export * from "./childEnv.ts";
 export * from "./desktopUpdateIpc.ts";

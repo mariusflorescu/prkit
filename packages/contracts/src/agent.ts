@@ -1,9 +1,15 @@
 import * as Schema from "effect/Schema";
+import * as SchemaGetter from "effect/SchemaGetter";
 
+import {
+  AgentAccent,
+  AgentEnvironmentVariable,
+  AgentInstanceId,
+  AgentLogin,
+  AgentProviderKind,
+  defaultInstanceId,
+} from "./agentInstance.ts";
 import { ModelOptionDescriptor, ModelOptionSelection, resolveModelOptions } from "./model.ts";
-
-export const AgentProviderKind = Schema.Literals(["claude", "codex"]);
-export type AgentProviderKind = typeof AgentProviderKind.Type;
 
 /** Why a provider can't write guides right now, so the UI can say what to do about it. */
 export const AgentUnavailableReason = Schema.Literals([
@@ -13,6 +19,10 @@ export const AgentUnavailableReason = Schema.Literals([
   "keychain-login",
   "not-subscription",
   "error",
+  /** Turned off in Settings > Agents. */
+  "off",
+  /** prkit couldn't read the sensitive values saved for it, so it won't run without them. */
+  "secrets",
 ]);
 export type AgentUnavailableReason = typeof AgentUnavailableReason.Type;
 
@@ -54,39 +64,66 @@ export const AgentModel = Schema.Struct({
 });
 export type AgentModel = typeof AgentModel.Type;
 
+/** One agent instance: its settings, its login, and the models and settings it offers. */
 export const AgentCatalogEntry = Schema.Struct({
+  instance: AgentInstanceId,
   kind: AgentProviderKind,
   label: Schema.String,
+  accent: Schema.NullOr(AgentAccent),
+  enabled: Schema.Boolean,
+  isDefault: Schema.Boolean,
+  configDir: Schema.NullOr(Schema.String),
+  binaryPath: Schema.NullOr(Schema.String),
+  /** Sensitive values come back empty, with `valueRedacted`. */
+  environment: Schema.Array(AgentEnvironmentVariable),
+  login: AgentLogin,
+  /**
+   * Instances in the same group share their conversations: the same kind and the same folder
+   * the agent keeps its sessions in. Switching to another group starts a new conversation.
+   */
+  group: Schema.String,
+  version: Schema.NullOr(Schema.String),
   state: AgentProviderState,
   models: Schema.Array(AgentModel),
 });
 export type AgentCatalogEntry = typeof AgentCatalogEntry.Type;
 
-/** Every provider, its login, and the models and settings it offers. */
+/** Every instance, default first within each kind, its login, and the models it offers. */
 export const AgentCatalog = Schema.Struct({ providers: Schema.Array(AgentCatalogEntry) });
 export type AgentCatalog = typeof AgentCatalog.Type;
 
-/** Who writes a guide: provider, model and the model's settings. */
-export const AgentSelection = Schema.Struct({
-  provider: AgentProviderKind,
+const SelectionFields = {
   model: Schema.NonEmptyString,
   options: Schema.Array(ModelOptionSelection),
-});
+};
+const CurrentSelection = Schema.Struct({ instance: AgentInstanceId, ...SelectionFields });
+/** Saved before agent instances: the kind stood for its only instance, now its default one. */
+const KindSelection = Schema.Struct({ provider: AgentProviderKind, ...SelectionFields }).pipe(
+  Schema.decodeTo(CurrentSelection, {
+    decode: SchemaGetter.transform((old) => ({
+      instance: old.provider,
+      model: old.model,
+      options: old.options,
+    })),
+    encode: SchemaGetter.forbidden(() => "Selections are saved by instance."),
+  }),
+);
+
+/** Who writes a guide: the agent instance, the model and the model's settings. */
+export const AgentSelection = Schema.Union([CurrentSelection, KindSelection]);
 export type AgentSelection = typeof AgentSelection.Type;
 
-export const findAgentModel = (
-  catalog: AgentCatalog,
-  provider: AgentProviderKind,
-  slug: string | null,
-) =>
-  catalog.providers
-    .find((entry) => entry.kind === provider)
-    ?.models.find((model) => model.slug === slug);
+export const findAgentEntry = (catalog: AgentCatalog, instance: string) =>
+  catalog.providers.find((entry) => entry.instance === instance);
+
+export const findAgentModel = (catalog: AgentCatalog, instance: string, slug: string | null) =>
+  findAgentEntry(catalog, instance)?.models.find((model) => model.slug === slug);
 
 /** Why a selection can't run now, in words for the user, or null when it can. */
 export const selectionProblem = (catalog: AgentCatalog, selection: AgentSelection) => {
-  const provider = catalog.providers.find((entry) => entry.kind === selection.provider);
-  if (provider === undefined) return `prkit doesn't know the agent ${selection.provider}.`;
+  const provider = findAgentEntry(catalog, selection.instance);
+  if (provider === undefined)
+    return "That agent was removed in Settings > Agents. Pick another one.";
   if (provider.state._tag === "unavailable") return provider.state.message;
   const model = provider.models.find((entry) => entry.slug === selection.model);
   if (model === undefined)
@@ -103,7 +140,7 @@ export const selectionProblem = (catalog: AgentCatalog, selection: AgentSelectio
 
 /**
  * The selection to use when none is given: `preferred` if it can run, else the
- * default model of the first ready provider. Null when no agent is ready.
+ * default model of the first ready instance. Null when no agent is ready.
  */
 export const effectiveSelection = (
   catalog: AgentCatalog,
@@ -114,7 +151,42 @@ export const effectiveSelection = (
     if (provider.state._tag !== "ready") continue;
     const usable = provider.models.filter((model) => model.blocked === null);
     const model = usable.find((entry) => entry.isDefault) ?? usable[0];
-    if (model !== undefined) return { provider: provider.kind, model: model.slug, options: [] };
+    if (model !== undefined) return { instance: provider.instance, model: model.slug, options: [] };
   }
   return null;
+};
+
+/**
+ * What a PR's guide or fix session runs on next, as the server picks it: its own instance while
+ * that is on, else its kind's default instance while that is on, else `fallback` (the default
+ * agent). Each is then checked as `effectiveSelection` checks it.
+ */
+export const sessionSelection = (
+  catalog: AgentCatalog,
+  own:
+    | (AgentSelection & {
+        readonly kind: AgentProviderKind;
+      })
+    | null,
+  fallback: AgentSelection | null,
+) => {
+  if (own === null) return effectiveSelection(catalog, fallback);
+  const selection = { model: own.model, options: own.options };
+  if (findAgentEntry(catalog, own.instance)?.enabled === true)
+    return effectiveSelection(catalog, { ...selection, instance: own.instance });
+  const kindDefault = defaultInstanceId(own.kind);
+  if (findAgentEntry(catalog, kindDefault)?.enabled === true)
+    return effectiveSelection(catalog, { ...selection, instance: kindDefault });
+  return effectiveSelection(catalog, fallback);
+};
+
+/**
+ * Whether moving a PR's guide or fix session from one instance to another keeps its
+ * conversation: only within one group. An instance that is gone keeps nothing but itself.
+ */
+export const keepsConversation = (catalog: AgentCatalog, from: string, to: string) => {
+  if (from === to) return true;
+  const before = findAgentEntry(catalog, from);
+  const after = findAgentEntry(catalog, to);
+  return before !== undefined && after !== undefined && before.group === after.group;
 };

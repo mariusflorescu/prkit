@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   AccountId,
   type AgentCatalog,
+  AgentInstanceId,
   type AttemptId,
   type DiffSnapshot,
   type Guide,
@@ -93,11 +94,22 @@ const PULL = {
     repo: { id: 1296269, name: "widgets", owner: { login: "acme" } },
   },
 };
+const CLAUDE = AgentInstanceId.make("claude");
 const CATALOG: AgentCatalog = {
   providers: [
     {
+      instance: CLAUDE,
       kind: "claude",
       label: "Claude",
+      accent: null,
+      enabled: true,
+      isDefault: true,
+      configDir: null,
+      binaryPath: null,
+      environment: [],
+      login: "shared",
+      group: "claude:default",
+      version: "2.1.999",
       state: { _tag: "ready", detail: "Claude Max subscription", ownLogin: false },
       models: [
         {
@@ -218,8 +230,12 @@ const scriptedAgents = (turns: Queue.Queue<Turn>) =>
     Effect.gen(function* () {
       const tokens = yield* McpTokens.McpTokens;
       const provider = {
+        instance: CLAUDE,
         kind: "claude",
         label: "Claude",
+        group: "claude:default",
+        version: Effect.succeed("2.1.999"),
+        retire: Effect.void,
         streamsGuideInput: true,
         check: Effect.succeed({
           _tag: "ready",
@@ -249,12 +265,18 @@ const scriptedAgents = (turns: Queue.Queue<Turn>) =>
         ownLogin: null,
       } satisfies AgentProvider;
       return Agents.of({
-        get: () => provider,
+        get: () => Effect.succeed(provider),
+        usable: (instance) => Effect.succeed(instance),
+        sameGroup: (instance) => Effect.succeed([instance]),
         catalog: () => Effect.succeed(CATALOG),
         invalidate: Effect.void,
         slots: yield* Semaphore.make(2),
         signIn: () => Stream.empty,
         signOut: () => Effect.succeed(CATALOG),
+        create: () => Effect.succeed(CATALOG),
+        update: () => Effect.succeed(CATALOG),
+        remove: () => Effect.succeed(CATALOG),
+        reset: () => Effect.succeed(CATALOG),
       });
     }),
   );
@@ -386,7 +408,7 @@ const SETTLED = new Set(["watching", "failed", "done"]);
 const guideWith = ({ reviews, turns }: Harness, turn: Turn) =>
   Effect.gen(function* () {
     yield* reviews.generate(KEY, ACCOUNT, {
-      agent: { provider: "claude", model: "claude-fable-5-1", options: [] },
+      agent: { instance: CLAUDE, model: "claude-fable-5-1", options: [] },
     });
     const subscribed = yield* Deferred.make<void>();
     const settled = yield* reviews.feed().pipe(

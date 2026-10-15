@@ -26,7 +26,8 @@ import {
   type Workspace,
   type WorkspaceCommand,
   type AgentCatalog,
-  type AgentProviderKind,
+  type AgentInstanceConfig,
+  type AgentInstanceId,
   type AgentSelection,
   type AttemptId,
   type DiffSnapshot,
@@ -255,19 +256,34 @@ export const getDraft = (key: PullRequestKey, attemptId: AttemptId): Promise<Dra
 export const getAttemptDiff = (key: PullRequestKey, attemptId: AttemptId): Promise<DiffSnapshot> =>
   call((client) => client[WS_METHODS.reviewsDiff]({ key, attemptId }));
 export const getTypicalDuration = (
-  provider: AgentProviderKind,
+  instance: AgentInstanceId,
   lines: number,
 ): Promise<TypicalDuration | null> =>
-  call((client) => client[WS_METHODS.reviewsTypicalDuration]({ provider, lines }));
-export const getAgentCatalog = (refresh = false): Promise<AgentCatalog> =>
-  call((client) => client[WS_METHODS.agentsCatalog]({ refresh }));
+  call((client) => client[WS_METHODS.reviewsTypicalDuration]({ instance, lines }));
+/** `refresh` reads logins again: every instance's, or only `instance`'s. */
+export const getAgentCatalog = (
+  refresh = false,
+  instance?: AgentInstanceId,
+): Promise<AgentCatalog> =>
+  call((client) =>
+    client[WS_METHODS.agentsCatalog](instance === undefined ? { refresh } : { refresh, instance }),
+  );
+export const createAgentInstance = (config: AgentInstanceConfig): Promise<AgentCatalog> =>
+  call((client) => client[WS_METHODS.agentsCreate]({ config }));
+/** A sensitive variable sent back empty and redacted keeps the value the server holds. */
+export const updateAgentInstance = (config: AgentInstanceConfig): Promise<AgentCatalog> =>
+  call((client) => client[WS_METHODS.agentsUpdate]({ config }));
+export const removeAgentInstance = (instance: AgentInstanceId): Promise<AgentCatalog> =>
+  call((client) => client[WS_METHODS.agentsRemove]({ instance }));
+export const resetAgentInstance = (instance: AgentInstanceId): Promise<AgentCatalog> =>
+  call((client) => client[WS_METHODS.agentsReset]({ instance }));
 /**
  * Signs an agent in for prkit: `onPage` gets the page to sign in on, and the promise settles
  * once that sign-in ends, with "cancelled" when `signal` stopped it. Failures reject the way
  * `call`'s do.
  */
 export const signInAgent = (
-  provider: AgentProviderKind,
+  instance: AgentInstanceId,
   onPage: (url: string) => void,
   signal: AbortSignal,
 ): Promise<"signed-in" | "cancelled"> => {
@@ -281,7 +297,7 @@ export const signInAgent = (
   });
   return current.runPromise(
     WsClient.use((client) =>
-      client[WS_METHODS.agentsSignIn]({ provider }).pipe(
+      client[WS_METHODS.agentsSignIn]({ instance }).pipe(
         Stream.runForEach((page) => Effect.sync(() => onPage(page.url))),
       ),
     ).pipe(
@@ -293,8 +309,8 @@ export const signInAgent = (
     ),
   );
 };
-export const signOutAgent = (provider: AgentProviderKind): Promise<AgentCatalog> =>
-  call((client) => client[WS_METHODS.agentsSignOut]({ provider }));
+export const signOutAgent = (instance: AgentInstanceId): Promise<AgentCatalog> =>
+  call((client) => client[WS_METHODS.agentsSignOut]({ instance }));
 export const getGuideSettings = (): Promise<GuideSettings> =>
   call((client) => client[WS_METHODS.guideSettingsGet]({}));
 export const updateGuideSettings = (patch: {

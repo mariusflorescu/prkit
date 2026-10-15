@@ -105,10 +105,7 @@ export function SendToAgentFields({
   const threadPicked = candidates.some(
     (candidate) => candidate.kind === "thread" && picked.includes(candidate.id),
   );
-  const switching =
-    agent.sessionProvider !== null &&
-    agent.selection !== null &&
-    agent.selection.provider !== agent.sessionProvider;
+  const switching = agent.switching;
   return (
     <form
       noValidate

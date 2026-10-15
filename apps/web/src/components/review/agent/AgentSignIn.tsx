@@ -1,4 +1,4 @@
-import type { AgentProviderKind } from "@prkit/contracts";
+import type { AgentInstanceId } from "@prkit/contracts";
 
 import { Button } from "~/components/ui/button";
 
@@ -8,8 +8,8 @@ import { useAgentSignIn } from "./useAgentSignIn";
  * Signs an agent in for prkit in the browser, when the user's own login can't be shared:
  * the button, then the page to finish on with Cancel, or why it failed with Try again.
  */
-export function AgentSignIn({ provider }: { provider: AgentProviderKind }) {
-  const { state, start, cancel } = useAgentSignIn(provider);
+export function AgentSignIn({ instance }: { instance: AgentInstanceId }) {
+  const { state, start, cancel } = useAgentSignIn(instance);
   switch (state._tag) {
     case "idle":
       return (

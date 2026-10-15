@@ -37,10 +37,12 @@ const seed = Effect.gen(function* () {
   const now = yield* DateTime.now;
   const at = DateTime.formatIso(now);
   const started = DateTime.formatIso(DateTime.subtract(now, { minutes: 1 }));
-  yield* sql`INSERT INTO fixers (id, pr_key, account_id, provider, created_at, updated_at)
-    VALUES (${FIXER}, 'github.com/acme/widgets#1', 'github.com/octocat', 'claude', ${at}, ${at})`;
-  yield* sql`INSERT INTO fixer_turns (id, fixer_id, kind, work, trigger, status, provider, created_at, started_at)
-    VALUES (${EARLIER}, ${FIXER}, 'fix', '{}', 'user', '{"_tag":"failed"}', 'claude', ${started}, ${started})`;
+  yield* sql`INSERT INTO fixers (id, pr_key, account_id, provider, instance_id, created_at, updated_at)
+    VALUES (${FIXER}, 'github.com/acme/widgets#1', 'github.com/octocat', 'claude', 'claude', ${at}, ${at})`;
+  yield* sql`INSERT INTO fixer_turns (id, fixer_id, kind, work, trigger, status, provider, instance_id,
+      created_at, started_at)
+    VALUES (${EARLIER}, ${FIXER}, 'fix', '{}', 'user', '{"_tag":"failed"}', 'claude', 'claude',
+      ${started}, ${started})`;
 });
 
 const run = <A, E>(test: Effect.Effect<A, E, SqlClient.SqlClient>) =>

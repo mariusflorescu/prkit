@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 
-import { AgentProviderKind, AgentSelection } from "./agent.ts";
+import { AgentSelection } from "./agent.ts";
+import { AgentInstanceId, AgentProviderKind } from "./agentInstance.ts";
 import { DiffSnapshot } from "./diffSnapshot.ts";
 import { NormalizedGuide } from "./guide.ts";
 import { AttemptConfig } from "./guideConfig.ts";
@@ -49,7 +50,9 @@ export const Review = Schema.Struct({
   id: ReviewId,
   key: PullRequestKey,
   accountId: AccountId,
+  /** The instance's kind, kept with it so a removed instance still shows the right agent. */
   provider: AgentProviderKind,
+  instance: AgentInstanceId,
   /** Null for reviews started before prkit offered a model choice: the agent's own default. */
   model: Schema.NullOr(Schema.String),
   modelOptions: Schema.Array(ModelOptionSelection),

@@ -126,8 +126,8 @@ const layerHandlers = WsRpcGroup.toLayer(
       [WS_METHODS.reviewsWatch]: ({ key }) => reviews.watch(key),
       [WS_METHODS.reviewsFeed]: () => reviews.feed(),
       [WS_METHODS.reviewsDiff]: ({ key, attemptId }) => reviews.diff(key, attemptId),
-      [WS_METHODS.reviewsTypicalDuration]: ({ provider, lines }) =>
-        reviews.typicalDuration(provider, lines),
+      [WS_METHODS.reviewsTypicalDuration]: ({ instance, lines }) =>
+        reviews.typicalDuration(instance, lines),
       [WS_METHODS.guidesGet]: ({ key, revision }) => reviews.guide(key, revision),
       // Pending review comments and GitHub review threads.
       [WS_METHODS.reviewCommentsList]: ({ key, accountId }) => reviewComments.list(key, accountId),
@@ -154,9 +154,13 @@ const layerHandlers = WsRpcGroup.toLayer(
       [WS_METHODS.guideConfigRepositories]: () => guideConfig.repositories(),
       [WS_METHODS.guideConfigFindRepository]: (input) => guideConfig.findRepository(input),
       [WS_METHODS.guideConfigSave]: (input) => guideConfig.save(input),
-      [WS_METHODS.agentsCatalog]: ({ refresh }) => agents.catalog(refresh),
-      [WS_METHODS.agentsSignIn]: ({ provider }) => agents.signIn(provider),
-      [WS_METHODS.agentsSignOut]: ({ provider }) => agents.signOut(provider),
+      [WS_METHODS.agentsCatalog]: ({ refresh, instance }) => agents.catalog(refresh, instance),
+      [WS_METHODS.agentsSignIn]: ({ instance }) => agents.signIn(instance),
+      [WS_METHODS.agentsSignOut]: ({ instance }) => agents.signOut(instance),
+      [WS_METHODS.agentsCreate]: ({ config }) => agents.create(config),
+      [WS_METHODS.agentsUpdate]: ({ config }) => agents.update(config),
+      [WS_METHODS.agentsRemove]: ({ instance }) => agents.remove(instance),
+      [WS_METHODS.agentsReset]: ({ instance }) => agents.reset(instance),
       // The fix agent: review fixes and merge conflicts.
       [WS_METHODS.fixersGet]: ({ key }) => fixers.get(key),
       [WS_METHODS.fixersWatch]: ({ key }) => fixers.watch(key),

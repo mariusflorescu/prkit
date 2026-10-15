@@ -1,7 +1,17 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
+import * as Schema from "effect/Schema";
+
 import { repoRoot } from "../scripts/verify-run.ts";
+
+const Run = Schema.fromJsonString(
+  Schema.Struct({
+    configDir: Schema.NullOr(Schema.String),
+    session: Schema.String,
+    resumed: Schema.Boolean,
+  }),
+);
 
 /**
  * The stand-in Claude Code of scripts/fake-claude.ts, in a folder of its own: pass `file` to
@@ -38,6 +48,15 @@ export const setUpFakeClaude = (name: string) => {
     lingering: () => {
       const file = NodePath.join(dir, "linger.pid");
       return NodeFS.existsSync(file) ? Number(NodeFS.readFileSync(file, "utf8")) : null;
+    },
+    /** Every turn so far: the config folder it ran with, its session, and whether it resumed. */
+    runs: () => {
+      const file = NodePath.join(dir, "runs.log");
+      if (!NodeFS.existsSync(file)) return [];
+      return NodeFS.readFileSync(file, "utf8")
+        .split("\n")
+        .filter((line) => line !== "")
+        .map((line) => Schema.decodeUnknownSync(Run)(line));
     },
   };
 };

@@ -1,11 +1,14 @@
 import { type FixerTurnId, refFromKey, type TurnScripts } from "@prkit/contracts";
 import * as Effect from "effect/Effect";
+import * as SqlClient from "effect/sql/SqlClient";
 
+import { AGENT_OFF } from "../agents/AgentProvider.ts";
 import { Agents } from "../agents/Agents.ts";
 import { RepoCache } from "../repo/RepoCache.ts";
 import type { AgentRuns } from "./agentRuns.ts";
 import type { ConflictTurn } from "./conflictTurn.ts";
 import type { FixerRow, TurnRow, WorkRequest } from "./fixerRows.ts";
+import { keepingEarlier } from "./keepEarlier.ts";
 import { FixerSettingsStore } from "./FixerSettingsStore.ts";
 import { type FixerState, plural, repositoryOf, reportSummary, short } from "./fixerState.ts";
 import { fixPrompt, revisePrompt } from "./prompt.ts";
@@ -28,6 +31,7 @@ export const makeTurnBodies = (
   leftovers: TurnLeftovers,
 ) =>
   Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
     const repo = yield* RepoCache;
     const agents = yield* Agents;
     const settings = yield* FixerSettingsStore;
@@ -36,14 +40,44 @@ export const makeTurnBodies = (
     const { resumeFor, untilReported } = runs;
     const { identityFor, recordHead, repoFailure, settleReady, targetOf } = steps;
     const { agentHeld, conflictsBody, recordConflicted, verifyResolution } = conflicts;
-    const { end } = sessions;
+    const { end, rebind } = sessions;
+    /**
+     * The session and the turn on the agent they run on now: the session's own instance while
+     * it is on, else the fallback `rebind` moves the session to. The turn records it, so the
+     * Fixes panel names the agent that ran.
+     */
+    const current = (fixer: FixerRow, turn: TurnRow) =>
+      Effect.gen(function* () {
+        const bound = yield* rebind(fixer).pipe(
+          Effect.catchTag("FixerError", (error) => fail("agent-auth", error.message)),
+        );
+        if (bound.instance_id === turn.instance_id) return { fixer: bound, turn };
+        yield* sql`UPDATE fixer_turns SET provider = ${bound.provider},
+          instance_id = ${bound.instance_id}, model = ${bound.model} WHERE id = ${turn.id}`;
+        return {
+          fixer: bound,
+          turn: {
+            ...turn,
+            provider: bound.provider,
+            instance_id: bound.instance_id,
+            model: bound.model,
+          },
+        };
+      });
+    /** The turn's agent instance, once `current` has moved it off one that is off. */
+    const agentFor = (turn: TurnRow) =>
+      Effect.gen(function* () {
+        const provider = yield* agents.get(turn.instance_id);
+        if (provider === null) return yield* fail("agent-auth", AGENT_OFF);
+        return provider;
+      });
 
     const fixBody = (fixer: FixerRow, turn: TurnRow, work: Extract<WorkRequest, { _tag: "fix" }>) =>
       Effect.gen(function* () {
         const ref = refFromKey(fixer.pr_key);
         if (ref === null)
           return yield* fail("repository", "This pull request's key can't be read.");
-        const provider = agents.get(turn.provider);
+        const provider = yield* agentFor(turn);
         const target = yield* targetOf(fixer, ref);
         if (target.state !== "open") return yield* end(fixer.pr_key, target.state);
         const identity = yield* identityFor(fixer);
@@ -203,12 +237,17 @@ export const makeTurnBodies = (
 
     const runTurn = (turnId: FixerTurnId) =>
       Effect.gen(function* () {
-        const turn = yield* turnById(turnId);
-        const fixer = turn === null ? null : yield* fixerById(turn.fixer_id);
-        if (turn === null || fixer === null) return;
-        yield* appendActivity(fixer.pr_key, turnId, "phase", "preparing-code");
-        const provider = agents.get(turn.provider);
+        const queued = yield* turnById(turnId);
+        const session = queued === null ? null : yield* fixerById(queued.fixer_id);
+        if (queued === null || session === null) return;
+        yield* appendActivity(session.pr_key, turnId, "phase", "preparing-code");
+        // A revert runs no agent, so it never needs one that is on.
+        const { fixer, turn } =
+          queued.work._tag === "revert"
+            ? { fixer: session, turn: queued }
+            : yield* current(session, queued);
         if (turn.work._tag !== "revert") {
+          const provider = yield* agentFor(turn);
           const state = yield* provider.check;
           if (state._tag === "unavailable") {
             yield* agents.invalidate;
@@ -228,34 +267,38 @@ export const makeTurnBodies = (
     /** The owner asked for a change to a ready result: the same session edits it, prkit re-commits. */
     const reviseBody = (turnId: FixerTurnId, note: string) =>
       Effect.gen(function* () {
-        const turn = yield* turnById(turnId);
-        const fixer = turn === null ? null : yield* fixerById(turn.fixer_id);
-        if (turn === null || fixer === null || turn.commit_sha === null || turn.head_sha === null)
-          return;
-        const ref = refFromKey(fixer.pr_key);
+        const ready = yield* turnById(turnId);
+        const session = ready === null ? null : yield* fixerById(ready.fixer_id);
+        if (ready === null || session === null) return;
+        if (ready.commit_sha === null || ready.head_sha === null) return;
+        const ref = refFromKey(session.pr_key);
         if (ref === null) return;
-        const commitSha = turn.commit_sha;
-        const parents = turn.commit_parents ?? [turn.head_sha];
+        const commitSha = ready.commit_sha;
+        const parents = ready.commit_parents ?? [ready.head_sha];
         /**
-         * A change that didn't work out leaves the earlier result as it was. If something the
-         * agent started may still be running, the checkout stays as it is and the change stops
-         * at Needs you, like any other turn.
+         * A change that didn't work out leaves the earlier result as it was, still naming the
+         * agent it ran on. If something the agent started may still be running, the checkout
+         * stays as it is and the change stops at Needs you, like any other turn.
          */
         const keepEarlier = (message: string) =>
           Effect.gen(function* () {
-            if ((yield* leftovers.pending(fixer.id)).length > 0)
+            yield* sql`UPDATE fixer_turns SET provider = ${ready.provider},
+              instance_id = ${ready.instance_id}, model = ${ready.model} WHERE id = ${turnId}`;
+            if ((yield* leftovers.pending(session.id)).length > 0)
               return yield* fail("checks", message);
-            yield* repo.resetFix(ref, fixer.id, commitSha).pipe(Effect.ignore);
+            yield* repo.resetFix(ref, session.id, commitSha).pipe(Effect.ignore);
             if (yield* transition(turnId, ["running"], { _tag: "ready" }))
               yield* appendActivity(
-                fixer.pr_key,
+                session.pr_key,
                 turnId,
                 "error",
                 `${message} The earlier result is unchanged.`,
               );
           });
         const body = Effect.gen(function* () {
-          const provider = agents.get(turn.provider);
+          // Inside the body: no agent to run the change on keeps the earlier result too.
+          const { fixer, turn } = yield* current(session, ready);
+          const provider = yield* agentFor(turn);
           const identity = yield* identityFor(fixer);
           // Put the checkout back at the ready commit, rebuilding it if its git metadata
           // drifted, so this behaves like ensureWorktree rather than giving up.
@@ -365,14 +408,7 @@ export const makeTurnBodies = (
           });
         });
         // A failed change request never throws away the result the owner already had.
-        yield* body.pipe(
-          Effect.catchTags({
-            TurnFailure: (failure) => keepEarlier(failure.message),
-            RepoError: (error) => keepEarlier(error.message),
-            LinkRefused: (error) => keepEarlier(error.message),
-            GitTampered: (error) => keepEarlier(error.message),
-          }),
-        );
+        yield* keepingEarlier(body, keepEarlier);
       });
 
     return { runTurn, reviseBody };

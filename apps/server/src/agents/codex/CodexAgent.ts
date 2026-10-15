@@ -7,6 +7,8 @@ import {
   type ModelOptionChoice,
   type ModelOptionDescriptor,
 } from "@prkit/contracts";
+import * as Context from "effect/Context";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -17,11 +19,12 @@ import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import { ServerConfig } from "../../config.ts";
-import { executableAt, findOnPath } from "../../executables.ts";
+import { agentBinary } from "../../executables.ts";
 import {
   AgentError,
   type AgentEvent,
   type AgentProvider,
+  type InstanceSetup,
   QUIET_TOOLS,
   TOOL_LABELS,
   type TurnInput,
@@ -38,6 +41,7 @@ import {
   keychainLogin,
   layOutHome,
   SIGN_IN,
+  signInForPrkit,
   SIGN_OUT,
   storeOverride,
   unavailable,
@@ -45,8 +49,6 @@ import {
 import * as Protocol from "./protocol.ts";
 import { codexSandbox, PROFILE } from "./sandbox.ts";
 
-const NOT_INSTALLED =
-  "Codex isn't installed. Install Codex, run codex login with your ChatGPT account, then check again.";
 const oneLine = (text: string) => text.replaceAll(/\s+/g, " ").trim().slice(0, 100);
 
 const EFFORT_LABELS: Readonly<Record<string, string>> = {
@@ -125,56 +127,135 @@ const toModel = (model: Protocol.CodexModel): AgentModel => {
   };
 };
 
-export const make = Effect.gen(function* () {
+/** How long a short `codex` command (login status, logout) may take before prkit gives up on it. */
+export const CommandTimeout = Context.Reference<Duration.Input>(
+  "@prkit/server/agents/codex/CodexAgent/CommandTimeout",
+  { defaultValue: () => "15 seconds" },
+);
+/** `effect`, or `orElse` once it has taken longer than CommandTimeout. */
+const shortCommand = <A, E, R>(effect: Effect.Effect<A, E, R>, orElse: A) =>
+  Effect.gen(function* () {
+    const duration = yield* CommandTimeout;
+    return yield* Effect.timeoutOrElse(effect, { duration, orElse: () => Effect.succeed(orElse) });
+  });
+
+/**
+ * One Codex instance. Codex gives every thread the AGENTS.md in its home, and no setting turns
+ * that off, so each instance runs in a home of prkit's own, which shares the login file of the
+ * instance's Codex home (CODEX_HOME, else ~/.codex) when there is one and keeps a keychain login
+ * of its own otherwise (`homeLogin`), or always, for an instance signed in with ChatGPT for prkit.
+ */
+export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const server = yield* ServerConfig;
-  const override = process.env.PRKIT_CODEX_PATH;
-  const executable =
-    override === undefined ? yield* findOnPath("codex") : yield* executableAt(override);
-  // Codex gives every thread the AGENTS.md in its home, and no setting turns that off, so
-  // prkit's Codex runs in a home of its own, which shares the user's login file when there is
-  // one and keeps a keychain login of its own otherwise (`homeLogin`).
-  const home = path.join(server.home, "codex");
+  const binary = agentBinary(setup.binaryPath, process.env.PRKIT_CODEX_PATH, "codex").pipe(
+    Effect.provideService(FileSystem.FileSystem, fs),
+    Effect.provideService(Path.Path, path),
+  );
+  const notInstalled =
+    setup.binaryPath === null
+      ? "Codex isn't installed. Install Codex, run codex login with your ChatGPT account, then check again."
+      : `There's no Codex at ${setup.binaryPath}. Fix the binary path in Settings > Agents, then check again.`;
+  // The default keeps `$PRKIT_HOME/codex`: Codex names a keychain login after its home's path,
+  // so moving it would lose prkit's login and the sessions guides and fixes resume.
+  const home = path.resolve(
+    setup.isDefault
+      ? path.join(server.home, "codex")
+      : path.join(server.home, "codex-instances", setup.id),
+  );
+  const ownOnly = setup.login === "prkit";
   const userAuthFile = path.join(
-    path.resolve(process.env.CODEX_HOME ?? path.join(NodeOS.homedir(), ".codex")),
+    path.resolve(setup.configDir ?? path.join(NodeOS.homedir(), ".codex")),
     "auth.json",
   );
   /** Whether a short `codex` command succeeded. Only the exit code is read: the output can name a key. */
   const succeeds = (codex: string, args: ReadonlyArray<string>, codexHome: string | undefined) =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const child = yield* spawner.spawn(
-          ChildProcess.make(codex, args, {
-            env: childEnv(process.env, { CODEX_HOME: codexHome }),
-            extendEnv: false,
-            stdin: "ignore",
-            stdout: "ignore",
-            stderr: "ignore",
-          }),
-        );
-        return (yield* child.exitCode) === 0;
-      }),
+    shortCommand(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const child = yield* spawner.spawn(
+            ChildProcess.make(codex, args, {
+              env: childEnv(process.env, { ...setup.environment, CODEX_HOME: codexHome }),
+              extendEnv: false,
+              stdin: "ignore",
+              stdout: "ignore",
+              stderr: "ignore",
+            }),
+          );
+          return (yield* child.exitCode) === 0;
+        }),
+      ),
+      false,
+    ).pipe(Effect.catchTag("PlatformError", () => Effect.succeed(false)));
+  /**
+   * What `codex login status` says about `codexHome`. Only Codex's own "Not logged in" counts as
+   * signed out: a timeout, a failed start or any other answer is unknown. The output is read for
+   * that phrase alone and never logged.
+   */
+  const loginStatus = (codex: string, args: ReadonlyArray<string>, codexHome: string) => {
+    /** Why the answer is unknown, for the log: never the output, which can name a key. */
+    const unknown = (why: string) =>
+      Effect.logWarning("Codex didn't confirm a login status").pipe(
+        Effect.annotateLogs({ instance: setup.id, why }),
+        Effect.as("unknown" as const),
+      );
+    return shortCommand(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const child = yield* spawner.spawn(
+            ChildProcess.make(codex, [...args, "login", "status"], {
+              env: childEnv(process.env, { ...setup.environment, CODEX_HOME: codexHome }),
+              extendEnv: false,
+              stdin: "ignore",
+            }),
+          );
+          const [, errors, code] = yield* Effect.all(
+            [
+              child.stdout.pipe(Stream.decodeText(), Stream.mkString),
+              child.stderr.pipe(Stream.decodeText(), Stream.mkString),
+              child.exitCode,
+            ],
+            { concurrency: "unbounded" },
+          );
+          if (code === 0) return "signed-in" as const;
+          // Only Codex's own answer counts: a non-zero exit with exactly this on stderr.
+          if (errors.trim() === "Not logged in") return "signed-out" as const;
+          // Codex's own error line says what went wrong; any other output could name a key.
+          const error = /^Error\b.{0,200}/m.exec(errors)?.[0];
+          return yield* unknown(`exit ${code}${error === undefined ? "" : `: ${error}`}`);
+        }),
+      ),
+      null,
     ).pipe(
-      Effect.timeoutOrElse({ duration: "15 seconds", orElse: () => Effect.succeed(false) }),
-      Effect.catchTag("PlatformError", () => Effect.succeed(false)),
+      Effect.flatMap((status) => (status === null ? unknown("timed out") : Effect.succeed(status))),
+      Effect.catchTag("PlatformError", (error) => unknown(`couldn't start: ${error.message}`)),
     );
-  const loginState = (response: typeof Protocol.AccountResponse.Type, login: CodexHomeLogin) =>
-    response.account !== null || login._tag === "shared" || executable === null
-      ? Effect.succeed(accountState(response, login))
-      : succeeds(executable, ["login", "status"], process.env.CODEX_HOME).pipe(
-          Effect.map((signedIn) =>
-            signedIn ? keychainLogin(home) : accountState(response, login),
-          ),
-        );
+  };
+  const loginState = (
+    response: typeof Protocol.AccountResponse.Type,
+    login: CodexHomeLogin,
+    executable: string,
+  ) =>
+    ownOnly && response.account === null
+      ? Effect.succeed(signInForPrkit(home))
+      : response.account !== null || login._tag === "shared" || ownOnly
+        ? Effect.succeed(accountState(response, login))
+        : succeeds(executable, ["login", "status"], setup.configDir ?? undefined).pipe(
+            Effect.map((signedIn) =>
+              signedIn ? keychainLogin(home) : accountState(response, login),
+            ),
+          );
   const preparing = yield* Semaphore.make(1);
   /** Lays out prkit's Codex home for the login it uses now. Safe to run again at any point. */
   const prepareHome = (codex: string) =>
     preparing
       .withPermits(1)(
         Effect.gen(function* () {
-          const login = homeLogin(userAuthFile, yield* fs.exists(userAuthFile));
+          const login: CodexHomeLogin = ownOnly
+            ? { _tag: "own" }
+            : homeLogin(userAuthFile, yield* fs.exists(userAuthFile));
           // Pinned to the keychain, this signs out only prkit's own entry. Codex then removes
           // the auth.json in prkit's home, a link at most, without reading through it.
           const retire = succeeds(
@@ -209,35 +290,104 @@ export const make = Effect.gen(function* () {
     cwd?: string,
     extras: Readonly<Record<string, string>> = {},
     approvals: CodexApprovals | null = null,
-  ) => {
-    if (executable === null)
-      return Effect.fail(new AgentError({ reason: "auth", message: NOT_INSTALLED }));
-    const codex = executable;
-    return Effect.gen(function* () {
+  ) =>
+    Effect.gen(function* () {
+      const codex = yield* binary;
+      if (codex === null) return yield* new AgentError({ reason: "auth", message: notInstalled });
       const login = yield* prepareHome(codex);
       const client = yield* JsonRpcClient.make({
         executable: codex,
         ...(cwd === undefined ? {} : { cwd }),
-        env: childEnv(process.env, { ...extras, CODEX_HOME: home }),
+        env: childEnv(process.env, { ...setup.environment, ...extras, CODEX_HOME: home }),
         config: [storeOverride(login)],
         ...(approvals === null ? {} : { approvals }),
       });
-      return { client, login };
+      return { client, login, codex };
     }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
-  };
   const check = Effect.scoped(
     Effect.gen(function* () {
-      const { client, login } = yield* open();
+      const { client, login, codex } = yield* open();
       return yield* loginState(
         yield* client.request("account/read", { refreshToken: false }, Protocol.AccountResponse),
         login,
+        codex,
       );
     }),
   ).pipe(
     Effect.catchTag("AgentError", (error) =>
-      Effect.succeed(unavailable(executable === null ? "not-installed" : "error", error.message)),
+      Effect.succeed(
+        unavailable(error.message === notInstalled ? "not-installed" : "error", error.message),
+      ),
     ),
   );
+
+  const version = Effect.scoped(
+    Effect.gen(function* () {
+      const codex = yield* binary;
+      if (codex === null) return null;
+      const child = yield* spawner.spawn(
+        ChildProcess.make(codex, ["--version"], {
+          env: childEnv(process.env, { CODEX_HOME: home }),
+          extendEnv: false,
+          stdin: "ignore",
+          stderr: "ignore",
+        }),
+      );
+      const text = yield* child.stdout.pipe(Stream.decodeText(), Stream.mkString);
+      return /\d+\.\d+[^\s]*/.exec(text)?.[0] ?? null;
+    }),
+  ).pipe(
+    Effect.timeout("15 seconds"),
+    Effect.orElseSucceed(() => null),
+  );
+
+  /**
+   * Before the instance is removed: signs out the keychain login prkit may hold in its home,
+   * pinned to the keychain so a shared login file is never touched, then deletes the home.
+   * The home goes only once Codex itself says that login is signed out. Without Codex, or
+   * without that answer, the removal is refused and the home kept, so the login is never left
+   * with nothing to remove it.
+   */
+  const retire = preparing
+    .withPermits(1)(
+      Effect.gen(function* () {
+        if (setup.isDefault) return;
+        // Only a home holding its own login has a config.toml; a shared one holds a link.
+        if (yield* fs.exists(path.join(home, "config.toml"))) {
+          const codex = yield* binary;
+          if (codex === null)
+            return yield* new AgentError({
+              reason: "auth",
+              message: `prkit needs Codex to sign out ${setup.label}'s ChatGPT login before removing it, and can't find it. Install Codex or fix the binary path, then remove it again.`,
+            });
+          const pinned = ["-c", storeOverride({ _tag: "own" })];
+          yield* succeeds(codex, [...pinned, "logout"], home);
+          const status = yield* loginStatus(codex, pinned, home);
+          if (status !== "signed-out")
+            return yield* new AgentError({
+              reason: "auth",
+              message:
+                status === "signed-in"
+                  ? `prkit couldn't sign out ${setup.label}'s ChatGPT login, so it kept the agent. Try again.`
+                  : `prkit couldn't confirm ${setup.label}'s ChatGPT login is signed out, so it kept the agent. Try again.`,
+            });
+        }
+        yield* fs.remove(home, { recursive: true, force: true });
+        yield* Effect.logInfo("Removed a Codex instance's home").pipe(
+          Effect.annotateLogs({ instance: setup.id }),
+        );
+      }),
+    )
+    .pipe(
+      Effect.catchTag("PlatformError", (error) =>
+        Effect.fail(
+          new AgentError({
+            reason: "agent",
+            message: `prkit couldn't delete ${setup.label}'s folder: ${error.message}`,
+          }),
+        ),
+      ),
+    );
 
   /** Codex in prkit's home while that home keeps its own login; refused while it shares the user's. */
   const openOwn = Effect.gen(function* () {
@@ -343,8 +493,6 @@ export const make = Effect.gen(function* () {
   const runTurn = (input: TurnInput): Stream.Stream<AgentEvent, AgentError> =>
     Stream.unwrap(
       Effect.gen(function* () {
-        if (executable === null)
-          return yield* new AgentError({ reason: "auth", message: NOT_INSTALLED });
         // A guide, and a fix whose pull request's scripts don't run: Codex asks before every
         // command and edit, and prkit answers with the turn's rule (docs/internals/architecture.md
         // "Agents"). A fix whose scripts run asks nothing; its sandbox profile is the boundary.
@@ -364,11 +512,12 @@ export const make = Effect.gen(function* () {
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         );
         const env = { ...input.env, [TURN_MARKER]: input.turn.id };
-        const { client, login } = yield* open(input.cwd, env, approvals);
+        const { client, login, codex: executable } = yield* open(input.cwd, env, approvals);
         watch.follow(client.pid);
         const state = yield* loginState(
           yield* client.request("account/read", { refreshToken: false }, Protocol.AccountResponse),
           login,
+          executable,
         );
         if (state._tag === "unavailable")
           return yield* new AgentError({ reason: "auth", message: state.message });
@@ -652,8 +801,13 @@ export const make = Effect.gen(function* () {
       }),
     );
   return {
+    instance: setup.id,
     kind: "codex",
-    label: "Codex",
+    label: setup.label,
+    // Codex keeps its threads in the home it runs in, which is prkit's own for each instance.
+    group: `codex:${home}`,
+    version,
+    retire,
     // app-server reports a tool call only once it is complete, so Codex drafts with submit_draft.
     streamsGuideInput: false,
     check,

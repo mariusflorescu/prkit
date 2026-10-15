@@ -157,7 +157,7 @@ test("Settings is a tab at the end of the strip: opened or focused, closed back 
     const sections = screen.getByRole("navigation", "Settings sections");
     for (const [name, loaded] of [
       ["Accounts", screen.getByRole("region", "GitHub accounts").getByText("Ready").first()],
-      ["Agents", screen.getByRole("list", "Agent sign-in status").getByText("Codex")],
+      ["Agents", screen.getByRole("list", "Agents").getByRole("listitem", "Codex")],
       ["Guides", screen.getByRole("list", "Automatic guides by account")],
       ["Appearance", screen.getByRole("radiogroup", "Theme")],
       ["Keyboard shortcuts", screen.getByRole("list", "General")],
@@ -295,13 +295,26 @@ test("Settings > Agents shows each agent's sign-in and keeps the default agent",
   await openInbox({ app, screen });
   await openSettingsSection({ screen, browser }, "Agents");
   const agents = screen.getByRole("region", "Agents");
-  const status = agents.getByRole("list", "Agent sign-in status");
-  await expect(status.getByRole("listitem")).toHaveCount(2, { timeout: 30_000 });
-  await expect(status.getByRole("listitem").first()).toContainText("Claude");
-  await expect(status.getByRole("listitem").last()).toContainText("Codex");
+  const list = agents.getByRole("list", "Agents");
+  // Each kind's default instance, Claude first. Instances other journeys add come after them.
+  const claude = list.getByRole("listitem", "Claude");
+  const codex = list.getByRole("listitem", "Codex");
+  await expect(claude).toBeVisible({ timeout: 30_000 });
+  await expect(list.getByRole("listitem").first()).toHaveAttribute("data-instance", "claude");
+  await expect(codex).toHaveAttribute("data-instance", "codex");
+  await expect(claude.getByRole("status", "Claude status")).not.toHaveText("Checking…", {
+    timeout: 30_000,
+  });
+  await expect(claude.getByRole("button", "Remove")).toHaveCount(0);
+  await claude.getByRole("button", "Reset to default").tap();
+  // Resetting wipes what the user set, so it asks first; Cancel leaves everything as it was.
+  const reset = screen.getByRole("alertdialog", "Reset Claude to default?");
+  await expect(reset).toContainText("Sensitive values saved for it are deleted.");
+  await reset.getByRole("button", "Cancel").tap();
+  await expect(reset).toBeHidden();
   await expect(agents.getByRole("button", /^Agent and model: /)).toBeVisible();
   await agents.getByRole("button", "Check again").tap();
-  await expect(status.getByRole("listitem")).toHaveCount(2);
+  await expect(codex).toBeVisible();
   await app.screenshot("settings-agents");
 });
 
@@ -351,7 +364,7 @@ test("Settings > Agents signs Codex in for prkit when its own login is in the ke
   await openInbox({ app, screen });
   await openSettingsSection({ screen, browser }, "Agents");
   const agents = screen.getByRole("region", "Agents");
-  const codex = agents.getByRole("list", "Agent sign-in status").getByRole("listitem").last();
+  const codex = agents.getByRole("list", "Agents").getByRole("listitem", "Codex");
   await expect(codex).toContainText("Codex isn't signed in", { timeout: 30_000 });
   signInThroughKeychain(home);
   try {
