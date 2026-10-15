@@ -13,6 +13,7 @@ import { AgentSignInHelp } from "./AgentSignInHelp";
 import { agentStatus, type AgentStatusTone } from "./agentStatus";
 import { configOf } from "./instanceConfig";
 import { RemoveAgentDialog } from "./RemoveAgentDialog";
+import { ResetAgentDialog } from "./ResetAgentDialog";
 import { useAgentInstanceActions } from "./useAgentInstanceActions";
 
 const TONES: Record<AgentStatusTone, string> = {
@@ -38,6 +39,7 @@ export function AgentInstanceCard({
   const actions = useAgentInstanceActions();
   const [editing, setEditing] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const checking =
     checkingAll || (actions.check.isPending && actions.check.variables === entry.instance);
   const status = agentStatus(entry, checking);
@@ -78,9 +80,9 @@ export function AgentInstanceCard({
                 size="xs"
                 variant="ghost-muted"
                 disabled={busy}
-                onClick={() => actions.reset.mutate(configOf(entry))}
+                onClick={() => setResetting(true)}
               >
-                {actions.reset.isPending ? "Resetting…" : "Reset to default"}
+                Reset to default
               </Button>
             ) : (
               <Button size="xs" variant="ghost-destructive" onClick={() => setRemoving(true)}>
@@ -108,7 +110,9 @@ export function AgentInstanceCard({
           onCheckedChange={(enabled) => actions.toggle.mutate({ ...configOf(entry), enabled })}
         />
       </div>
-      {!entry.isDefault && (
+      {entry.isDefault ? (
+        <ResetAgentDialog entry={entry} open={resetting} onOpenChange={setResetting} />
+      ) : (
         <RemoveAgentDialog entry={entry} open={removing} onOpenChange={setRemoving} />
       )}
     </li>

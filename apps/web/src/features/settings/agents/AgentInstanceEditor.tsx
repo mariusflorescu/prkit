@@ -88,6 +88,7 @@ export function AgentInstanceEditor({
         )}
       </div>
       <EnvironmentFields
+        kind={entry.kind}
         control={form.control}
         register={form.register}
         disabled={update.isPending}

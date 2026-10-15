@@ -121,9 +121,7 @@ test(
       const folder = dialog.getByRole("textbox", "Config folder (CLAUDE_CONFIG_DIR)");
       await folder.fill("claude-work");
       await dialog.getByRole("button", "Add agent").tap();
-      await expect(dialog.getByRole("alert")).toHaveText(
-        "Use an absolute path or one starting with ~/.",
-      );
+      await expect(dialog.getByRole("alert")).toHaveText("Use a full path, starting with / or ~/.");
       await shoot(app, browser, "u67-add-agent-setup-error");
       await folder.fill(work);
       await dialog.getByRole("button", "Add agent").tap();
@@ -293,9 +291,14 @@ test(
       await card.getByRole("button", "Edit").tap();
       const edit = screen.getByRole("form", "Edit Work");
       await edit.getByRole("button", "Add variable").tap();
+      await expect(edit).toContainText(
+        "Claude Code passes these to commands it runs; on trusted fixes the repository's check scripts can read them.",
+      );
       await edit.getByRole("textbox", "Variable 1 name").fill("ANTHROPIC_API_KEY");
       await edit.getByRole("button", "Save").tap();
       await expect(edit.getByRole("alert")).toContainText("off your subscription");
+      await edit.getByRole("textbox", "Variable 1 name").fill("CLAUDE_CODE_SHELL_PREFIX");
+      await expect(edit.getByRole("alert")).toContainText("changes how the agent runs");
       await edit.getByRole("textbox", "Variable 1 name").fill("STAND_IN_TOKEN");
       await edit.getByRole("button", "Mark as sensitive").tap();
       await edit.getByLabel("Variable 1 value").fill("stand-in-secret-7f3a");
@@ -314,6 +317,16 @@ test(
         )
         .toEqual({ value: "", placeholder: "Saved. Type to replace it." });
       await shoot(app, browser, "u67-edit-agent-secret");
+      // Unlocking a saved secret asks for it again rather than dropping it; locking keeps it.
+      await edit.getByRole("button", "Sensitive: stored apart").tap();
+      await expect(edit).toContainText("Lock it again to keep the saved one.");
+      await edit.getByRole("button", "Save").tap();
+      await expect(edit.getByRole("alert")).toHaveText(
+        "STAND_IN_TOKEN: Type the value again: prkit never shows a saved sensitive value.",
+      );
+      await shoot(app, browser, "u67-edit-agent-unlocked-secret");
+      await edit.getByRole("button", "Mark as sensitive").tap();
+      await expect(edit.getByRole("alert")).toHaveCount(0);
       await edit.getByRole("textbox", "Label").fill("Work ");
       await edit.getByRole("button", "Save").tap();
       await expect(screen.getByText("Saved Work").first()).toBeVisible({ timeout: 30_000 });

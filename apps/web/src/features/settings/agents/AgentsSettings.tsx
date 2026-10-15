@@ -5,6 +5,7 @@ import { useState } from "react";
 import { ListError } from "~/components/ListError";
 import { ListSkeleton } from "~/components/ListSkeleton";
 import { Button } from "~/components/ui/button";
+import { toastManager } from "~/components/ui/toast";
 import { useGuideSettings } from "~/features/guides/useGuideSettings";
 import { agentCatalogQuery } from "~/rpc/queries";
 
@@ -104,7 +105,15 @@ export function AgentsSettings() {
           <DefaultAgentSetting
             catalog={data.catalog}
             settings={data.settings}
-            onChange={(defaultAgent) => update.mutate({ defaultAgent })}
+            onChange={(defaultAgent) =>
+              update.mutate(
+                { defaultAgent },
+                {
+                  onSuccess: () =>
+                    toastManager.add({ title: "Saved the default agent", type: "success" }),
+                },
+              )
+            }
             saving={update.isPending}
           />
           <AddAgentDialog catalog={data.catalog} open={adding} onOpenChange={setAdding} />

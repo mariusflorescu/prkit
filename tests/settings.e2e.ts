@@ -306,7 +306,12 @@ test("Settings > Agents shows each agent's sign-in and keeps the default agent",
     timeout: 30_000,
   });
   await expect(claude.getByRole("button", "Remove")).toHaveCount(0);
-  await expect(claude.getByRole("button", "Reset to default")).toBeVisible();
+  await claude.getByRole("button", "Reset to default").tap();
+  // Resetting wipes what the user set, so it asks first; Cancel leaves everything as it was.
+  const reset = screen.getByRole("alertdialog", "Reset Claude to default?");
+  await expect(reset).toContainText("Sensitive values saved for it are deleted.");
+  await reset.getByRole("button", "Cancel").tap();
+  await expect(reset).toBeHidden();
   await expect(agents.getByRole("button", /^Agent and model: /)).toBeVisible();
   await agents.getByRole("button", "Check again").tap();
   await expect(codex).toBeVisible();
