@@ -61,12 +61,23 @@ const models = async (sdk: Sdk, apiKey: string | null) => {
 };
 
 const login = async (sdk: Sdk) => {
-  await sdk.Cursor.auth.login({
-    openBrowser: false,
-    store: new sdk.FileCredentialStore(),
-    apiKeyName: "prkit",
-    onLoginUrl: (url) => emit({ type: "login-url", url }),
-  });
+  try {
+    await sdk.Cursor.auth.login({
+      openBrowser: false,
+      store: new sdk.FileCredentialStore(),
+      apiKeyName: "prkit",
+      onLoginUrl: (url) => emit({ type: "login-url", url }),
+    });
+  } catch (error) {
+    // The SDK stops waiting about 25 minutes after the page opens, or when the page is declined.
+    if (!(error instanceof sdk.AuthenticationError)) throw error;
+    return emit({
+      type: "error",
+      reason: "auth",
+      message:
+        "The Cursor sign-in page expired or was declined before it was approved. Sign in again.",
+    });
+  }
   emit({ type: "signed-in" });
 };
 
