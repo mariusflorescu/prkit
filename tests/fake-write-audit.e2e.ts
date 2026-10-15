@@ -55,3 +55,46 @@ test("records a git push before the transport refuses it", () => {
   expect(result.status).toBe(1);
   expect(git.pushes()).toEqual([["push", "origin", "HEAD"]]);
 });
+
+test("audits every GraphQL batch entry and records anything it cannot classify as a query", async () => {
+  const fake = await startFakeGitHub("outside-graphql-audit");
+  const post = (body: string) => fetch(`${fake.url}/graphql`, { method: "POST", body });
+  try {
+    for (const query of [
+      "query Read { viewer { login } }",
+      "{ viewer { login } }",
+      'query Read { mutation(text: "mutation Fake { x }") }',
+      "# mutation in a comment\nquery Read { viewer { login } }",
+      "fragment User on User { login } query Read { viewer { ...User } }",
+    ])
+      await post(JSON.stringify({ query }));
+    expect(await fake.writes()).toEqual([]);
+
+    await post(
+      JSON.stringify([
+        { operationName: "Read", query: "query Read { viewer { login } }" },
+        { operationName: "R", query: "mutation R { x }" },
+        { query: "query MissingClosingBrace { viewer" },
+        { variables: {} },
+      ]),
+    );
+    await post("{malformed");
+    await post("[]");
+    await post(JSON.stringify({ query: "subscription Updates { changed }" }));
+    await post(JSON.stringify({ query: "query Read { viewer { login } }", variables: 42 }));
+    await fake.limit("graphql", 60);
+    await post(JSON.stringify([{ operationName: "R", query: "mutation R { x }" }]));
+    expect((await fake.writes()).map((entry) => entry.kind)).toEqual([
+      "graphql mutation",
+      "graphql unclassified",
+      "graphql unclassified",
+      "graphql unclassified",
+      "graphql unclassified",
+      "graphql unclassified",
+      "graphql unclassified",
+      "graphql mutation",
+    ]);
+  } finally {
+    fake.stop();
+  }
+});

@@ -931,10 +931,7 @@ export const make = Effect.gen(function* () {
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.id;
       if (turnId === undefined)
         return yield* fail("conflict", "No fix failed, so there is nothing to retry.");
-      // A revert undoes pushed work on the branch; running one again is the owner's click.
-      if (before.turns.find((turn) => turn.id === turnId)?.work._tag === "revert")
-        return yield* fail("not-allowed", "Reverts run again only from prkit, by the owner.");
-      return fixResultOf(yield* fixers.retry(target.key, turnId), null);
+      return fixResultOf(yield* fixers.retry(target.key, turnId, { refuse: ["revert"] }), null);
     }).pipe(Effect.mapError(asFailure));
 
   const resolveConflicts = (input: typeof ConflictsInput.Type) =>

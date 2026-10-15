@@ -2,6 +2,7 @@ import * as NodeFS from "node:fs";
 import * as NodeHttp from "node:http";
 import * as NodePath from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { FixerSnapshot } from "../packages/contracts/src/fixer.ts";
 
 import { describe, test } from "@e2e-dev/web";
 import { expect } from "e2e";
@@ -14,6 +15,7 @@ import { draftOn, type Fixtures, openSendToAgent } from "./fixActions.ts";
 import { readRows } from "./fixturePr.ts";
 import { outsideGit } from "./outsideGit.ts";
 import { StatusResult } from "../apps/server/src/outside/schemas.ts";
+import { AgentsResult, FixTurnResult } from "../apps/server/src/outside/paritySchemas.ts";
 import { type Bridge, startBridge } from "./outsideBridge.ts";
 
 const accountOf = async (bridge: Bridge) => {
@@ -181,6 +183,198 @@ const raw = (home: string, headers: Record<string, string>) => {
 };
 
 describe("outside agents", { tags: ["outside-agents"] }, () => {
+  test(
+    "outside retries refuse recent and older reverts while the app retry path keeps its behavior",
+    { timeout: 180_000 },
+    async ({ app, screen, browser }) => {
+      const name = "outside-agents-retry";
+      const fake = await startFakeGitHub(name);
+      const git = outsideGit(name, { fetches: false });
+      const claude = setUpFakeClaude(name);
+      let bridge: Bridge | null = null;
+      const log = transcript(name);
+      try {
+        const run = git.start(() => startFakeInstance(name, fake, ["--claude", claude.file]));
+        await app.open(run.openUrl);
+        await openOutsideSettings({ app, screen, browser });
+        await switchOn({ app, screen, browser }, true);
+        await screen.getByRole("radio", "Read and start work").tap();
+        bridge = startBridge(run.home, CLIENT);
+        await bridge.initialize();
+        await toolsSettle(bridge, ALL);
+        const account = await accountOf(bridge);
+        const catalog = await bridge.call("list_agents");
+        const agent = Schema.decodeUnknownSync(AgentsResult)(
+          "json" in catalog ? catalog.json : null,
+        ).items.find((entry) => entry.kind === "claude" && entry.ready);
+        if (agent === undefined) throw new Error("The stand-in Claude must be ready");
+        const key = "github.com/budget/fixtures#9";
+        const old = "outside-old-revert";
+        const recent = "outside-recent-revert";
+        const fixer = "outside-retry-session";
+        const at = Date.now() - 60_000;
+        // Terminal history is a fixture: exercising 20 real agent turns would hide this boundary.
+        const db = new DatabaseSync(NodePath.join(run.home, "prkit.sqlite"));
+        try {
+          db.prepare(`INSERT INTO fixers
+            (id, pr_key, account_id, provider, instance_id, created_at, updated_at)
+            VALUES (?, ?, ?, 'claude', ?, ?, ?)`).run(
+            fixer,
+            key,
+            account,
+            agent.instance,
+            new Date(at).toISOString(),
+            new Date(at).toISOString(),
+          );
+          const insert = db.prepare(`INSERT INTO fixer_turns
+            (id, fixer_id, kind, work, trigger, status, provider, instance_id, created_at, finished_at)
+            VALUES (?, ?, ?, ?, 'user', ?, 'claude', ?, ?, ?)`);
+          for (let index = 0; index < 22; index++) {
+            const revert = index === 0 || index === 21;
+            const id = index === 0 ? old : index === 21 ? recent : `outside-history-${index}`;
+            const createdAt = new Date(at + index * 1000).toISOString();
+            insert.run(
+              id,
+              fixer,
+              revert ? "revert" : "conflicts",
+              JSON.stringify(
+                revert
+                  ? { _tag: "revert", turnId: old, sha: "a".repeat(40) }
+                  : { _tag: "conflicts", strategy: "merge" },
+              ),
+              JSON.stringify(
+                revert
+                  ? { _tag: "failed", reason: "repository", message: "Fixture revert failed" }
+                  : { _tag: "unchanged" },
+              ),
+              agent.instance,
+              createdAt,
+              createdAt,
+            );
+          }
+        } finally {
+          db.close();
+        }
+
+        const Exit = Schema.TaggedStruct("Exit", {
+          exit: Schema.TaggedStruct("Success", { value: FixerSnapshot }),
+        });
+        const ownerCall = async (tag: "fixers.get" | "fixers.retry", turnId?: string) => {
+          const text = await browser.evaluate(
+            (input: {
+              url: string;
+              token: string;
+              tag: string;
+              payload: { key: string; turnId?: string };
+            }) =>
+              new Promise<string>((resolve, reject) => {
+                const url = new URL("/ws", input.url);
+                url.protocol = "ws:";
+                url.searchParams.set("token", input.token);
+                const socket = new WebSocket(url);
+                const timer = setTimeout(() => {
+                  socket.close();
+                  reject(new Error("App RPC timed out"));
+                }, 20_000);
+                socket.addEventListener(
+                  "open",
+                  () =>
+                    socket.send(
+                      JSON.stringify({
+                        _tag: "Request",
+                        id: "1",
+                        tag: input.tag,
+                        payload: input.payload,
+                        headers: [],
+                      }),
+                    ),
+                  { once: true },
+                );
+                socket.addEventListener(
+                  "error",
+                  () => {
+                    clearTimeout(timer);
+                    socket.close();
+                    reject(new Error("App RPC failed"));
+                  },
+                  { once: true },
+                );
+                socket.addEventListener(
+                  "message",
+                  (event: MessageEvent<string>) => {
+                    clearTimeout(timer);
+                    socket.close();
+                    resolve(event.data);
+                  },
+                  { once: true },
+                );
+              }),
+            {
+              url: run.url,
+              token: run.token,
+              tag,
+              payload: { key, ...(turnId === undefined ? {} : { turnId }) },
+            },
+          );
+          const decoded = Schema.decodeSync(
+            Schema.fromJsonString(Schema.Union([Exit, Schema.Array(Exit)])),
+          )(text);
+          const result = Schema.is(Exit)(decoded) ? decoded : decoded[0];
+          if (result === undefined) throw new Error("App RPC returned no result");
+          return result.exit.value;
+        };
+        const shown = await ownerCall("fixers.get");
+        expect(shown.turns.length).toBe(20);
+        expect(shown.turns.some((turn) => turn.id === old)).toBe(false);
+        expect(shown.turns.some((turn) => turn.id === recent)).toBe(true);
+        for (const turnId of [old, recent]) {
+          const read = await bridge.call("read_fix_turn", {
+            url: PR_9,
+            accountId: account,
+            turnId,
+          });
+          expect(
+            Schema.decodeUnknownSync(FixTurnResult)("json" in read ? read.json : null).turn.work
+              ._tag,
+          ).toBe("revert");
+          const refused = await bridge.call("retry_fix", { url: PR_9, accountId: account, turnId });
+          log.note(`retry_fix ${turnId === old ? "outside latest 20" : "recent"}`, refused);
+          expect(refused).toMatchObject({
+            isError: true,
+            text: "Reverts run again only from prkit, by the owner.",
+          });
+        }
+        expect(readRows(run.home, "SELECT COUNT(*) AS count FROM fixer_turns")).toEqual([
+          { count: 22 },
+        ]);
+        const retried = await ownerCall("fixers.retry", old);
+        expect(
+          retried.turns.some((turn) => turn.work._tag === "revert" && turn.trigger === "retry"),
+        ).toBe(true);
+        expect(readRows(run.home, "SELECT COUNT(*) AS count FROM fixer_turns")).toEqual([
+          { count: 23 },
+        ]);
+        log.note("app retry", retried);
+      } finally {
+        try {
+          await bridge?.stop();
+          const writes = await fake.writes();
+          const pushes = git.pushes();
+          log.note("final write attempts", { writes, pushes });
+          log.save();
+          expect(writes).toEqual([]);
+          expect(pushes).toEqual([]);
+        } finally {
+          try {
+            stopFakeInstance(name, { keepHome: false });
+          } finally {
+            fake.stop();
+          }
+        }
+      }
+    },
+  );
+
   test(
     "a client drives prkit through its launcher, at the level the owner set, and never reaches GitHub",
     { timeout: 300_000 },

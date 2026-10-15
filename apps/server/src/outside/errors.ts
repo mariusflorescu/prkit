@@ -15,6 +15,7 @@ const PLAIN_ERRORS: Record<string, OutsideToolFailure["code"]> = {
   ReviewCommentsError: "failed",
   FixerError: "failed",
   FixerStateError: "conflict",
+  FixerWorkRefused: "not-allowed",
   RepositoryError: "github",
   GuideConfigError: "invalid",
   GuideConfigConflict: "conflict",

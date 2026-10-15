@@ -318,3 +318,9 @@ export class FixerStateError extends Schema.TaggedError<FixerStateError>()("Fixe
   key: PullRequestKey,
   message: Schema.String,
 }) {}
+
+/** The caller may retry ordinary work, but this kind stays the owner's action. */
+export class FixerWorkRefused extends Schema.TaggedError<FixerWorkRefused>()("FixerWorkRefused", {
+  key: PullRequestKey,
+  message: Schema.String,
+}) {}

@@ -33,7 +33,7 @@ const GraphQLRequest = Schema.fromJsonString(
     variables: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
   }),
 );
-const decodeRequest = Schema.decodeUnknownSync(GraphQLRequest);
+const decodeRequest = Schema.decodeUnknownOption(GraphQLRequest);
 
 const searchNode = (pull: Pull) => ({
   ...stackFields(pull),
@@ -387,9 +387,16 @@ const mutation = (
 export const graphql = (
   body: string,
 ): { kind: string; cost: number; data: Schema.Json; errors?: Schema.Json } => {
-  const request = decodeRequest(body);
-  const query = request.query;
-  const variables = request.variables ?? {};
+  const decoded = decodeRequest(body);
+  if (Option.isNone(decoded))
+    return {
+      kind: "graphql:unsupported",
+      cost: 0,
+      data: null,
+      errors: [{ type: "BAD_USER_INPUT", message: "The fake expects one GraphQL request." }],
+    };
+  const query = decoded.value.query;
+  const variables = decoded.value.variables ?? {};
   const pullFrom = (value: Schema.Json | undefined) => pulls.get(Number(value));
   if (query.includes("PrkitPushAccess")) {
     const pull = pullFrom(variables["number"]);
