@@ -197,13 +197,35 @@ describe("prkit's file tools for Cursor", () => {
     await NodeFs.writeFile(`${checkout}/slow.txt`, `${"a".repeat(40)}b\n`);
     expect(await use(readTools, "grep", { pattern: "(a+)+$", path: "slow.txt" })).toMatchObject({
       ok: false,
-      text: expect.stringContaining("too slow"),
+      text: "The search took too long and was stopped. Narrow the pattern or the paths.",
     });
     expect(await use(readTools, "grep", { pattern: "b$", path: "slow.txt" })).toEqual({
       ok: true,
       text: `slow.txt:1: ${"a".repeat(40)}b`,
     });
   }, 12_000);
+
+  // Node's glob matching backtracks too: a long name and many stars, or many brace groups.
+  it("stops a glob that takes too long to match, in glob and in grep, and keeps working", async () => {
+    await NodeFs.mkdir(`${checkout}/names`);
+    await NodeFs.writeFile(`${checkout}/names/${"a".repeat(60)}`, "a\n");
+    const stars = `names/${"*a".repeat(8)}b`;
+    const braces = `names/${"{a,b}".repeat(16)}c`;
+    for (const [tool, args] of [
+      ["glob", { pattern: stars }],
+      ["glob", { pattern: braces }],
+      ["grep", { pattern: "a", glob: stars }],
+      ["grep", { pattern: "a", glob: braces }],
+    ] as const)
+      expect(await use(readTools, tool, args), `${tool} ${JSON.stringify(args)}`).toEqual({
+        ok: false,
+        text: "The search took too long and was stopped. Narrow the pattern or the paths.",
+      });
+    expect(await use(readTools, "glob", { pattern: "names/a*" })).toEqual({
+      ok: true,
+      text: `names/${"a".repeat(60)}`,
+    });
+  }, 40_000);
 
   it("never writes through a link put where a file was checked", async () => {
     await NodeFs.symlink(`${at.outside}/secret.txt`, `${checkout}/swapped.txt`);

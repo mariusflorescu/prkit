@@ -1,6 +1,6 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- the runner is a plain child process; prkit's file tools read with Node's own calls.
 import * as NodeFs from "node:fs/promises";
-// @effect-diagnostics-next-line nodeBuiltinImport:off -- matchesGlob has no counterpart in effect/Path.
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- the runner is a plain child process, outside the Effect runtime.
 import * as NodePath from "node:path";
 
 import * as Effect from "effect/Effect";
@@ -8,7 +8,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { type CheckoutPaths, foldedName, MAX_LISTED } from "../checkoutPaths.ts";
-import { searchFiles } from "./regexSearch.ts";
+import { matchNames, searchFiles } from "./searchWorker.ts";
 
 /**
  * The file tools prkit gives Cursor in place of Cursor's own, which reach past the checkout.
@@ -45,6 +45,8 @@ const refused = (text: string): ToolResult => ({ ok: false, text });
 const OUTSIDE = refused(
   "Refused: that path is outside the pull request's checkout, inside .git, or behind a link that leads out. Use a path inside the working directory.",
 );
+/** glob and grep stop at a deadline: a slow pattern, or a slow disk. */
+const TOO_SLOW = "The search took too long and was stopped. Narrow the pattern or the paths.";
 const NOT_WRITABLE = refused(
   "Refused: only files in the pull request's checkout can change, never through a link, never .git, .cursor or a sandbox.json.",
 );
@@ -71,7 +73,7 @@ const EditArgs = Schema.Struct({
 });
 
 const isBinary = (bytes: Uint8Array) => bytes.subarray(0, 8000).includes(0);
-/** Names as macOS compares them: `.GIT` and `.ġit`-like spellings of `.git` alike (foldedName). */
+/** `.git` in any spelling APFS opens as it, `.GIT` included (foldedName). */
 const isGitName = (name: string) => foldedName(name) === ".git";
 const clip = (line: string) =>
   line.length > MAX_LINE_CHARS ? `${line.slice(0, MAX_LINE_CHARS)}…` : line;
@@ -292,18 +294,17 @@ export const makeFileTools = (where: {
       if (climbs(pattern)) return OUTSIDE;
       const dir = await folder(path);
       if (dir === null) return OUTSIDE;
-      const found: Array<string> = [];
+      const names: Array<string> = [];
       const budget = { left: MAX_LISTED };
-      for await (const entry of walk(dir, budget)) {
-        if (entry.kind === "folder") continue;
-        if (!NodePath.matchesGlob(NodePath.relative(dir, entry.at), pattern)) continue;
-        found.push(shown(entry.at));
-        if (found.length >= MAX_RESULTS) break;
-      }
-      if (found.length === 0) return ok("No files match.");
-      const cut = found.length >= MAX_RESULTS || budget.left < 0;
+      for await (const entry of walk(dir, budget))
+        if (entry.kind !== "folder") names.push(NodePath.relative(dir, entry.at));
+      const found = await matchNames({ names, glob: pattern, maxNames: MAX_RESULTS });
+      if (found === "slow") return refused(TOO_SLOW);
+      if (found === "failed") return refused("prkit couldn't match that pattern.");
+      if (found.names.length === 0) return ok("No files match.");
+      const cut = found.more || budget.left < 0;
       return ok(
-        `${found.join("\n")}${cut ? "\n(more matches not shown; narrow the pattern)" : ""}`,
+        `${found.names.map((name) => shown(NodePath.join(dir, name))).join("\n")}${cut ? "\n(more matches not shown; narrow the pattern)" : ""}`,
       );
     }),
   };
@@ -338,23 +339,17 @@ export const makeFileTools = (where: {
       if ((await NodeFs.stat(real)).isFile()) files.push(real);
       else
         for await (const entry of walk(real, budget))
-          if (
-            entry.kind === "file" &&
-            (args.glob === undefined ||
-              NodePath.matchesGlob(NodePath.relative(real, entry.at), args.glob))
-          )
-            files.push(entry.at);
+          if (entry.kind === "file") files.push(entry.at);
       const found = await searchFiles({
         files,
+        base: real,
+        glob: args.glob ?? null,
         pattern: regex.source,
         flags: regex.flags,
         maxFileBytes: MAX_FILE_BYTES,
         maxMatches: MAX_MATCHES,
       });
-      if (found === "slow")
-        return refused(
-          "That pattern is too slow: prkit stopped the search after 5 seconds. Use a simpler pattern.",
-        );
+      if (found === "slow") return refused(TOO_SLOW);
       if (found === "failed") return refused("prkit couldn't search with that pattern.");
       if (found.matches.length === 0) return ok("No matches.");
       const lines = found.matches.map(

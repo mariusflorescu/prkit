@@ -17,8 +17,9 @@ export const spellingsOf = (fs: FileSystem.FileSystem, dirs: ReadonlyArray<strin
 type Place = "checkout" | "git" | "readable" | "outside";
 
 /**
- * A file name as macOS compares it, near enough: APFS ignores case and folds compatibility
- * spellings, so `.GIT` and `.curſor` (a long s) open `.git` and `.cursor`.
+ * A file name folded so every spelling APFS opens as the same name compares equal. APFS folds
+ * only ASCII case and the long s (`.GIT` is `.git`, `.curſor` is `.cursor`); NFKC folds more,
+ * on purpose: a few names APFS keeps apart are refused too, and none it joins slips through.
  */
 export const foldedName = (name: string) => name.normalize("NFKC").toLowerCase();
 
