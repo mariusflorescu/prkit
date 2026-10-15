@@ -18,6 +18,7 @@ import { RepoCache } from "../repo/RepoCache.ts";
 import type { FixerRow, TurnRow } from "./fixerRows.ts";
 import { type FixerState, repositoryOf, short } from "./fixerState.ts";
 import { readPushAccess } from "./pushAccess.ts";
+import type { Sessions } from "./sessions.ts";
 import type { TurnQueue } from "./turnQueue.ts";
 
 /**
@@ -25,7 +26,7 @@ import type { TurnQueue } from "./turnQueue.ts";
  * the push itself only while the branch is where the turn found it, and what
  * happens to the batch's comments after.
  */
-export const makePushes = (state: FixerState, queue: TurnQueue) =>
+export const makePushes = (state: FixerState, queue: TurnQueue, sessions: Sessions) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const repo = yield* RepoCache;
@@ -43,6 +44,7 @@ export const makePushes = (state: FixerState, queue: TurnQueue) =>
       transition,
     } = state;
     const { advance, enqueue } = queue;
+    const { rebind } = sessions;
     const accessCache = new Map<string, { readonly at: number; readonly access: PushAccess }>();
 
     /** Pushes a ready turn's commit, only if the branch is still where the turn found it. */
@@ -96,7 +98,11 @@ export const makePushes = (state: FixerState, queue: TurnQueue) =>
             return yield* snapshotOf(key);
           yield* repo.holdCommit(ref, turnId, null).pipe(Effect.ignore);
           yield* appendActivity(key, turnId, "note", message);
-          yield* enqueue(fixer, row.work, "redo", {
+          // The redo runs on the session's agent, or the fallback when that one is off now.
+          const bound = yield* rebind(fixer).pipe(
+            Effect.catchTag("FixerError", () => Effect.succeed(fixer)),
+          );
+          yield* enqueue(bound, row.work, "redo", {
             createdAt: row.created_at,
             // The batch's drafts stay with the agent, now for the redo.
             prepare: (redoId) =>

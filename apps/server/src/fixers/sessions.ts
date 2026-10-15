@@ -22,6 +22,7 @@ import { reapAgentGroup } from "../agents/agentProcess.ts";
 import { Agents } from "../agents/Agents.ts";
 import { turnTmpDir } from "../agents/commandReach.ts";
 import { RepoCache } from "../repo/RepoCache.ts";
+import { makeAgentChoice } from "./agentChoice.ts";
 import {
   decodeTurns,
   encodeOptions,
@@ -53,6 +54,7 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
     const path = yield* Path.Path;
     const repo = yield* RepoCache;
     const agents = yield* Agents;
+    const { chooseAgent } = yield* makeAgentChoice;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const {
       appendActivity,
@@ -106,6 +108,21 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
             message: "prkit couldn't save the agent session. Try again.",
           });
         return fixer;
+      });
+
+    /**
+     * The session as a turn nobody picked an agent for runs it (a redo, a revert, a retry, a
+     * change request): moved to the agent `chooseAgent` falls back to when its own instance is
+     * off or was removed, so it never runs on a setup the user turned off.
+     */
+    const rebind = (fixer: FixerRow) =>
+      Effect.gen(function* () {
+        const agent = yield* chooseAgent(undefined, fixer);
+        if (agent.instance === fixer.instance_id) return fixer;
+        yield* Effect.logInfo("Moved a fix session off an agent that is off").pipe(
+          Effect.annotateLogs({ fixerId: fixer.id, from: fixer.instance_id, to: agent.instance }),
+        );
+        return yield* ensureFixer(fixer.pr_key, fixer.account_id, agent);
       });
 
     /** The account check every command shares: a PR's agent works through the account bound to it. */
@@ -294,7 +311,7 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
       );
     });
 
-    return { ensureFixer, boundFixer, dropTurn, end, stop, reconcile };
+    return { chooseAgent, ensureFixer, rebind, boundFixer, dropTurn, end, stop, reconcile };
   });
 
 export type Sessions = Effect.Success<ReturnType<typeof makeSessions>>;

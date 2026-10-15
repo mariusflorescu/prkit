@@ -1,5 +1,6 @@
 import { type FixerTurnId, refFromKey, type TurnScripts } from "@prkit/contracts";
 import * as Effect from "effect/Effect";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { AGENT_OFF } from "../agents/AgentProvider.ts";
 import { Agents } from "../agents/Agents.ts";
@@ -29,6 +30,7 @@ export const makeTurnBodies = (
   leftovers: TurnLeftovers,
 ) =>
   Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
     const repo = yield* RepoCache;
     const agents = yield* Agents;
     const settings = yield* FixerSettingsStore;
@@ -37,8 +39,31 @@ export const makeTurnBodies = (
     const { resumeFor, untilReported } = runs;
     const { identityFor, recordHead, repoFailure, settleReady, targetOf } = steps;
     const { agentHeld, conflictsBody, recordConflicted, verifyResolution } = conflicts;
-    const { end } = sessions;
-    /** The turn's agent instance, which may have been turned off or removed since it was queued. */
+    const { end, rebind } = sessions;
+    /**
+     * The session and the turn on the agent they run on now: the session's own instance while
+     * it is on, else the fallback `rebind` moves the session to. The turn records it, so the
+     * Fixes panel names the agent that ran.
+     */
+    const current = (fixer: FixerRow, turn: TurnRow) =>
+      Effect.gen(function* () {
+        const bound = yield* rebind(fixer).pipe(
+          Effect.catchTag("FixerError", (error) => fail("agent-auth", error.message)),
+        );
+        if (bound.instance_id === turn.instance_id) return { fixer: bound, turn };
+        yield* sql`UPDATE fixer_turns SET provider = ${bound.provider},
+          instance_id = ${bound.instance_id}, model = ${bound.model} WHERE id = ${turn.id}`;
+        return {
+          fixer: bound,
+          turn: {
+            ...turn,
+            provider: bound.provider,
+            instance_id: bound.instance_id,
+            model: bound.model,
+          },
+        };
+      });
+    /** The turn's agent instance, once `current` has moved it off one that is off. */
     const agentFor = (turn: TurnRow) =>
       Effect.gen(function* () {
         const provider = yield* agents.get(turn.instance_id);
@@ -211,10 +236,15 @@ export const makeTurnBodies = (
 
     const runTurn = (turnId: FixerTurnId) =>
       Effect.gen(function* () {
-        const turn = yield* turnById(turnId);
-        const fixer = turn === null ? null : yield* fixerById(turn.fixer_id);
-        if (turn === null || fixer === null) return;
-        yield* appendActivity(fixer.pr_key, turnId, "phase", "preparing-code");
+        const queued = yield* turnById(turnId);
+        const session = queued === null ? null : yield* fixerById(queued.fixer_id);
+        if (queued === null || session === null) return;
+        yield* appendActivity(session.pr_key, turnId, "phase", "preparing-code");
+        // A revert runs no agent, so it never needs one that is on.
+        const { fixer, turn } =
+          queued.work._tag === "revert"
+            ? { fixer: session, turn: queued }
+            : yield* current(session, queued);
         if (turn.work._tag !== "revert") {
           const provider = yield* agentFor(turn);
           const state = yield* provider.check;
@@ -236,10 +266,11 @@ export const makeTurnBodies = (
     /** The owner asked for a change to a ready result: the same session edits it, prkit re-commits. */
     const reviseBody = (turnId: FixerTurnId, note: string) =>
       Effect.gen(function* () {
-        const turn = yield* turnById(turnId);
-        const fixer = turn === null ? null : yield* fixerById(turn.fixer_id);
-        if (turn === null || fixer === null || turn.commit_sha === null || turn.head_sha === null)
-          return;
+        const ready = yield* turnById(turnId);
+        const session = ready === null ? null : yield* fixerById(ready.fixer_id);
+        if (ready === null || session === null) return;
+        const { fixer, turn } = yield* current(session, ready);
+        if (turn.commit_sha === null || turn.head_sha === null) return;
         const ref = refFromKey(fixer.pr_key);
         if (ref === null) return;
         const commitSha = turn.commit_sha;
