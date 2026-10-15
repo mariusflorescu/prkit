@@ -106,20 +106,20 @@ const seedAutomaticResolutions = (home: string, key: string, accountId: string, 
   try {
     const now = Date.now();
     db.prepare(
-      "INSERT INTO fixers (id, pr_key, account_id, provider, model, model_options, session_id, ended, created_at, updated_at) VALUES ('seeded-fixer', ?, ?, 'claude', NULL, '[]', NULL, NULL, ?, ?)",
+      "INSERT INTO fixers (id, pr_key, account_id, provider, instance_id, model, model_options, session_id, ended, created_at, updated_at) VALUES ('seeded-fixer', ?, ?, 'claude', 'claude', NULL, '[]', NULL, NULL, ?, ?)",
     ).run(key, accountId, new Date(now - 4 * 3_600_000).toISOString(), new Date(now).toISOString());
     for (let index = 1; index <= count; index++) {
       const at = new Date(now - (count + 1 - index) * 3_600_000).toISOString();
       db.prepare(
-        `INSERT INTO fixer_turns (id, fixer_id, kind, work, trigger, status, provider, head_sha, conflicted, created_at, started_at, finished_at)
+        `INSERT INTO fixer_turns (id, fixer_id, kind, work, trigger, status, provider, instance_id, head_sha, conflicted, created_at, started_at, finished_at)
           VALUES (?, 'seeded-fixer', 'conflicts', '{"_tag":"conflicts","strategy":"merge"}', 'auto',
-            '{"_tag":"discarded","reason":"upstream","message":"The new head no longer conflicts"}', 'claude', ?, '[]', ?, ?, ?)`,
+            '{"_tag":"discarded","reason":"upstream","message":"The new head no longer conflicts"}', 'claude', 'claude', ?, '[]', ?, ?, ?)`,
       ).run(`seeded-turn-${index}`, `${index}`.repeat(40), at, at, at);
     }
     const pushing = new Date(now - 30 * 60_000).toISOString();
     db.prepare(
-      `INSERT INTO fixer_turns (id, fixer_id, kind, work, trigger, status, provider, head_sha, conflicted, created_at, started_at, finished_at)
-        VALUES ('seeded-push', 'seeded-fixer', 'fix', ?, 'user', '{"_tag":"pushing"}', 'claude', ?, '[]', ?, ?, NULL)`,
+      `INSERT INTO fixer_turns (id, fixer_id, kind, work, trigger, status, provider, instance_id, head_sha, conflicted, created_at, started_at, finished_at)
+        VALUES ('seeded-push', 'seeded-fixer', 'fix', ?, 'user', '{"_tag":"pushing"}', 'claude', 'claude', ?, '[]', ?, ?, NULL)`,
     ).run(
       JSON.stringify({
         _tag: "fix",
