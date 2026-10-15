@@ -37,7 +37,7 @@ A fix turn gets a write profile (`TurnInput.access`): edits under the checkout, 
 
 ### Check scripts are the PR author's code
 
-A check script's command comes from the PR head's `package.json`, so `npm test` runs whatever the PR's author wrote, on the owner's machine, with the owner's files in reach (the child environment allowlist aside). prkit runs them only when it trusts the author (`decideScripts` in `fixers/scriptAccess.ts`):
+A check script's command comes from the PR head's `package.json`, so `npm test` runs whatever the PR's author wrote, on the owner's machine, with the owner's files in reach (the child environment allowlist aside, and under Claude the instance's own variables too: docs/features/agents.md, Environment). prkit runs them only when it trusts the author (`decideScripts` in `fixers/scriptAccess.ts`):
 
 - the PR comes from the base repository itself, not a fork, and
 - its author is one of the owner's logins on that host, or GitHub's `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`.
