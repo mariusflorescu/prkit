@@ -12,7 +12,11 @@ const LEFT_BEHIND: Record<AgentProviderKind, (entry: AgentCatalogEntry) => strin
   codex: (entry) => {
     const held = entry.login === "prkit" || entry.state.ownLogin;
     const yours =
-      entry.login === "shared" ? " The Codex home you named and its login stay as they are." : "";
+      entry.login === "prkit"
+        ? ""
+        : entry.configDir === null
+          ? " Your Codex home (~/.codex) and its login stay as they are."
+          : " The Codex home you named and its login stay as they are.";
     return held
       ? `prkit signs out the ChatGPT login it holds for it, then deletes its folder. If Codex can't confirm the sign-out, nothing is removed.${yours}`
       : `prkit deletes its own folder for it, after signing out any login it holds there.${yours}`;

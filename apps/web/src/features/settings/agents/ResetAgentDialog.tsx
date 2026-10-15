@@ -41,7 +41,11 @@ export function ResetAgentDialog({
               Its name, accent, binary, config folder and environment variables go back to how prkit
               ships them. Sensitive values saved for it are deleted.
             </p>
-            <p>Its login and the guides and fixes that use it stay as they are.</p>
+            <p>
+              {entry.configDir === null
+                ? "Its login stays, and the guides and fixes that use it carry on."
+                : `It stops using ${entry.configDir}: it runs on the login of the default folder, and the guides and fixes that use it start new conversations.`}
+            </p>
           </AlertDialog.Description>
           {reset.error !== null && !reset.isPending && (
             <p role="alert" className="mt-3 text-xs text-error-foreground">

@@ -43,7 +43,7 @@ export function AgentInstanceCard({
   const checking =
     checkingAll || (actions.check.isPending && actions.check.variables === entry.instance);
   const status = agentStatus(entry, checking);
-  const busy = actions.toggle.isPending || actions.reset.isPending;
+  const busy = actions.toggle.isPending;
   return (
     <li
       aria-label={entry.label}
