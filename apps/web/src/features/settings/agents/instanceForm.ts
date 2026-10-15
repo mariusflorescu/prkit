@@ -1,4 +1,9 @@
-import type { AgentCatalogEntry, AgentInstanceConfig, AgentProviderKind } from "@prkit/contracts";
+import {
+  type AgentCatalogEntry,
+  type AgentInstanceConfig,
+  type AgentProviderKind,
+  agentPathProblem,
+} from "@prkit/contracts";
 
 /** What the edit form holds: paths as typed, empty for the agent's own default. */
 export interface InstanceFormValues {
@@ -40,9 +45,7 @@ export const configFrom = (
 
 /** An absolute path, or one starting with `~/`. */
 export const pathProblem = (value: string) =>
-  value.trim() === "" || value.trim().startsWith("/") || value.trim().startsWith("~/")
-    ? true
-    : "Use an absolute path or one starting with ~/.";
+  value.trim() === "" ? true : (agentPathProblem(value.trim()) ?? true);
 
 /** Each kind's binary and folder fields: what they're called and why they matter. */
 export const KIND_FIELDS: Record<
@@ -61,7 +64,7 @@ export const KIND_FIELDS: Record<
     folder: {
       label: "Config folder (CLAUDE_CONFIG_DIR)",
       placeholder: "~/.claude",
-      hint: "Where this Claude Code keeps its login and sessions. Type it the way you signed in with it: Claude Code names its keychain login after this exact path.",
+      hint: "Where this Claude Code keeps its login and sessions. Spell it the way you signed in with it: Claude Code names its keychain login after the exact text, so a trailing slash or a path through a symlink is another login. prkit expands ~ the way your shell does.",
     },
   },
   codex: {

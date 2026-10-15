@@ -3,7 +3,9 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { type AgentCatalog, AgentSelection, keepsConversation } from "../src/agent.ts";
 import {
+  AgentInstanceConfig,
   AgentInstanceId,
+  defaultInstanceConfig,
   deriveInstanceId,
   environmentNameProblem,
   instanceIdProblem,
@@ -25,6 +27,10 @@ describe("deriveInstanceId", () => {
 
   it("counts up past ids that exist", () => {
     expect(deriveInstanceId("codex", "x", new Set(["codex_x", "codex_x_2"]))).toBe("codex_x_3");
+  });
+
+  it("counts an id taken in another case as taken", () => {
+    expect(deriveInstanceId("claude", "Work", new Set(["Claude_Work"]))).toBe("claude_work_2");
   });
 
   it("keeps a suffixed id within 64 characters", () => {
@@ -57,9 +63,18 @@ describe("instanceIdProblem", () => {
     );
   });
 
-  it("keeps the default ids for the defaults", () => {
+  it("keeps the default ids for the defaults, in any case", () => {
     expect(instanceIdProblem("claude", none)).toBe("An instance named 'claude' already exists.");
     expect(instanceIdProblem("codex", none)).toBe("An instance named 'codex' already exists.");
+    expect(instanceIdProblem("Claude", none)).toBe("An instance named 'Claude' already exists.");
+    expect(instanceIdProblem("CODEX", none)).toBe("An instance named 'CODEX' already exists.");
+  });
+
+  it("refuses an id that differs from another only in case", () => {
+    expect(instanceIdProblem("Claude_Work", new Set(["claude_work"]))).toBe(
+      "An instance named 'Claude_Work' already exists.",
+    );
+    expect(instanceIdProblem("claude_work", new Set(["CLAUDE_WORK"]))).not.toBeNull();
   });
 
   it("matches the schema, which trims", () => {
@@ -99,11 +114,58 @@ describe("environmentNameProblem", () => {
     expect(environmentNameProblem("DYLD_INSERT_LIBRARIES")).toContain("run code");
   });
 
+  it("refuses whole agent and runtime namespaces, not only the names known today", () => {
+    for (const name of [
+      "CLAUDE_CODE_PLUGIN_DIRS",
+      "CLAUDE_CODE_MANAGED_SETTINGS_PATH",
+      "CLAUDE_CODE_REMOTE_SETTINGS_PATH",
+      "CLAUDE_ENV_FILE",
+      "CLAUDE_CODE_SHELL",
+      "CLAUDE_CODE_SHELL_PREFIX",
+      "CLAUDE_CODE_SHELL_LAUNCHER_SCRIPT",
+      "claude_anything_new",
+      "CODEX_SANDBOX",
+      "CODEX_ANYTHING_NEW",
+    ])
+      expect(environmentNameProblem(name), name).toContain("changes how the agent runs");
+    for (const name of [
+      "BUN_OPTIONS",
+      "BUN_INSPECT",
+      "BUN_INSPECT_CONNECT_TO",
+      "NODE_EXTRA_CA_CERTS",
+    ])
+      expect(environmentNameProblem(name), name).toContain("runtime");
+    for (const name of ["ANTHROPIC_CUSTOM_HEADERS", "OPENAI_ORG_ID"])
+      expect(environmentNameProblem(name), name).toContain("off your subscription");
+  });
+
   it("takes ordinary names and refuses malformed ones", () => {
     expect(environmentNameProblem("HTTPS_PROXY")).toBeNull();
     expect(environmentNameProblem("_MY_FLAG2")).toBeNull();
     expect(environmentNameProblem("2FAST")).toContain("letters, digits");
     expect(environmentNameProblem("MY-FLAG")).toContain("letters, digits");
+  });
+});
+
+describe("AgentInstanceConfig paths", () => {
+  const decode = Schema.decodeUnknownSync(AgentInstanceConfig);
+  const config = (configDir: string, binaryPath: string | null = null) => ({
+    ...defaultInstanceConfig("claude"),
+    configDir,
+    binaryPath,
+  });
+
+  it("takes absolute paths and paths under ~/", () => {
+    expect(decode(config("/Users/octocat/.claude-work")).configDir).toBe(
+      "/Users/octocat/.claude-work",
+    );
+    expect(decode(config("~/.claude-work", "~/bin/claude")).binaryPath).toBe("~/bin/claude");
+  });
+
+  it("refuses relative paths and a bare ~", () => {
+    for (const path of [".claude-work", "~", "~octocat/.claude", "bin/claude"])
+      expect(() => decode(config(path)), path).toThrow();
+    expect(() => decode(config("/Users/octocat/.claude", "claude"))).toThrow();
   });
 });
 

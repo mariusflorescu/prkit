@@ -31,6 +31,12 @@ export type AgentInstanceId = typeof AgentInstanceId.Type;
 /** The instance that always exists for `kind`: it can be renamed, turned off and reset, never removed. */
 export const defaultInstanceId = (kind: AgentProviderKind) => AgentInstanceId.make(kind);
 export const isDefaultInstance = (id: string) => AGENT_KINDS.some((kind) => kind === id);
+/** Ids are unique whatever their case, so `Claude` or `CODEX` would pass for a default. */
+const sameId = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+/** `id` is a default's id in some case: no added instance may take it. */
+export const isReservedInstanceId = (id: string) => AGENT_KINDS.some((kind) => sameId(kind, id));
+const idTaken = (id: string, existing: ReadonlySet<string>) =>
+  isReservedInstanceId(id) || [...existing].some((other) => sameId(other, id));
 
 /** `#rrggbb`, the user's own marker for an instance. */
 export const AgentAccent = Schema.String.check(Schema.isPattern(/^#[0-9a-fA-F]{6}$/));
@@ -52,6 +58,15 @@ export const AgentEnvironmentVariable = Schema.Struct({
 });
 export type AgentEnvironmentVariable = typeof AgentEnvironmentVariable.Type;
 
+/** Why a folder or binary path can't be used, in words for the form, or null. */
+export const agentPathProblem = (path: string) =>
+  path.startsWith("/") || path.startsWith("~/") ? null : "Use a full path, starting with / or ~/.";
+
+/** An absolute path, or one under the user's home (`~/`), which prkit expands. */
+export const AgentPath = Schema.String.check(
+  Schema.makeFilter((path) => agentPathProblem(path) ?? true),
+);
+
 export const AgentLogin = Schema.Literals(["shared", "prkit"]);
 export type AgentLogin = typeof AgentLogin.Type;
 
@@ -63,9 +78,9 @@ export const AgentInstanceConfig = Schema.Struct({
   accent: Schema.NullOr(AgentAccent),
   enabled: Schema.Boolean,
   /** CLAUDE_CONFIG_DIR or CODEX_HOME; null for the agent's own default folder. `~` is expanded. */
-  configDir: Schema.NullOr(Schema.String),
+  configDir: Schema.NullOr(AgentPath),
   /** Null finds the agent on PATH. */
-  binaryPath: Schema.NullOr(Schema.String),
+  binaryPath: Schema.NullOr(AgentPath),
   environment: Schema.Array(AgentEnvironmentVariable),
   /**
    * Codex only. `shared` runs on the login of the instance's Codex home; `prkit` keeps a ChatGPT
@@ -99,7 +114,7 @@ export const instanceIdProblem = (id: string, existing: ReadonlySet<string>) => 
   if (id.length > INSTANCE_ID_MAX) return "Instance ID must be 64 characters or fewer.";
   if (!INSTANCE_ID_PATTERN.test(id))
     return "Instance ID must start with a letter and use only letters, digits, '-', or '_'.";
-  if (existing.has(id) || isDefaultInstance(id)) return `An instance named '${id}' already exists.`;
+  if (idTaken(id, existing)) return `An instance named '${id}' already exists.`;
   return null;
 };
 
@@ -126,7 +141,7 @@ export const deriveInstanceId = (
     slug === "" || label.trim() === names.name || label.trim() === names.short
       ? kind
       : `${kind}_${slug}`;
-  const taken = (id: string) => existing.has(id) || isDefaultInstance(id);
+  const taken = (id: string) => idTaken(id, existing);
   if (!taken(base)) return base;
   for (let suffix = 2; ; suffix += 1) {
     const end = `_${suffix}`;
@@ -136,9 +151,10 @@ export const deriveInstanceId = (
 };
 
 /**
- * Variables an instance may not set, and why. prkit builds every agent's environment from an
- * allowlist; these would undo that: switch the agent off the user's subscription, cross GitHub
- * accounts, reach prkit's own secrets, or run code around prkit's sandbox.
+ * Variables an instance may not set, and why: they would switch the agent off the user's
+ * subscription, cross GitHub accounts, reach prkit's own secrets, or change how the agent or its
+ * runtime starts. Whole namespaces go, since Claude Code, Codex, Bun and Node add new settings
+ * all the time and any of them could load code or settings from outside prkit's sandbox.
  */
 const BLOCKED_ENV: ReadonlyArray<{
   readonly test: (name: string) => boolean;
@@ -178,6 +194,14 @@ const BLOCKED_ENV: ReadonlyArray<{
       /^CLAUDE_(CODE_TMPDIR|AGENT_SDK)/.test(name) ||
       name === "CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING",
     why: "It could run code or change settings around prkit's sandbox.",
+  },
+  {
+    test: (name) => /^(CLAUDE|CODEX)_/.test(name),
+    why: "It changes how the agent runs: settings, plugins, shells or logins from outside prkit. Use the Config folder field to point the agent at another setup.",
+  },
+  {
+    test: (name) => /^(BUN|NODE)_/.test(name),
+    why: "It changes how the agent's runtime starts, and could load code around prkit's sandbox.",
   },
 ];
 
