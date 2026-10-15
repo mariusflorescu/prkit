@@ -135,7 +135,13 @@ export const install = (options: {
                   ),
                 ),
               );
-      }).pipe(Effect.catchTag("PlatformError", () => Effect.void));
+      }).pipe(
+        Effect.catchTag("PlatformError", (error) =>
+          Effect.logWarning("prkit couldn't list old Cursor SDKs").pipe(
+            Effect.annotateLogs({ message: error.message }),
+          ),
+        ),
+      );
       if (yield* fs.exists(entry)) {
         yield* removeStale;
         return Stream.make({ name: null, done: total, total });
