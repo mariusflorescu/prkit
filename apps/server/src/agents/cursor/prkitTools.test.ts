@@ -53,11 +53,19 @@ const server = NodeHttp.createServer((request, response) => {
               isError: body.params?.name === "submit_guide",
             }
           : { protocolVersion: "2025-06-18", capabilities: {}, serverInfo: { name: "prkit" } };
-    // Like prkit's server, one answer as a server-sent event.
+    const answer = JSON.stringify({ jsonrpc: "2.0", id: body.id, result }, null, 1);
+    if (body.method === "initialize") {
+      response.writeHead(200, { "content-type": "application/json", "mcp-session-id": "s1" });
+      return response.end(answer);
+    }
+    // A stream: a notification first, then the answer over several data lines.
     response.writeHead(200, { "content-type": "text/event-stream", "mcp-session-id": "s1" });
-    response.end(
-      `event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: body.id, result })}\n\n`,
-    );
+    const notice = JSON.stringify({ jsonrpc: "2.0", method: "notifications/message", params: {} });
+    const data = answer
+      .split("\n")
+      .map((line) => `data: ${line}`)
+      .join("\n");
+    response.end(`event: message\ndata: ${notice}\n\nevent: message\n${data}\n\n`);
   });
 });
 

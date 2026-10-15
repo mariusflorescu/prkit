@@ -18,6 +18,7 @@ export interface PrkitTool {
 }
 
 const Reply = Schema.Struct({
+  id: Schema.optionalKey(Schema.Union([Schema.Number, Schema.String])),
   result: Schema.optionalKey(Schema.Json),
   error: Schema.optionalKey(Schema.Struct({ message: Schema.String })),
 });
@@ -40,6 +41,22 @@ const Called = Schema.Struct({
 const UNREACHABLE = "prkit's server didn't answer this call. Try it again.";
 
 export class PrkitUnreachable extends Error {}
+
+/**
+ * The messages of a server-sent event stream: one per event, its `data:` lines joined with
+ * newlines. A server may send notifications before the answer, so there can be several.
+ */
+export const sseMessages = (text: string) =>
+  text
+    .split(/\r?\n\r?\n/)
+    .map((event) =>
+      event
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(line.startsWith("data: ") ? 6 : 5))
+        .join("\n"),
+    )
+    .filter((data) => data !== "");
 
 /**
  * Connects to prkit's MCP server and offers the tools in `names` it lists. Fails with
@@ -69,22 +86,19 @@ export const connectPrkitTools = async (
     }).catch(() => null);
     if (response === null || !response.ok) throw new PrkitUnreachable(UNREACHABLE);
     session = response.headers.get("mcp-session-id") ?? session;
-    return response.text();
+    const sse = (response.headers.get("content-type") ?? "").startsWith("text/event-stream");
+    const text = await response.text();
+    return sse ? sseMessages(text) : [text];
   };
 
-  /** One JSON-RPC request; the answer is JSON or a server-sent event holding it. */
+  /** One JSON-RPC request; its answer is the message carrying the request's id. */
   const request = async (method: string, params: Schema.JsonObject) => {
-    const text = await post({ id: nextId++, method, params });
-    const json = text.includes("data:")
-      ? text
-          .split("\n")
-          .filter((line) => line.startsWith("data:"))
-          .map((line) => line.slice(5).trim())
-          .join("")
-      : text;
-    const reply = Schema.decodeUnknownOption(Schema.fromJsonString(Reply))(json);
-    if (Option.isNone(reply)) throw new PrkitUnreachable(UNREACHABLE);
-    return reply.value;
+    const id = nextId++;
+    for (const message of await post({ id, method, params })) {
+      const reply = Schema.decodeUnknownOption(Schema.fromJsonString(Reply))(message);
+      if (Option.isSome(reply) && reply.value.id === id) return reply.value;
+    }
+    throw new PrkitUnreachable(UNREACHABLE);
   };
 
   await request("initialize", {
