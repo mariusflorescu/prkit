@@ -163,7 +163,7 @@ export const ReviewRow = Schema.Struct({
 const OutlineChapters = Schema.Array(
   Schema.Struct({ id: Schema.String, title: Schema.String, written: Schema.Boolean }),
 );
-const AttemptRow = Schema.Struct({
+export const AttemptRow = Schema.Struct({
   id: AttemptId,
   revision: Schema.Int,
   trigger: AttemptTrigger,

@@ -155,8 +155,9 @@ const start = async (options: StartOptions) => {
 
   // childEnv drops the caller's PRKIT_*, GH_TOKEN and GITHUB_TOKEN: the server reads
   // GitHub through the gh config dirs, never through a token in the environment. Each
-  // agent's own config folder carries over, so the default instances use the caller's
-  // setup, as the desktop app does, and journeys find its sessions where it saved them.
+  // agent's config folder carries over, so e2e and verify runs use the caller's own setup:
+  // real-agent journeys spend whichever Claude account the caller's shell points at, and
+  // find its sessions there. Stand-in agents never write to it.
   const server = NodeChildProcess.spawn(
     process.execPath,
     [

@@ -7,7 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { FixerRow, TURN_COLUMNS, TurnRow } from "../fixers/fixerRows.ts";
 import * as GuideSettingsStore from "../reviews/GuideSettingsStore.ts";
-import { ReviewRow } from "../reviews/Reviews.ts";
+import { AttemptRow, ReviewRow } from "../reviews/Reviews.ts";
 import { migrationEntries } from "./Migrations.ts";
 import * as NodeSqliteClient from "./NodeSqliteClient.ts";
 
@@ -41,7 +41,7 @@ const seed = Effect.gen(function* () {
       VALUES (${id}, ${`github.com/acme/widgets#${id}`}, 'github.com/octocat', ${provider}, 'm',
         ${`{"_tag":"watching","headSha":"abc1234","checkedAt":"${AT}"}`}, ${AT}, ${AT})`;
     yield* sql`INSERT INTO review_attempts (id, review_id, revision, trigger, run_id, phase, started_at, provider, model)
-      VALUES (${`${id}-1`}, ${id}, 1, 'first', 'run', 'done', ${AT}, ${provider}, 'm')`;
+      VALUES (${`${id}-1`}, ${id}, 1, 'first', 'run', 'checking-guide', ${AT}, ${provider}, 'm')`;
     yield* sql`INSERT INTO fixers (id, pr_key, account_id, provider, created_at, updated_at)
       VALUES (${`fixer-${provider}`}, ${`github.com/acme/widgets#${id}`}, 'github.com/octocat', ${provider}, ${AT}, ${AT})`;
     yield* sql`INSERT INTO fixer_turns (id, fixer_id, kind, work, trigger, status, provider, created_at)
@@ -89,6 +89,11 @@ describe("016_AgentInstances", () => {
             Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(TurnRow))),
           );
         expect(pairs(turns)).toEqual(both);
+        // Attempts as the review summary reads them, then the backfilled pair beside them.
+        yield* sql`SELECT id, revision, trigger, phase, head_sha, commits, started_at, finished_at,
+          narration, draft_outline, draft_version FROM review_attempts`.pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(AttemptRow))),
+        );
         const attempts =
           yield* sql`SELECT provider, instance_id FROM review_attempts ORDER BY provider`.pipe(
             Effect.flatMap(decodeRows),

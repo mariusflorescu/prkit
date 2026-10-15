@@ -3,7 +3,8 @@ import type { E2EConfig } from "e2e";
 
 // The runner passes the app command only PATH, HOME and TMPDIR. The server reads the
 // user's gh config and keychain, so it also gets the login name and locale, and each
-// agent's config folder, so the default instances run on the caller's own setup.
+// agent's config folder: real-agent journeys spend whichever Claude account the caller's
+// shell points at. Stand-in agents never write to it.
 const passThrough = Object.fromEntries(
   ["USER", "LOGNAME", "LANG", "CODEX_HOME", "CLAUDE_CONFIG_DIR"].flatMap((key) => {
     const value = process.env[key];
