@@ -287,6 +287,44 @@ test(
       });
       await addClaude(screen, "Work", work);
 
+      // A sensitive variable: kept by the server, never sent back, and kept when left blank.
+      const card = screen.getByRole("list", "Agents").getByRole("listitem", "Work");
+      await card.getByRole("button", "Edit").tap();
+      const edit = screen.getByRole("form", "Edit Work");
+      await edit.getByRole("button", "Add variable").tap();
+      await edit.getByRole("textbox", "Variable 1 name").fill("ANTHROPIC_API_KEY");
+      await edit.getByRole("button", "Save").tap();
+      await expect(edit.getByRole("alert")).toContainText("off your subscription");
+      await edit.getByRole("textbox", "Variable 1 name").fill("STAND_IN_TOKEN");
+      await edit.getByRole("button", "Mark as sensitive").tap();
+      await edit.getByLabel("Variable 1 value").fill("stand-in-secret-7f3a");
+      await edit.getByRole("button", "Save").tap();
+      await expect(screen.getByText("Saved Work")).toBeVisible({ timeout: 30_000 });
+      await card.getByRole("button", "Edit").tap();
+      // The page holds no value to show: the field is empty, with a note in its place.
+      await expect
+        .poll(() =>
+          browser.evaluate(() => {
+            const field = document.querySelector('input[aria-label="Variable 1 value"]');
+            return field instanceof HTMLInputElement
+              ? { value: field.value, placeholder: field.placeholder }
+              : null;
+          }),
+        )
+        .toEqual({ value: "", placeholder: "Saved. Type to replace it." });
+      await shoot(app, browser, "u67-edit-agent-secret");
+      await edit.getByRole("textbox", "Label").fill("Work ");
+      await edit.getByRole("button", "Save").tap();
+      await expect(screen.getByText("Saved Work").first()).toBeVisible({ timeout: 30_000 });
+      const [stored] = readRows(
+        run.home,
+        "SELECT environment FROM agent_instances WHERE id = 'claude_work'",
+      );
+      expect(JSON.stringify(stored)).not.toContain("stand-in-secret-7f3a");
+      expect(NodeFS.readFileSync(NodePath.join(run.home, "agent-secrets.json"), "utf8")).toContain(
+        "stand-in-secret-7f3a",
+      );
+
       // A fix sent to the second instance: the Fixes header says which one.
       await app.open(
         `${run.url}/pr/github.com/budget/fixtures/9?account=github.com%2Fbudget-test&tab=files`,
