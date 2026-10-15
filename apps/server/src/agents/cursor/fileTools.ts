@@ -7,7 +7,8 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import { type CheckoutPaths, MAX_LISTED } from "../checkoutPaths.ts";
+import { type CheckoutPaths, foldedName, MAX_LISTED } from "../checkoutPaths.ts";
+import { searchFiles } from "./regexSearch.ts";
 
 /**
  * The file tools prkit gives Cursor in place of Cursor's own, which reach past the checkout.
@@ -70,9 +71,21 @@ const EditArgs = Schema.Struct({
 });
 
 const isBinary = (bytes: Uint8Array) => bytes.subarray(0, 8000).includes(0);
-const isGitName = (name: string) => name.toLowerCase() === ".git";
+/** Names as macOS compares them: `.GIT` and `.ġit`-like spellings of `.git` alike (foldedName). */
+const isGitName = (name: string) => foldedName(name) === ".git";
 const clip = (line: string) =>
   line.length > MAX_LINE_CHARS ? `${line.slice(0, MAX_LINE_CHARS)}…` : line;
+
+/** Writes a file without following a link put in its place after the checks: that throws. */
+export const writeNoFollow = async (target: string, content: string) => {
+  const { O_WRONLY, O_CREAT, O_TRUNC, O_NOFOLLOW } = NodeFs.constants;
+  const handle = await NodeFs.open(target, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0o666);
+  try {
+    await handle.writeFile(content);
+  } finally {
+    await handle.close();
+  }
+};
 
 /** A pattern that starts at a root or climbs out with `..`. */
 const climbs = (pattern: string) =>
@@ -114,11 +127,38 @@ export const makeFileTools = (where: {
     const target = absolute(given);
     if (!(await canWrite(target))) return null;
     const real = await realTarget(target);
-    const parts = NodePath.relative(checkout, real).split(NodePath.sep);
+    const parts = NodePath.relative(checkout, real).split(NodePath.sep).map(foldedName);
     if (parts[0] === "..") return null;
-    if (parts.some((part) => part.toLowerCase() === ".cursor" || isGitName(part))) return null;
-    if (parts.at(-1)?.toLowerCase() === "sandbox.json") return null;
+    if (parts.some((part) => part === ".cursor" || part === ".git")) return null;
+    if (parts.at(-1) === "sandbox.json") return null;
     return real;
+  };
+
+  /**
+   * Whether `real` sits in the checkout's `.cursor` or `.git` by another spelling: APFS opens
+   * `.curſor` as `.cursor`, so the folder a write lands in is compared with them by inode too.
+   */
+  const inProtectedFolder = async (real: string) => {
+    const [top] = NodePath.relative(checkout, real).split(NodePath.sep);
+    if (top === undefined || top === "" || top === "..") return false;
+    const at = await NodeFs.stat(NodePath.join(checkout, top)).catch(() => null);
+    if (at === null) return false;
+    for (const name of [".cursor", ".git"]) {
+      const other = await NodeFs.stat(NodePath.join(checkout, name)).catch(() => null);
+      if (other !== null && other.dev === at.dev && other.ino === at.ino) return true;
+    }
+    return false;
+  };
+
+  /** The first folder on the way to `dir` that doesn't exist yet, which a write would create. */
+  const firstMissing = async (dir: string): Promise<string | null> => {
+    const exists = await NodeFs.lstat(dir).then(
+      () => true,
+      () => false,
+    );
+    if (exists) return null;
+    const parent = NodePath.dirname(dir);
+    return parent === dir ? dir : ((await firstMissing(parent)) ?? dir);
   };
 
   /** A readable file's real path and bytes, or the refusal to return instead. */
@@ -126,6 +166,8 @@ export const makeFileTools = (where: {
     const target = absolute(given);
     if (!(await canRead(target))) return OUTSIDE;
     const real = await NodeFs.realpath(target);
+    // The path that is opened is checked too, not only the one that was asked for.
+    if (!(await canRead(real))) return OUTSIDE;
     const info = await NodeFs.stat(real);
     if (info.isDirectory()) return refused("That's a folder. Use list_dir.");
     if (!info.isFile()) return refused("That isn't a regular file.");
@@ -302,20 +344,25 @@ export const makeFileTools = (where: {
               NodePath.matchesGlob(NodePath.relative(real, entry.at), args.glob))
           )
             files.push(entry.at);
-      const matches: Array<string> = [];
-      for (const file of files) {
-        const info = await NodeFs.stat(file);
-        if (info.size > MAX_FILE_BYTES) continue;
-        const bytes = await NodeFs.readFile(file);
-        if (isBinary(bytes)) continue;
-        for (const [index, line] of bytes.toString("utf8").split("\n").entries()) {
-          if (!regex.test(line)) continue;
-          matches.push(`${shown(file)}:${index + 1}: ${clip(line)}`);
-          if (matches.length >= MAX_MATCHES)
-            return ok(`${matches.join("\n")}\n(more matches not shown; narrow the search)`);
-        }
-      }
-      return ok(matches.length === 0 ? "No matches." : matches.join("\n"));
+      const found = await searchFiles({
+        files,
+        pattern: regex.source,
+        flags: regex.flags,
+        maxFileBytes: MAX_FILE_BYTES,
+        maxMatches: MAX_MATCHES,
+      });
+      if (found === "slow")
+        return refused(
+          "That pattern is too slow: prkit stopped the search after 5 seconds. Use a simpler pattern.",
+        );
+      if (found === "failed") return refused("prkit couldn't search with that pattern.");
+      if (found.matches.length === 0) return ok("No matches.");
+      const lines = found.matches.map(
+        ([file, line, text]) => `${shown(file)}:${line}: ${clip(text)}`,
+      );
+      return ok(
+        `${lines.join("\n")}${found.more ? "\n(more matches not shown; narrow the search)" : ""}`,
+      );
     }),
   };
 
@@ -333,10 +380,15 @@ export const makeFileTools = (where: {
         return refused("That content is too large for one write.");
       const target = await writeTarget(path);
       if (target === null) return NOT_WRITABLE;
+      const created = await firstMissing(NodePath.dirname(target));
       await NodeFs.mkdir(NodePath.dirname(target), { recursive: true });
-      // Checked again once its folders exist: a folder made on the way must not be a link out.
-      if ((await writeTarget(target)) !== target) return NOT_WRITABLE;
-      await NodeFs.writeFile(target, content);
+      // Checked again once its folders exist: a folder made on the way must not be a link out,
+      // nor `.cursor` or `.git` by another spelling.
+      if ((await writeTarget(target)) !== target || (await inProtectedFolder(target))) {
+        if (created !== null) await NodeFs.rm(created, { recursive: true, force: true });
+        return NOT_WRITABLE;
+      }
+      await writeNoFollow(target, content);
       return ok(`Wrote ${shown(target)}.`);
     }),
   };
@@ -357,7 +409,7 @@ export const makeFileTools = (where: {
     readOnly: false,
     run: guarded(EditArgs, async (args) => {
       const target = await writeTarget(args.path);
-      if (target === null) return NOT_WRITABLE;
+      if (target === null || (await inProtectedFolder(target))) return NOT_WRITABLE;
       const file = await openFile(target);
       if ("ok" in file) return file;
       if (isBinary(file.bytes)) return refused("That's a binary file; prkit edits text only.");
@@ -373,7 +425,7 @@ export const makeFileTools = (where: {
       const next = text.split(args.old_string).join(args.new_string);
       if (Buffer.byteLength(next) > MAX_FILE_BYTES)
         return refused("The edited file would be too large.");
-      await NodeFs.writeFile(target, next);
+      await writeNoFollow(target, next);
       return ok(`Edited ${shown(target)}.`);
     }),
   };

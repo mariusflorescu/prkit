@@ -17,6 +17,12 @@ export const spellingsOf = (fs: FileSystem.FileSystem, dirs: ReadonlyArray<strin
 type Place = "checkout" | "git" | "readable" | "outside";
 
 /**
+ * A file name as macOS compares it, near enough: APFS ignores case and folds compatibility
+ * spellings, so `.GIT` and `.curſor` (a long s) open `.git` and `.cursor`.
+ */
+export const foldedName = (name: string) => name.normalize("NFKC").toLowerCase();
+
+/**
  * A path a command or tool reads. `option` when the command could take a match of it as
  * an option: anywhere before a command's `--`, never for the Read, Grep and Glob tools.
  */
@@ -129,7 +135,7 @@ export const checkoutPaths = (
         return path
           .relative(checkout, real)
           .split(path.sep)
-          .some((part) => part.toLowerCase() === ".git")
+          .some((part) => foldedName(part) === ".git")
           ? "git"
           : "checkout";
       return readable.some(under) ? "readable" : "outside";

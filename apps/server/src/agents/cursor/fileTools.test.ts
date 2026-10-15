@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
 import { makeTestCheckout, removeTestCheckout } from "../testCheckout.ts";
-import { type FileTool, makeFileTools, MAX_FILE_BYTES } from "./fileTools.ts";
+import { type FileTool, makeFileTools, MAX_FILE_BYTES, writeNoFollow } from "./fileTools.ts";
 
 let at: Effect.Success<ReturnType<typeof makeTestCheckout>>;
 let checkout = "";
@@ -180,5 +180,34 @@ describe("prkit's file tools for Cursor", () => {
     expect(await NodeFs.readdir(`${at.outside}/dir`)).toEqual(["inside.txt"]);
     await expect(NodeFs.access(`${at.root}/escape.txt`)).rejects.toThrow();
     await expect(NodeFs.access(`${checkout}/.cursor`)).rejects.toThrow();
+  });
+
+  it("refuses .cursor and sandbox.json spelled so APFS opens them anyway, and leaves no folder", async () => {
+    for (const path of [".curſor/ſandbox.json", ".curſor/hooks.json", ".CURSOR/x", "ſandbox.json"])
+      expect(await use(writeTools, "write_file", { path, content: "{}" }), path).toMatchObject({
+        ok: false,
+      });
+    await expect(NodeFs.stat(`${checkout}/.cursor/sandbox.json`)).rejects.toThrow();
+    await expect(NodeFs.stat(`${checkout}/.cursor`)).rejects.toThrow();
+    await expect(NodeFs.stat(`${checkout}/sandbox.json`)).rejects.toThrow();
+  });
+
+  // The test's own timeout is the proof it returned within seconds: unbounded, this takes minutes.
+  it("stops a search whose pattern backtracks for too long, and keeps working", async () => {
+    await NodeFs.writeFile(`${checkout}/slow.txt`, `${"a".repeat(40)}b\n`);
+    expect(await use(readTools, "grep", { pattern: "(a+)+$", path: "slow.txt" })).toMatchObject({
+      ok: false,
+      text: expect.stringContaining("too slow"),
+    });
+    expect(await use(readTools, "grep", { pattern: "b$", path: "slow.txt" })).toEqual({
+      ok: true,
+      text: `slow.txt:1: ${"a".repeat(40)}b`,
+    });
+  }, 12_000);
+
+  it("never writes through a link put where a file was checked", async () => {
+    await NodeFs.symlink(`${at.outside}/secret.txt`, `${checkout}/swapped.txt`);
+    await expect(writeNoFollow(`${checkout}/swapped.txt`, "x")).rejects.toThrow();
+    expect(await NodeFs.readFile(`${at.outside}/secret.txt`, "utf8")).toBe("secret\n");
   });
 });
