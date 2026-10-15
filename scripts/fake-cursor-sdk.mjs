@@ -1,15 +1,22 @@
 /**
  * A stand-in for Cursor's SDK (`@cursor/sdk`), so tests can install, sign in and run Cursor
- * without Cursor. `tests/fakeCursor.ts` lays it out as an SDK package folder, with the folder
- * that steers it baked in as CONTROL, and prkit loads it through PRKIT_CURSOR_SDK_PATH or the
- * installer. Plain JavaScript: the installer puts it under node_modules, where Node strips no types.
+ * without Cursor. `tests/fakeCursor.ts` lays it out as an SDK package folder, with the address
+ * of the control server that steers it (apps/server/src/agents/cursor/fakeControl.ts) baked in as CONTROL, and prkit
+ * loads it through PRKIT_CURSOR_SDK_PATH or the installer. Plain JavaScript: the installer puts
+ * it under node_modules, where Node strips no types. prkit runs it in the runner's sandbox like
+ * the real SDK, so it reaches the test only through that server.
  *
- * In CONTROL:
+ * In the control folder:
  *   approve-login  a sign-in waiting in the browser finishes
  *   reject-keys    Cursor turns every key down
  *   hold           a turn keeps writing until the file is removed
  *   many-models    Cursor lists 400 more models, more than a pipe takes at once
  *   builtin-read   a turn calls Cursor's own read tool, then still tries submit_guide
+ *   builtin-overlap  a turn starts submit_guide, starts Cursor's own read tool while it runs,
+ *                  then lets submit_guide finish
+ *   shell-output   a turn reports a shell's output, as Cursor's own shell tool would
+ *   escape.json    paths a turn reads and writes with Node's own fs first, past prkit's tools,
+ *                  `{ "reads": [...], "writes": [...] }`; each outcome goes to escape.log
  *   disposed.log   each agent disposed, written a moment after the dispose starts, as the
  *                  SDK's own store writes land late
  *   probe.json     calls a turn makes first, `[{ "tool": "read_file", "args": {...} }]`
@@ -29,7 +36,18 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
 const CONTROL = process.env.FAKE_CURSOR_CONTROL ?? "";
-const flagged = (name) => CONTROL !== "" && NodeFS.existsSync(NodePath.join(CONTROL, name));
+/** A control server's answer, or null without one. */
+const ask = async (path, body) => {
+  if (CONTROL === "") return null;
+  const response = await fetch(
+    `${CONTROL}/${path}`,
+    body === undefined ? {} : { method: "POST", body },
+  );
+  return response.ok ? response.text() : null;
+};
+const flagged = async (name) => (await ask(`flag/${name}`)) === "1";
+const log = (name, value) =>
+  ask(`log/${name}`, typeof value === "string" ? value : JSON.stringify(value));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class AuthenticationError extends Error {}
@@ -73,19 +91,19 @@ export class JsonlLocalAgentStore {
   }
 }
 
-const checkKey = (apiKey) => {
-  if (flagged("reject-keys") || !String(apiKey ?? "").startsWith("stand-in-"))
+const checkKey = async (apiKey) => {
+  if ((await flagged("reject-keys")) || !String(apiKey ?? "").startsWith("stand-in-"))
     throw new AuthenticationError("Invalid User API Key");
 };
 
 export const Cursor = {
   me: async ({ apiKey } = {}) => {
-    checkKey(apiKey);
+    await checkKey(apiKey);
     return { apiKeyName: "prkit", createdAt: new Date(0).toISOString() };
   },
   models: {
     list: async ({ apiKey } = {}) => {
-      checkKey(apiKey);
+      await checkKey(apiKey);
       return [
         { id: "auto", displayName: "Auto" },
         {
@@ -106,7 +124,7 @@ export const Cursor = {
             { params: [{ id: "effort", value: "high" }], displayName: "High", isDefault: true },
           ],
         },
-        ...(flagged("many-models")
+        ...((await flagged("many-models"))
           ? Array.from({ length: 400 }, (_, index) => ({
               id: `stand-in-extra-${index}`,
               displayName: `Stand-in extra ${index}`,
@@ -119,7 +137,7 @@ export const Cursor = {
   auth: {
     login: async ({ onLoginUrl, store }) => {
       onLoginUrl?.("http://127.0.0.1:9/cursor-stand-in-login");
-      while (!flagged("approve-login")) await sleep(200);
+      while (!(await flagged("approve-login"))) await sleep(200);
       const expires = Date.now() + 90 * 86_400_000;
       await store.save({
         version: 1,
@@ -172,11 +190,7 @@ class StandInAgent {
           : await found.execute(args, { toolCallId: callId });
       const ok = result.isError !== true;
       const text = (result.content ?? []).map((part) => part.text ?? "").join("\n");
-      if (CONTROL !== "")
-        NodeFS.appendFileSync(
-          NodePath.join(CONTROL, "calls.log"),
-          `${JSON.stringify({ tool, args, ok, text })}\n`,
-        );
+      await log("calls.log", { tool, args, ok, text });
       await onDelta({
         update: {
           type: "tool-call-completed",
@@ -194,15 +208,71 @@ class StandInAgent {
       return { ok, text };
     };
     const work = async () => {
-      const probe = NodePath.join(CONTROL, "probe.json");
-      if (CONTROL !== "" && NodeFS.existsSync(probe))
-        for (const step of JSON.parse(NodeFS.readFileSync(probe, "utf8")))
-          await call(step.tool, step.args);
+      const escape = await ask("file/escape.json");
+      if (escape !== null) {
+        const { reads = [], writes = [] } = JSON.parse(escape);
+        const attempt = async (op, path, run) => {
+          try {
+            run();
+            await log("escape.log", { op, path, ok: true, code: null });
+          } catch (error) {
+            await log("escape.log", { op, path, ok: false, code: error.code ?? "unknown" });
+          }
+        };
+        for (const path of reads) await attempt("read", path, () => NodeFS.readFileSync(path));
+        for (const path of writes)
+          await attempt("write", path, () => NodeFS.writeFileSync(path, "written past prkit\n"));
+      }
+      const probe = await ask("file/probe.json");
+      if (probe !== null) for (const step of JSON.parse(probe)) await call(step.tool, step.args);
       await onDelta({ update: { type: "text-delta", text: "Reading the change." } });
       await call("report_progress", { message: "Reading the change with a stand-in Cursor" });
-      while (flagged("hold") && !state.cancelled) await sleep(200);
+      while ((await flagged("hold")) && !state.cancelled) await sleep(200);
       if (state.cancelled) return { status: "cancelled" };
-      if (flagged("builtin-read")) {
+      if (await flagged("shell-output")) {
+        await onDelta({ update: { type: "shell-output-delta", event: { stdout: "hosts\n" } } });
+        await call("submit_guide", { summary: "After a shell of Cursor's own", chapters: [] });
+        return { status: state.cancelled ? "cancelled" : "finished" };
+      }
+      if (await flagged("builtin-overlap")) {
+        const files = changedFiles(message);
+        const args = {
+          summary: "A guide finishing while Cursor's own tool runs.",
+          chapters: [{ title: "Every change", files }],
+        };
+        const callId = NodeCrypto.randomUUID();
+        const toolCall = {
+          type: "mcp",
+          args: { providerIdentifier: "custom-user-tools", toolName: "submit_guide", args },
+        };
+        await onDelta({ update: { type: "tool-call-started", callId, toolCall } });
+        const running = tools.submit_guide.execute(args, { toolCallId: callId });
+        await onDelta({
+          update: {
+            type: "tool-call-started",
+            callId: NodeCrypto.randomUUID(),
+            toolCall: { type: "read", args: { path: "/etc/hosts" } },
+          },
+        });
+        const result = await running;
+        const text = (result.content ?? []).map((part) => part.text ?? "").join("\n");
+        await log("calls.log", { tool: "submit_guide", args, ok: result.isError !== true, text });
+        await onDelta({
+          update: {
+            type: "tool-call-completed",
+            callId,
+            toolCall: {
+              ...toolCall,
+              result: {
+                status: "success",
+                value: { content: [{ text: { text } }], isError: result.isError === true },
+              },
+            },
+          },
+        });
+        return { status: "finished" };
+      }
+      if (await flagged("builtin-read")) {
         const callId = NodeCrypto.randomUUID();
         const toolCall = { type: "read", args: { path: "/etc/hosts" } };
         await onDelta({ update: { type: "tool-call-started", callId, toolCall } });
@@ -248,43 +318,37 @@ class StandInAgent {
   close() {}
   async [Symbol.asyncDispose]() {
     await sleep(300);
-    if (CONTROL !== "")
-      NodeFS.appendFileSync(NodePath.join(CONTROL, "disposed.log"), `${this.agentId}\n`);
+    await log("disposed.log", this.agentId);
   }
 }
 
-const record = (options, resumed) => {
-  if (CONTROL === "") return;
-  NodeFS.appendFileSync(
-    NodePath.join(CONTROL, "runs.log"),
-    `${JSON.stringify({
-      tools: options.tools ?? null,
-      disallowedTools: options.disallowedTools ?? null,
-      settingSources: options.local?.settingSources ?? null,
-      sandbox: options.local?.sandboxOptions?.enabled ?? null,
-      mcpServers: Object.keys(options.mcpServers ?? {}),
-      customTools: Object.keys(options.local?.customTools ?? {}).sort(),
-      cwd: options.local?.cwd ?? null,
-      home: process.env.HOME ?? null,
-      proxy: process.env.HTTPS_PROXY ?? null,
-      keyInEnv: process.env.CURSOR_API_KEY !== undefined,
-      resumed,
-    })}\n`,
-  );
-};
+const record = (options, resumed) =>
+  log("runs.log", {
+    tools: options.tools ?? null,
+    disallowedTools: options.disallowedTools ?? null,
+    settingSources: options.local?.settingSources ?? null,
+    sandbox: options.local?.sandboxOptions?.enabled ?? null,
+    mcpServers: Object.keys(options.mcpServers ?? {}),
+    customTools: Object.keys(options.local?.customTools ?? {}).sort(),
+    cwd: options.local?.cwd ?? null,
+    home: process.env.HOME ?? null,
+    proxy: process.env.HTTPS_PROXY ?? null,
+    keyInEnv: process.env.CURSOR_API_KEY !== undefined,
+    resumed,
+  });
 
 export const Agent = {
   create: async (options) => {
-    checkKey(options.apiKey);
-    record(options, false);
+    await checkKey(options.apiKey);
+    await record(options, false);
     const agentId = `agent-${NodeCrypto.randomUUID()}`;
     options.local.store.add(agentId);
     return new StandInAgent(agentId, options);
   },
   resume: async (agentId, options) => {
-    checkKey(options.apiKey);
+    await checkKey(options.apiKey);
     if (!options.local.store.list().includes(agentId)) throw new Error("Agent not found");
-    record(options, true);
+    await record(options, true);
     return new StandInAgent(agentId, options);
   },
   get: async (agentId, options) => {

@@ -12,6 +12,7 @@ import {
   isDefaultInstance,
 } from "@prkit/contracts";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -33,6 +34,7 @@ export class Agents extends Context.Service<Agents, Effect.Success<typeof make>>
 ) {}
 
 type BuildServices =
+  | Crypto.Crypto
   | FileSystem.FileSystem
   | Path.Path
   | ChildProcessSpawner.ChildProcessSpawner

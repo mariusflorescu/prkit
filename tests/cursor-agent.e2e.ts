@@ -74,7 +74,7 @@ const openAgents = async (screen: Screen, browser: Browser) => {
 /** Settings > Agents: installs Cursor support from its card, then signs in for prkit. */
 const installAndSignIn = async (
   fixtures: Pick<TestFixtures, "app" | "screen"> & { browser: Browser },
-  cursor: ReturnType<typeof setUpFakeCursor>,
+  cursor: Awaited<ReturnType<typeof setUpFakeCursor>>,
   shots: boolean,
 ) => {
   const { app, screen, browser } = fixtures;
@@ -116,7 +116,7 @@ test(
     // On the fake GitHub: the PR merges just before its turn starts, so the turn ends at once.
     const fake = await startFakeGitHub(NAME);
     const claude = setUpFakeClaude(NAME);
-    const cursor = setUpFakeCursor(NAME);
+    const cursor = await setUpFakeCursor(NAME);
     try {
       const run = startFakeInstance(NAME, fake, [
         "--claude",
@@ -258,7 +258,7 @@ test(
   { skip: NEEDS_FIXTURE, timeout: 300_000 },
   async ({ app, screen, browser }) => {
     const claude = setUpFakeClaude(`${NAME}-fixture`);
-    const cursor = setUpFakeCursor(`${NAME}-fixture`);
+    const cursor = await setUpFakeCursor(`${NAME}-fixture`);
     const fixture = createFixFixture(`${Date.now()}`);
     try {
       const run = startInstance(`${NAME}-fixture`, [

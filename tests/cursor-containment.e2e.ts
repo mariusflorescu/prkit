@@ -1,4 +1,5 @@
 import * as NodeChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeHttp from "node:http";
 import * as NodePath from "node:path";
@@ -7,10 +8,11 @@ import { type Browser, describe, test } from "@e2e-dev/web";
 import { expect, type Screen, type TestFixtures } from "e2e";
 import * as Schema from "effect/Schema";
 
-import { eventText } from "../apps/server/src/agents/cursor/protocol.ts";
+import { eventMark, eventText } from "../apps/server/src/agents/cursor/protocol.ts";
 import { childEnv } from "../packages/contracts/src/childEnv.ts";
 import { repoRoot } from "../scripts/verify-run.ts";
 import { startInstance, stopFakeInstance } from "./fakeGitHub.ts";
+import { draftOn } from "./fixActions.ts";
 import { closeFixFixture, createFixFixture } from "./fixFixture.ts";
 import { FIXTURE_REPO, NEEDS_FIXTURE, prPath, readRows } from "./fixturePr.ts";
 import { LIMITS_PATH } from "./reviewFixture.ts";
@@ -18,10 +20,11 @@ import { LIMITS_PATH } from "./reviewFixture.ts";
 /**
  * Cursor's agent, live: the guarantees prkit's Cursor setup makes, checked against the real SDK
  * on the user's Cursor plan. It needs an instance home signed in to Cursor once, by hand
- * (`.e2e/homes/cursor-live`, kept between runs, see the fix-agent feature file), and spends three
- * Cursor runs: one through prkit's own Cursor runner on a local repository with links that lead
- * out and every kind of project setting Cursor could load (containment), and two through the app
- * on a fixture PR (a guide through prkit's MCP tools, then a resumed turn that is stopped).
+ * (`.e2e/homes/cursor-live`, kept between runs, see the fix-agent feature file), and spends one
+ * Cursor run per test: one through prkit's own Cursor runner on a local repository with links
+ * that lead out and every kind of project setting Cursor could load (containment), and the rest
+ * through the app, in the runner's sandbox, on a fixture PR (a guide through prkit's MCP tools,
+ * an edit-only fix, and a resumed turn that is stopped).
  */
 const LIVE = process.env.PRKIT_E2E_CURSOR === "1";
 const SKIP =
@@ -225,9 +228,10 @@ const startMcp = async () => {
 };
 
 /**
- * One turn on prkit's Cursor runner, started the way the server starts it (CursorAgent.ts):
- * childEnv's allowlist plus the instance's HOME and the turn's TMPDIR, its own process group, the
- * request on stdin. Resolves with every event once the runner exits.
+ * One turn on prkit's Cursor runner, started the way the server starts it (CursorAgent.ts) but
+ * outside its macOS sandbox (seatbelt.ts), so what refuses here is prkit's own tools: childEnv's
+ * allowlist plus the instance's HOME and the turn's TMPDIR, its own process group, the request on
+ * stdin. Resolves with every event once the runner exits.
  */
 const runTurn = (input: {
   readonly home: string;
@@ -242,6 +246,7 @@ const runTurn = (input: {
   };
 }) =>
   new Promise<ReadonlyArray<RunnerEvent>>((resolve, reject) => {
+    const nonce = NodeCrypto.randomBytes(16).toString("hex");
     const child = NodeChildProcess.spawn(process.execPath, [RUNNER], {
       cwd: input.cwd,
       env: childEnv(process.env, { HOME: input.home, TMPDIR: input.tmp }),
@@ -254,7 +259,7 @@ const runTurn = (input: {
     child.on("exit", () =>
       resolve(
         stdout.split("\n").flatMap((line) => {
-          const text = eventText(line);
+          const text = eventText(line, eventMark(nonce));
           if (text === null) return [];
           try {
             return [Schema.decodeUnknownSync(RunnerEvent)(text)];
@@ -267,6 +272,7 @@ const runTurn = (input: {
     child.stdin.end(
       `${JSON.stringify({
         op: "turn",
+        nonce,
         sdk: SDK,
         apiKey: null,
         cwd: input.cwd,
@@ -413,6 +419,60 @@ describe("Cursor's agent, live", { tags: ["agent", "cursor"], skip: NEEDS_FIXTUR
         expect(bearer).toEqual([]);
         expect(scans).toBeGreaterThan(0);
         expect(live).toBe(0);
+      } finally {
+        stopFakeInstance(NAME, { keepHome: true });
+        closeFixFixture(fixture);
+      }
+    },
+  );
+
+  test(
+    "an edit-only fix written by real Cursor inside the runner's sandbox, committed by prkit",
+    { timeout: 1_500_000 },
+    async ({ app, screen, browser }) => {
+      test.skip(!LIVE, SKIP);
+      const fixture = createFixFixture(`${Date.now()}`);
+      const run = startInstance(NAME, ["--cursor-sdk", SDK]);
+      try {
+        await browser.setViewport({ width: 1280, height: 860 });
+        await app.open(run.openUrl);
+        const card = (await openAgents(screen, browser)).getByRole("listitem", "Cursor");
+        await expect(card.getByRole("status", "Cursor status")).toHaveText(/^Signed in · /, {
+          timeout: 60_000,
+        });
+        await app.open(`${run.url}${prPath(FIXTURE_REPO, fixture.number, "files")}`);
+        await expect(screen.getByRole("region", LIMITS_PATH)).toBeVisible({ timeout: 60_000 });
+        await draftOn(
+          { app, screen, browser },
+          3,
+          "Add a one-line comment above this line saying what the limit is for.",
+        );
+        await screen.getByRole("button", "Review, 1 pending").first().tap();
+        await screen
+          .getByRole("group", "Where your comments go")
+          .getByRole("button", "Send to agent")
+          .tap();
+        const send = screen.getByRole("dialog", "Send to agent");
+        await send.getByRole("button", /^Agent and model: /).tap({ timeout: 30_000 });
+        await screen
+          .getByRole("group", /^Cursor/)
+          .getByRole("option")
+          .first()
+          .tap({
+            timeout: 60_000,
+          });
+        await send.getByRole("button", "Send 1 comment to agent").tap();
+        await screen.getByRole("button", "Open Fixes").tap({ timeout: 30_000 });
+        const fixes = screen.getByRole("list", "Fixes");
+        await expect(fixes.getByText(/^prkit committed \w+: /)).toBeVisible({ timeout: 900_000 });
+        await expect(fixes.getByRole("region", LIMITS_PATH)).toBeVisible();
+        await app.screenshot("u68-live-fix");
+        const [turn] = readRows(
+          run.home,
+          "SELECT json_extract(status, '$._tag') AS state FROM fixer_turns ORDER BY created_at DESC LIMIT 1",
+        );
+        save("fix-turn.json", JSON.stringify(turn ?? null, null, 2));
+        expect(turn?.state).toBe("ready");
       } finally {
         stopFakeInstance(NAME, { keepHome: true });
         closeFixFixture(fixture);

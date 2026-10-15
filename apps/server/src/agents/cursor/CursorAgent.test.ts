@@ -1,8 +1,11 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- runs the runner itself, to read its exit code
+import * as NodeChildProcess from "node:child_process";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- a stand-in for prkit's MCP server, outside Effect
 import * as NodeHttp from "node:http";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { AgentInstanceId } from "@prkit/contracts";
+import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -29,6 +32,7 @@ import {
 } from "../AgentProvider.ts";
 import { checkoutFor } from "../../repo/gitRun.ts";
 import * as CursorAgent from "./CursorAgent.ts";
+import { startCursorControl } from "./fakeControl.ts";
 import { SDK_PATH_VARIABLE } from "./sdkLoader.ts";
 import { ALLOWED_TOOLS, DENIED_TOOLS } from "./tools.ts";
 
@@ -51,6 +55,7 @@ const Run = Schema.fromJsonString(
 let root = "";
 let home = "";
 let control = "";
+let controlServer = { url: "", close: () => Promise.resolve() };
 let mcpUrl = "";
 /** Each MCP call prkit's stand-in server got: its method and tool, and whether it had the token. */
 const mcpCalls: Array<{
@@ -99,6 +104,7 @@ beforeAll(async () => {
   );
   home = `${root}/prkit-home`;
   control = `${root}/control`;
+  controlServer = await startCursorControl(control);
   // The stand-in SDK as a package folder, steered from `control`.
   const source = await fsRun(
     Effect.gen(function* () {
@@ -117,7 +123,7 @@ beforeAll(async () => {
       yield* fs.writeFileString(`${root}/sdk/package.json`, '{"type":"module"}\n');
       yield* fs.writeFileString(
         `${root}/sdk/dist/esm/index.js`,
-        source.replace('process.env.FAKE_CURSOR_CONTROL ?? ""', JSON.stringify(control)),
+        source.replace('process.env.FAKE_CURSOR_CONTROL ?? ""', JSON.stringify(controlServer.url)),
       );
     }),
   );
@@ -127,6 +133,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   delete process.env[SDK_PATH_VARIABLE];
+  await controlServer.close();
   await new Promise((resolve) => mcpServer.close(resolve));
   await fsRun(
     Effect.gen(function* () {
@@ -156,6 +163,7 @@ const run = <A, E>(
   effect: Effect.Effect<
     A,
     E,
+    | Crypto.Crypto
     | FileSystem.FileSystem
     | Path.Path
     | ChildProcessSpawner.ChildProcessSpawner
@@ -207,6 +215,62 @@ const runs = () =>
         .split("\n")
         .filter((line) => line !== "")
         .map((line) => Schema.decodeUnknownSync(Run)(line));
+    }),
+  );
+
+const Escape = Schema.fromJsonString(
+  Schema.Struct({
+    op: Schema.String,
+    path: Schema.String,
+    ok: Schema.Boolean,
+    code: Schema.NullOr(Schema.String),
+  }),
+);
+
+/**
+ * What the stand-in's next turns do with Node's own fs before anything else, past prkit's tools:
+ * read `reads` and write `writes`. Returns each outcome, as `path: ok` or `path: <code>`.
+ */
+const escapeTurn = async <A>(
+  steps: { readonly reads: ReadonlyArray<string>; readonly writes: ReadonlyArray<string> },
+  turn: () => Promise<A>,
+) => {
+  await fsRun(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      yield* fs.remove(`${control}/escape.log`, { force: true });
+      yield* fs.writeFileString(`${control}/escape.json`, JSON.stringify(steps));
+    }),
+  );
+  await turn();
+  return fsRun(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      yield* fs.remove(`${control}/escape.json`);
+      return (yield* fs.readFileString(`${control}/escape.log`))
+        .split("\n")
+        .filter((line) => line !== "")
+        .map((line) => Schema.decodeUnknownSync(Escape)(line))
+        .map((entry) => `${entry.op} ${entry.path}: ${entry.ok ? "ok" : entry.code}`);
+    }),
+  );
+};
+
+/** Files the runner must never reach: a stand-in for the user's home, and prkit's own data. */
+const privateFiles = () =>
+  fsRun(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      yield* fs.makeDirectory(`${root}/user-home/.ssh`, { recursive: true });
+      yield* fs.writeFileString(`${root}/user-home/.ssh/id_marker`, "MARKER\n");
+      yield* fs.writeFileString(`${home}/agent-secrets.json`, "{}\n");
+      yield* fs.makeDirectory(`${home}/cursor-instances/other/home`, { recursive: true });
+      yield* fs.writeFileString(`${home}/cursor-instances/other/home/auth.json`, "{}\n");
+      return [
+        `${root}/user-home/.ssh/id_marker`,
+        `${home}/agent-secrets.json`,
+        `${home}/cursor-instances/other/home/auth.json`,
+      ];
     }),
   );
 
@@ -463,6 +527,79 @@ describe("Cursor turns", () => {
     expect(ok.at(-1)).toEqual({ _tag: "finished", outcome: "completed", message: null });
   });
 
+  it("fails the turn when Cursor's own tool starts while submit_guide runs", async () => {
+    const provider = await instance("cursor_overlap", { env: { CURSOR_API_KEY: "stand-in-key" } });
+    await flag("builtin-overlap", true);
+    const input = await turnInput("overlap", { _tag: "read-only", tmpDir: `${root}/tmp-overlap` });
+    const seen: Array<AgentEvent> = [];
+    const exit = await Effect.runPromiseExit(
+      provider.runTurn(input).pipe(
+        Stream.runForEach((event) => Effect.sync(() => seen.push(event))),
+        Effect.provideService(References.MinimumLogLevel, "Error"),
+      ),
+    );
+    await flag("builtin-overlap", false);
+    expect(Exit.isFailure(exit) && JSON.stringify(exit.cause)).toContain(
+      "Cursor tried to use one of its own tools",
+    );
+    // submit_guide's call was seen, but never as done: a review keeps a guide only after that.
+    expect(
+      seen.some((event) => event._tag === "tool" && event.label === "Submitted the guide"),
+    ).toBe(true);
+    expect(seen.filter((event) => event._tag === "tool-done" && event.ok)).toHaveLength(1);
+    expect(seen.at(-1)?._tag).not.toBe("tool-done");
+  });
+
+  it("fails the turn when Cursor reports a shell's output", async () => {
+    const provider = await instance("cursor_shell", { env: { CURSOR_API_KEY: "stand-in-key" } });
+    mcpCalls.length = 0;
+    await flag("shell-output", true);
+    const input = await turnInput("shell", { _tag: "read-only", tmpDir: `${root}/tmp-shell` });
+    const exit = await Effect.runPromiseExit(
+      provider
+        .runTurn(input)
+        .pipe(Stream.runCollect, Effect.provideService(References.MinimumLogLevel, "Error")),
+    );
+    await flag("shell-output", false);
+    expect(Exit.isFailure(exit) && JSON.stringify(exit.cause)).toContain(
+      "Cursor tried to use one of its own tools",
+    );
+    expect(
+      mcpCalls.filter((call) => call.method === "tools/call").map((call) => call.tool),
+    ).toEqual(["report_progress"]);
+  });
+
+  it("exits non-zero when Cursor ran one of its own tools", async () => {
+    const input = await turnInput("exit", { _tag: "read-only", tmpDir: `${root}/tmp-exit` });
+    await flag("builtin-read", true);
+    const code = await new Promise<number | null>((resolve) => {
+      const child = NodeChildProcess.spawn(
+        process.execPath,
+        [new URL("./runner.ts", import.meta.url).pathname],
+        { cwd: input.cwd, env: { PATH: process.env.PATH, HOME: `${root}/exit-home` } },
+      );
+      child.on("exit", resolve);
+      child.stdin.end(
+        `${JSON.stringify({
+          op: "turn",
+          nonce: "n",
+          sdk: `${root}/sdk`,
+          apiKey: "stand-in-key",
+          cwd: input.cwd,
+          readableDirs: [],
+          message: input.prompt,
+          resumeSessionId: null,
+          model: null,
+          params: [],
+          fileTools: ["read_file"],
+          mcp: { url: mcpUrl, token: TOKEN, tools: [...GUIDE_TOOLS] },
+        })}\n`,
+      );
+    });
+    await flag("builtin-read", false);
+    expect(code).toBe(1);
+  });
+
   it("hears a turn end only once Cursor saved it, through the SDK's own stray output", async () => {
     const provider = await instance("cursor_dispose", { env: { CURSOR_API_KEY: "stand-in-key" } });
     const all = await events(
@@ -507,6 +644,95 @@ describe("Cursor turns", () => {
       }
     };
     expect(alive(pid)).toBe(false);
+  });
+});
+
+describe("Cursor's sandbox", () => {
+  it("keeps a guide's runner to reading its checkout, even through Node's own fs", async () => {
+    // A proxy's CA file is the one file outside an instance variable opens.
+    const ca = `${root}/proxy-ca/ca.pem`;
+    await fsRun(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        yield* fs.makeDirectory(`${root}/proxy-ca`, { recursive: true });
+        yield* fs.writeFileString(ca, "not a real certificate\n");
+        yield* fs.writeFileString(`${root}/proxy-ca/other.pem`, "beside it\n");
+      }),
+    );
+    const provider = await instance("cursor_box", {
+      env: { CURSOR_API_KEY: "stand-in-key", NODE_EXTRA_CA_CERTS: ca },
+    });
+    const outside = await privateFiles();
+    const tmpDir = `${root}/tmp-box`;
+    const input = await turnInput("box", { _tag: "read-only", tmpDir });
+    await fsRun(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        yield* fs.makeDirectory(tmpDir, { recursive: true });
+      }),
+    );
+    const outcomes = await escapeTurn(
+      {
+        reads: [`${input.cwd}/src/a.js`, ca, `${root}/proxy-ca/other.pem`, ...outside],
+        writes: [`${input.cwd}/src/a.js`, `${root}/written-outside.txt`, `${tmpDir}/scratch.txt`],
+      },
+      () => events(provider, input),
+    );
+    expect(outcomes).toEqual([
+      `read ${input.cwd}/src/a.js: ok`,
+      `read ${ca}: ok`,
+      `read ${root}/proxy-ca/other.pem: EPERM`,
+      ...outside.map((file) => `read ${file}: EPERM`),
+      `write ${input.cwd}/src/a.js: EPERM`,
+      `write ${root}/written-outside.txt: EPERM`,
+      `write ${tmpDir}/scratch.txt: ok`,
+    ]);
+  });
+
+  it("lets a fix's runner write its checkout, but never .git, .cursor or outside", async () => {
+    const provider = await instance("cursor_boxfix", { env: { CURSOR_API_KEY: "stand-in-key" } });
+    const outside = await privateFiles();
+    const tmpDir = `${root}/tmp-boxfix`;
+    const input = await turnInput("boxfix", {
+      _tag: "write",
+      scripts: { _tag: "blocked", reason: "Cursor runs no commands" },
+      tmpDir,
+    });
+    await fsRun(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        yield* fs.makeDirectory(tmpDir, { recursive: true });
+        yield* fs.makeDirectory(`${input.cwd}/.git/hooks`, { recursive: true });
+        yield* fs.makeDirectory(`${input.cwd}/.cursor`, { recursive: true });
+      }),
+    );
+    const outcomes = await escapeTurn(
+      {
+        reads: outside,
+        writes: [
+          `${input.cwd}/src/a.js`,
+          `${input.cwd}/.git/hooks/pre-commit`,
+          `${input.cwd}/.GIT/config`,
+          `${input.cwd}/.cursor/hooks.json`,
+          `${input.cwd}/.curſor/sandbox.json`,
+          `${root}/written-outside.txt`,
+        ],
+      },
+      () =>
+        events(provider, {
+          ...input,
+          prompt: "Call `finish_fixes` with one entry for each of c1, then end your turn.",
+        }),
+    );
+    expect(outcomes).toEqual([
+      ...outside.map((file) => `read ${file}: EPERM`),
+      `write ${input.cwd}/src/a.js: ok`,
+      `write ${input.cwd}/.git/hooks/pre-commit: EPERM`,
+      `write ${input.cwd}/.GIT/config: EPERM`,
+      `write ${input.cwd}/.cursor/hooks.json: EPERM`,
+      `write ${input.cwd}/.curſor/sandbox.json: EPERM`,
+      `write ${root}/written-outside.txt: EPERM`,
+    ]);
   });
 });
 

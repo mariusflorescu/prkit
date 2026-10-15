@@ -17,7 +17,7 @@ import * as Schema from "effect/Schema";
 import { checkoutPaths } from "../checkoutPaths.ts";
 import { makeFileTools, type ToolResult } from "./fileTools.ts";
 import { connectPrkitTools } from "./prkitTools.ts";
-import { type Event, EVENT_MARK, Request, type TurnRequest } from "./protocol.ts";
+import { type Event, eventMark, Request, type TurnRequest } from "./protocol.ts";
 import { loadSdk } from "./sdkLoader.ts";
 import { ALLOWED_TOOLS, CUSTOM_TOOLS_SERVER, DENIED_TOOLS } from "./tools.ts";
 
@@ -26,8 +26,10 @@ const CURSOR_BACKEND = "https://api2.cursor.sh";
 
 type Sdk = Awaited<ReturnType<typeof loadSdk>>;
 
+/** This run's event mark, from the request: nothing else writing to stdout knows it. */
+let mark: string | null = null;
 const emit = (event: Event) => {
-  process.stdout.write(`${EVENT_MARK}${JSON.stringify(event)}\n`);
+  if (mark !== null) process.stdout.write(`${mark}${JSON.stringify(event)}\n`);
 };
 const oneLine = (text: string) => text.replaceAll(/\s+/g, " ").trim().slice(0, 300);
 
@@ -159,17 +161,34 @@ const toolEvent = (update: InteractionUpdate, cwd: string): Event | null => {
 const FILE_TOOLS = new Set(["read_file", "list_dir", "glob", "grep", "write_file", "edit_file"]);
 
 /**
- * Set once Cursor starts a tool prkit didn't give it, one of its own: the SDK runs whatever
- * Cursor's backend asks for, so the turn stops there, prkit's tools refuse every later call, and
- * the turn fails so nothing from it is kept.
+ * Set once Cursor shows a tool prkit didn't give it, one of its own: the SDK runs whatever
+ * Cursor's backend asks for, so the turn fails there, the runner says so at once, prkit's tools
+ * refuse every later call, and no later call counts as done, so nothing from the turn is kept.
  */
-let forbidden: string | null = null;
+let forbidden = false;
 const FORBIDDEN =
   "Cursor tried to use one of its own tools, which prkit doesn't allow. Nothing from this run was kept.";
 
-/** Whether a started call is one of the custom tools the turn gave Cursor. */
-const isOwnTool = (update: Extract<InteractionUpdate, { type: "tool-call-started" }>) =>
-  update.toolCall.type === "mcp" && update.toolCall.args.providerIdentifier === CUSTOM_TOOLS_SERVER;
+/**
+ * Whether an update shows one of Cursor's own tools at work: a call that isn't one of the custom
+ * tools the turn gave it, a shell's output, or a subagent's steps.
+ */
+const showsOwnTool = (update: InteractionUpdate) => {
+  switch (update.type) {
+    case "shell-output-delta":
+    case "tool-call-delta":
+      return true;
+    case "tool-call-started":
+    case "partial-tool-call":
+    case "tool-call-completed":
+      return !(
+        update.toolCall.type === "mcp" &&
+        update.toolCall.args.providerIdentifier === CUSTOM_TOOLS_SERVER
+      );
+    default:
+      return false;
+  }
+};
 
 const asCustomTool = (tool: {
   readonly description: string;
@@ -181,7 +200,7 @@ const asCustomTool = (tool: {
   inputSchema: tool.inputSchema,
   annotations: { readOnlyHint: tool.readOnly, openWorldHint: false },
   execute: async (args) => {
-    if (forbidden !== null) return { content: [{ type: "text", text: FORBIDDEN }], isError: true };
+    if (forbidden) return { content: [{ type: "text", text: FORBIDDEN }], isError: true };
     const result = await tool.run(args);
     return { content: [{ type: "text", text: result.text }], isError: !result.ok };
   },
@@ -224,6 +243,25 @@ const defaultModel = async (sdk: Sdk, apiKey: string) => {
 };
 
 let stop: (() => Promise<void>) | null = null;
+/** The turn's agent, so Stop and a failure can still let its conversation's writes land. */
+let active: SDKAgent | null = null;
+
+/**
+ * Lets the agent's last writes land, waiting at most `ms` on the way out of a stopped or failed
+ * turn: its conversation may be cut short, but prkit isn't kept waiting.
+ */
+const dispose = (ms: number) => {
+  const agent = active;
+  active = null;
+  if (agent === null) return Promise.resolve();
+  return Promise.race([
+    agent[Symbol.asyncDispose]().catch(() => undefined),
+    new Promise((resolve) => {
+      // @effect-diagnostics-next-line globalTimers:off -- a child process outside the Effect runtime
+      setTimeout(resolve, ms);
+    }),
+  ]);
+};
 
 const turn = async (sdk: Sdk, request: TurnRequest) => {
   const key = await keyFor(sdk, request.apiKey);
@@ -256,29 +294,31 @@ const turn = async (sdk: Sdk, request: TurnRequest) => {
     request.resumeSessionId === null
       ? await sdk.Agent.create(options)
       : await sdk.Agent.resume(request.resumeSessionId, options);
+  active = agent;
   emit({ type: "session", sessionId: agent.agentId });
   const run = await agent.send(request.message, {
     model,
     local: { customTools },
     onDelta: ({ update }) => {
-      const event = toolEvent(update, request.cwd);
-      if (event !== null) emit(event);
-      if (update.type === "tool-call-started" && !isOwnTool(update) && forbidden === null) {
-        forbidden = update.toolCall.type;
+      if (!forbidden && showsOwnTool(update)) {
+        forbidden = true;
+        emit({ type: "error", reason: "agent", message: FORBIDDEN });
+        process.exitCode = 1;
         void stop?.();
       }
+      const event = toolEvent(update, request.cwd);
+      // A call that finishes after one of Cursor's own tools ran doesn't count, whatever it says.
+      if (event !== null)
+        emit(forbidden && event.type === "tool-done" ? { ...event, ok: false } : event);
     },
   });
   stop = () => run.cancel();
-  if (forbidden !== null) void run.cancel();
+  if (forbidden) void run.cancel();
   const result = await run.wait();
+  if (forbidden) return await dispose(2000);
   // The conversation's last writes land before prkit hears the turn ended and stops the runner.
+  active = null;
   await agent[Symbol.asyncDispose]();
-  if (forbidden !== null) {
-    emit({ type: "error", reason: "agent", message: FORBIDDEN });
-    process.exitCode = 1;
-    return;
-  }
   emit({
     type: "finished",
     outcome:
@@ -307,6 +347,7 @@ const main = async () => {
   let sdk: Sdk | null = null;
   try {
     const request = await readRequest();
+    mark = eventMark(request.nonce);
     sdk = await loadSdk(request.sdk);
     switch (request.op) {
       case "status":
@@ -325,15 +366,17 @@ const main = async () => {
   } catch (error) {
     emit(failure(sdk, error instanceof Error ? error : new Error(String(error))));
     process.exitCode = 1;
+    await dispose(2000);
   }
 };
 
 /** Exits once every event line has reached prkit: a pipe takes a long line (the models) in parts. */
-const exit = (code?: number) => process.stdout.write("", () => process.exit(code));
+const exit = (code?: number) =>
+  process.stdout.write("", () => process.exit(code ?? process.exitCode));
 
 // prkit stops a turn with SIGTERM, then kills the runner's whole process group.
 process.on("SIGTERM", () => {
-  void (stop?.() ?? Promise.resolve()).finally(() => exit(143));
+  void (stop?.() ?? Promise.resolve()).then(() => dispose(1500)).finally(() => exit(143));
 });
 
 await main();

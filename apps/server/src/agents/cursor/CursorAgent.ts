@@ -1,5 +1,6 @@
 import { type AgentModel, type AgentProviderState, childEnv } from "@prkit/contracts";
 import * as Clock from "effect/Clock";
+import * as Crypto from "effect/Crypto";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -8,6 +9,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import { Hex } from "effect/encoding";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import { ServerConfig } from "../../config.ts";
@@ -20,8 +22,9 @@ import {
 } from "../AgentProvider.ts";
 import { TURN_MARKER, watchTurn } from "../turnEnd.ts";
 import { toModels } from "./models.ts";
-import { Event, eventText, Request } from "./protocol.ts";
+import { Event, eventMark, eventText, Request } from "./protocol.ts";
 import { layOutHome, workspaceSandboxProblem } from "./sandbox.ts";
+import { runnerProfile, runnerReach, SANDBOX_EXEC } from "./seatbelt.ts";
 import { findSdk } from "./sdkLoader.ts";
 import { CURSOR_SDK_VERSION } from "./sdkPackages.ts";
 import { describeToolCall, fileToolsFor } from "./tools.ts";
@@ -38,9 +41,8 @@ const unavailable = (
   ownLogin = false,
 ): AgentProviderState => ({ _tag: "unavailable", reason, message, fix: null, ownLogin });
 
-type Common = { readonly sdk: string; readonly apiKey: string | null };
+type Common = { readonly nonce: string; readonly sdk: string; readonly apiKey: string | null };
 
-/** The turn's rules and its task in one message: Cursor takes no system prompt from prkit. */
 /**
  * What Cursor really has, since the rules and prompts are written for agents with a shell: no
  * git, no rg, no check scripts, only prkit's file tools and its MCP tools.
@@ -53,9 +55,10 @@ const cursorTools = (input: TurnInput) =>
       ? ["- write_file and edit_file: change files in the working directory."]
       : []),
     `- prkit's own tools: ${input.tools.join(", ")}.`,
-    "What changed, and what the base branch had, come from the task below and any diff file it names: a diff shows each changed line's old version.",
+    "What changed, and what the base branch had, come from the task below and any diff file it names: a diff shows each changed line's old version. In a file with a merge conflict, the conflict markers hold both sides: read the file to see them.",
   ].join("\n");
 
+/** The turn's rules and its task in one message: Cursor takes no system prompt from prkit. */
 const turnMessage = (input: TurnInput) =>
   `<prkit-rules>\n${input.instructions}\n\n${cursorTools(input)}\n</prkit-rules>\n\n${input.prompt}`;
 
@@ -70,6 +73,7 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const crypto = yield* Crypto.Crypto;
   const server = yield* ServerConfig;
   const instanceDir = path.resolve(path.join(server.home, "cursor-instances", setup.id));
   const home = path.join(instanceDir, "home");
@@ -102,7 +106,12 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
    */
   const start = (
     request: (common: Common) => typeof Request.Type,
-    options: { readonly cwd: string; readonly env?: Readonly<Record<string, string>> },
+    options: {
+      readonly cwd: string;
+      readonly env?: Readonly<Record<string, string>>;
+      /** What the runner may reach besides its code and the instance's home (seatbelt.ts). */
+      readonly reach?: Pick<Parameters<typeof runnerReach>[0], "reads" | "turn">;
+    },
   ): Effect.Effect<
     { readonly pid: number; readonly events: Stream.Stream<Event, AgentError> },
     AgentError,
@@ -111,27 +120,55 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
     Effect.gen(function* () {
       const sdk = yield* provide(findSdk(server.home, process.env));
       if (sdk === null) return yield* new AgentError({ reason: "auth", message: NOT_INSTALLED });
+      if (process.platform !== "darwin")
+        return yield* new AgentError({
+          reason: "agent",
+          message: "prkit runs Cursor only inside macOS's sandbox, so Cursor works on macOS only.",
+        });
       yield* provide(layOutHome(home));
       const script = yield* runnerScript;
-      const child = yield* spawner.spawn(
-        ChildProcess.make(process.execPath, [script], {
-          cwd: options.cwd,
-          env: childEnv(process.env, {
-            ...instanceEnv,
-            ...options.env,
-            HOME: home,
-            // The packaged server runs on Electron's Node, which needs this to stay Node.
-            ...(process.versions.electron === undefined ? {} : { ELECTRON_RUN_AS_NODE: "1" }),
-          }),
-          extendEnv: false,
-          detached: true,
-          forceKillAfter: "3 seconds",
+      const reach = yield* provide(
+        runnerReach({
+          script,
+          sdk,
+          home,
+          // A corporate proxy's CA file, the one instance variable naming a file the runner reads.
+          reads: [
+            ...(options.reach?.reads ?? []),
+            ...(instanceEnv.NODE_EXTRA_CA_CERTS === undefined
+              ? []
+              : [instanceEnv.NODE_EXTRA_CA_CERTS]),
+          ],
+          turn: options.reach?.turn ?? null,
         }),
+      );
+      const child = yield* spawner.spawn(
+        ChildProcess.make(
+          SANDBOX_EXEC,
+          ["-p", runnerProfile(path, reach), process.execPath, script],
+          {
+            cwd: options.cwd,
+            env: childEnv(process.env, {
+              ...instanceEnv,
+              // Outside a turn the runner's temporary files stay in the instance's home.
+              TMPDIR: path.join(home, "tmp"),
+              ...options.env,
+              HOME: home,
+              // The packaged server runs on Electron's Node, which needs this to stay Node.
+              ...(process.versions.electron === undefined ? {} : { ELECTRON_RUN_AS_NODE: "1" }),
+            }),
+            extendEnv: false,
+            detached: true,
+            forceKillAfter: "3 seconds",
+          },
+        ),
       );
       yield* Effect.addFinalizer(() =>
         child.kill({ forceKillAfter: "3 seconds" }).pipe(Effect.ignore),
       );
-      yield* Stream.make(`${encodeRequest(request({ sdk, apiKey }))}\n`).pipe(
+      const nonce = Hex.encode(yield* crypto.randomBytes(16));
+      const mark = eventMark(nonce);
+      yield* Stream.make(`${encodeRequest(request({ nonce, sdk, apiKey }))}\n`).pipe(
         Stream.encodeText,
         Stream.run(child.stdin),
       );
@@ -141,7 +178,7 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
         Stream.decodeText(),
         Stream.splitLines,
         Stream.flatMap((line) => {
-          const text = eventText(line);
+          const text = eventText(line, mark);
           return text === null
             ? Stream.empty
             : Option.match(decodeEvent(text), { onNone: () => Stream.empty, onSome: Stream.make });
@@ -167,10 +204,11 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
   const ask = (
     request: (common: Common) => typeof Request.Type,
     timeout: Duration.Input = "30 seconds",
+    reads: ReadonlyArray<string> = [],
   ) =>
     Effect.scoped(
       Effect.gen(function* () {
-        const { events } = yield* start(request, { cwd: home });
+        const { events } = yield* start(request, { cwd: home, reach: { reads, turn: null } });
         const all = yield* Stream.runCollect(events);
         const failed = all.find((event) => event.type === "error");
         if (failed !== undefined && failed.type === "error")
@@ -254,7 +292,7 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
         );
 
   const hasSession = (sessionId: string, cwd: string) =>
-    ask((common) => ({ ...common, op: "has-session", sessionId, cwd })).pipe(
+    ask((common) => ({ ...common, op: "has-session", sessionId, cwd }), "30 seconds", [cwd]).pipe(
       Effect.map((events) => events.some((event) => event.type === "has-session" && event.found)),
       Effect.orElseSucceed(() => false),
     );
@@ -377,6 +415,15 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
           {
             cwd: input.cwd,
             env: { ...input.env, [TURN_MARKER]: input.turn.id, TMPDIR: input.access.tmpDir },
+            reach: {
+              reads: [],
+              turn: {
+                cwd: input.cwd,
+                readableDirs: input.readableDirs,
+                tmpDir: input.access.tmpDir,
+                writes: input.access._tag === "write",
+              },
+            },
           },
         );
         watch.follow(pid);

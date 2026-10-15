@@ -6,6 +6,7 @@ import * as NodeUrl from "node:url";
 
 import * as Schema from "effect/Schema";
 
+import { startCursorControl } from "../apps/server/src/agents/cursor/fakeControl.ts";
 import { repoRoot } from "../scripts/verify-run.ts";
 
 const VERSION = "1.0.37";
@@ -54,11 +55,12 @@ const pack = (dir: string, name: string, files: Readonly<Record<string, string>>
  * unpacks them from file URLs, checked like npm's, without the network. `approveLogin` finishes
  * a sign-in waiting in the browser; `runs` lists every turn the stand-in started.
  */
-export const setUpFakeCursor = (name: string) => {
+export const setUpFakeCursor = async (name: string) => {
   const dir = NodePath.join(repoRoot, ".e2e", "fake", `${name}-cursor`);
   NodeFS.rmSync(dir, { recursive: true, force: true });
   const control = NodePath.join(dir, "control");
-  NodeFS.mkdirSync(control, { recursive: true });
+  // The stand-in runs in the runner's sandbox, so it reaches `control` through this server.
+  const server = await startCursorControl(control);
   const source = NodeFS.readFileSync(
     NodePath.join(repoRoot, "scripts", "fake-cursor-sdk.mjs"),
     "utf8",
@@ -67,7 +69,7 @@ export const setUpFakeCursor = (name: string) => {
     "package.json": JSON.stringify({ name: "@cursor/sdk", version: VERSION, type: "module" }),
     "dist/esm/index.js": source.replace(
       'process.env.FAKE_CURSOR_CONTROL ?? ""',
-      JSON.stringify(control),
+      JSON.stringify(server.url),
     ),
   });
   const platform = (arch: string) => ({

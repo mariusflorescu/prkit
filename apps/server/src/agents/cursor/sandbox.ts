@@ -29,6 +29,8 @@ export const layOutHome = (home: string) =>
     const path = yield* Path.Path;
     const dotCursor = path.join(home, ".cursor");
     yield* fs.makeDirectory(dotCursor, { recursive: true, mode: 0o700 });
+    // The runner's temporary files outside a turn: its sandbox opens no other temp folder.
+    yield* fs.makeDirectory(path.join(home, "tmp"), { recursive: true, mode: 0o700 });
     yield* fs.writeFileString(
       path.join(dotCursor, "sandbox.json"),
       `${encodePolicy(SANDBOX_POLICY)}\n`,

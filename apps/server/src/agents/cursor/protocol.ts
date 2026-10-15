@@ -8,6 +8,8 @@ import * as Schema from "effect/Schema";
  */
 
 const Common = {
+  /** A random value for this run only: its event lines carry it (eventMark). */
+  nonce: Schema.String,
   /** The SDK's package folder (sdkLoader.ts). */
   sdk: Schema.String,
   /** The instance's own CURSOR_API_KEY; null uses the key its sign-in saved. */
@@ -76,16 +78,17 @@ export const RunnerModel = Schema.Struct({
 export type RunnerModel = typeof RunnerModel.Type;
 
 /**
- * What starts each event line the runner writes. The SDK may print to stdout too, even half a
- * line with no newline; prkit reads an event from its last mark on a line, so stray output
- * before it can't swallow it.
+ * What starts each event line of one run: a mark with the request's nonce. The SDK may print to
+ * stdout too, even half a line with no newline; prkit reads an event from its last mark on a
+ * line, so stray output before it can't swallow it, and nothing that doesn't know the nonce can
+ * write an event.
  */
-export const EVENT_MARK = "\u001eprkit-event:";
+export const eventMark = (nonce: string) => `\u001eprkit-event:${nonce}:`;
 
-/** The event a line carries, read from its last mark; null when it has none. */
-export const eventText = (line: string) => {
-  const at = line.lastIndexOf(EVENT_MARK);
-  return at === -1 ? null : line.slice(at + EVENT_MARK.length);
+/** The event a line carries, read from its last `mark`; null when it has none. */
+export const eventText = (line: string, mark: string) => {
+  const at = line.lastIndexOf(mark);
+  return at === -1 ? null : line.slice(at + mark.length);
 };
 
 export const Event = Schema.Union([
