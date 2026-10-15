@@ -75,30 +75,45 @@ export const make = Effect.gen(function* () {
   let port: number | null = null;
   const clients = new Map<string, OutsideClient>();
 
-  /** Written whole or not at all: a fresh owner-only temporary file, then renamed over. */
-  const writeDiscovery = (file: OutsideDiscovery) =>
+  const removeQuietly = (file: string) => fs.remove(file, { force: true }).pipe(Effect.ignore);
+
+  /**
+   * The file's next version in a fresh owner-only temporary file, not yet in place. Whatever
+   * fails on the way, no temporary file holding a token is left behind.
+   */
+  const stage = (file: OutsideDiscovery) =>
     Effect.gen(function* () {
       const text = yield* Schema.encodeEffect(OutsideDiscoveryJson)(file);
       const temporary = `${discoveryPath}.${process.pid}.tmp`;
       yield* fs.remove(temporary, { force: true });
-      yield* fs.writeFileString(temporary, text, { flag: "wx", mode: 0o600 });
-      yield* fs.rename(temporary, discoveryPath);
+      yield* fs
+        .writeFileString(temporary, text, { flag: "wx", mode: 0o600 })
+        .pipe(Effect.onError(() => removeQuietly(temporary)));
+      return temporary;
     });
 
+  /** Puts a staged file in place, last, so the file changes whole or not at all. */
+  const place = (temporary: string) =>
+    fs.rename(temporary, discoveryPath).pipe(Effect.onError(() => removeQuietly(temporary)));
+
   /**
-   * Writes the file for `next`, with a new token while on, and returns the hash to accept.
-   * Nothing in memory changes here: callers swap in the hash only once the file is written.
+   * Stages the file for `next`, with a new token while on, and the hash to accept with it.
+   * Nothing changes until the caller places it, and memory only after that.
    */
-  const publish = (next: OutsideAgentsSettings) =>
+  const prepare = (next: OutsideAgentsSettings) =>
     Effect.gen(function* () {
-      if (port === null) return null;
+      if (port === null) return { temporary: null, hash: null };
       if (!next.enabled) {
-        yield* writeDiscovery({ _tag: "off", pid: process.pid, version: config.version });
-        return null;
+        const temporary = yield* stage({
+          _tag: "off",
+          pid: process.pid,
+          version: config.version,
+        });
+        return { temporary, hash: null };
       }
       const token = Base64Url.encode(yield* crypto.randomBytes(32));
       const hash = yield* digest(token);
-      yield* writeDiscovery({
+      const temporary = yield* stage({
         _tag: "on",
         port,
         token,
@@ -106,7 +121,15 @@ export const make = Effect.gen(function* () {
         version: config.version,
         access: next.access,
       });
-      return hash;
+      return { temporary, hash };
+    });
+
+  /** Writes the file for `next` and returns the hash to accept. */
+  const publish = (next: OutsideAgentsSettings) =>
+    Effect.gen(function* () {
+      const prepared = yield* prepare(next);
+      if (prepared.temporary !== null) yield* place(prepared.temporary);
+      return prepared.hash;
     });
 
   const state = Effect.gen(function* () {
@@ -123,25 +146,37 @@ export const make = Effect.gen(function* () {
 
   const get = () => gate.withPermits(1)(state);
 
+  const saveSettings = (value: OutsideAgentsSettings) =>
+    Schema.encodeEffect(SettingsJson)(value).pipe(
+      Effect.flatMap(
+        (text) => sql`INSERT INTO settings (key, value) VALUES (${SETTINGS_KEY}, ${text})
+          ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+      ),
+    );
+
   /**
-   * Saves the settings and, when the switch or level changed, writes the file with a new
-   * token, in one transaction: a failed write leaves the settings, the file and the token as
-   * they were, and the error reaches the UI.
+   * Saves the settings and, when the switch or level changed, the file with a new token, in
+   * the order that keeps them together: stage the file, save the row, then put the file in
+   * place. A failure anywhere leaves the settings, the file and the token as they were (the
+   * row goes back too), and the error reaches the UI.
    */
   const update = (next: OutsideAgentsSettings) =>
     gate.withPermits(1)(
       Effect.gen(function* () {
-        const text = yield* Schema.encodeEffect(SettingsJson)(next);
         const changed = next.enabled !== settings.enabled || next.access !== settings.access;
-        const hash = yield* sql.withTransaction(
-          Effect.gen(function* () {
-            yield* sql`INSERT INTO settings (key, value) VALUES (${SETTINGS_KEY}, ${text})
-              ON CONFLICT (key) DO UPDATE SET value = excluded.value`;
-            return changed ? yield* publish(next) : tokenHash;
-          }),
+        const prepared = changed ? yield* prepare(next) : { temporary: null, hash: tokenHash };
+        const temporary = prepared.temporary;
+        yield* saveSettings(next).pipe(
+          Effect.onError(() => (temporary === null ? Effect.void : removeQuietly(temporary))),
         );
+        if (temporary !== null) {
+          const previous = settings;
+          yield* place(temporary).pipe(
+            Effect.tapError(() => saveSettings(previous).pipe(Effect.ignore)),
+          );
+        }
         settings = next;
-        tokenHash = hash;
+        tokenHash = prepared.hash;
         return yield* state;
       }).pipe(
         Effect.catchTags({

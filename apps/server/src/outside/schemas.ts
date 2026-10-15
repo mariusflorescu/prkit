@@ -37,8 +37,11 @@ const describe = <S extends Schema.Top>(schema: S, description: string) =>
   schema.annotate({ description });
 
 /** A pull request by URL or by host, owner, repo and number, and optionally the account to read it through. */
-/** GitHub's rules: a login or organization, and a repository name ("." and ".." aren't one). */
-export const OWNER_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
+/**
+ * Path-safe names: a login or organization (managed users carry `_`, as in `mona_acme`) and a
+ * repository name. Never empty, never a slash, never "." or "..".
+ */
+export const OWNER_NAME = /^[A-Za-z0-9_-]{1,100}$/;
 export const REPO_NAME = /^(?!\.\.?$)[A-Za-z0-9._-]{1,100}$/;
 export const HOST_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(?::\d{1,5})?$/;
 
@@ -393,6 +396,13 @@ export const FixResult = Schema.Struct({
   ),
 });
 export type FixResult = typeof FixResult.Type;
+export const StopFixResult = Schema.Struct({
+  ...FixResult.fields,
+  note: describe(
+    Schema.NullOr(Schema.String),
+    "What stop_fix left running, in plain words, or null when everything it may stop stopped.",
+  ),
+});
 
 // wait_for
 export const WaitInput = Schema.Struct({

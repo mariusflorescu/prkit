@@ -319,20 +319,24 @@ export const make = Effect.gen(function* () {
         return yield* new FixerStateError({ key, message: "No agent works on this pull request." });
       const caller = yield* StartedBy;
       const fresh: ReadonlyArray<FixerTurnState> = ["queued", "preparing", "running"];
-      for (const row of yield* turnsOf(fixer.id, fresh))
-        if (row.rounds === 0)
-          yield* dropTurn(
-            fixer,
-            row,
-            {
-              _tag: "discarded",
-              reason: "user",
-              message: caller === null ? "Stopped" : `Stopped from ${caller}`,
-            },
-            fresh,
-          );
+      let changesLeft = 0;
+      for (const row of yield* turnsOf(fixer.id, fresh)) {
+        // `rounds = 0` is checked again in the drop's own UPDATE.
+        const dropped = yield* dropTurn(
+          fixer,
+          row,
+          {
+            _tag: "discarded",
+            reason: "user",
+            message: caller === null ? "Stopped" : `Stopped from ${caller}`,
+          },
+          fresh,
+          true,
+        );
+        if (!dropped && row.rounds > 0) changesLeft += 1;
+      }
       yield* advance(fixer.id);
-      return yield* snapshotOf(key);
+      return { snapshot: yield* snapshotOf(key), changesLeft };
     }).pipe(Effect.catchTags(dbFailures));
 
   const revise = (key: PullRequestKey, turnId: FixerTurnId, note: string) =>

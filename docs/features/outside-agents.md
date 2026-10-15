@@ -22,6 +22,8 @@ Each tool is declared once with its level (`apps/server/src/mcp/outside/access.t
 
 Never offered: pushing, merging or any other pull request action, submitting a review, replying to or resolving threads, deleting or discarding anything, reverting, and any change to agents, accounts or settings. These are the owner's, in the app. So `stop_fix` stops only queued and running work: the session stays, and so does every commit waiting for Push, including one the agent is changing. `retry_fix` refuses a revert.
 
+One case reaches GitHub without a click, and it is the owner's own opt-in. In a repository with both "Resolve conflicts automatically" and "Push fixes automatically" on, the watcher resolves a conflicting PR that has an open tab or a watched guide and pushes the result (`FixerWatcher`, `conflictTurn`). So `open_pull_request` or `generate_guide` on such a PR can lead to that push, exactly as opening its tab in the app does. The turn is the watcher's, not the client's, and there is no extra guard: the two settings are what the owner chose for that repository.
+
 `add_review_comment`, `send_to_fix_agent` and `ask_fix_agent_to_change` take a `clientRequestId`. A request is the tool, the client, the pull request and that id (`outside_requests`, kept a day): a retry gets the first answer, looked up before anything else, instead of doing it twice; the same id with other input answers `conflict`. Each key has its own lock, so one slow call holds back only its own retries.
 
 ## Accounts

@@ -827,8 +827,9 @@ export const make = Effect.gen(function* () {
           clientRequestId: input.clientRequestId,
           key: target.key,
           input: [
-            input.draftIds === undefined ? null : input.draftIds.join(","),
-            input.threadIds === undefined ? null : input.threadIds.join(","),
+            // The same ids in another order are the same request.
+            input.draftIds === undefined ? null : input.draftIds.toSorted().join(","),
+            input.threadIds === undefined ? null : input.threadIds.toSorted().join(","),
             input.instructions ?? null,
           ],
         },
@@ -901,8 +902,14 @@ export const make = Effect.gen(function* () {
   const stopFix = (input: TargetInput) =>
     Effect.gen(function* () {
       const target = yield* resolve(input);
-      const snapshot = yield* fixers.stopWorking(target.key);
-      return fixResultOf(snapshot, null);
+      const { snapshot, changesLeft } = yield* fixers.stopWorking(target.key);
+      return {
+        ...fixResultOf(snapshot, null),
+        note:
+          changesLeft === 0
+            ? null
+            : "A change you asked for is still running, on a fix that was waiting for Push. Stop it in prkit, which keeps or discards that fix.",
+      };
     }).pipe(Effect.mapError(asFailure));
 
   const retryFix = (input: TargetInput & { readonly turnId?: FixerTurnId }) =>

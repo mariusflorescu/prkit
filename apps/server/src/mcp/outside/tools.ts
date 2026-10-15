@@ -7,6 +7,7 @@ import {
   CommentsResult,
   ConflictsInput,
   FixResult,
+  StopFixResult,
   GenerateGuideInput,
   GuideResult,
   GuideStatus,
@@ -224,7 +225,7 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
     Tool.make("stop_fix", {
       description: `Stops the fix agent's queued and running work on a pull request. Commits waiting for Push stay, and so does one it is changing: discarding them, and ending the session, are the owner's clicks in prkit.${TARGET_HINT}`,
       parameters: TargetInput,
-      success: FixResult,
+      success: StopFixResult,
       failure: OutsideToolFailure,
     }),
     "Stop the fix agent",

@@ -215,6 +215,8 @@ export const makeFixerState = Effect.gen(function* () {
     turnId: FixerTurnId,
     from: ReadonlyArray<FixerTurnState>,
     status: FixerTurnStatus,
+    /** Only a turn no change request ever ran on (`rounds = 0`). */
+    freshOnly = false,
   ) =>
     Effect.gen(function* () {
       const at = yield* now;
@@ -222,7 +224,8 @@ export const makeFixerState = Effect.gen(function* () {
       const rows = yield* sql`
         UPDATE fixer_turns SET status = ${encodeStatus(status)},
           finished_at = CASE WHEN ${ends ? 1 : 0} = 1 THEN ${at} ELSE finished_at END
-        WHERE id = ${turnId} AND json_extract(status, '$._tag') IN ${sql.in(from)} RETURNING id`;
+        WHERE id = ${turnId} AND json_extract(status, '$._tag') IN ${sql.in(from)}
+          AND (${freshOnly ? 1 : 0} = 0 OR rounds = 0) RETURNING id`;
       return rows.length > 0;
     });
 
