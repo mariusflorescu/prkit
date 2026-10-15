@@ -6,7 +6,12 @@ import { expect, type Screen, type TestFixtures } from "e2e";
 
 import { repoRoot } from "../scripts/verify-run.ts";
 import { setUpFakeClaude } from "./fakeClaude.ts";
-import { startInstance, stopFakeInstance } from "./fakeGitHub.ts";
+import {
+  startFakeGitHub,
+  startFakeInstance,
+  startInstance,
+  stopFakeInstance,
+} from "./fakeGitHub.ts";
 import { FIXTURE_NAME, NEEDS_FIXTURE, readRows } from "./fixturePr.ts";
 import { emulateOsColorScheme, screenshotLightAndDark } from "./osColorScheme.ts";
 
@@ -251,6 +256,99 @@ test(
       expect(NodeFS.existsSync(sideHome)).toBe(false);
     } finally {
       stopFakeInstance(NAME, { keepHome: false });
+      NodeFS.rmSync(work, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "agent instances: the Fixes header names the instance, and Codex signs in with ChatGPT for one",
+  { timeout: 180_000 },
+  async ({ app, screen, browser }) => {
+    // On the fake GitHub: the PR merges just before its turn starts, so the turn ends at once,
+    // and the ChatGPT sign-in stops at its page, which is never opened.
+    const fake = await startFakeGitHub(`${NAME}-fixes`);
+    const claude = setUpFakeClaude(`${NAME}-fixes`);
+    const work = NodePath.join(repoRoot, ".e2e", "fake", `${NAME}-fixes-work`);
+    NodeFS.rmSync(work, { recursive: true, force: true });
+    NodeFS.mkdirSync(work, { recursive: true });
+    try {
+      const run = startFakeInstance(`${NAME}-fixes`, fake, ["--claude", claude.file]);
+      await emulateOsColorScheme(browser, "light");
+      await browser.setViewport({ width: 1280, height: 860 });
+      await browser.addInitScript("window.open = () => null;");
+      await app.open(run.openUrl);
+      await expect(screen.getByRole("link", /#1 Budget fixture 1/)).toBeVisible({
+        timeout: 20_000,
+      });
+      await openAgents(screen, browser);
+      await expect(screen.getByRole("list", "Agents").getByRole("listitem", "Claude")).toBeVisible({
+        timeout: 30_000,
+      });
+      await addClaude(screen, "Work", work);
+
+      // A fix sent to the second instance: the Fixes header says which one.
+      await app.open(
+        `${run.url}/pr/github.com/budget/fixtures/9?account=github.com%2Fbudget-test&tab=files`,
+      );
+      const file = screen.getByRole("region", "src/limits.ts");
+      await expect(file.getByRole("button", "Comment on line 1")).toBeVisible({ timeout: 30_000 });
+      await file.getByRole("button", "Comment on line 1").tap();
+      await screen.getByRole("textbox", "Comment on line 1").fill("Name the limit.");
+      await screen.getByRole("textbox", "Comment on line 1").press("Meta+Enter");
+      await screen.getByRole("button", "Review, 1 pending").first().tap();
+      await screen
+        .getByRole("group", "Where your comments go")
+        .getByRole("button", "Send to agent")
+        .tap();
+      const send = screen.getByRole("dialog", "Send to agent");
+      await send.getByRole("button", /^Agent and model: /).tap({ timeout: 30_000 });
+      await screen.getByRole("combobox", "Search models").fill("claude_work");
+      await screen.getByRole("option", /Claude Sonnet 5\.5/).tap();
+      await expect(send.getByRole("button", /^Agent and model: .* · Work$/)).toBeVisible();
+      await fake.merge(9);
+      await send.getByRole("button", "Send 1 comment to agent").tap();
+      await screen.getByRole("button", "Open Fixes").tap({ timeout: 30_000 });
+      await expect(screen.getByText(/Claude Sonnet 5\.5 · .*Work/).first()).toBeVisible({
+        timeout: 30_000,
+      });
+      expect(readRows(run.home, "SELECT instance_id FROM fixers WHERE pr_key LIKE '%#9'")).toEqual([
+        { instance_id: "claude_work" },
+      ]);
+      await shoot(app, browser, "u67-fixes-header");
+
+      // Sign in with ChatGPT: a Codex instance holding a login of its own, signing in at once.
+      await openAgents(screen, browser);
+      await screen.getByRole("region", "Agents").getByRole("button", "Add agent").tap();
+      const dialog = screen.getByRole("dialog", "Add agent");
+      await dialog.getByRole("radio", /^Sign in with ChatGPT/).tap();
+      await dialog.getByRole("button", "Next").tap();
+      await expect(dialog.getByRole("textbox", "Account name")).toHaveValue("Personal");
+      await expect(dialog.getByRole("textbox", "Instance ID")).toHaveValue("codex_personal");
+      await dialog.getByRole("button", "Next").tap();
+      await shoot(app, browser, "u67-add-agent-chatgpt");
+      await dialog.getByRole("button", "Add and sign in").tap();
+      const signingIn = dialog.getByRole("status", "Signing in for prkit");
+      await expect(signingIn.getByRole("link", "Open the sign-in page")).toHaveAttribute(
+        "href",
+        /^https:\/\/auth\.openai\.com\/oauth\/authorize\?/,
+        { timeout: 30_000 },
+      );
+      await shoot(app, browser, "u67-add-agent-chatgpt-signing-in");
+      await signingIn.getByRole("button", "Cancel").tap();
+      await dialog.getByRole("button", "Done").tap();
+      const personal = screen.getByRole("list", "Agents").getByRole("listitem", "Personal");
+      await expect(personal.getByRole("status")).toHaveText("Not signed in", { timeout: 30_000 });
+      const home = NodePath.join(run.home, "codex-instances", "codex_personal");
+      expect(NodeFS.existsSync(NodePath.join(home, "config.toml"))).toBe(true);
+      await personal.getByRole("button", "Remove").tap();
+      const confirm = screen.getByRole("alertdialog", "Remove Personal?");
+      await confirm.getByRole("button", "Remove").tap();
+      await expect(confirm).toBeHidden({ timeout: 30_000 });
+      expect(NodeFS.existsSync(home)).toBe(false);
+    } finally {
+      stopFakeInstance(`${NAME}-fixes`, { keepHome: false });
+      fake.stop();
       NodeFS.rmSync(work, { recursive: true, force: true });
     }
   },
