@@ -34,7 +34,7 @@ import { useReviewActions } from "./useReviewActions";
 import { useStartStackGuides } from "./useStartStackGuides";
 
 const NO_AGENT =
-  "No agent is ready to write guides. Sign in to Claude Code or Codex, then check again.";
+  "No agent is ready to write guides. Sign one in under Settings > Agents, then check again.";
 
 /**
  * Sets a guide up like a document, not a chat: who writes it, an optional focus (this
@@ -106,7 +106,7 @@ export function GuideSetup({
   const own =
     review?.model == null
       ? null
-      : { provider: review.provider, model: review.model, options: review.modelOptions };
+      : { instance: review.instance, model: review.model, options: review.modelOptions };
   const selection =
     picked ??
     (catalog.data === undefined || settings.data === undefined
@@ -230,7 +230,7 @@ export function GuideSetup({
             pending={pending}
             onRetry={() => void submit()}
             onCheckAgain={() => checkAgain.mutate()}
-            fallback={<TypicalDuration detail={detail} provider={selection?.provider ?? null} />}
+            fallback={<TypicalDuration detail={detail} instance={selection?.instance ?? null} />}
           />
         </div>
         <GenerateGuideButton

@@ -40,13 +40,11 @@ export const makeTurnBodies = (
     const { end } = sessions;
     /** The turn's agent instance, which may have been turned off or removed since it was queued. */
     const agentFor = (turn: TurnRow) =>
-      agents
-        .get(turn.instance_id)
-        .pipe(
-          Effect.flatMap((found) =>
-            found === null ? fail("agent-auth", AGENT_OFF) : Effect.succeed(found),
-          ),
-        );
+      Effect.gen(function* () {
+        const provider = yield* agents.get(turn.instance_id);
+        if (provider === null) return yield* fail("agent-auth", AGENT_OFF);
+        return provider;
+      });
 
     const fixBody = (fixer: FixerRow, turn: TurnRow, work: Extract<WorkRequest, { _tag: "fix" }>) =>
       Effect.gen(function* () {

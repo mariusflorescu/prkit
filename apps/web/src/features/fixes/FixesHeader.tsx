@@ -38,6 +38,7 @@ export function FixesHeader({
           {fixer.status._tag === "active" ? "Agent" : "Was"}:{" "}
           <span className="text-foreground">
             {agentLabel(catalog.data, {
+              instance: fixer.instance,
               provider: fixer.provider,
               model: fixer.model,
               options: fixer.modelOptions,

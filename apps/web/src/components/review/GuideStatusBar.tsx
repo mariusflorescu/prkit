@@ -56,6 +56,7 @@ export function GuideStatusBar({
     settings.data !== undefined &&
     settings.data.hash !== shown.config.hash;
   const agent = agentLabel(catalog.data, {
+    instance: review.instance,
     provider: review.provider,
     model: review.model,
     options: review.modelOptions,

@@ -148,8 +148,7 @@ export const effectiveSelection = (
     if (provider.state._tag !== "ready") continue;
     const usable = provider.models.filter((model) => model.blocked === null);
     const model = usable.find((entry) => entry.isDefault) ?? usable[0];
-    if (model !== undefined)
-      return { instance: provider.instance, model: model.slug, options: [] };
+    if (model !== undefined) return { instance: provider.instance, model: model.slug, options: [] };
   }
   return null;
 };

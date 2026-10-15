@@ -25,7 +25,7 @@ export function DefaultAgentSetting({
   const checkAgain = useCheckAgents();
   const selection = effectiveSelection(catalog, settings.defaultAgent) ?? settings.defaultAgent;
   const model =
-    selection === null ? undefined : findAgentModel(catalog, selection.provider, selection.model);
+    selection === null ? undefined : findAgentModel(catalog, selection.instance, selection.model);
   return (
     <div className="flex min-h-14 items-center justify-between gap-4 border-b border-border/60 py-3">
       <div className="min-w-0">

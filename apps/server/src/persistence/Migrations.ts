@@ -23,7 +23,7 @@ import Migration0014 from "./Migrations/014_InboxFilters.ts";
 import Migration0015 from "./Migrations/015_FixerTurnEnds.ts";
 import Migration0016 from "./Migrations/016_AgentInstances.ts";
 
-const migrationEntries = [
+export const migrationEntries = [
   [1, "Meta", Migration0001],
   [2, "GitHubConfigDirs", Migration0002],
   [3, "Workspace", Migration0003],

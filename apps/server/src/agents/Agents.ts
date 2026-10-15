@@ -31,6 +31,27 @@ export class Agents extends Context.Service<Agents, Effect.Success<typeof make>>
   "@prkit/server/agents/Agents",
 ) {}
 
+type BuildServices =
+  | FileSystem.FileSystem
+  | Path.Path
+  | ChildProcessSpawner.ChildProcessSpawner
+  | ServerConfig;
+
+/** The variable each kind reads its config folder from. */
+const CONFIG_DIR_VARIABLES: Record<AgentProviderKind, string> = {
+  claude: "CLAUDE_CONFIG_DIR",
+  codex: "CODEX_HOME",
+};
+
+/** How each kind's provider is made from an instance's setup. */
+const FACTORIES: Record<
+  AgentProviderKind,
+  (setup: InstanceSetup) => Effect.Effect<AgentProvider, never, BuildServices>
+> = {
+  claude: ClaudeAgent.make,
+  codex: CodexAgent.make,
+};
+
 /**
  * What an instance runs with. A default instance without a config folder of its own keeps the
  * one the server was started with, as before instances existed.
@@ -40,10 +61,10 @@ export const setupOf = (
   env: Readonly<Record<string, string | undefined>>,
 ): InstanceSetup => {
   const { config } = resolved;
-  const inherited =
-    config.id === "claude" ? env.CLAUDE_CONFIG_DIR : config.id === "codex" ? env.CODEX_HOME : undefined;
-  const configDir =
-    config.configDir !== null ? expandHome(config.configDir) : (inherited ?? null);
+  const inherited = isDefaultInstance(config.id)
+    ? env[CONFIG_DIR_VARIABLES[config.kind]]
+    : undefined;
+  const configDir = config.configDir !== null ? expandHome(config.configDir) : (inherited ?? null);
   return {
     id: config.id,
     label: config.label,
@@ -85,12 +106,6 @@ const settingsKey = (config: AgentInstanceConfig, setup: InstanceSetup) =>
       .map(([name, value]) => `${name}=${value}`),
   ].join("\u0000");
 
-type BuildServices =
-  | FileSystem.FileSystem
-  | Path.Path
-  | ChildProcessSpawner.ChildProcessSpawner
-  | ServerConfig;
-
 interface Built {
   /** The settings the provider was built from; a change rebuilds it. */
   readonly key: string;
@@ -107,13 +122,13 @@ export const make = Effect.gen(function* () {
   const slots = yield* Semaphore.make(2);
   let built = new Map<AgentInstanceId, Built>();
   /** Each instance's last read login and models, by the settings they were read with. */
-  const checked = new Map<AgentInstanceId, { readonly key: string; readonly entry: AgentCatalogEntry }>();
+  const checked = new Map<
+    AgentInstanceId,
+    { readonly key: string; readonly entry: AgentCatalogEntry }
+  >();
 
-  const build = (kind: AgentProviderKind, setup: InstanceSetup) => {
-    const made: Effect.Effect<AgentProvider, never, BuildServices> =
-      kind === "claude" ? ClaudeAgent.make(setup) : CodexAgent.make(setup);
-    return Effect.provideContext(made, services);
-  };
+  const build = (kind: AgentProviderKind, setup: InstanceSetup) =>
+    Effect.provideContext(FACTORIES[kind](setup), services);
 
   /** Every instance with its provider, built again only when its settings changed. */
   const instances = building.withPermits(1)(
@@ -138,7 +153,9 @@ export const make = Effect.gen(function* () {
       Effect.catchTag("AgentInstanceError", (error) =>
         Effect.logWarning("Couldn't read the agent instances").pipe(
           Effect.annotateLogs({ message: error.message }),
-          Effect.as([...built.values()].toSorted((left, right) => order(left.config, right.config))),
+          Effect.as(
+            [...built.values()].toSorted((left, right) => order(left.config, right.config)),
+          ),
         ),
       ),
     ),
@@ -236,7 +253,9 @@ export const make = Effect.gen(function* () {
                   .filter((entry) => entry.fresh)
                   .map(({ entry }) => [
                     entry.instance,
-                    entry.state._tag === "ready" ? `${entry.models.length} models` : entry.state.reason,
+                    entry.state._tag === "ready"
+                      ? `${entry.models.length} models`
+                      : entry.state.reason,
                   ]),
               ),
             ),
@@ -319,7 +338,20 @@ export const make = Effect.gen(function* () {
       return yield* catalog(true, id);
     });
 
-  return { get, usable, sameGroup, catalog, invalidate, slots, signIn, signOut, create, update, remove, reset };
+  return {
+    get,
+    usable,
+    sameGroup,
+    catalog,
+    invalidate,
+    slots,
+    signIn,
+    signOut,
+    create,
+    update,
+    remove,
+    reset,
+  };
 });
 
 export const layer = Layer.effect(Agents, make).pipe(Layer.provide(AgentInstancesStore.layer));

@@ -1,4 +1,4 @@
-import type { AgentProviderKind } from "@prkit/contracts";
+import type { AgentInstanceId } from "@prkit/contracts";
 import {
   skipToken,
   useMutation,
@@ -21,24 +21,24 @@ export type AgentSignInState =
   | SignInStep
   | { readonly _tag: "failed"; readonly message: string };
 
-const signInKey = (provider: AgentProviderKind) => ["agentSignIn", provider] as const;
-const stepKey = (provider: AgentProviderKind) => ["agentSignIn", provider, "step"] as const;
+const signInKey = (instance: AgentInstanceId) => ["agentSignIn", instance] as const;
+const stepKey = (instance: AgentInstanceId) => ["agentSignIn", instance, "step"] as const;
 
 /**
  * prkit's own sign-in for an agent. Settings and the model list share it through its mutation
  * key, so closing the list while the browser is open doesn't lose it, and Cancel works from
  * either: the mutation's variables are the controller that stops it.
  */
-export function useAgentSignIn(provider: AgentProviderKind) {
+export function useAgentSignIn(instance: AgentInstanceId) {
   const client = useQueryClient();
   const signIn = useMutation({
-    mutationKey: signInKey(provider),
+    mutationKey: signInKey(instance),
     mutationFn: async (controller: AbortController) => {
       const reached = (step: SignInStep) =>
-        client.setQueryData<SignInStep>(stepKey(provider), step);
+        client.setQueryData<SignInStep>(stepKey(instance), step);
       reached({ _tag: "opening" });
       const result = await signInAgent(
-        provider,
+        instance,
         (url) => {
           reached({ _tag: "browser", url });
           window.open(url, "_blank", "noopener,noreferrer");
@@ -54,12 +54,12 @@ export function useAgentSignIn(provider: AgentProviderKind) {
     },
   });
   const step = useQuery<SignInStep>({
-    queryKey: stepKey(provider),
+    queryKey: stepKey(instance),
     queryFn: skipToken,
     gcTime: Infinity,
   }).data;
   const latest = useMutationState({
-    filters: { mutationKey: signInKey(provider) },
+    filters: { mutationKey: signInKey(instance) },
     select: (mutation) => mutation.state,
   }).at(-1);
   const running =

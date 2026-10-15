@@ -2,6 +2,7 @@ import {
   type AgentSelection,
   effectiveSelection,
   findAgentModel,
+  keepsConversation,
   type PullRequestKey,
   selectionProblem,
 } from "@prkit/contracts";
@@ -27,7 +28,7 @@ export function useFixAgent(key: PullRequestKey, picked: AgentSelection | null) 
   const own =
     session?.model == null
       ? null
-      : { provider: session.provider, model: session.model, options: session.modelOptions };
+      : { instance: session.instance, model: session.model, options: session.modelOptions };
   const selection =
     picked ??
     (catalog.data === undefined || settings.data === undefined
@@ -40,7 +41,7 @@ export function useFixAgent(key: PullRequestKey, picked: AgentSelection | null) 
   const model =
     catalog.data === undefined || selection === null
       ? undefined
-      : findAgentModel(catalog.data, selection.provider, selection.model);
+      : findAgentModel(catalog.data, selection.instance, selection.model);
   return {
     catalog: catalog.data,
     selection,
@@ -53,7 +54,11 @@ export function useFixAgent(key: PullRequestKey, picked: AgentSelection | null) 
       void settings.refetch();
     },
     checkAgain,
-    /** The session's own agent, so changing it can say it starts a new conversation. */
-    sessionProvider: session?.status._tag === "active" ? session.provider : null,
+    /** Picking an agent in another conversation group than the session's starts a new conversation. */
+    switching:
+      session?.status._tag === "active" &&
+      catalog.data !== undefined &&
+      selection !== null &&
+      !keepsConversation(catalog.data, session.instance, selection.instance),
   };
 }

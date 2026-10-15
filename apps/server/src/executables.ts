@@ -37,14 +37,22 @@ export const findOnPath = (name: string) =>
 
 /** `~` and `~/...` in a path the user typed, as their home folder. */
 export const expandHome = (input: string) =>
-  input === "~" ? NodeOS.homedir() : input.startsWith("~/") ? `${NodeOS.homedir()}${input.slice(1)}` : input;
+  input === "~"
+    ? NodeOS.homedir()
+    : input.startsWith("~/")
+      ? `${NodeOS.homedir()}${input.slice(1)}`
+      : input;
 
 /**
  * An agent's binary: the instance's own path, else the server's override (`PRKIT_CLAUDE_PATH`,
  * `PRKIT_CODEX_PATH`), else the first on PATH. Looked up on every call, so Check again finds
  * an agent installed while prkit runs.
  */
-export const agentBinary = (binaryPath: string | null, override: string | undefined, name: string) =>
+export const agentBinary = (
+  binaryPath: string | null,
+  override: string | undefined,
+  name: string,
+) =>
   binaryPath !== null
     ? executableAt(binaryPath)
     : override !== undefined

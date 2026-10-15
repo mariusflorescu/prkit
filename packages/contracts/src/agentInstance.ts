@@ -140,44 +140,46 @@ export const deriveInstanceId = (
  * allowlist; these would undo that: switch the agent off the user's subscription, cross GitHub
  * accounts, reach prkit's own secrets, or run code around prkit's sandbox.
  */
-const BLOCKED_ENV: ReadonlyArray<{ readonly test: (name: string) => boolean; readonly why: string }> =
-  [
-    {
-      test: (name) => name === "HOME",
-      why: "prkit never changes HOME for an agent: the agent would lose its keychain login.",
-    },
-    {
-      test: (name) => ["PATH", "USER", "SHELL", "TMPDIR", "DEVELOPER_DIR"].includes(name),
-      why: "prkit sets this itself for every agent, to keep its commands in the sandbox.",
-    },
-    {
-      test: (name) => name === "CLAUDE_CONFIG_DIR" || name === "CODEX_HOME",
-      why: "Use the Config folder field instead.",
-    },
-    {
-      test: (name) =>
-        /^(ANTHROPIC|OPENAI|AZURE|AWS|GOOGLE|VERTEX|CLOUD_ML|BEDROCK|GEMINI)_/.test(name) ||
-        /^CLAUDE_CODE_(USE|OAUTH|API_KEY)/.test(name) ||
-        /^CODEX_(API_KEY|.*BASE_URL)/.test(name),
-      why: "It would switch the agent off your subscription to an API key or another provider.",
-    },
-    {
-      test: (name) => /^(GH|GITHUB)_/.test(name),
-      why: "It would switch GitHub accounts.",
-    },
-    {
-      test: (name) => /^(PRKIT|GIT)_/.test(name),
-      why: "prkit sets these itself.",
-    },
-    {
-      test: (name) =>
-        ["NODE_OPTIONS", "NODE_PATH", "BASH_ENV", "ENV", "ZDOTDIR"].includes(name) ||
-        /^(DYLD|LD)_/.test(name) ||
-        /^CLAUDE_(CODE_TMPDIR|AGENT_SDK)/.test(name) ||
-        name === "CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING",
-      why: "It could run code or change settings around prkit's sandbox.",
-    },
-  ];
+const BLOCKED_ENV: ReadonlyArray<{
+  readonly test: (name: string) => boolean;
+  readonly why: string;
+}> = [
+  {
+    test: (name) => name === "HOME",
+    why: "prkit never changes HOME for an agent: the agent would lose its keychain login.",
+  },
+  {
+    test: (name) => ["PATH", "USER", "SHELL", "TMPDIR", "DEVELOPER_DIR"].includes(name),
+    why: "prkit sets this itself for every agent, to keep its commands in the sandbox.",
+  },
+  {
+    test: (name) => name === "CLAUDE_CONFIG_DIR" || name === "CODEX_HOME",
+    why: "Use the Config folder field instead.",
+  },
+  {
+    test: (name) =>
+      /^(ANTHROPIC|OPENAI|AZURE|AWS|GOOGLE|VERTEX|CLOUD_ML|BEDROCK|GEMINI)_/.test(name) ||
+      /^CLAUDE_CODE_(USE|OAUTH|API_KEY)/.test(name) ||
+      /^CODEX_(API_KEY|.*BASE_URL)/.test(name),
+    why: "It would switch the agent off your subscription to an API key or another provider.",
+  },
+  {
+    test: (name) => /^(GH|GITHUB)_/.test(name),
+    why: "It would switch GitHub accounts.",
+  },
+  {
+    test: (name) => /^(PRKIT|GIT)_/.test(name),
+    why: "prkit sets these itself.",
+  },
+  {
+    test: (name) =>
+      ["NODE_OPTIONS", "NODE_PATH", "BASH_ENV", "ENV", "ZDOTDIR"].includes(name) ||
+      /^(DYLD|LD)_/.test(name) ||
+      /^CLAUDE_(CODE_TMPDIR|AGENT_SDK)/.test(name) ||
+      name === "CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING",
+    why: "It could run code or change settings around prkit's sandbox.",
+  },
+];
 
 /** Why an instance can't set `name`, in words for the form, or null when it can. */
 export const environmentNameProblem = (name: string) => {

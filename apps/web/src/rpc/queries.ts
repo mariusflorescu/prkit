@@ -2,7 +2,7 @@ import { queryOptions, skipToken } from "@tanstack/react-query";
 
 import {
   type AccountId,
-  type AgentProviderKind,
+  type AgentInstanceId,
   type AttemptId,
   type PullRequestKey,
   type FileSide,
@@ -182,10 +182,10 @@ export const draftQuery = (key: PullRequestKey, attemptId: AttemptId, version: n
     staleTime: Infinity,
     retry: false,
   });
-export const typicalDurationQuery = (provider: AgentProviderKind, lines: number) =>
+export const typicalDurationQuery = (instance: AgentInstanceId | null, lines: number) =>
   queryOptions({
-    queryKey: ["typicalDuration", provider, lines],
-    queryFn: () => getTypicalDuration(provider, lines),
+    queryKey: ["typicalDuration", instance, lines],
+    queryFn: instance === null ? skipToken : () => getTypicalDuration(instance, lines),
     staleTime: 5 * 60_000,
     retry: false,
   });

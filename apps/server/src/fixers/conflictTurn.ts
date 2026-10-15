@@ -161,9 +161,8 @@ export const makeConflictTurn = (
         const ref = refFromKey(fixer.pr_key);
         if (ref === null)
           return yield* fail("repository", "This pull request's key can't be read.");
-        const provider = yield* agents.get(turn.instance_id).pipe(
-          Effect.flatMap((found) => (found === null ? fail("agent-auth", AGENT_OFF) : Effect.succeed(found))),
-        );
+        const provider = yield* agents.get(turn.instance_id);
+        if (provider === null) return yield* fail("agent-auth", AGENT_OFF);
         const target = yield* targetOf(fixer, ref);
         if (target.state !== "open") return yield* end(fixer.pr_key, target.state);
         const identity = yield* identityFor(fixer);

@@ -71,10 +71,9 @@ const redact = (config: AgentInstanceConfig, secrets: Readonly<Record<string, st
  * which exists without a row. Sensitive variable values live in `agent-secrets.json` under
  * PRKIT_HOME (mode 0600), never in the database, the app or a log.
  */
-export class AgentInstances extends Context.Service<
-  AgentInstances,
-  Effect.Success<typeof make>
->()("@prkit/server/agents/AgentInstances") {}
+export class AgentInstances extends Context.Service<AgentInstances, Effect.Success<typeof make>>()(
+  "@prkit/server/agents/AgentInstances",
+) {}
 
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -106,7 +105,8 @@ export const make = Effect.gen(function* () {
       yield* fs.rename(temporary, secretsFile);
     });
 
-  const rows = sql`SELECT id, kind, label, accent, enabled, config_dir, binary_path, environment, login
+  const rows =
+    sql`SELECT id, kind, label, accent, enabled, config_dir, binary_path, environment, login
     FROM agent_instances ORDER BY created_at, id`.pipe(Effect.flatMap(decodeRows));
 
   /** Every instance with its real environment: each kind's default first, then the user's. */
@@ -178,45 +178,46 @@ export const make = Effect.gen(function* () {
    * redacted keeps the value the server holds; any other sensitive value replaces it.
    */
   const save = (config: AgentInstanceConfig, mode: "create" | "update") =>
-    writing.withPermits(1)(
-      Effect.gen(function* () {
-        yield* checkConfig(config);
-        const existing = yield* sql<{
-          readonly kind: string;
-        }>`SELECT kind FROM agent_instances WHERE id = ${config.id}`;
-        if (mode === "create" && (existing.length > 0 || isDefaultInstance(config.id)))
-          return yield* new AgentInstanceError({
-            message: `An instance named '${config.id}' already exists.`,
-          });
-        if (mode === "update" && existing.length === 0 && !isDefaultInstance(config.id))
-          return yield* new AgentInstanceError({
-            message: "That agent was removed. Check again.",
-          });
-        const current = existing[0];
-        if (current !== undefined && current.kind !== config.kind)
-          return yield* new AgentInstanceError({
-            message: "An instance can't change which agent it runs.",
-          });
-        const secrets = yield* readSecrets;
-        const held = secrets[config.id] ?? {};
-        const kept: Record<string, string> = {};
-        for (const variable of config.environment) {
-          if (!variable.sensitive) continue;
-          const value =
-            variable.value === "" && variable.valueRedacted
-              ? held[variable.name]
-              : variable.value;
-          if (value !== undefined && value !== "") kept[variable.name] = value;
-        }
-        const stored = config.environment.map((variable) => ({
-          name: variable.name,
-          value: variable.sensitive ? "" : variable.value,
-          sensitive: variable.sensitive,
-        }));
-        const at = DateTime.formatIso(yield* DateTime.now);
-        const blank = (value: string | null) =>
-          value === null || value.trim() === "" ? null : value.trim();
-        yield* sql`
+    writing
+      .withPermits(1)(
+        Effect.gen(function* () {
+          yield* checkConfig(config);
+          const existing = yield* sql<{
+            readonly kind: string;
+          }>`SELECT kind FROM agent_instances WHERE id = ${config.id}`;
+          if (mode === "create" && (existing.length > 0 || isDefaultInstance(config.id)))
+            return yield* new AgentInstanceError({
+              message: `An instance named '${config.id}' already exists.`,
+            });
+          if (mode === "update" && existing.length === 0 && !isDefaultInstance(config.id))
+            return yield* new AgentInstanceError({
+              message: "That agent was removed. Check again.",
+            });
+          const current = existing[0];
+          if (current !== undefined && current.kind !== config.kind)
+            return yield* new AgentInstanceError({
+              message: "An instance can't change which agent it runs.",
+            });
+          const secrets = yield* readSecrets;
+          const held = secrets[config.id] ?? {};
+          const kept: Record<string, string> = {};
+          for (const variable of config.environment) {
+            if (!variable.sensitive) continue;
+            const value =
+              variable.value === "" && variable.valueRedacted
+                ? held[variable.name]
+                : variable.value;
+            if (value !== undefined && value !== "") kept[variable.name] = value;
+          }
+          const stored = config.environment.map((variable) => ({
+            name: variable.name,
+            value: variable.sensitive ? "" : variable.value,
+            sensitive: variable.sensitive,
+          }));
+          const at = DateTime.formatIso(yield* DateTime.now);
+          const blank = (value: string | null) =>
+            value === null || value.trim() === "" ? null : value.trim();
+          yield* sql`
           INSERT INTO agent_instances (id, kind, label, accent, enabled, config_dir, binary_path,
             environment, login, created_at, updated_at)
           VALUES (${config.id}, ${config.kind}, ${config.label}, ${config.accent},
@@ -226,38 +227,41 @@ export const make = Effect.gen(function* () {
             enabled = excluded.enabled, config_dir = excluded.config_dir,
             binary_path = excluded.binary_path, environment = excluded.environment,
             login = excluded.login, updated_at = excluded.updated_at`;
-        yield* writeSecrets(withSecrets(secrets, config.id, kept));
-        yield* Effect.logInfo(mode === "create" ? "Added an agent" : "Changed an agent").pipe(
-          Effect.annotateLogs({
-            instance: config.id,
-            kind: config.kind,
-            enabled: config.enabled,
-            // Names only: values can be secrets.
-            variables: config.environment.map((variable) => variable.name).join(","),
-          }),
-        );
-      }),
-    ).pipe(
-      Effect.catchTags({
-        SqlError: fail("prkit couldn't save that agent. Try again."),
-        PlatformError: fail("prkit couldn't save that agent's sensitive values. Try again."),
-      }),
-    );
+          yield* writeSecrets(withSecrets(secrets, config.id, kept));
+          yield* Effect.logInfo(mode === "create" ? "Added an agent" : "Changed an agent").pipe(
+            Effect.annotateLogs({
+              instance: config.id,
+              kind: config.kind,
+              enabled: config.enabled,
+              // Names only: values can be secrets.
+              variables: config.environment.map((variable) => variable.name).join(","),
+            }),
+          );
+        }),
+      )
+      .pipe(
+        Effect.catchTags({
+          SqlError: fail("prkit couldn't save that agent. Try again."),
+          PlatformError: fail("prkit couldn't save that agent's sensitive values. Try again."),
+        }),
+      );
 
   /** Drops the row and its secrets: a default instance goes back to how it shipped. */
   const drop = (id: AgentInstanceId) =>
-    writing.withPermits(1)(
-      Effect.gen(function* () {
-        yield* sql`DELETE FROM agent_instances WHERE id = ${id}`;
-        const secrets = yield* readSecrets;
-        if (secrets[id] !== undefined) yield* writeSecrets(withSecrets(secrets, id, {}));
-      }),
-    ).pipe(
-      Effect.catchTags({
-        SqlError: fail("prkit couldn't remove that agent. Try again."),
-        PlatformError: fail("prkit couldn't remove that agent's sensitive values. Try again."),
-      }),
-    );
+    writing
+      .withPermits(1)(
+        Effect.gen(function* () {
+          yield* sql`DELETE FROM agent_instances WHERE id = ${id}`;
+          const secrets = yield* readSecrets;
+          if (secrets[id] !== undefined) yield* writeSecrets(withSecrets(secrets, id, {}));
+        }),
+      )
+      .pipe(
+        Effect.catchTags({
+          SqlError: fail("prkit couldn't remove that agent. Try again."),
+          PlatformError: fail("prkit couldn't remove that agent's sensitive values. Try again."),
+        }),
+      );
 
   return {
     resolved,

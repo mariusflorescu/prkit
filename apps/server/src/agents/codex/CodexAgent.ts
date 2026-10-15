@@ -278,42 +278,47 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
       const text = yield* child.stdout.pipe(Stream.decodeText(), Stream.mkString);
       return /\d+\.\d+[^\s]*/.exec(text)?.[0] ?? null;
     }),
-  ).pipe(Effect.timeout("15 seconds"), Effect.orElseSucceed(() => null));
+  ).pipe(
+    Effect.timeout("15 seconds"),
+    Effect.orElseSucceed(() => null),
+  );
 
   /**
    * Before the instance is removed: signs out the keychain login prkit may hold in its home,
    * pinned to the keychain so a shared login file is never touched, then deletes the home.
    * A sign-out that fails keeps the home, so the login is never left with nothing to remove it.
    */
-  const retire = preparing.withPermits(1)(
-    Effect.gen(function* () {
-      if (setup.isDefault) return;
-      const codex = yield* binary;
-      const holdsOwn = yield* fs.exists(path.join(home, "config.toml"));
-      if (holdsOwn && codex !== null) {
-        const pinned = ["-c", storeOverride({ _tag: "own" })];
-        yield* succeeds(codex, [...pinned, "logout"], home);
-        if (yield* succeeds(codex, [...pinned, "login", "status"], home))
-          return yield* new AgentError({
-            reason: "auth",
-            message: `prkit couldn't sign out ${setup.label}'s login. Try again.`,
-          });
-      }
-      yield* fs.remove(home, { recursive: true, force: true });
-      yield* Effect.logInfo("Removed a Codex instance's home").pipe(
-        Effect.annotateLogs({ instance: setup.id }),
-      );
-    }),
-  ).pipe(
-    Effect.catchTag("PlatformError", (error) =>
-      Effect.fail(
-        new AgentError({
-          reason: "agent",
-          message: `prkit couldn't delete ${setup.label}'s folder: ${error.message}`,
-        }),
+  const retire = preparing
+    .withPermits(1)(
+      Effect.gen(function* () {
+        if (setup.isDefault) return;
+        const codex = yield* binary;
+        const holdsOwn = yield* fs.exists(path.join(home, "config.toml"));
+        if (holdsOwn && codex !== null) {
+          const pinned = ["-c", storeOverride({ _tag: "own" })];
+          yield* succeeds(codex, [...pinned, "logout"], home);
+          if (yield* succeeds(codex, [...pinned, "login", "status"], home))
+            return yield* new AgentError({
+              reason: "auth",
+              message: `prkit couldn't sign out ${setup.label}'s login. Try again.`,
+            });
+        }
+        yield* fs.remove(home, { recursive: true, force: true });
+        yield* Effect.logInfo("Removed a Codex instance's home").pipe(
+          Effect.annotateLogs({ instance: setup.id }),
+        );
+      }),
+    )
+    .pipe(
+      Effect.catchTag("PlatformError", (error) =>
+        Effect.fail(
+          new AgentError({
+            reason: "agent",
+            message: `prkit couldn't delete ${setup.label}'s folder: ${error.message}`,
+          }),
+        ),
       ),
-    ),
-  );
+    );
 
   /** Codex in prkit's home while that home keeps its own login; refused while it shares the user's. */
   const openOwn = Effect.gen(function* () {

@@ -46,7 +46,7 @@ export function GuideSetupAgent({
       />
     );
   const model =
-    selection === null ? undefined : findAgentModel(catalog, selection.provider, selection.model);
+    selection === null ? undefined : findAgentModel(catalog, selection.instance, selection.model);
   return (
     <>
       <AgentModelPicker
