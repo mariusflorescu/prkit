@@ -23,7 +23,7 @@ BrowserWindow ──loads──> http://127.0.0.1:<port>/?token=<token>
 
 - The server is a child process. Electron main stays small: start the server, read its ready line, open the window, forward a few native capabilities through the preload bridge.
 - The server also serves the UI, so the desktop window, a plain browser in dev, and the e2e test browser are the same surface.
-- Dev mode runs the server and Vite separately; Vite proxies `/ws`, `/health` and `/appearance.js` to the server, so dev stays single-origin. MCP clients, agent turns and outside agents alike, talk to the server's own port.
+- Dev mode runs the server and Vite separately; Vite proxies `/ws`, `/health` and `/appearance.js` to the server, so dev stays single-origin. MCP clients, agent turns and outside agents alike, connect to the server's own port directly.
 - Closing the window on macOS keeps the app and its server running, so reviews keep watching. Quitting stops the server; the next launch reconciles every review (see Restarts).
 
 ### Auth between UI and server
@@ -32,7 +32,7 @@ The server binds `127.0.0.1` only. It requires a per-launch token on the WebSock
 
 `/mcp` uses separate bearer tokens, one per agent attempt (see Agents).
 
-`/mcp/outside` has a token of its own, and refuses any request with an `Origin` header or a `Host` other than `127.0.0.1:<port>`, so a web page can't reach it either. That token is the one prkit writes to disk: the launcher an outside client starts has to find the running server and its token, so they sit in `outside-agents.json`, mode 0600, holding no GitHub token, and the server keeps only the token's SHA-256 (see Outside agents).
+`/mcp/outside` has a token of its own, and refuses any request with an `Origin` header or a `Host` other than `127.0.0.1:<port>`, so a web page can't reach it either. Unlike the server's other tokens, it is written to disk: the launcher an outside client starts has to find the running server and its token, so they sit in `outside-agents.json`, mode 0600, holding no GitHub token, and the server keeps only the token's SHA-256 (see Outside agents). The only other secrets prkit writes are agent logins: the instances' sensitive environment values in `agent-secrets.json` and the key a Cursor sign-in saves in its instance's home (see State).
 
 ### Child process environment
 
@@ -46,7 +46,7 @@ Every child process (agents, `gh`, `git`) gets an environment built from an allo
 
 `PRKIT_HOME` (default `~/.prkit`; in a git worktree, the worktree's gitignored `.prkit/`), which prkit creates with mode 0700, holds:
 
-- `prkit.sqlite` - settings, guide settings per scope, open PRs and the Inbox's filters, reviews, attempts and their files, guide revisions, review activity, fix sessions with their turns and activity, fix settings per repository, the agent instances the user added, and the outside agents' request ids.
+- `prkit.sqlite` - settings, guide settings per scope, open PRs and the Inbox's filters, reviews, attempts and their files, guide revisions, review activity, fix sessions with their turns and activity, fix settings per repository, the agent instances the user added or changed, and the outside agents' request ids.
 - `repos/<host>/<owner>/<repo>.git` - one bare, blobless repository cache per repo.
 - `worktrees/<reviewId>` - one detached checkout per review that is not done.
 - `fixes/<fixerId>` - one checkout per fix session that has not ended, apart from the review worktrees (see The fix agent).
@@ -59,7 +59,7 @@ Every child process (agents, `gh`, `git`) gets an environment built from an allo
 - `cursor-sdk/<version>/` - Cursor's SDK, downloaded from npm when the user installs Cursor support, since prkit doesn't ship it.
 - `agent-secrets.json` - the agent instances' sensitive environment values, mode 0600, never in the database.
 - `bin/prkit-mcp` - the launcher an outside MCP client runs, mode 0700, written on every launch, holding no secret.
-- `outside-agents.json` - how that launcher finds the running server, mode 0600: the port, pid, version and, while the switch is on, the outside token and level. Removed when the server stops (see Outside agents).
+- `outside-agents.json` - how that launcher finds the running server, mode 0600: while the switch is on, the port, outside token and level with the pid and version; while off, only the pid and version. Removed when the server stops (see Outside agents).
 
 SQLite goes through `effect/sql` with a small driver over `node:sqlite`, WAL mode, migrations as TypeScript files under `apps/server/src/persistence/Migrations/`.
 
@@ -248,9 +248,9 @@ interface AgentProvider {
   // Reports submit_guide's input while the agent writes it, so the agent needs no submit_draft.
   readonly streamsGuideInput: boolean
   // Checks the provider is installed and logged in with a subscription, without starting a turn.
-  readonly check: Effect<ProviderStatus>
+  readonly check: Effect<AgentProviderState>
   // The models this login can use, each with the settings it advertises.
-  readonly models: (state: ProviderStatus) => Effect<ReadonlyArray<AgentModel>>
+  readonly models: (state: AgentProviderState) => Effect<ReadonlyArray<AgentModel>>
   // Whether a saved session can still be resumed.
   readonly hasSession: (sessionId: string, cwd: string) => Effect<boolean>
   // One turn. The process lives exactly as long as the returned stream's scope.
@@ -258,7 +258,7 @@ interface AgentProvider {
     turn: AgentTurn                   // its id, which the turn's processes inherit as PRKIT_TURN
     cwd: string                       // the review worktree or the fix checkout
     checkout: Checkout                // its git-dir layout as prkit computed it
-    readableDirs: string[]            // the attempt's diffs/ directory
+    readableDirs: string[]            // the attempt's diffs/ or the fix turn's context folder
     instructions: string              // the guide-writing or fixing rules
     prompt: string                    // this turn's task
     resumeSessionId: string | null
@@ -295,7 +295,7 @@ AgentEvent =
 - **Cursor** runs through Cursor's SDK, never its CLI, in a child process prkit starts for each check, sign-in or turn (`agents/cursor/runner.ts`), with HOME set to the instance's own home and `settingSources: []`, so neither the user's nor the repository's Cursor settings apply.
   - **The SDK.** prkit doesn't ship it, since it isn't open source. "Install Cursor support" downloads the versions pinned in `agents/cursor/sdkPackages.ts` from npm into `$PRKIT_HOME/cursor-sdk/<version>/`, each tarball checked against the lockfile's sha512 and unpacked without install scripts. `sdkLoader.ts` is the one place it is loaded from; `PRKIT_CURSOR_SDK_PATH` loads another copy, and only with `PRKIT_E2E=1`.
   - **Tools.** None of Cursor's own tools are on: it keeps only the two that list and call custom tools, and its tools are prkit's, run in the runner and held to the checkout by `checkoutPaths`: `read_file`, `list_dir`, `glob` and `grep` for a guide, plus `write_file` and `edit_file` for a fix. So a Cursor fix only edits files and never runs the repository's scripts. prkit's MCP tools come the same way: the runner calls `/mcp` with the turn's token, which Cursor never sees. A turn that shows one of Cursor's own tools at work fails at once, and nothing from it is kept.
-  - **The runner's sandbox.** The SDK runs locally whatever Cursor's backend sends, so the runner itself runs under macOS's `sandbox-exec`, with a profile prkit writes for each run (`agents/cursor/seatbelt.ts`). It reads the system, its runtime, the runner, the SDK, the instance's home, the checkout and the turn's diffs and temp folder. It writes only the instance's home, the temp folder and, on a fix, the checkout, never `.git` or `.cursor`. Of this Mac's sockets and addresses it reaches only prkit's MCP port. IPv4 to other hosts stays open, since the SDK needs Cursor's backend: if that backend ever ran one of its own tools, a pull request's instructions could send the checkout and the instance's stored conversations out.
+  - **The runner's sandbox.** The SDK runs locally whatever Cursor's backend sends, so the runner itself runs under macOS's `sandbox-exec`, with a profile prkit writes for each run (`agents/cursor/seatbelt.ts`). It reads the system, its runtime, the runner, the SDK, the instance's home, the checkout and the turn's diffs and temp folder. It writes only the instance's home, the temp folder and, on a fix, the checkout, never the checkout's `.git` or `.cursor`. The home's `.cursor`, where the saved key lives, is closed too, but for `.cursor/projects`, where Cursor writes its transcripts; only signing in and out write the key. Of this Mac's sockets and addresses it reaches only prkit's MCP port and the system's name resolver. IPv4 to other hosts stays open, since the SDK needs Cursor's backend: if that backend ever ran one of its own tools, a pull request's instructions could send the checkout and the instance's stored conversations out.
   - **Turns.** Cursor runs on macOS only. It doesn't stream `submit_guide`'s input, so it drafts with `submit_draft`, and it resumes with `Agent.resume` from the instance's agent store. Signing in saves a Cursor API key named `prkit` in the instance's home. Details in `docs/features/agents.md`.
 - MCP config and a fresh bearer token are passed on every start and every resume; a resumed session never reuses an old token. For Cursor the runner holds the token.
 - Whether the stored session still exists is checked (`hasSession`) before the turn's prompt is chosen, so a follow-up never lands in an empty conversation.
@@ -374,9 +374,9 @@ The owner's own MCP client (Claude Code, Codex, Cursor, anything that starts a s
 
 - **Bridge.** The client runs `<home>/bin/prkit-mcp`, a launcher prkit writes on every launch that runs prkit's own server binary in bridge mode (`mcp-bridge`, picked in `bin.ts` before anything else loads). The bridge relays stdio to `/mcp/outside`. It never opens the database or touches `prkit.lock`, so it runs beside the app. It finds the server through `outside-agents.json`, which it reads only when it is a regular file of the current user's with no group or other permissions, and a dead pid there reads as not open. On a refused connection, a 401, a 403 or an unknown session it reads the file again and replays the client's `initialize`, so a restart or a new token costs the client nothing. While prkit isn't reachable it answers on its own with only `prkit_status`, and sends `tools/list_changed` when that changes.
 - **Endpoint.** `/mcp/outside` is a second `McpServer` on the same listener, built in `Layer.fresh` because effect's server layer is memoized: without it both endpoints would list both toolkits. Agent turns' `/mcp` and its tool list are unchanged, and neither endpoint takes the other's tokens. The endpoint refuses any request with an `Origin` header, a `Host` other than `127.0.0.1:<port>`, the switch off, or a token whose SHA-256 isn't the current one.
-- **Token.** 32 random bytes, new on every launch, every switch on, every level change and Reset access, written to `outside-agents.json` (mode 0600, staged in a fresh file and renamed in last) and nowhere else: not on a command line, in a client's config or in a log. This is the one exception to tokens never touching disk (see Auth between UI and server).
-- **Levels.** Each tool declares its level once (`mcp/outside/access.ts`), and the server won't start if a handler's level and its tool's disagree. A tool above the client's level is hidden from `tools/list` and unknown to `tools/call`, checked on every call. No tool pushes, merges, posts to GitHub, discards a commit waiting for Push, reverts, or changes agents, accounts or settings; `stop_fix` stops only queued and running work.
-- **Who started it.** The client's name (`x-prkit-client`, from its `initialize`) is a label, not an identity. It is stored as `startedBy` on the attempt or fix turn it starts or asks to change, and the activity says "Started from Claude Code". A fix turn with `startedBy` never pushes by itself, even in a repository set to push automatically, and a retry keeps the name (`startedByFor`, `pushesItself` in `fixers/turnRules.ts`). The one push without a click an outside call can lead to is the owner's own opt-in: with automatic conflict resolution and automatic push both on, the watcher resolves and pushes a conflicting PR that has an open tab or a watched guide, however it was opened.
+- **Token.** 32 random bytes, new on every launch, every switch on, every level change and Reset access, written to `outside-agents.json` (mode 0600, staged in a fresh file and renamed in last) and nowhere else: not on a command line, in a client's config or in a log. It is the one server token that touches disk (see Auth between UI and server).
+- **Levels.** Each tool's definition carries its level and its visibility in one call (`mcp/outside/tools.ts`), each handler is wrapped by `reads` or `startsWork`, and `mcp/outside/access.ts` refuses to start the server if the two disagree. A tool above the client's level is hidden from `tools/list` and unknown to `tools/call`, checked on every call. No tool pushes, merges, posts to GitHub, discards a commit waiting for Push, reverts, or changes agents, accounts or settings; `stop_fix` stops only queued and running work.
+- **Who started it.** The client's name (`x-prkit-client`, from its `initialize`) is a label, not an identity. It is stored as `startedBy` on the attempt or fix turn it starts or asks to change, and the activity says "Started from Claude Code". A fix turn with `startedBy` never pushes by itself, even in a repository set to push automatically, and a retry keeps the name (`startedByFor`, `pushesItself` in `fixers/turnRules.ts`). The one push without a click an outside call can lead to is the owner's own opt-in: with automatic conflict resolution and automatic push both on, the watcher resolves and pushes a conflicting PR it watches (an open tab, a watched guide or an active fix session), however that started.
 - **Clicks, not background work.** Calls count against the GitHub budget like the app's own clicks. `add_review_comment`, `send_to_fix_agent` and `ask_fix_agent_to_change` take a `clientRequestId`, stored per tool, client and pull request (`outside_requests`, kept a day), so a retry gets the first answer instead of doing it twice.
 
 ## Client
