@@ -162,7 +162,7 @@ test(
       await side.getByRole("button", "Remove").tap();
       const remove = screen.getByRole("alertdialog", "Remove Side?");
       await expect(remove).toContainText(
-        "If Cursor can't confirm the sign-out, nothing is removed.",
+        "prkit deletes its folder for it, with the Cursor key its sign-in saved there.",
       );
       await remove.getByRole("button", "Remove").tap();
       await expect(side).toHaveCount(0, { timeout: 30_000 });

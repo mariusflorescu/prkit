@@ -94,7 +94,8 @@ const installPackage = (entry: SdkPackage, temp: string) =>
 /**
  * Installs Cursor's SDK into `$PRKIT_HOME/cursor-sdk/<version>`: each package into a temporary
  * folder, then one rename, so the SDK is either all there or not there. Already there is done.
- * A run that stopped halfway leaves only a temporary folder, which the next run removes.
+ * A run that stopped halfway leaves only a temporary folder, which the next run removes, and
+ * other versions' folders go once this one is there.
  */
 export const install = (options: {
   readonly home: string;
@@ -117,12 +118,21 @@ export const install = (options: {
       const entry = path.join(root, "node_modules", "@cursor", "sdk", "dist", "esm", "index.js");
       const list = packagesFor(options.packages, options.platform);
       const total = list.length;
-      if (yield* fs.exists(entry)) return Stream.make({ name: null, done: total, total });
+      const parent = path.dirname(root);
+      /** Other versions' folders: a version prkit no longer pins is never loaded again. */
+      const removeStale = Effect.gen(function* () {
+        for (const name of yield* fs.readDirectory(parent))
+          if (name !== path.basename(root) && !name.startsWith(PARTIAL))
+            yield* fs.remove(path.join(parent, name), { recursive: true, force: true });
+      });
+      if (yield* fs.exists(entry)) {
+        yield* removeStale;
+        return Stream.make({ name: null, done: total, total });
+      }
       if (!supportsPlatform(options.packages, options.platform))
         return yield* failure(
           `Cursor's SDK doesn't run on this computer (${options.platform}). Cursor support needs a Mac.`,
         );
-      const parent = path.dirname(root);
       yield* fs.makeDirectory(parent, { recursive: true });
       for (const name of yield* fs.readDirectory(parent))
         if (name.startsWith(PARTIAL))
@@ -149,6 +159,7 @@ export const install = (options: {
         if (!(yield* fs.exists(entry)))
           return yield* failure("prkit couldn't finish installing Cursor's SDK. Try again.");
         if (!moved) yield* fs.remove(temp, { recursive: true, force: true });
+        yield* removeStale;
         yield* Effect.logInfo("Installed Cursor's SDK").pipe(Effect.annotateLogs({ root }));
         return { name: null, done: total, total };
       }).pipe(

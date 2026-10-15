@@ -160,6 +160,22 @@ describe("installing Cursor's SDK", () => {
     expect(await listing(home)).toEqual(["1.0.37"]);
   });
 
+  it("removes the folders of versions prkit no longer pins once this one is in", async () => {
+    const home = `${root}/home-stale`;
+    await run(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        yield* fs.makeDirectory(`${home}/cursor-sdk/1.0.30/node_modules/@cursor/sdk`, {
+          recursive: true,
+        });
+      }),
+    );
+    const sdk = await tarball("@cursor/sdk", SDK_FILES);
+    const platform = await tarball("@cursor/sdk-darwin-arm64", {}, "darwin-arm64");
+    await run(installAll(home, [sdk, platform]));
+    expect(await listing(home)).toEqual(["1.0.37"]);
+  });
+
   it("does nothing when the SDK is already installed", async () => {
     const home = `${root}/home-ok`;
     const unreadable: SdkPackage = {

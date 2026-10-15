@@ -22,7 +22,7 @@ const LEFT_BEHIND: Record<AgentProviderKind, (entry: AgentCatalogEntry) => strin
       : `prkit deletes its own folder for it, after signing out any login it holds there.${yours}`;
   },
   cursor: () =>
-    "prkit signs out of the Cursor sign-in it holds for it, then deletes its folder. If Cursor can't confirm the sign-out, nothing is removed. The key that sign-in created stays valid until it expires: delete it in your Cursor dashboard to end it sooner.",
+    "prkit deletes its folder for it, with the Cursor key its sign-in saved there. The key itself stays valid until it expires: delete it in your Cursor dashboard to end it sooner.",
 };
 
 /**
