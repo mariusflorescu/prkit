@@ -169,7 +169,14 @@ class StandInAgent {
         update: {
           type: "tool-call-completed",
           callId,
-          toolCall: { ...toolCall, result: { status: ok ? "success" : "error" } },
+          // Like Cursor: a tool that returns, even with an error, completes as a success.
+          toolCall: {
+            ...toolCall,
+            result: {
+              status: "success",
+              value: { content: [{ text: { text } }], isError: !ok },
+            },
+          },
         },
       });
       return { ok, text };

@@ -123,18 +123,24 @@ const hasSession = async (sdk: Sdk, apiKey: string | null, sessionId: string, cw
  */
 const toolEvent = (update: InteractionUpdate, cwd: string): Event | null => {
   if (update.type === "text-delta") return { type: "text", text: update.text };
-  if (update.type === "tool-call-completed")
+  if (update.type === "tool-call-completed") {
+    const call = update.toolCall;
+    // A tool that refused still returns, as a result marked as an error.
+    const refused =
+      call.type === "mcp" && call.result?.status === "success" && call.result.value.isError;
     return {
       type: "tool-done",
       callId: update.callId,
-      ok: update.toolCall.result?.status === "success",
+      ok: call.result?.status === "success" && !refused,
     };
+  }
   if (update.type !== "tool-call-started") return null;
   const call = update.toolCall;
   const base = { type: "tool", callId: update.callId, path: null, pattern: null } as const;
   if (call.type !== "mcp") return { ...base, tool: "other", name: call.type };
   const name = call.args.toolName ?? "";
-  if (call.args.providerIdentifier !== CUSTOM_TOOLS_SERVER) return { ...base, tool: "other", name };
+  // A server Cursor doesn't have: the call fails without running anything.
+  if (call.args.providerIdentifier !== CUSTOM_TOOLS_SERVER) return { ...base, tool: "mcp", name };
   const field = (key: string) => {
     const value = call.args.args?.[key];
     return typeof value === "string" ? value : null;

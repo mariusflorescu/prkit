@@ -95,7 +95,10 @@ export const Event = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("tool"),
     callId: Schema.String,
-    /** One of prkit's file tools (read_file, grep...), `prkit` for its MCP tools, else `other`. */
+    /**
+     * One of prkit's file tools (read_file, grep...), `prkit` for its MCP tools, `mcp` for a tool
+     * of a server Cursor doesn't have, else `other`: one of Cursor's own.
+     */
     tool: Schema.String,
     /** The tool's own name: submit_guide for a `prkit` call. */
     name: Schema.String,
