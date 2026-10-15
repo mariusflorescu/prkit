@@ -1,5 +1,6 @@
 import { stripVTControlCharacters } from "node:util";
 import type * as Schema from "effect/Schema";
+import { shellQuote } from "../outside/launcher.ts";
 
 const scalar = (value: Schema.Json) => value === null || typeof value !== "object";
 const plain = (value: Schema.Json) =>
@@ -60,4 +61,31 @@ export const humanOutput = (value: Schema.Json, depth = 0): string => {
       scalar(entry) ? `${key}: ${plain(entry)}` : `${key}:\n${humanOutput(entry, depth + 1)}`,
     )
     .join(depth === 0 ? "\n\n" : "\n");
+};
+
+export const continuationOutput = (value: Schema.Json, args: readonly string[]) => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return "";
+  const fragment = "_tag" in value && value._tag === "response-fragment";
+  const cursor = fragment
+    ? "nextResponseCursor" in value
+      ? value.nextResponseCursor
+      : null
+    : "nextCursor" in value
+      ? value.nextCursor
+      : null;
+  if (typeof cursor !== "string")
+    return fragment
+      ? "Final response fragment. Join the text fragments in offset order and decode the complete JSON before reading its page cursor."
+      : "";
+  const flag = fragment ? "--response-cursor" : "--cursor";
+  const oldFlags = fragment ? [flag] : [flag, "--response-cursor"];
+  const words = args.filter(
+    (word, index) =>
+      !oldFlags.includes(word) &&
+      !oldFlags.some((old) => word.startsWith(`${old}=`)) &&
+      !oldFlags.includes(args[index - 1] ?? ""),
+  );
+  const quote = (word: string) => (/^[A-Za-z0-9_./:@%+=,-]+$/.test(word) ? word : shellQuote(word));
+  const command = ["prkit", ...words, flag, cursor].map(quote).join(" ");
+  return `${fragment ? "Continue this response using the server's cursor. Join text fragments in offset order before decoding the complete JSON." : "Next page:"}\n${command}`;
 };

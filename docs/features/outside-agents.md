@@ -69,6 +69,7 @@ The inventory covers every WebSocket RPC and the app's local presentation action
 | Push/resolve automatically or trust repository scripts | fixerSettings.update | Excluded B | Excluded |
 | Appearance | appearance.get, appearance.update | `read_settings`; changes excluded B | Read / Excluded |
 | Outside agents state/access/reset | outsideAgents.get, outsideAgents.update, outsideAgents.reset | `read_settings`; enabling/disabling, access changes and Reset access excluded B | Read / Excluded |
+| CLI setup and skill installer | cliInstall.get, cliInstall.install, cliInstall.uninstall, cliInstall.skill | Setup status is presentation; installing/removing the launcher and opening the skill installer are excluded B: machine setup | Presentation / Excluded |
 | Live updates and waiting | github.events, workspace.changes, reviews.watch, fixers.watch | Finite snapshot reads above plus `wait_for`; no outside background subscriptions or polling loop | Read |
 | Desktop updater: channel/automatic checks, check/download/install/restart | Electron update bridge | Changes excluded B (installation and trust). Native updater status has no server service and is outside this unit’s server-only build scope; release notes and What’s new are presentation. | Excluded / Presentation |
 | Navigation, inner tabs, scrolling, collapses, keyboard shortcuts, text selection, copy/open links | Presentation only | Read the corresponding data or use the workspace tool; these have no separate domain operation | Presentation |
@@ -123,7 +124,7 @@ When a complete result is too large, the success value is a typed `_tag: "respon
 
 `list_open_pull_requests` continues to mean open **app tabs**. `list_repository_pull_requests` lists a repository's open PRs. `read_guide_revision` returns the guide and frozen settings; use the revision's `attemptId` from `list_guide_revisions` with `read_review_diff` for its exact saved diff. `read_fix_turn` returns the full per-comment/per-file report and script decision. Neither read starts an agent.
 
-The CLI is built separately from this surface using one command map. Until its branch is on main there are no CLI files here to edit. Whoever merges second adds the new tool names to that map after rebasing; the CLI's parity check must compare both sets exactly.
+The CLI uses one command map in `apps/server/src/cli/commands.ts`. Its parity check compares the map with all 52 tools exactly, and its flags come from the same parameter schemas. The public skill and CLI documentation are checked against that map too.
 
 Each tool is declared once with its level (`apps/server/src/mcp/outside/tools.ts`): `reads` or `startsWork` wraps the handler, and the server refuses to start when a handler's level differs from its tool's. A tool above the client's level is hidden from `tools/list` and unknown to `tools/call`, checked again on every call, so lowering the level takes effect at once. Other failures come back as tool errors with a code (`invalid`, `not-found`, `account-needed`, `not-allowed`, `not-ready`, `conflict`, `github`, `failed`) and a plain message.
 

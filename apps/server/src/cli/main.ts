@@ -12,12 +12,46 @@ import { Argument, Command, Flag } from "effect/cli";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { callTool, CliFailure } from "./client.ts";
-import { flagName, mappings, toolkit, type ToolName } from "./commands.ts";
-import { humanOutput } from "./output.ts";
+import {
+  commandParameters,
+  mappings,
+  toolkit,
+  type CommandMapping,
+  type ToolName,
+} from "./commands.ts";
+import { continuationOutput, humanOutput } from "./output.ts";
 
 type Value = Option.Option<Schema.Json>;
 type Input = Record<string, Flag.Flag<Value> | Argument.Argument<Value>>;
 const JsonText = Schema.fromJsonString(Schema.Json);
+
+const textValue = (text: string, ast: SchemaAST.AST): Schema.Json => {
+  if (ast._tag === "Objects" || ast._tag === "Arrays") return Schema.decodeSync(JsonText)(text);
+  if (ast._tag === "Number") {
+    const number = Number(text);
+    if (!Number.isFinite(number)) throw new Error("Expected a number.");
+    return number;
+  }
+  if (ast._tag === "Boolean") {
+    if (text !== "true" && text !== "false") throw new Error("Expected true or false.");
+    return text === "true";
+  }
+  if (ast._tag === "Union") {
+    if (text === "null" && ast.types.some((type) => type._tag === "Null")) return null;
+    if (ast.types.some((type) => type._tag === "Objects" || type._tag === "Arrays"))
+      return Schema.decodeSync(JsonText)(text);
+  }
+  return text;
+};
+
+const repository = (text: string, host: Schema.Json | undefined) => {
+  const match = /^([^/]+)\/([^/]+)$/.exec(text);
+  const owner = match?.[1];
+  const repo = match?.[2];
+  if (owner === undefined || repo === undefined)
+    throw new Error("Name the repository as owner/repo.");
+  return { owner, repo, host: host ?? "github.com" };
+};
 
 const parameter = (name: string, ast: SchemaAST.AST): Flag.Flag<Schema.Json> => {
   switch (ast._tag) {
@@ -38,19 +72,23 @@ const parameter = (name: string, ast: SchemaAST.AST): Flag.Flag<Schema.Json> => 
                 value: value === "true" ? true : value === "false" ? false : value,
               };
             }
-            const item = ast.rest[0];
-            return item?._tag === "Objects" || item?._tag === "Arrays"
-              ? Schema.decodeSync(JsonText)(text)
-              : text;
+            const item = ast.rest[0] ?? ast.elements[0];
+            return item === undefined ? text : textValue(text, item);
           },
           (error) => (error instanceof Error ? error.message : `Invalid --${name}.`),
         ),
         Flag.atLeast(0),
       );
-    case "Objects":
-      return Flag.String(name).pipe(Flag.withSchema(JsonText));
     default:
-      return Flag.String(name);
+      return Flag.String(name).pipe(
+        Flag.mapTryCatch(
+          (text) =>
+            name === "repo" && !text.startsWith("{") && text !== "null"
+              ? text
+              : textValue(text, ast),
+          (error) => (error instanceof Error ? error.message : `Invalid --${name}.`),
+        ),
+      );
   }
 };
 
@@ -82,39 +120,88 @@ export const main = () => {
       ),
     }),
   );
-  const leaf = (name: ToolName, mapping: (typeof mappings)[number][1]) => {
+  const leaf = (name: ToolName, mapping: CommandMapping) => {
     const tool = toolkit.tools[name];
-    const ast = SchemaAST.toEncoded(tool.parametersSchema.ast);
     const input: Input = {};
     if (mapping.target)
-      input.pr = Argument.String("pr").pipe(
+      input.target = Argument.String(mapping.target === "pr" ? "pr" : "owner/repo").pipe(
         Argument.map((value) => Option.some<Schema.Json>(value)),
       );
-    if (ast._tag === "Objects")
-      for (const field of ast.propertySignatures) {
-        if (typeof field.name !== "string") continue;
-        if (mapping.target && ["url", "owner", "repo", "number"].includes(field.name)) continue;
-        const flag = parameter(flagName(field.name), field.type).pipe(
-          Flag.withDescription(SchemaAST.resolveDescription(field.type) ?? field.name),
-        );
-        input[field.name] = flag.pipe(Flag.optional);
-      }
+    for (const field of commandParameters(name, mapping)) {
+      const flag = parameter(field.name, field.ast).pipe(
+        Flag.withDescription(SchemaAST.resolveDescription(field.ast) ?? field.key),
+      );
+      input[field.key] = flag.pipe(Flag.optional);
+    }
     return Command.make(mapping.path.at(-1) ?? name, input, (values) =>
       Effect.gen(function* () {
         const { json } = yield* root;
         const args: Record<string, Schema.Json> = {};
         for (const [key, value] of Object.entries(values))
           if (
-            key !== "pr" &&
+            key !== "target" &&
             Option.isSome(value) &&
             !(Array.isArray(value.value) && value.value.length === 0)
           )
             args[key] = value.value;
         if (mapping.target) {
-          const pr = values.pr;
-          if (pr === undefined || Option.isNone(pr) || typeof pr.value !== "string")
-            return yield* new CliFailure({ code: 2, message: "Name the pull request." });
-          Object.assign(args, yield* target(pr.value, args.host));
+          const selected = values.target;
+          if (
+            selected === undefined ||
+            Option.isNone(selected) ||
+            typeof selected.value !== "string"
+          )
+            return yield* new CliFailure({
+              code: 2,
+              message: "Name the pull request or repository.",
+            });
+          const text = selected.value;
+          Object.assign(
+            args,
+            mapping.target === "pr"
+              ? yield* target(text, args.host)
+              : yield* Effect.try({
+                  try: () => repository(text, args.host),
+                  catch: (error) =>
+                    new CliFailure({
+                      code: 2,
+                      message:
+                        error instanceof Error
+                          ? error.message
+                          : "Name the repository as owner/repo.",
+                    }),
+                }),
+          );
+        }
+        if (typeof args.repository === "string") {
+          const text = args.repository;
+          const selected = yield* Effect.try({
+            try: () => repository(text, args.host),
+            catch: (error) =>
+              new CliFailure({
+                code: 2,
+                message:
+                  error instanceof Error ? error.message : "Name the repository as owner/repo.",
+              }),
+          });
+          args.repository = { host: selected.host, owner: selected.owner, name: selected.repo };
+          if (name === "save_inbox_filters") {
+            if (typeof args.account !== "string")
+              return yield* new CliFailure({
+                code: 2,
+                message:
+                  "Saving --repo owner/repo also needs --account. Or pass repository JSON with accountIds.",
+              });
+            args.repository = { ...args.repository, accountIds: [args.account] };
+          }
+        }
+        if (name === "generate_guide") {
+          if (args.stack === "this") args.stack = "this-pr";
+          else if (args.stack === "all") args.stack = "whole-stack";
+          else if (typeof args.stack === "string" && /^\d+(?:,\d+)*$/.test(args.stack)) {
+            args.layers = args.stack.split(",").map(Number);
+            args.stack = "chosen-layers";
+          }
         }
         yield* Schema.decodeUnknownEffect(
           Schema.make<Schema.Codec<Schema.Json>>(tool.parametersSchema.ast),
@@ -122,27 +209,43 @@ export const main = () => {
           Effect.mapError((error) => new CliFailure({ code: 2, message: error.message })),
         );
         const result = yield* callTool(home, name, args);
-        process.stdout.write(`${json ? JSON.stringify(result) : humanOutput(result)}\n`);
+        process.stdout.write(
+          `${json ? JSON.stringify(result) : [humanOutput(result), continuationOutput(result, process.argv.slice(3))].filter(Boolean).join("\n\n")}\n`,
+        );
       }),
     ).pipe(Command.withDescription(tool.description ?? name));
   };
-  const groups = new Set(
-    mappings.filter(([, mapping]) => mapping.path.length > 1).map(([, mapping]) => mapping.path[0]),
-  );
-  const commands = [
-    ...mappings
-      .filter(([, mapping]) => mapping.path.length === 1)
-      .map(([name, mapping]) => leaf(name, mapping)),
-    ...[...groups].map((group) =>
-      Command.make(group).pipe(
-        Command.withSubcommands(
-          mappings
-            .filter(([, mapping]) => mapping.path.length > 1 && mapping.path[0] === group)
-            .map(([name, mapping]) => leaf(name, mapping)),
+  type TreeCommand = Command.Command<
+    string,
+    never,
+    {},
+    CliFailure,
+    Command.CommandContext<"prkit">
+  >;
+  const branch = (path: readonly string[]): TreeCommand => {
+    const entry = mappings.find(
+      ([, mapping]) =>
+        mapping.path.length === path.length &&
+        mapping.path.every((part, index) => part === path[index]),
+    );
+    const base = entry === undefined ? Command.make(path.at(-1) ?? "prkit") : leaf(...entry);
+    const children = [
+      ...new Set(
+        mappings.flatMap(([, mapping]) =>
+          mapping.path.length > path.length &&
+          path.every((part, index) => mapping.path[index] === part)
+            ? mapping.path.slice(path.length, path.length + 1)
+            : [],
         ),
       ),
-    ),
-  ];
+    ];
+    return children.length === 0
+      ? base
+      : base.pipe(Command.withSubcommands(children.map((child) => branch([...path, child]))));
+  };
+  const commands = [...new Set(mappings.map(([, mapping]) => mapping.path[0]))].map((part) =>
+    branch([part]),
+  );
   const usageFailure = () =>
     Effect.sync(() => {
       process.exitCode = 2;

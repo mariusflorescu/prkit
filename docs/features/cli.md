@@ -1,8 +1,8 @@
 # Command line
 
-Settings > Outside agents > Command line installs `prkit` for terminals, scripts and coding agents. The command palette also offers **Install command line tool**. Open prkit and turn Outside agents on before using it. Read only permits reads; Read and start work also permits guides, local draft comments and fix turns.
+Settings > Outside agents > Command line installs the CLI for terminals, scripts and coding agents. The command palette also offers **Install command line tool**. Open prkit and turn Outside agents on before using it. Read only permits reads; Read and start work also permits guides, fix turns, local tabs and drafts, saved inbox filters and PR-scope guide settings.
 
-The CLI calls the existing `/mcp/outside` tools. It uses the bridge's trusted discovery-file reader and sends `prkit CLI` as its client name. Work appears in the app as **Started from prkit CLI**. It never starts the app, opens the database or takes the home lock. The MCP bridge remains available separately.
+The CLI calls the existing `/mcp/outside` tools. It uses the bridge's trusted discovery-file reader and sends **prkit CLI** as its client name. Work appears in the app as **Started from prkit CLI**. It never starts the app, opens the database or takes the home lock. The MCP bridge remains available separately.
 
 ## Installation
 
@@ -20,35 +20,64 @@ An existing file, directory or foreign link is shown and left alone. Uninstall m
 
 ## Commands
 
-Run `prkit --help` or help on any subcommand for the installed version's flags. `--version` and `--completions bash|zsh|fish|sh` work while the app is closed.
+Run `prkit --help` or help on any subcommand for the installed version's flags. `prkit --version` and `prkit --completions zsh` work while the app is closed; completion shells are bash, zsh, fish and sh. The [skill's command reference](../../skills/prkit-cli/references/commands.md) covers every outside tool, including less common reads and JSON settings inputs.
 
 ```sh
 prkit status --json
-prkit inbox --account github.com/octocat --json
-prkit open-prs
-prkit pr read acme/widgets#42
-prkit pr open acme/widgets#42 --no-focus
-prkit guide generate acme/widgets#42 --agent claude --model MODEL --option effort=high
+prkit accounts --json
+prkit agents --json
+prkit inbox --reason review-requested --account github.com/octocat --json
+prkit inbox --reason authored --repo acme/widgets --json
+prkit repos list --json
+prkit repos prs acme/widgets --account github.com/octocat --json
+prkit tabs list --json
+prkit pr read acme/widgets#42 --json
+prkit pr files acme/widgets#42 --limit 20 --json
+prkit pr files acme/widgets#42 --limit 20 --cursor '<nextCursor>' --json
+prkit pr file acme/widgets#42 --path src/a.ts --side new --json
+prkit pr threads acme/widgets#42 --json
+prkit pr checks acme/widgets#42 --json
+prkit pr stack acme/widgets#42 --json
+prkit guide generate acme/widgets#42 --agent <instance> --model <model> --option effort=high --stack this
 prkit wait acme/widgets#42 --for guide --timeout 600
-prkit guide read acme/widgets#42
-prkit comments list acme/widgets#42
+prkit guide read acme/widgets#42 --json
+prkit guide revisions acme/widgets#42 --json
+prkit pr diff acme/widgets#42 --attempt-id <attempt-id> --json
+prkit comments list acme/widgets#42 --json
 prkit comments add acme/widgets#42 --path src/a.ts --line 42 --body 'Handle an empty list' --request-id comment-42
 prkit fix send acme/widgets#42 --request-id fix-42
 prkit wait acme/widgets#42 --for fix --timeout 600
 prkit fix read acme/widgets#42 --json
+prkit fix diff acme/widgets#42 --turn-id <turn-id> --json
 prkit fix change acme/widgets#42 --instructions 'Keep the existing name' --request-id change-42
 prkit fix resolve acme/widgets#42 --strategy merge
+prkit pr open acme/widgets#42 --no-focus
+prkit tabs focus acme/widgets#42
 ```
 
-Also available: `guide stop`, `fix stop` and `fix retry`. PRs accept HTTPS URLs or `owner/repo#number`, with `--host` for an Enterprise host. `--account` selects the account when prkit asks for one. Repeated `--option id=value` flags select model options; `true` and `false` are booleans. Repeated `--draft-ids` and `--thread-ids` select particular comments for `fix send`.
+The command tree covers all 52 tools: status, accounts, agents, settings, inbox (and filters save), repos list/prs, pr read/files/file/timeline/threads/checks/conversation/stack/candidates/diff/open, guide list/read/generate/stop/revisions/revision/progress/duration/settings/scope/repositories/repository, guide settings save, fix list/read/turn/diff/patch/access/send/change/stop/retry/resolve, comments list/add/edit/move, tabs list/close/focus/reorder, and wait.
+
+PRs accept HTTPS URLs or `owner/repo#number`, with `--host` for an Enterprise short form. Repository commands take `owner/repo`. `--account` selects the account when prkit asks for one; never switch accounts to work around a failure. Inbox `--repo owner/repo` selects a repository on github.com; quoted JSON with `host`, `owner` and `name` selects an Enterprise repository. Inbox also accepts reason, state, draft, checks, search and stacks selectors. These read filters do not change the app's saved filters.
+
+Pick a ready, enabled agent instance from the paged `prkit agents --json` result, an unblocked model's slug, and only the option ids and values that model advertises. Repeated `--option id=value` flags select options; `true` and `false` are booleans. Repeated `--draft-ids` and `--thread-ids` select comments for fix send.
+
+For guides, read stack layers first. `--stack this` maps to this PR, `--stack all` to the whole stack, and `--stack 1,3` to chosen layer numbers. The native values `this-pr`, `whole-stack` and `chosen-layers` also work, with repeated `--layers` for the last. `--regenerate` includes layers with guides. `--guidance` and `--focus` accept versioned JSON section edits, not plain strings. Read `prkit guide settings acme/widgets#42 --json` first and use the PR section's current version as `expectedVersion`; a stale version is refused. The command reference shows the full JSON shapes and the standalone PR settings save.
 
 `apps/server/src/cli/commands.ts` is the command map. Flags and validation come from each outside tool's parameter schema; the parity test fails when a tool has no command or a command has no tool. As outside tools acquire filters or new options, their commands acquire those flags. A new tool needs a map entry.
+
+The documentation drift test extracts command snippets from the public skill and its references, plus this document, then checks their command paths and flags against that map. Failures name the file, line and unrecognized command or flag.
+
+## Paging and output
+
+Paged reads take `--limit` from 1 to 100 and `--cursor`. Repeat the same command, target and filters with `nextCursor` verbatim until it is null. Plain output prints how to request the next page. File patch fragments for one path have `offset` and `complete`; join their text in offset order. File contents and fix patches are text pages joined by offset. A true `githubTruncated` or `threadsTruncated` means upstream data is missing even after local paging is finished. The current PR diff comes from PR files; PR diff with an attempt id is the immutable guide snapshot.
+
+Any large answer can be an outer `response-fragment`. Keep the logical page's cursor and arguments unchanged and use `nextResponseCursor` as `--response-cursor`. Join `text` fragments by `offset` and parse the complete JSON before following its `nextCursor`. The response cursor continues one encoded answer; the page cursor advances the list. `--json` preserves each response unchanged so clients can implement both continuations.
 
 Plain output uses tables and labelled fields, without terminal color codes. `--json` returns the tool's structured result unchanged on stdout; failures go to stderr. Exit codes are 0 for success, 1 for a tool or protocol failure, 2 for invalid usage, 3 for a closed app, Outside agents off or an unreachable app (including a sandbox), 4 for insufficient access, and 130 for interruption by SIGINT or SIGTERM. Interruption cancels the HTTP request and closes the MCP session; it never stops guide or fix work. `wait` returning `finished: false` is a successful timeout, not a failed guide, and never stops work.
 
 A disconnected action is never automatically replayed, since it may already have run. Use the same `--request-id` to retry `comments add`, `fix send` or `fix change` safely. Authentication rejections before dispatch may reconnect once using the new discovery file. Each CLI invocation closes its MCP session before exiting.
 
-The CLI offers no push, merge, posting, thread resolution, account or agent setup, settings changes, discard or revert commands. Client-started fixes wait for Push in the app. The repository's existing opt-in automatic conflict watcher remains independent: when automatic resolution and automatic push are both on, the watcher may still resolve and push a conflicting PR it watches.
+The CLI offers no push, merge, posting, thread resolution, account or agent setup, Global or Repository settings changes, discard or revert commands. Reading settings, saving inbox filters and saving PR-scope guide sections are available. Client-started fixes wait for Push in the app. The repository's existing opt-in automatic conflict watcher remains independent: when automatic resolution and automatic push are both on, the watcher may still resolve and push a conflicting PR it watches.
 
 ## The coding agent skill
 

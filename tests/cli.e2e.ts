@@ -7,6 +7,13 @@ import { test } from "@e2e-dev/web";
 import { expect } from "e2e";
 import * as Schema from "effect/Schema";
 
+import {
+  FilesResult,
+  ConversationResult,
+  GuideSettingsResult,
+} from "../apps/server/src/outside/paritySchemas.ts";
+import { ResponseFragment } from "../apps/server/src/outside/responseSchemas.ts";
+import { InboxListResult } from "../apps/server/src/outside/schemas.ts";
 import { repoRoot } from "../scripts/verify-run.ts";
 import { cliFixture } from "./cliFixture.ts";
 import { setUpFakeClaude } from "./fakeClaude.ts";
@@ -204,6 +211,17 @@ test(
         );
       const inbox = cli(["inbox", "--json"]);
       expect(inbox.code).toBe(0);
+      for (const reason of ["review-requested", "authored"]) {
+        const filtered = cli(["inbox", "--reason", reason, "--repo", "budget/fixtures", "--json"]);
+        expect(filtered.code).toBe(0);
+        const result = Schema.decodeSync(Schema.fromJsonString(InboxListResult))(filtered.stdout);
+        expect(result.total).toBeGreaterThan(0);
+        expect(
+          result.accounts
+            .flatMap((entry) => entry.sections)
+            .every((section) => section.reason === reason),
+        ).toBe(true);
+      }
       bridge = startBridge(run.home);
       await bridge.initialize();
       const direct = await bridge.call("list_inbox");
@@ -215,6 +233,70 @@ test(
       )(status.stdout).accounts[0]?.accountId;
       expect(account).toBeDefined();
       expect(cli(["inbox", "--account", account ?? "", "--json"]).code).toBe(0);
+      expect(cli(["agents", "--json"]).code).toBe(0);
+      expect(
+        cli(["repos", "prs", "budget/fixtures", "--account", account ?? "", "--json"]).code,
+      ).toBe(0);
+      await fake.push(1);
+      const firstFiles = cli(["pr", "files", "budget/fixtures#1", "--limit", "1", "--json"]);
+      expect(firstFiles.code).toBe(0);
+      const firstPage = Schema.decodeSync(Schema.fromJsonString(FilesResult))(firstFiles.stdout);
+      expect(firstPage.items.length).toBe(1);
+      if (firstPage.nextCursor === null) throw new Error("Expected another file page.");
+      const directFiles = await bridge.call("read_pull_request_files", {
+        owner: "budget",
+        repo: "fixtures",
+        number: 1,
+        limit: 1,
+      });
+      expect("json" in directFiles ? directFiles.json : null).toEqual(
+        Schema.decodeSync(Json)(firstFiles.stdout),
+      );
+      const secondFiles = cli([
+        "pr",
+        "files",
+        "budget/fixtures#1",
+        "--limit",
+        "1",
+        "--cursor",
+        firstPage.nextCursor,
+        "--json",
+      ]);
+      expect(secondFiles.code).toBe(0);
+      const secondPage = Schema.decodeSync(Schema.fromJsonString(FilesResult))(secondFiles.stdout);
+      expect(secondPage.items.length).toBe(1);
+      expect(secondPage.items[0]?.path).not.toBe(firstPage.items[0]?.path);
+      expect(secondPage.nextCursor).toBe(null);
+      const readableFiles = cli(["pr", "files", "budget/fixtures#1", "--limit", "1"]);
+      expect(readableFiles.code).toBe(0);
+      expect(readableFiles.stdout).toContain("prkit pr files");
+      expect(readableFiles.stdout).toContain("--cursor");
+      await fake.comment(9, 12_000);
+      let response = Schema.decodeSync(Schema.fromJsonString(ResponseFragment))(
+        cli(["pr", "conversation", "budget/fixtures#9", "--limit", "100", "--json"]).stdout,
+      );
+      let reconstructed = "";
+      while (true) {
+        expect(response.offset).toBe(reconstructed.length);
+        reconstructed += response.text;
+        if (response.nextResponseCursor === null) break;
+        const fragment = cli([
+          "pr",
+          "conversation",
+          "budget/fixtures#9",
+          "--limit",
+          "100",
+          "--response-cursor",
+          response.nextResponseCursor,
+          "--json",
+        ]);
+        expect(fragment.code).toBe(0);
+        response = Schema.decodeSync(Schema.fromJsonString(ResponseFragment))(fragment.stdout);
+      }
+      const conversation = Schema.decodeSync(Schema.fromJsonString(ConversationResult))(
+        reconstructed,
+      );
+      expect(conversation.items.some((item) => item.body.length > 48_000)).toBe(true);
       expect(cli(["pr", "open", "budget/fixtures#9"]).code).toBe(4);
       await screen.getByRole("radio", "Read and start work").tap();
       await expect(
@@ -224,6 +306,10 @@ test(
       expect(cli(["pr", "read", "https://github.com/budget/fixtures/pull/9", "--json"]).code).toBe(
         0,
       );
+      const settings = cli(["guide", "settings", "budget/fixtures#9", "--json"]);
+      expect(settings.code).toBe(0);
+      const scope = Schema.decodeSync(Schema.fromJsonString(GuideSettingsResult))(settings.stdout)
+        .scopes.pullRequest;
       expect(
         cli([
           "guide",
@@ -235,6 +321,20 @@ test(
           "claude-sonnet-5-5",
           "--option",
           "effort=high",
+          "--stack",
+          "this",
+          "--guidance",
+          JSON.stringify({
+            expectedVersion: scope.guidance.version,
+            text: "Explain the limit change.",
+            mode: "append",
+          }),
+          "--focus",
+          JSON.stringify({
+            expectedVersion: scope.focus.version,
+            areas: [{ id: null, label: "Limit", question: "Is the limit safe?" }],
+            overrides: [],
+          }),
           "--json",
         ]).code,
       ).toBe(0);
