@@ -99,7 +99,13 @@ export const makeTurnBodies = (
           `Checked out ${short(prepared.headSha)} with ${plural(work.comments.length, "comment")} to fix`,
         );
         yield* publish(fixer.pr_key);
-        const scripts = yield* access.forTurn(fixer.pr_key, turn.id, target, prepared.worktree);
+        const scripts = yield* access.forTurn(
+          fixer.pr_key,
+          turn.id,
+          target,
+          prepared.worktree,
+          provider.kind,
+        );
         const resume = yield* resumeFor(fixer.pr_key, turn.id, fixer, provider, prepared.worktree);
         yield* untilReported(
           fixer,

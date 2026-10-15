@@ -258,6 +258,7 @@ const main = async () => {
     "apps/desktop/dist-electron/main.cjs",
     "apps/desktop/dist-electron/preload.cjs",
     "apps/server/dist/bin.mjs",
+    "apps/server/dist/cursorRunner.mjs",
     "apps/web/dist/index.html",
   ]) {
     if (!NodeFS.existsSync(NodePath.join(repoRoot, required)))

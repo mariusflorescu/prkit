@@ -1,0 +1,115 @@
+import * as Schema from "effect/Schema";
+
+/**
+ * What prkit and its Cursor runner say to each other. The runner is a child process prkit starts
+ * for each check, sign-in or turn: one request line on its stdin, then event lines on its stdout
+ * until it exits. Secrets (the API key, prkit's MCP token) travel only in the request, never in
+ * the runner's arguments or environment.
+ */
+
+const Common = {
+  /** The SDK's package folder (sdkLoader.ts). */
+  sdk: Schema.String,
+  /** The instance's own CURSOR_API_KEY; null uses the key its sign-in saved. */
+  apiKey: Schema.NullOr(Schema.String),
+};
+
+export const TurnRequest = Schema.Struct({
+  ...Common,
+  op: Schema.Literal("turn"),
+  cwd: Schema.String,
+  readableDirs: Schema.Array(Schema.String),
+  /** The turn's rules and its task, in one message: Cursor takes no system prompt from prkit. */
+  message: Schema.String,
+  resumeSessionId: Schema.NullOr(Schema.String),
+  /** Null runs Cursor's own pick, as the catalog shows it (models.ts). */
+  model: Schema.NullOr(Schema.String),
+  params: Schema.Array(Schema.Struct({ id: Schema.String, value: Schema.String })),
+  /** The built-in tools Cursor may offer: never shell or task (tools.ts). */
+  tools: Schema.Array(Schema.String),
+  /** prkit's MCP server, under a name picked at random for the turn. */
+  mcp: Schema.Struct({ name: Schema.String, url: Schema.String, token: Schema.String }),
+});
+export type TurnRequest = typeof TurnRequest.Type;
+
+export const Request = Schema.Union([
+  Schema.Struct({ ...Common, op: Schema.Literals(["status", "models", "login", "logout"]) }),
+  Schema.Struct({
+    ...Common,
+    op: Schema.Literal("has-session"),
+    sessionId: Schema.String,
+    cwd: Schema.String,
+  }),
+  TurnRequest,
+]);
+export type Request = typeof Request.Type;
+
+export const RunnerModel = Schema.Struct({
+  id: Schema.String,
+  displayName: Schema.String,
+  description: Schema.optionalKey(Schema.String),
+  parameters: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        displayName: Schema.optionalKey(Schema.String),
+        values: Schema.Array(
+          Schema.Struct({ value: Schema.String, displayName: Schema.optionalKey(Schema.String) }),
+        ),
+      }),
+    ),
+  ),
+  /** Named settings combinations; the default one gives each setting's default value. */
+  variants: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        params: Schema.Array(Schema.Struct({ id: Schema.String, value: Schema.String })),
+        isDefault: Schema.optionalKey(Schema.Boolean),
+      }),
+    ),
+  ),
+});
+export type RunnerModel = typeof RunnerModel.Type;
+
+export const Event = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("status"),
+    /** `login`: the key prkit's sign-in saved; `key`: the instance's CURSOR_API_KEY. */
+    via: Schema.NullOr(Schema.Literals(["login", "key"])),
+    /** When the saved key stops working, for a sign-in; null otherwise. */
+    expiresAtMs: Schema.NullOr(Schema.Number),
+    /** Cursor turned the key down (expired, revoked or wrong). */
+    rejected: Schema.Boolean,
+  }),
+  Schema.Struct({ type: Schema.Literal("models"), models: Schema.Array(RunnerModel) }),
+  Schema.Struct({ type: Schema.Literal("login-url"), url: Schema.String }),
+  Schema.Struct({ type: Schema.Literal("signed-in") }),
+  Schema.Struct({ type: Schema.Literal("signed-out"), confirmed: Schema.Boolean }),
+  Schema.Struct({ type: Schema.Literal("has-session"), found: Schema.Boolean }),
+  Schema.Struct({ type: Schema.Literal("session"), sessionId: Schema.String }),
+  Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }),
+  Schema.Struct({
+    type: Schema.Literal("tool"),
+    callId: Schema.String,
+    /** Cursor's tool name: read, grep, glob, ls, edit, mcp... */
+    tool: Schema.String,
+    /** The file or folder the call works on, when it names one. */
+    path: Schema.NullOr(Schema.String),
+    /** The search pattern, for grep and glob. */
+    pattern: Schema.NullOr(Schema.String),
+    /** For an MCP call: the server and tool names. */
+    mcp: Schema.NullOr(Schema.Struct({ server: Schema.String, tool: Schema.String })),
+  }),
+  Schema.Struct({ type: Schema.Literal("tool-done"), callId: Schema.String, ok: Schema.Boolean }),
+  Schema.Struct({
+    type: Schema.Literal("finished"),
+    outcome: Schema.Literals(["completed", "failed", "interrupted"]),
+    message: Schema.NullOr(Schema.String),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("error"),
+    reason: Schema.Literals(["auth", "agent"]),
+    message: Schema.String,
+  }),
+]);
+export type Event = typeof Event.Type;

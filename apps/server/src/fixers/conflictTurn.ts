@@ -181,7 +181,13 @@ export const makeConflictTurn = (
           repo.logBetween(co, mergeBaseSha, headSha),
           repo.logBetween(co, mergeBaseSha, baseSha),
         ]).pipe(Effect.catchTag("RepoError", repoFailure));
-        const scripts = yield* access.forTurn(fixer.pr_key, turn.id, target, worktree);
+        const scripts = yield* access.forTurn(
+          fixer.pr_key,
+          turn.id,
+          target,
+          worktree,
+          provider.kind,
+        );
         const guideFile = yield* writeGuideContext(fixer.pr_key, turn.id);
         const prompt = (input: {
           readonly files: ReadonlyArray<string>;

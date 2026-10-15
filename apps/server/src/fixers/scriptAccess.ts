@@ -1,5 +1,6 @@
 import {
   type AccountId,
+  type AgentProviderKind,
   FixerError,
   type FixerTurnId,
   type PullRequestKey,
@@ -73,6 +74,12 @@ export const decideScripts = (input: {
     : { _tag: "allowed", reason: trusted(author, repository) };
 };
 
+/**
+ * Cursor runs a repository's scripts on no pull request: its SDK approves every command on its
+ * own, so prkit can't hold one back, and a Cursor turn has no shell (agents/cursor/tools.ts).
+ */
+export const CURSOR_RUNS_NO_SCRIPTS = "Cursor runs no commands, only reads and edits files";
+
 /** What the agent's shell policy needs from a turn's scripts. */
 export const scriptRuns = (scripts: TurnScripts): ScriptRuns =>
   scripts._tag === "blocked"
@@ -121,11 +128,15 @@ export const makeScriptAccess = (state: FixerState) =>
       turnId: FixerTurnId,
       target: ReviewTarget,
       worktree: string,
+      kind: AgentProviderKind,
     ) =>
       Effect.gen(function* () {
-        const access = yield* decide(target.ref, target).pipe(
-          Effect.catchTag("AccountsError", (error) => fail("account", error.message)),
-        );
+        const access: ScriptAccess =
+          kind === "cursor"
+            ? { _tag: "blocked", reason: CURSOR_RUNS_NO_SCRIPTS }
+            : yield* decide(target.ref, target).pipe(
+                Effect.catchTag("AccountsError", (error) => fail("account", error.message)),
+              );
         const scripts: TurnScripts =
           access._tag === "blocked" ? access : { ...access, scripts: yield* scriptsIn(worktree) };
         yield* sql`UPDATE fixer_turns SET scripts = ${encodeScripts(scripts)} WHERE id = ${turnId}`;

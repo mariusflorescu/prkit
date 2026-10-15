@@ -151,7 +151,10 @@ export const make = Effect.gen(function* () {
       for (const variable of config.environment) {
         const value = variable.sensitive ? own[variable.name] : variable.value;
         // A name a newer rule refuses is skipped, never passed to the agent.
-        if (value !== undefined && environmentNameProblem(variable.name) === null)
+        if (
+          value !== undefined &&
+          environmentNameProblem(variable.name, config.kind, variable.sensitive) === null
+        )
           environment[variable.name] = value;
       }
       return {
@@ -200,9 +203,16 @@ export const make = Effect.gen(function* () {
         return yield* new AgentInstanceError({
           message: `'${config.id}' is the default ${config.id} instance. Pick another ID.`,
         });
+      if (config.kind === "cursor" && (config.configDir !== null || config.binaryPath !== null))
+        return yield* new AgentInstanceError({
+          message:
+            "Cursor runs in a folder of prkit's own, through its SDK: leave Config folder and Binary path empty.",
+        });
       const names = new Set<string>();
       for (const variable of config.environment) {
-        const problem = saved.has(variable.name) ? null : environmentNameProblem(variable.name);
+        const problem = saved.has(variable.name)
+          ? null
+          : environmentNameProblem(variable.name, config.kind, variable.sensitive);
         if (problem !== null)
           return yield* new AgentInstanceError({ message: `${variable.name}: ${problem}` });
         if (names.has(variable.name))

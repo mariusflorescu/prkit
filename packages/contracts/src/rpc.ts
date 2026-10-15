@@ -11,7 +11,14 @@ import {
   ConfigDirNotAddedError,
   ConfigDirNotFoundError,
 } from "./accounts.ts";
-import { AgentCatalog, AgentSelection, AgentSignInError, AgentSignInPage } from "./agent.ts";
+import {
+  AgentCatalog,
+  AgentSelection,
+  AgentSignInError,
+  AgentSignInPage,
+  CursorSdkInstallError,
+  CursorSdkInstallProgress,
+} from "./agent.ts";
 import { AgentInstanceConfig, AgentInstanceError, AgentInstanceId } from "./agentInstance.ts";
 import { DiffSnapshot } from "./diffSnapshot.ts";
 import {
@@ -147,6 +154,7 @@ export const WS_METHODS = {
   agentsUpdate: "agents.update",
   agentsRemove: "agents.remove",
   agentsReset: "agents.reset",
+  agentsInstallCursor: "agents.installCursor",
   fixersGet: "fixers.get",
   fixersWatch: "fixers.watch",
   fixersFeed: "fixers.feed",
@@ -485,6 +493,13 @@ export const WsRpcGroup = RpcGroup.make(
     payload: Schema.Struct({ instance: AgentInstanceId }),
     success: AgentCatalog,
     error: AgentInstanceError,
+  }),
+  // Downloads Cursor's SDK into prkit's folder, on the user's request: progress, then the end.
+  Rpc.make(WS_METHODS.agentsInstallCursor, {
+    payload: Schema.Struct({}),
+    success: CursorSdkInstallProgress,
+    error: CursorSdkInstallError,
+    stream: true,
   }),
   // Pending review comments and GitHub review threads.
   Rpc.make(WS_METHODS.reviewCommentsList, {

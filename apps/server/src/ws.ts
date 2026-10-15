@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
+import * as Stream from "effect/Stream";
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { RpcSerialization, RpcServer } from "effect/rpc";
 
@@ -15,6 +16,7 @@ import { GitHubApi } from "./github/GitHubApi.ts";
 import { PullRequests } from "./pullRequests/PullRequests.ts";
 import { Workspace } from "./workspace/Workspace.ts";
 import { Agents } from "./agents/Agents.ts";
+import { CursorSdk } from "./agents/cursor/CursorSdk.ts";
 import { AppearanceStore } from "./appearance/AppearanceStore.ts";
 import { buildId } from "./build.ts";
 import { GuideConfigStore } from "./reviews/GuideConfigStore.ts";
@@ -63,6 +65,7 @@ const layerHandlers = WsRpcGroup.toLayer(
     const workspace = yield* Workspace;
     const reviews = yield* Reviews;
     const agents = yield* Agents;
+    const cursorSdk = yield* CursorSdk;
     const reviewComments = yield* ReviewComments;
     const guideSettings = yield* GuideSettingsStore;
     const fixers = yield* Fixers;
@@ -161,6 +164,8 @@ const layerHandlers = WsRpcGroup.toLayer(
       [WS_METHODS.agentsUpdate]: ({ config }) => agents.update(config),
       [WS_METHODS.agentsRemove]: ({ instance }) => agents.remove(instance),
       [WS_METHODS.agentsReset]: ({ instance }) => agents.reset(instance),
+      [WS_METHODS.agentsInstallCursor]: () =>
+        cursorSdk.install.pipe(Stream.ensuring(agents.invalidate)),
       // The fix agent: review fixes and merge conflicts.
       [WS_METHODS.fixersGet]: ({ key }) => fixers.get(key),
       [WS_METHODS.fixersWatch]: ({ key }) => fixers.watch(key),

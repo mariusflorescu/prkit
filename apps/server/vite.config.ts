@@ -16,7 +16,8 @@ export default defineConfig({
     },
   },
   pack: {
-    entry: ["src/bin.ts"],
+    // Cursor's runner is a child process of its own (agents/cursor/CursorAgent.ts finds it here).
+    entry: { bin: "src/bin.ts", cursorRunner: "src/agents/cursor/runner.ts" },
     outDir: "dist",
     sourcemap: true,
     clean: true,

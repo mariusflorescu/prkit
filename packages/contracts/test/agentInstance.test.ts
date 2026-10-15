@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { type AgentCatalog, AgentSelection, keepsConversation } from "../src/agent.ts";
 import {
+  AGENT_KINDS,
   AgentInstanceConfig,
   AgentInstanceId,
   defaultInstanceConfig,
@@ -83,6 +84,13 @@ describe("instanceIdProblem", () => {
   });
 });
 
+/** The answer for a plain variable, which must be the same for every kind. */
+const problem = (name: string) => {
+  const answers = AGENT_KINDS.map((kind) => environmentNameProblem(name, kind, false));
+  expect(new Set(answers).size, name).toBe(1);
+  return answers[0];
+};
+
 describe("environmentNameProblem", () => {
   it("refuses what would move the agent off the user's subscription", () => {
     for (const name of [
@@ -97,21 +105,19 @@ describe("environmentNameProblem", () => {
       "AWS_PROFILE",
       "CODEX_API_KEY",
     ])
-      expect(environmentNameProblem(name), name).toContain("off your subscription");
+      expect(problem(name), name).toContain("off your subscription");
   });
 
   it("refuses what prkit sets itself or what crosses accounts", () => {
-    expect(environmentNameProblem("HOME")).toContain("keychain");
-    expect(environmentNameProblem("PATH")).toContain("sandbox");
-    expect(environmentNameProblem("CLAUDE_CONFIG_DIR")).toBe(
-      "Use the Config folder field instead.",
-    );
-    expect(environmentNameProblem("CODEX_HOME")).toBe("Use the Config folder field instead.");
-    expect(environmentNameProblem("GH_TOKEN")).toContain("GitHub accounts");
-    expect(environmentNameProblem("GITHUB_TOKEN")).toContain("GitHub accounts");
-    expect(environmentNameProblem("PRKIT_AUTH_TOKEN")).toContain("prkit sets");
-    expect(environmentNameProblem("NODE_OPTIONS")).toContain("run code");
-    expect(environmentNameProblem("DYLD_INSERT_LIBRARIES")).toContain("run code");
+    expect(problem("HOME")).toContain("keychain");
+    expect(problem("PATH")).toContain("sandbox");
+    expect(problem("CLAUDE_CONFIG_DIR")).toBe("Use the Config folder field instead.");
+    expect(problem("CODEX_HOME")).toBe("Use the Config folder field instead.");
+    expect(problem("GH_TOKEN")).toContain("GitHub accounts");
+    expect(problem("GITHUB_TOKEN")).toContain("GitHub accounts");
+    expect(problem("PRKIT_AUTH_TOKEN")).toContain("prkit sets");
+    expect(problem("NODE_OPTIONS")).toContain("run code");
+    expect(problem("DYLD_INSERT_LIBRARIES")).toContain("run code");
   });
 
   it("refuses whole agent and runtime namespaces, not only the names known today", () => {
@@ -127,26 +133,57 @@ describe("environmentNameProblem", () => {
       "CODEX_SANDBOX",
       "CODEX_ANYTHING_NEW",
     ])
-      expect(environmentNameProblem(name), name).toContain("changes how the agent runs");
+      expect(problem(name), name).toContain("changes how the agent runs");
     for (const name of [
       "BUN_OPTIONS",
       "BUN_INSPECT",
       "BUN_INSPECT_CONNECT_TO",
       "NODE_REDIRECT_WARNINGS",
     ])
-      expect(environmentNameProblem(name), name).toContain("runtime");
+      expect(problem(name), name).toContain("runtime");
     for (const name of ["ANTHROPIC_CUSTOM_HEADERS", "OPENAI_ORG_ID"])
-      expect(environmentNameProblem(name), name).toContain("off your subscription");
+      expect(problem(name), name).toContain("off your subscription");
   });
 
   it("takes ordinary names and refuses malformed ones", () => {
-    expect(environmentNameProblem("HTTPS_PROXY")).toBeNull();
+    expect(problem("HTTPS_PROXY")).toBeNull();
     // The one named exception to NODE_*: a CA file for a corporate proxy.
-    expect(environmentNameProblem("NODE_EXTRA_CA_CERTS")).toBeNull();
-    expect(environmentNameProblem("node_extra_ca_certs")).toBeNull();
-    expect(environmentNameProblem("_MY_FLAG2")).toBeNull();
-    expect(environmentNameProblem("2FAST")).toContain("letters, digits");
-    expect(environmentNameProblem("MY-FLAG")).toContain("letters, digits");
+    expect(problem("NODE_EXTRA_CA_CERTS")).toBeNull();
+    expect(problem("node_extra_ca_certs")).toBeNull();
+    expect(problem("_MY_FLAG2")).toBeNull();
+    expect(problem("2FAST")).toContain("letters, digits");
+    expect(problem("MY-FLAG")).toContain("letters, digits");
+  });
+});
+
+describe("Cursor's variables", () => {
+  it("takes CURSOR_API_KEY only on a Cursor agent, and only as a secret", () => {
+    expect(environmentNameProblem("CURSOR_API_KEY", "cursor", true)).toBeNull();
+    expect(environmentNameProblem("CURSOR_API_KEY", "cursor", false)).toContain("Sensitive");
+    expect(environmentNameProblem("cursor_api_key", "cursor", true)).toContain("CURSOR_API_KEY");
+    expect(environmentNameProblem("CURSOR_API_KEY", "claude", true)).toContain("Only a Cursor");
+    expect(environmentNameProblem("CURSOR_API_KEY", "codex", true)).toContain("Only a Cursor");
+  });
+
+  it("refuses every other CURSOR_ name for every kind: endpoints, settings and paths", () => {
+    for (const name of [
+      "CURSOR_BACKEND_URL",
+      "CURSOR_WEBSITE_URL",
+      "CURSOR_SANDBOX_POLICY_DIR",
+      "CURSOR_RIPGREP_PATH",
+      "CURSOR_DATA_DIR",
+      "CURSOR_ANYTHING_NEW",
+    ])
+      for (const sensitive of [false, true])
+        for (const kind of AGENT_KINDS)
+          expect(environmentNameProblem(name, kind, sensitive), name).toContain(
+            "changes how Cursor runs",
+          );
+  });
+
+  it("refuses the other providers' keys and switches on a Cursor agent too", () => {
+    for (const name of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "AWS_PROFILE", "BEDROCK_REGION"])
+      expect(environmentNameProblem(name, "cursor", true), name).toContain("off your subscription");
   });
 });
 
