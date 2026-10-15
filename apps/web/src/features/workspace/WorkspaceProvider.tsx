@@ -35,7 +35,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         return client.invalidateQueries({ queryKey: workspaceQuery.queryKey });
     },
   });
-  const go = (row: OpenPullRequest) => {
+  const go = (row: OpenPullRequest | null) => {
+    if (row === null) {
+      void navigate({ to: "/" });
+      return;
+    }
     const ref = refFromKey(row.key);
     if (!ref) return;
     const tab = useWorkspaceSession.getState().views[row.key]?.tab ?? "conversation";

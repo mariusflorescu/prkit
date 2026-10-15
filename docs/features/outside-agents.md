@@ -13,12 +13,115 @@ codex mcp add prkit -- <home>/bin/prkit-mcp
 
 No secret goes in a client's config. `bin/prkit-mcp` is a launcher prkit writes on every launch (mode 0700): it runs prkit's own server binary (`ELECTRON_RUN_AS_NODE=1` in the app) with `mcp-bridge`, which `bin.ts` picks before loading anything else. The bridge never opens the database or touches `prkit.lock`, so it runs beside the app.
 
-## Levels
+## Levels and parity inventory
 
-- **Read only**: `prkit_status`, `list_inbox`, `list_open_pull_requests`, `read_pull_request`, `read_guide`, `list_review_comments`, `read_fix`, `wait_for`.
-- **Read and start work** adds `open_pull_request`, `generate_guide`, `stop_guide`, `add_review_comment`, `send_to_fix_agent`, `ask_fix_agent_to_change`, `stop_fix`, `retry_fix`, `resolve_conflicts`.
+Read tools are available at **Read only** and **Read and start work**. Local state changes and agent starts are available only at **Read and start work** (Work below). Every tool has typed parameters and a typed success schema in `apps/server/src/outside/`, used by the MCP toolkit and available to the CLI.
 
-Each tool is declared once with its level (`apps/server/src/mcp/outside/access.ts`): `reads` or `startsWork` wraps the handler, and the server refuses to start when a handler's level differs from its tool's. A tool above the client's level is hidden from `tools/list` and unknown to `tools/call`, checked again on every call, so lowering the level takes effect at once. Other failures come back as tool errors with a code (`invalid`, `not-found`, `account-needed`, `not-allowed`, `not-ready`, `conflict`, `github`, `failed`) and a plain message.
+The inventory covers every WebSocket RPC and the app's local presentation actions. Exclusion A means a GitHub write; B means changing settings, identity or trust; C means a destructive local action. Reads of settings are allowed, except environment and sensitive values, which never leave the server. Excluded actions have no tool declaration, so admitting one later requires an explicit declaration at the work level and its handler check.
+
+| App action | RPC / app surface | Tool or exclusion | Level |
+| --- | --- | --- | --- |
+| Status and accounts | app.info, accounts.list, github.budget | `prkit_status`, `list_accounts` | Read |
+| Account discovery and config directories | accounts.refresh, accounts.addConfigDir, accounts.removeConfigDir | Excluded B: refresh identity, add/remove gh config directories | Excluded |
+| Inbox, refresh and filters | inbox.list | `list_inbox`: reason, accountId, repository, state, draft, checks, search, stacks; cursor, limit, refresh | Read |
+| Repository list and open repository PRs | repositories.list, repositories.pullRequests | `list_repositories`, `list_repository_pull_requests` | Read |
+| PR detail and refresh | pullRequests.detail, pullRequests.refresh | `read_pull_request`; refresh on paged PR reads | Read |
+| Changed files and diff | pullRequests.files | `read_pull_request_files` | Read |
+| Expand file contents | pullRequests.fileContents | `read_file_contents` | Read |
+| Conversation comments/reviews, checks, timeline | pullRequests.timeline | `read_conversation`, `read_checks`, `read_timeline` | Read |
+| Stack strip and layers | pullRequests.stack | `read_stack` | Read |
+| Available reviewers, teams and labels | pullRequests.candidates | `read_pull_request_candidates` | Read |
+| GitHub PR actions | pullRequests.execute | Excluded A: merge/squash/rebase, enable/disable auto-merge, close/reopen, draft/ready, edit title/body, reviewers/teams/labels, assignees/milestones, update/delete branch, approve workflows, revert PR | Excluded |
+| Workspace and open tabs | workspace.get | `list_open_pull_requests` (tabs, not repository PRs) | Read |
+| Open/reopen a PR tab | workspace.open | `open_pull_request` | Work |
+| Close/focus/reorder tabs | workspace.close, workspace.activate, workspace.reorder | `close_pull_request`, `focus_pull_request`, `reorder_pull_requests` | Work |
+| Save Inbox presentation filters | workspace.saveInboxFilters | `save_inbox_filters` | Work |
+| Generate, regenerate and retry a guide | reviews.generate, reviews.retry | `generate_guide` with instance, model, options, guidance, focus and version checks; retries use the same generation service | Work |
+| Generate stack guides | reviews.generateStack | `generate_guide` with stack this-pr / whole-stack / chosen-layers, layers and regenerate | Work |
+| Stop guide and watcher | reviews.stop | `stop_guide` | Work |
+| Current guide/progress and review feed | reviews.get, reviews.feed | `read_guide`, `read_guide_progress`, `list_reviews` | Read |
+| Guide revision switcher and saved diff | guides.get, reviews.diff, guides.draft | `list_guide_revisions`, `read_guide_revision`, `read_review_diff`; `read_guide_progress` includes the draft | Read |
+| Typical guide duration | reviews.typicalDuration | `read_guide_duration` | Read |
+| Guide defaults and auto mode | guideSettings.get | `read_settings` | Read |
+| Change default agent or auto mode | guideSettings.update | Excluded B | Excluded |
+| Resolved guide settings and preview | guideConfig.pullRequest | `read_guide_settings`: scope versions, active guidance/focus/rules, skipped files | Read |
+| Read scope settings and repository lookup | guideConfig.scope, guideConfig.repositories, guideConfig.findRepository | `read_guide_scope`, `list_guide_repositories`, `find_guide_repository` | Read |
+| Save guide settings | guideConfig.save | `save_pull_request_guide_settings`, and guidance/focus in `generate_guide`, only for this PR. Global and Repository changes excluded B | Work |
+| Agent picker, status and model options | agents.catalog | `list_agents`; safe fields only, no environment values | Read |
+| Agent identity, configuration and installation | agents.signIn, agents.signOut, agents.create, agents.update, agents.remove, agents.reset, agents.installCursor | Excluded B: sign-in/out, instances, environment, sensitive values and SDK installation | Excluded |
+| Read/add local drafts | reviewComments.list, reviewComments.add | `list_review_comments`, `add_review_comment` | Read / Work |
+| Edit/move local drafts | reviewComments.edit, reviewComments.move | `edit_review_comment`, `move_review_comment` | Work |
+| Delete drafts | reviewComments.delete | Excluded C | Excluded |
+| Submit GitHub review | reviewComments.submit | Excluded A | Excluded |
+| Read GitHub threads | reviewThreads.list | `read_threads`, `list_review_comments` | Read |
+| Reply/resolve/unresolve GitHub threads | reviewThreads.reply, reviewThreads.resolve | Excluded A; posting or editing GitHub comments is also excluded | Excluded |
+| Fix snapshot, feed and turn details | fixers.get, fixers.feed | `read_fix`, `list_fixes`, `read_fix_turn` | Read |
+| Send drafts/threads to fix agent | fixers.send | `send_to_fix_agent`: draftIds, threadIds, instructions, instance, model, options; replies after Push stay disabled | Work |
+| Resolve conflicts locally | fixers.resolveConflicts | `resolve_conflicts`: merge/rebase strategy and agent selection | Work |
+| Change/retry/stop queued or running fix work | fixers.revise, fixers.retry, fixers.stop | `ask_fix_agent_to_change`, `retry_fix`, `stop_fix`; stopping never ends the session or discards a ready commit; retry refuses reverts | Work |
+| Read fix diff and Copy patch | fixers.diff, fixers.patch | `read_fix_diff`, `read_fix_patch` | Read |
+| Read push/script eligibility | fixers.pushAccess, fixers.scriptAccess | `read_fix_access` | Read |
+| Push fix, merge resolution or rebase | fixers.push | Excluded A, including force-push | Excluded |
+| Discard fix commit, end fix session, revert | fixers.discard, fixers.revert | Excluded C; ending a session via fixers.stop is also excluded | Excluded |
+| Repository fix settings | fixerSettings.list | `read_settings` | Read |
+| Push/resolve automatically or trust repository scripts | fixerSettings.update | Excluded B | Excluded |
+| Appearance | appearance.get, appearance.update | `read_settings`; changes excluded B | Read / Excluded |
+| Outside agents state/access/reset | outsideAgents.get, outsideAgents.update, outsideAgents.reset | `read_settings`; enabling/disabling, access changes and Reset access excluded B | Read / Excluded |
+| Live updates and waiting | github.events, workspace.changes, reviews.watch, fixers.watch | Finite snapshot reads above plus `wait_for`; no outside background subscriptions or polling loop | Read |
+| Desktop updater: channel/automatic checks, check/download/install/restart | Electron update bridge | Changes excluded B (installation and trust). Native updater status has no server service and is outside this unit’s server-only build scope; release notes and What’s new are presentation. | Excluded / Presentation |
+| Navigation, inner tabs, scrolling, collapses, keyboard shortcuts, text selection, copy/open links | Presentation only | Read the corresponding data or use the workspace tool; these have no separate domain operation | Presentation |
+
+### Tool parameters
+
+All PR tools accept `url`, or `owner`, `repo`, `number` and optional `host`, plus `accountId` when needed. Paged reads accept `cursor` and `limit` (1-100, default 20). Use `nextCursor` until null. A cursor is tied to the read and its relevant identity; an invalid or changed-diff cursor asks the client to start again. `refresh: true` spends budget on the first page only. Source truncation (`githubTruncated`, `githubTotal`, or per-account repository totals) is separate from the tool's pagination.
+
+Diffs, file contents and patch text are split into fragments of at most 8,000 characters. Pages target 48,000 encoded bytes, leaving room for enclosing metadata. `offset` is a character offset; concatenate fragments in order. A file's `complete` marks its last patch fragment. A truncated page explicitly says to read `nextCursor`. Binary and oversized upstream patches keep their tagged representation rather than pretending to contain text.
+
+| Tool | Level | Parameters beyond the PR target |
+| --- | --- | --- |
+| `list_accounts` | Read | `ListInput` schema (no PR target) |
+| `list_repositories` | Read | `RefreshListInput` schema (no PR target) |
+| `list_repository_pull_requests` | Read | `RepositoryInput` schema (no PR target) |
+| `list_agents` | Read | `AgentsInput` schema (no PR target) |
+| `read_pull_request_files` | Read | `PagedTargetInput` schema |
+| `read_file_contents` | Read | `FileInput` schema |
+| `read_timeline` | Read | `PagedTargetInput` schema |
+| `read_threads` | Read | `PagedTargetInput` schema |
+| `read_checks` | Read | `PagedTargetInput` schema |
+| `read_conversation` | Read | `PagedTargetInput` schema |
+| `read_stack` | Read | `PagedTargetInput` schema |
+| `read_pull_request_candidates` | Read | `TargetInput` schema |
+| `list_reviews` | Read | `ListInput` schema (no PR target) |
+| `list_guide_revisions` | Read | `PagedTargetInput` schema |
+| `read_guide_revision` | Read | `RevisionInput` schema |
+| `read_guide_progress` | Read | `PagedTargetInput` schema |
+| `read_review_diff` | Read | `ReviewDiffInput` schema |
+| `read_guide_duration` | Read | `DurationInput` schema (no PR target) |
+| `read_guide_settings` | Read | `TargetInput` schema |
+| `read_guide_scope` | Read | `ScopeInput` schema (no PR target) |
+| `list_guide_repositories` | Read | `SettingsInput` schema (no PR target) |
+| `find_guide_repository` | Read | `RepositoryInput` schema (no PR target) |
+| `list_fixes` | Read | `ListInput` schema (no PR target) |
+| `read_fix_turn` | Read | `FixTurnInput` schema |
+| `read_fix_diff` | Read | `FixDiffInput` schema |
+| `read_fix_patch` | Read | `FixTurnInput` schema |
+| `read_fix_access` | Read | `TargetInput` schema |
+| `read_settings` | Read | `SettingsInput` schema (no PR target) |
+| `close_pull_request` | Work | `TargetInput` schema |
+| `focus_pull_request` | Work | `TargetInput` schema |
+| `reorder_pull_requests` | Work | `ReorderInput` schema |
+| `save_inbox_filters` | Work | `SaveInboxFiltersInput` schema |
+| `save_pull_request_guide_settings` | Work | `SaveGuideSettingsInput` schema |
+| `edit_review_comment` | Work | `EditCommentInput` schema |
+| `move_review_comment` | Work | `MoveCommentInput` schema |
+
+`generate_guide` adds `instance`, `model`, `options: [{id, value}]`, `guidance: {expectedVersion, text, mode}`, `focus: {expectedVersion, areas: [{id, label, question}], overrides}`, `stack` (`this-pr`, `whole-stack`, `chosen-layers`), `layers` and `regenerate`. New focus-area ids are null. The catalog's `selectionProblem` validates the choice; partial selections, unknown or repeated option ids are refused before work starts. Guidance and focus use the same per-section compare-and-set versions as the app. Stack generation uses `reviews.generateStack`, preserving its bottom-to-top order and skip reasons.
+
+`list_open_pull_requests` continues to mean open **app tabs**. `list_repository_pull_requests` lists a repository's open PRs. `read_guide_revision` returns the guide and frozen settings; use the revision's `attemptId` from `list_guide_revisions` with `read_review_diff` for its exact saved diff. `read_fix_turn` returns the full per-comment/per-file report and script decision. Neither read starts an agent.
+
+The CLI is built separately from this surface using one command map. Until its branch is on main there are no CLI files here to edit. Whoever merges second adds the new tool names to that map after rebasing; the CLI's parity check must compare both sets exactly.
+
+Each tool is declared once with its level (`apps/server/src/mcp/outside/tools.ts`): `reads` or `startsWork` wraps the handler, and the server refuses to start when a handler's level differs from its tool's. A tool above the client's level is hidden from `tools/list` and unknown to `tools/call`, checked again on every call, so lowering the level takes effect at once. Other failures come back as tool errors with a code (`invalid`, `not-found`, `account-needed`, `not-allowed`, `not-ready`, `conflict`, `github`, `failed`) and a plain message.
 
 Never offered: pushing, merging or any other pull request action, submitting a review, replying to or resolving threads, deleting or discarding anything, reverting, and any change to agents, accounts or settings. These are the owner's, in the app. So `stop_fix` stops only queued and running work: the session stays, and so does every commit waiting for Push, including one the agent is changing. `retry_fix` refuses a revert.
 

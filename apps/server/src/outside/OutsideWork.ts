@@ -1,5 +1,7 @@
 import {
   type AccountId,
+  matchesInboxFilter,
+  stackOrder,
   type FixerSnapshot,
   type FixerTurn,
   type FixerTurnId,
@@ -9,7 +11,6 @@ import {
   rangeRows,
   diffRows,
   refFromKey,
-  type ReviewCommentId,
   type ReviewSnapshot,
 } from "@prkit/contracts";
 import * as Context from "effect/Context";
@@ -34,17 +35,22 @@ import { ReviewComments } from "../reviewComments/ReviewComments.ts";
 import { Reviews } from "../reviews/Reviews.ts";
 import { Workspace } from "../workspace/Workspace.ts";
 import { StartedBy } from "./StartedBy.ts";
+import { makeOutsideReads } from "./OutsideReads.ts";
+import { makeOutsideActions } from "./OutsideActions.ts";
+import { requestedAgent } from "./agentSelection.ts";
+import { makePager, type PageInput } from "./paging.ts";
+import { asFailure, fail } from "./errors.ts";
 import { OutsideAgents } from "./OutsideAgents.ts";
 import {
   AddedComment,
-  type CommentsResult,
   type FixResult,
   type GuideResult,
-  type GenerateGuideInput,
   type GuideStatus,
   type InboxListResult,
+  InboxInput,
+  SendToFixInput,
+  ConflictsInput,
   type OpenPullRequestsResult,
-  OutsideToolFailure,
   type PullRequestResult,
   StartedTurn,
   type StatusResult,
@@ -55,34 +61,6 @@ import {
   OWNER_NAME,
   REPO_NAME,
 } from "./schemas.ts";
-
-/** Errors whose message is written for the owner and may reach a client as it is. */
-const PLAIN_ERRORS: Record<string, OutsideToolFailure["code"]> = {
-  ReviewError: "failed",
-  ReviewStateError: "conflict",
-  GuideNotFoundError: "not-found",
-  PullRequestReadError: "github",
-  InboxError: "github",
-  AccountsError: "failed",
-  WorkspaceError: "failed",
-  ReviewCommentsError: "failed",
-  FixerError: "failed",
-  FixerStateError: "conflict",
-};
-
-/** Turns any service error into a failure a client may read: never a cause, a path or a stack. */
-const isFailure = Schema.is(OutsideToolFailure);
-const asFailure = (error: { readonly _tag: string; readonly message: string }) => {
-  if (isFailure(error)) return error;
-  const code = PLAIN_ERRORS[error._tag];
-  return new OutsideToolFailure(
-    code === undefined
-      ? { code: "failed", message: "prkit couldn't do that. Try again." }
-      : { code, message: error.message },
-  );
-};
-const fail = (code: OutsideToolFailure["code"], message: string) =>
-  Effect.fail(new OutsideToolFailure({ code, message }));
 
 const WAIT_DEFAULT_SECONDS = 50;
 const DIFF_LIMIT = 60_000;
@@ -124,6 +102,7 @@ export class OutsideWork extends Context.Service<OutsideWork, Effect.Success<typ
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const config = yield* ServerConfig.ServerConfig;
+  const page = yield* makePager;
   const accounts = yield* GitHubAccounts;
   const github = yield* GitHubApi;
   const agents = yield* Agents;
@@ -276,22 +255,51 @@ export const make = Effect.gen(function* () {
       return result;
     }).pipe(Effect.mapError(asFailure));
 
-  const inbox = (input: { readonly refresh?: boolean; readonly accountId?: AccountId }) =>
+  const inbox = (input: typeof InboxInput.Type) =>
     Effect.gen(function* () {
       const result = yield* pullRequests.inbox(
-        input.refresh === true ? { _tag: "refresh" } : { _tag: "cached" },
+        input.refresh === true && input.cursor === undefined
+          ? { _tag: "refresh" }
+          : { _tag: "cached" },
+      );
+      const { cursor: _cursor, limit: _limit, refresh: _refresh, ...filters } = input;
+      const filterKey = yield* Schema.encodeEffect(Schema.fromJsonString(InboxInput))(filters);
+      const filtered = stackOrder(
+        result.entries.filter((entry) =>
+          matchesInboxFilter(
+            entry,
+            input.search ?? "",
+            input.accountId ?? null,
+            input.repository ?? null,
+            input,
+          ),
+        ),
+      );
+      const paged = yield* page(
+        filtered,
+        input,
+        `inbox:${filterKey}:${filtered.map((entry) => `${pullRequestKey(entry.ref)}:${entry.updatedAt}`).join(",")}`,
       );
       const feed = new Map<string, string>();
-      for (const entry of result.entries) {
+      for (const entry of paged.items) {
         const key = pullRequestKey(entry.ref);
         const guide = (yield* reviews.get(key)).review?.status._tag;
         if (guide !== undefined) feed.set(key, guide);
       }
       const listed: InboxListResult = {
+        githubTruncated: result.truncated.filter(
+          (entry) =>
+            (input.accountId === undefined || entry.accountId === input.accountId) &&
+            (input.reason === undefined || entry.reason === input.reason),
+        ),
+        nextCursor: paged.nextCursor,
+        total: paged.total,
+        truncated: paged.truncated,
+        message: paged.message,
         accounts: result.accounts
           .filter((row) => input.accountId === undefined || row.accountId === input.accountId)
           .map((row) => {
-            const entries = result.entries.filter((entry) => entry.accountId === row.accountId);
+            const entries = paged.items.filter((entry) => entry.accountId === row.accountId);
             const reasons = ["review-requested", "authored", "involved"] as const;
             return {
               accountId: row.accountId,
@@ -398,6 +406,9 @@ export const make = Effect.gen(function* () {
                   state: layer.state,
                 })),
               },
+        reviewers: detail.reviewers,
+        labels: detail.labels,
+        actions: detail.actions,
         fetchedAt: detail.freshness.fetchedAt,
       };
       return result;
@@ -426,7 +437,7 @@ export const make = Effect.gen(function* () {
         running && attempt !== null
           ? {
               narration: attempt.narration,
-              filesRead: attempt.files.filter((file) => file.read !== null).length,
+              filesRead: attempt.files.filter((file) => file.read === "read").length,
               files: attempt.files.length,
             }
           : null,
@@ -456,12 +467,12 @@ export const make = Effect.gen(function* () {
       return result;
     }).pipe(Effect.mapError(asFailure));
 
-  const comments = (input: TargetInput) =>
+  const comments = (input: TargetInput & PageInput) =>
     Effect.gen(function* () {
       const target = yield* resolve(input);
       const drafts = yield* reviewComments.list(target.key, target.accountId);
       const threads = yield* pullRequests.threads(target.key, target.accountId);
-      const result: CommentsResult = {
+      const result = {
         drafts: drafts.comments.map((comment) => ({
           id: comment.id,
           path: comment.anchor.path,
@@ -485,7 +496,20 @@ export const make = Effect.gen(function* () {
         })),
         threadsTruncated: threads.truncated,
       };
-      return result;
+      const entries = [
+        ...result.drafts.map((value) => ({ kind: "draft" as const, value })),
+        ...result.threads.map((value) => ({ kind: "thread" as const, value })),
+      ];
+      const paged = yield* page(entries, input, `comments:${target.accountId}:${target.key}`);
+      return {
+        nextCursor: paged.nextCursor,
+        total: paged.total,
+        truncated: paged.truncated,
+        message: paged.message,
+        drafts: paged.items.flatMap((entry) => (entry.kind === "draft" ? [entry.value] : [])),
+        threads: paged.items.flatMap((entry) => (entry.kind === "thread" ? [entry.value] : [])),
+        threadsTruncated: result.threadsTruncated,
+      };
     }).pipe(Effect.mapError(asFailure));
 
   const turnMessage = (turn: FixerTurn) => {
@@ -518,7 +542,7 @@ export const make = Effect.gen(function* () {
               : waiting
                 ? "waiting-for-push"
                 : "idle",
-      turns: turns.slice(0, 10).map((turn) => ({
+      turns: turns.map((turn) => ({
         id: turn.id,
         kind: turn.work._tag,
         state: turn.status._tag,
@@ -576,11 +600,24 @@ export const make = Effect.gen(function* () {
       };
     });
 
-  const fix = (input: TargetInput) =>
+  const fix = (input: TargetInput & PageInput) =>
     Effect.gen(function* () {
       const target = yield* resolve(input);
-      const snapshot = yield* fixers.get(target.key);
-      return fixResultOf(snapshot, yield* latestDiff(target.key, snapshot));
+      const snapshot = yield* fixers.history(target.key);
+      const result = fixResultOf(snapshot, yield* latestDiff(target.key, snapshot));
+      const paged = yield* page(
+        result.turns,
+        input,
+        `fix:${target.key}:${result.turns.map((turn) => turn.id).join(",")}`,
+      );
+      return {
+        ...result,
+        turns: paged.items,
+        nextCursor: paged.nextCursor,
+        total: paged.total,
+        truncated: paged.truncated,
+        message: paged.message,
+      };
     }).pipe(Effect.mapError(asFailure));
 
   /**
@@ -705,33 +742,6 @@ export const make = Effect.gen(function* () {
       return yield* openPullRequests();
     }).pipe(Effect.mapError(asFailure));
 
-  const generateGuide = (input: typeof GenerateGuideInput.Type) =>
-    Effect.gen(function* () {
-      const target = yield* resolve(input);
-      if (input.instance !== undefined && input.model === undefined)
-        return yield* fail(
-          "invalid",
-          "Pass model with instance: one of the slugs prkit_status lists for it.",
-        );
-      const catalog = yield* agents.catalog();
-      const entry = catalog.providers.find((provider) => provider.instance === input.instance);
-      if (input.instance !== undefined && entry === undefined)
-        return yield* fail(
-          "not-ready",
-          `prkit has no agent ${input.instance}. prkit_status lists the agents it has.`,
-        );
-      const snapshot = yield* reviews.generate(
-        target.key,
-        target.accountId,
-        entry === undefined || input.model === undefined
-          ? {}
-          : {
-              agent: { instance: entry.instance, model: input.model, options: input.options ?? [] },
-            },
-      );
-      return guideStatusOf(snapshot);
-    }).pipe(Effect.mapError(asFailure));
-
   const stopGuide = (input: TargetInput) =>
     Effect.gen(function* () {
       const target = yield* resolve(input);
@@ -811,14 +821,7 @@ export const make = Effect.gen(function* () {
   const latestTurnId = (snapshot: FixerSnapshot) =>
     [...snapshot.turns].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.id;
 
-  const sendToFix = (
-    input: TargetInput & {
-      readonly draftIds?: ReadonlyArray<ReviewCommentId>;
-      readonly threadIds?: ReadonlyArray<string>;
-      readonly instructions?: string;
-      readonly clientRequestId?: string;
-    },
-  ) =>
+  const sendToFix = (input: typeof SendToFixInput.Type) =>
     Effect.gen(function* () {
       const target = yield* resolve(input);
       return yield* idempotent(
@@ -831,10 +834,14 @@ export const make = Effect.gen(function* () {
             input.draftIds === undefined ? null : input.draftIds.toSorted().join(","),
             input.threadIds === undefined ? null : input.threadIds.toSorted().join(","),
             input.instructions ?? null,
+            input.instance ?? null,
+            input.model ?? null,
+            input.options?.map((option) => `${option.id}=${option.value}`).join(",") ?? null,
           ],
         },
         StartedTurn,
         Effect.gen(function* () {
+          const agent = yield* requestedAgent(agents, input);
           // Neither named: every draft still waiting, as Send to agent in prkit sends them.
           const draftIds =
             input.draftIds === undefined && input.threadIds === undefined
@@ -852,6 +859,7 @@ export const make = Effect.gen(function* () {
               "There is nothing to send: no draft comments wait on this pull request. Add one with add_review_comment, or pass threadIds from list_review_comments.",
             );
           const snapshot = yield* fixers.send(target.key, target.accountId, {
+            ...(agent === undefined ? {} : { agent }),
             targets,
             note: input.instructions ?? null,
             replyAfterPush: false,
@@ -929,16 +937,22 @@ export const make = Effect.gen(function* () {
       return fixResultOf(yield* fixers.retry(target.key, turnId), null);
     }).pipe(Effect.mapError(asFailure));
 
-  const resolveConflicts = (input: TargetInput & { readonly strategy?: "merge" | "rebase" }) =>
+  const resolveConflicts = (input: typeof ConflictsInput.Type) =>
     Effect.gen(function* () {
       const target = yield* resolve(input);
+      const agent = yield* requestedAgent(agents, input);
       const snapshot = yield* fixers.resolveConflicts(target.key, target.accountId, {
+        ...(agent === undefined ? {} : { agent }),
         strategy: input.strategy ?? "merge",
       });
       return fixResultOf(snapshot, null);
     }).pipe(Effect.mapError(asFailure));
 
+  const reads = yield* makeOutsideReads(resolve, guideStatusOf);
+  const actions = yield* makeOutsideActions(resolve, guideStatusOf, openPullRequests);
   return {
+    ...reads,
+    ...actions,
     status,
     inbox,
     openPullRequests,
@@ -948,7 +962,6 @@ export const make = Effect.gen(function* () {
     fix,
     waitFor,
     open,
-    generateGuide,
     stopGuide,
     addComment,
     sendToFix,

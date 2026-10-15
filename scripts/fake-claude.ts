@@ -329,6 +329,10 @@ const turn = async (prompt: string) => {
     arguments: {
       summary: "A guide written by the stand-in agent.",
       chapters: [{ title: "Every change", files }],
+      focusAreas: [...prompt.matchAll(/^- `([^`]+)` .+: .+$/gm)].map((match) => ({
+        id: match[1] ?? "",
+        verdict: "nothing-notable",
+      })),
     },
   });
   return finish(submitted.ok ? null : `submit_guide was refused: ${submitted.text.slice(0, 300)}`);

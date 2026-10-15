@@ -91,7 +91,7 @@ export const makeActions = (reads: {
                 : "not-permitted";
       return fail(key, accountId, reason, message);
     };
-    const binding = (key: PullRequestKey, accountId: AccountId) =>
+    const binding = (key: PullRequestKey, accountId: AccountId, requireOpen = true) =>
       Effect.gen(function* () {
         const rows = yield* sql`SELECT account_id FROM open_pull_requests WHERE key = ${key}`.pipe(
           Effect.flatMap(
@@ -99,7 +99,12 @@ export const makeActions = (reads: {
           ),
         );
         const ref = refFromKey(key);
-        if (!ref || rows[0]?.account_id !== accountId || !accountId.startsWith(`${ref.host}/`))
+        if (
+          !ref ||
+          !accountId.startsWith(`${ref.host}/`) ||
+          (rows[0] !== undefined && rows[0].account_id !== accountId) ||
+          (requireOpen && rows[0] === undefined)
+        )
           return yield* fail(
             key,
             accountId,
@@ -460,7 +465,7 @@ export const makeActions = (reads: {
     };
     const candidates = (key: PullRequestKey, accountId: AccountId) =>
       Effect.gen(function* () {
-        const { ref, root } = yield* binding(key, accountId);
+        const { ref, root } = yield* binding(key, accountId, false);
         const incomplete = () =>
           Effect.logWarning("GitHub action choices reached their pagination limit").pipe(
             Effect.annotateLogs({ key, accountId, maxPages: 30 }),

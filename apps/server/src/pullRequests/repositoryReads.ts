@@ -259,6 +259,7 @@ export const makeRepositoryReads = Effect.fnUntraced(function* (options: {
     host: string,
     owner: string,
     name: string,
+    refresh = false,
   ): Effect.Effect<RepositoryPullRequests, RepositoryError> =>
     Effect.gen(function* () {
       const discovered = yield* accounts.list();
@@ -274,6 +275,7 @@ export const makeRepositoryReads = Effect.fnUntraced(function* (options: {
       const cached = yield* pullsCache.read(
         { accountId, configDir: account.configDir, key: nameKey(host, owner, name) },
         fetchPulls(account, owner, name),
+        { refresh },
       );
       return {
         ...cached.value,

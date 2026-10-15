@@ -105,6 +105,9 @@ export const make = Effect.gen(function* () {
   const { finishFixes, finishConflicts, reportProgress } = yield* makeFixTools(state, conflicts);
 
   const get = (key: PullRequestKey) => snapshotOf(key).pipe(Effect.catchTags(dbFailures));
+  const history = (key: PullRequestKey) => snapshotOf(key, true).pipe(Effect.catchTags(dbFailures));
+  const turnActivity = (key: PullRequestKey, turnId: FixerTurnId) =>
+    state.turnActivity(key, turnId).pipe(Effect.catchTags(dbFailures));
 
   /** The comments as the agent gets them, read fresh: drafts from prkit, threads from GitHub. */
   const commentsFor = (
@@ -541,6 +544,8 @@ export const make = Effect.gen(function* () {
 
   return {
     get,
+    history,
+    turnActivity,
     watch,
     feed,
     send,

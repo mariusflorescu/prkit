@@ -395,6 +395,46 @@ export const graphql = (
   const query = request.query;
   const variables = request.variables ?? {};
   const pullFrom = (value: Schema.Json | undefined) => pulls.get(Number(value));
+  if (query.includes("PrkitPushAccess")) {
+    const pull = pullFrom(variables["number"]);
+    return {
+      kind: "graphql:push-access",
+      cost: 1,
+      data: {
+        viewer: { login: LOGIN },
+        repository: {
+          viewerPermission: "WRITE",
+          pullRequest:
+            pull === undefined
+              ? null
+              : {
+                  state: pull.state,
+                  headRefName: `feature-${pull.number}`,
+                  isCrossRepository: pull.headRepo !== `${OWNER}/${REPO}`,
+                  maintainerCanModify: true,
+                  headRepository: {
+                    nameWithOwner: pull.headRepo,
+                    isArchived: false,
+                    viewerPermission: "WRITE",
+                  },
+                },
+        },
+      },
+    };
+  }
+  if (query.includes("PrkitAssignableUsers"))
+    return {
+      kind: "graphql:assignable-users",
+      cost: 1,
+      data: {
+        repository: {
+          assignableUsers: {
+            nodes: [{ login: LOGIN, name: "Fixture reviewer", avatarUrl: "" }],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      },
+    };
   if (!STACKS && query.includes("stackEntry"))
     return {
       kind: "graphql:no-stacks",

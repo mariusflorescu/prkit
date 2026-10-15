@@ -4,8 +4,13 @@ import {
   AgentProviderKind,
   FixerTurnId,
   GitHubLimit,
+  GuidanceEdit,
+  GuideItemId,
+  GuideOverride,
+  PullRequestDetail,
   GitHubProblem,
   InboxReason,
+  InboxResult,
   ModelOptionSelection,
   NormalizedGuide,
   OutsideAccess,
@@ -14,6 +19,7 @@ import {
   ReviewCommentId,
 } from "@prkit/contracts";
 import * as Schema from "effect/Schema";
+import { PageFields, PageInfo } from "./pageSchemas.ts";
 
 /** What every outside tool fails with: a code a client can act on and a plain sentence. */
 export class OutsideToolFailure extends Schema.TaggedError<OutsideToolFailure>()(
@@ -115,6 +121,20 @@ export type StatusResult = typeof StatusResult.Type;
 
 // list_inbox
 export const InboxInput = Schema.Struct({
+  ...PageFields,
+  reason: Schema.optionalKey(InboxReason),
+  repository: Schema.optionalKey(
+    Schema.Struct({
+      host: Schema.String.check(Schema.isPattern(HOST_NAME)),
+      owner: Schema.String.check(Schema.isPattern(OWNER_NAME)),
+      name: Schema.String.check(Schema.isPattern(REPO_NAME)),
+    }),
+  ),
+  state: Schema.optionalKey(PullRequestSummary.fields.state),
+  draft: Schema.optionalKey(Schema.Boolean),
+  checks: Schema.optionalKey(Schema.Literals(["passing", "failing", "pending", "none"])),
+  search: Schema.optionalKey(Schema.String),
+  stacks: Schema.optionalKey(Schema.Literals(["all", "stacked", "unstacked"])),
   refresh: Schema.optionalKey(
     describe(
       Schema.Boolean,
@@ -138,6 +158,8 @@ export const InboxPullRequest = Schema.Struct({
   guide: Schema.NullOr(Schema.String),
 });
 export const InboxListResult = Schema.Struct({
+  ...PageInfo,
+  githubTruncated: InboxResult.fields.truncated,
   accounts: Schema.Array(
     Schema.Struct({
       accountId: AccountId,
@@ -222,6 +244,9 @@ export const PullRequestResult = Schema.Struct({
       ),
     }),
   ),
+  reviewers: PullRequestDetail.fields.reviewers,
+  labels: PullRequestDetail.fields.labels,
+  actions: PullRequestDetail.fields.actions,
   fetchedAt: Schema.String,
 });
 export type PullRequestResult = typeof PullRequestResult.Type;
@@ -259,6 +284,23 @@ export const GuideResult = Schema.Struct({
 export type GuideResult = typeof GuideResult.Type;
 export const GenerateGuideInput = Schema.Struct({
   ...TargetFields,
+  guidance: Schema.optionalKey(GuidanceEdit),
+  focus: Schema.optionalKey(
+    Schema.Struct({
+      expectedVersion: Schema.Int,
+      areas: Schema.Array(
+        Schema.Struct({
+          id: Schema.NullOr(GuideItemId),
+          label: Schema.String,
+          question: Schema.String,
+        }),
+      ),
+      overrides: Schema.Array(GuideOverride),
+    }),
+  ),
+  regenerate: Schema.optionalKey(Schema.Boolean),
+  stack: Schema.optionalKey(Schema.Literals(["this-pr", "whole-stack", "chosen-layers"])),
+  layers: Schema.optionalKey(Schema.NonEmptyArray(Schema.Int.check(Schema.isGreaterThan(0)))),
   instance: Schema.optionalKey(
     describe(
       AgentInstanceId,
@@ -271,6 +313,7 @@ export const GenerateGuideInput = Schema.Struct({
 
 // list_review_comments / add_review_comment
 export const CommentsResult = Schema.Struct({
+  ...PageInfo,
   drafts: Schema.Array(
     Schema.Struct({
       id: ReviewCommentId,
@@ -329,6 +372,9 @@ export type AddedComment = typeof AddedComment.Type;
 // send_to_fix_agent / ask_fix_agent_to_change / read_fix / stop_fix / retry_fix / resolve_conflicts
 export const SendToFixInput = Schema.Struct({
   ...TargetFields,
+  instance: GenerateGuideInput.fields.instance,
+  model: GenerateGuideInput.fields.model,
+  options: GenerateGuideInput.fields.options,
   draftIds: Schema.optionalKey(
     describe(
       Schema.Array(ReviewCommentId),
@@ -359,6 +405,9 @@ export const TurnInput = Schema.Struct({
 });
 export const ConflictsInput = Schema.Struct({
   ...TargetFields,
+  instance: GenerateGuideInput.fields.instance,
+  model: GenerateGuideInput.fields.model,
+  options: GenerateGuideInput.fields.options,
   strategy: Schema.optionalKey(
     describe(
       Schema.Literals(["merge", "rebase"]),
