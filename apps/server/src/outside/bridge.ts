@@ -2,7 +2,6 @@
 // server's Effect runtime, and relays JSON-RPC lines it must not rewrite.
 // @effect-diagnostics nodeBuiltinImport:off globalFetch:off preferSchemaOverJson:off globalTimers:off
 import * as NodeCrypto from "node:crypto";
-import * as NodeFs from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeReadline from "node:readline";
 
@@ -10,16 +9,16 @@ import {
   cleanClientName,
   OUTSIDE_BRIDGE_HEADER,
   OUTSIDE_CLIENT_HEADER,
-  OUTSIDE_DISCOVERY_FILE,
   OUTSIDE_MCP_PATH,
   OUTSIDE_NOT_OPEN,
   OUTSIDE_OFF,
-  OutsideDiscoveryJson,
 } from "@prkit/contracts/outsideAgents";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import packageJson from "../../package.json" with { type: "json" };
+import { discover as discoverHome } from "./discovery.ts";
+import { ssePayloads } from "./sse.ts";
 import { OUTSIDE_OFFLINE_INSTRUCTIONS } from "./instructions.ts";
 
 /**
@@ -57,7 +56,6 @@ const decodeInitializeParams = Schema.decodeUnknownOption(
 const decodeInitializeResult = Schema.decodeUnknownOption(
   Schema.Struct({ protocolVersion: Schema.String }),
 );
-const decodeDiscovery = Schema.decodeUnknownOption(OutsideDiscoveryJson);
 
 type Upstream = {
   readonly port: number;
@@ -68,56 +66,23 @@ type Upstream = {
 type Reachable = { readonly _tag: "on"; readonly port: number; readonly token: string };
 type Unreachable = { readonly _tag: "off" | "not-open" };
 
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    // EPERM: the process exists but belongs to someone else.
-    return error instanceof Error && "code" in error && error.code === "EPERM";
-  }
-};
-
 export const runBridge = async (home: string) => {
-  const discoveryPath = NodePath.join(home, OUTSIDE_DISCOVERY_FILE);
   const bridgeId = NodeCrypto.randomUUID();
   const write = (message: string) => {
     process.stdout.write(`${message}\n`);
   };
   const send = (message: object) => write(JSON.stringify(message));
 
-  /**
-   * The file's text, only when it is a regular file of this user's that nobody else can read
-   * or write: a symlink, another owner's file or a loose mode counts as no file.
-   */
-  const readTrusted = () => {
-    try {
-      const stat = NodeFs.lstatSync(discoveryPath);
-      if (!stat.isFile() || stat.uid !== process.getuid?.() || (stat.mode & 0o077) !== 0)
-        return null;
-      return NodeFs.readFileSync(discoveryPath, "utf8");
-    } catch {
-      return null;
-    }
-  };
-
-  /** The file as it says now; a missing, damaged or stale (dead pid) file means not open. */
   const discover = (): Reachable | Unreachable => {
-    const text = readTrusted();
-    if (text === null) return { _tag: "not-open" };
-    const file = Option.getOrUndefined(decodeDiscovery(text));
-    if (file === undefined || !alive(file.pid)) return { _tag: "not-open" };
+    const file = discoverHome(home);
+    if (file === null) return { _tag: "not-open" };
     return file._tag === "off"
       ? { _tag: "off" }
       : { _tag: "on", port: file.port, token: file.token };
   };
-  /** What changes the tools a client should see: reachable or not, and the level. */
   const fingerprint = () => {
-    const text = readTrusted();
-    if (text === null) return "not-open";
-    const file = Option.getOrUndefined(decodeDiscovery(text));
-    if (file === undefined || !alive(file.pid)) return "not-open";
-    return file._tag === "off" ? "off" : `on:${file.access}`;
+    const file = discoverHome(home);
+    return file === null ? "not-open" : file._tag === "off" ? "off" : `on:${file.access}`;
   };
 
   let clientName = cleanClientName("");
@@ -146,13 +111,7 @@ export const runBridge = async (home: string) => {
   const payloads = async (response: Response) => {
     const text = await response.text();
     const lines = (response.headers.get("content-type") ?? "").includes("text/event-stream")
-      ? text.split(/\r?\n\r?\n/).map((event) =>
-          event
-            .split(/\r?\n/)
-            .filter((line) => line.startsWith("data:"))
-            .map((line) => line.slice(5).trimStart())
-            .join("\n"),
-        )
+      ? ssePayloads(text)
       : text.split("\n");
     return lines.filter((line) => line.trim() !== "");
   };

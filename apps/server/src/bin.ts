@@ -3,6 +3,9 @@
 if (process.argv[2] === "mcp-bridge") {
   const { main } = await import("./outside/bridge.ts");
   await main();
+} else if (process.argv[2] === "cli") {
+  const { main } = await import("./cli/main.ts");
+  await main();
 } else {
   await import("./cli.ts");
 }

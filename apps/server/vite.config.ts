@@ -1,8 +1,27 @@
-// @effect-diagnostics-next-line nodeBuiltinImport:off -- The build configuration runs outside the Effect runtime.
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Build metadata comes from a read-only git command.
+import { execFileSync } from "node:child_process";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- The build callback writes its identity before the server runtime exists.
 import { writeFileSync } from "node:fs";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import { defineConfig } from "vite-plus";
+
+const git = (...args: string[]) => {
+  try {
+    return execFileSync("git", args, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "";
+  }
+};
+const remote = git("remote", "get-url", "origin");
+const repository =
+  process.env.GITHUB_REPOSITORY ??
+  /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/.exec(remote)?.[1] ??
+  "";
+const skillRef = process.env.GITHUB_ACTIONS === "true" ? git("rev-parse", "HEAD") : "main";
 
 const buildId = String(Effect.runSync(Clock.currentTimeMillis));
 
@@ -21,7 +40,11 @@ export default defineConfig({
     outDir: "dist",
     sourcemap: true,
     clean: true,
-    define: { PRKIT_BUILD_ID: JSON.stringify(buildId) },
+    define: {
+      PRKIT_BUILD_ID: JSON.stringify(buildId),
+      PRKIT_SKILL_REPOSITORY: JSON.stringify(repository),
+      PRKIT_SKILL_REF: JSON.stringify(skillRef),
+    },
     onSuccess: () => {
       writeFileSync(new URL("./dist/build.json", import.meta.url), JSON.stringify({ buildId }));
     },

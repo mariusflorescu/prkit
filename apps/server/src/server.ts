@@ -22,6 +22,7 @@ import * as CursorSdk from "./agents/cursor/CursorSdk.ts";
 import * as McpHttp from "./mcp/McpHttp.ts";
 import * as McpTokens from "./mcp/McpTokens.ts";
 import * as OutsideMcp from "./mcp/outside/OutsideMcp.ts";
+import * as CliInstall from "./cli/CliInstall.ts";
 import * as OutsideAgents from "./outside/OutsideAgents.ts";
 import * as OutsideWork from "./outside/OutsideWork.ts";
 import * as RepoCache from "./repo/RepoCache.ts";
@@ -136,6 +137,7 @@ const layerServer = Layer.mergeAll(layerReadyLine, layerOutsideDiscovery).pipe(
   // What outside agents can do: the same services the app's buttons call.
   Layer.provideMerge(OutsideWork.layer),
   Layer.provideMerge(OutsideAgents.layer),
+  Layer.provideMerge(CliInstall.layer),
   Layer.provideMerge(Layer.mergeAll(ReviewComments.layer, AppearanceStore.layer)),
   Layer.provideMerge(layerFixers),
   Layer.provide(SqlitePersistence.layer),

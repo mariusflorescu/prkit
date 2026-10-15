@@ -4,6 +4,7 @@ import { Button } from "~/components/ui/button";
 
 import { SettingsAlert } from "../SettingsAlert";
 import { SettingsSection } from "../SettingsSection";
+import { CommandLineSettings } from "./CommandLineSettings";
 import { OutsideAgentsForm } from "./OutsideAgentsForm";
 import { OutsideClientsList } from "./OutsideClientsList";
 import { OutsideSetupCommands } from "./OutsideSetupCommands";
@@ -60,6 +61,7 @@ export function OutsideAgentsSettings() {
             saving={update.isPending}
             onSave={(settings) => update.mutate(settings)}
           />
+          <CommandLineSettings enabled={state.data.enabled} access={state.data.access} />
           {state.data.enabled && (
             <>
               <OutsideSetupCommands launcher={state.data.launcher} />

@@ -1,9 +1,9 @@
 import { PullRequestRef, pullRequestKey, refFromKey, type PullRequestKey } from "@prkit/contracts";
 import { Dialog } from "@base-ui/react/dialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouterState } from "@tanstack/react-router";
+import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useForm, useWatch } from "react-hook-form";
-import { BookOpenTextIcon, LayersIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { BookOpenTextIcon, LayersIcon, SearchIcon, SettingsIcon, TerminalIcon } from "lucide-react";
 import * as Schema from "effect/Schema";
 
 import { useStartGuide, useStartStackGuides } from "~/components/review";
@@ -17,6 +17,8 @@ import {
 } from "~/rpc/queries";
 
 import { PaletteBranch } from "./PaletteBranch";
+import { useCliInstall } from "~/features/settings/outsideAgents/useCliInstall";
+import { SettingsAlert } from "~/features/settings/SettingsAlert";
 import { searchPalette, type PaletteEntry } from "./paletteSearch";
 import { useWorkspaceSession } from "./sessionStore";
 import { useWorkspace } from "./workspaceContext";
@@ -46,6 +48,17 @@ export function CommandPalette() {
     accounts.data?.accounts.filter(
       (account) => account.status._tag === "ready" && account.host === pastedRef?.host,
     ) ?? [];
+  const installer = useCliInstall();
+  const navigate = useNavigate();
+  const installCommand = () =>
+    installer.change.mutate("install", {
+      onSuccess: () => {
+        setOpen(false);
+        form.reset();
+        void navigate({ to: "/settings/outside-agents" });
+      },
+    });
+  const showInstall = mode === "all" && "install command line tool".includes(search);
   const showSettings = mode === "all" && "settings".includes(search);
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const guide = useStartGuide();
@@ -160,7 +173,8 @@ export function CommandPalette() {
           <form
             onSubmit={form.handleSubmit(() => {
               const first = results[0];
-              if (showGenerate && search !== "") generateActive();
+              if (showInstall && search !== "") installCommand();
+              else if (showGenerate && search !== "") generateActive();
               else if (showStack && search !== "") generateStack();
               else if (pastedRef) {
                 const account = urlAccounts.length === 1 ? urlAccounts[0] : undefined;
@@ -218,6 +232,21 @@ export function CommandPalette() {
                   {1 + restOpen.length} PR{restOpen.length === 0 ? "" : "s"} · default agent
                 </span>
               </button>
+            )}
+            {showInstall && (
+              <button
+                type="button"
+                data-command-result=""
+                disabled={installer.change.isPending}
+                className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent focus:bg-accent focus:outline-none"
+                onClick={installCommand}
+              >
+                <TerminalIcon aria-hidden="true" className="size-4" />
+                Install command line tool
+              </button>
+            )}
+            {installer.change.isError && (
+              <SettingsAlert message={installer.change.error.message} retry={installCommand} />
             )}
             {showSettings && (
               <button
@@ -294,6 +323,7 @@ export function CommandPalette() {
               !inbox.isPending &&
               !pastedRef &&
               !showSettings &&
+              !showInstall &&
               !showGenerate && (
                 <p role="status" className="p-4 text-center text-sm text-muted-foreground">
                   No matching pull requests

@@ -243,8 +243,19 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           port = boundPort;
           yield* fs.makeDirectory(path.dirname(launcher), { recursive: true });
-          yield* fs.writeFileString(launcher, launcherScript(config.home), { mode: 0o700 });
+          yield* fs.writeFileString(
+            launcher,
+            launcherScript(config.home, "mcp-bridge", config.version),
+            {
+              mode: 0o700,
+            },
+          );
           yield* fs.chmod(launcher, 0o700);
+          const cli = path.join(config.home, "bin", "prkit");
+          yield* fs.writeFileString(cli, launcherScript(config.home, "cli", config.version), {
+            mode: 0o700,
+          });
+          yield* fs.chmod(cli, 0o700);
           tokenHash = yield* publish(settings);
         }),
       ),
