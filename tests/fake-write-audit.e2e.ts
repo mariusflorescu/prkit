@@ -56,6 +56,35 @@ test("records a git push before the transport refuses it", () => {
   expect(git.pushes()).toEqual([["push", "origin", "HEAD"]]);
 });
 
+test("audits GraphQL GET mutations and unsupported methods before refusing them", async () => {
+  const fake = await startFakeGitHub("outside-graphql-methods");
+  const get = (query: string, operationName?: string) => {
+    const url = new URL("/graphql", fake.url);
+    url.searchParams.set("query", query);
+    if (operationName !== undefined) url.searchParams.set("operationName", operationName);
+    return fetch(url);
+  };
+  try {
+    await get("query Read { viewer { login } }", "Read");
+    expect(await fake.writes()).toEqual([]);
+    await get("mutation{x}");
+    await get("mutation R { x }", "R");
+    await fetch(`${fake.url}/graphql`, { method: "PUT", body: '{"query":"query Read { x }"}' });
+    await fetch(`${fake.url}/graphql?operationName=Read`);
+    await fake.limit("graphql", 60);
+    await get("mutation{x}");
+    expect((await fake.writes()).map((entry) => entry.kind)).toEqual([
+      "graphql mutation",
+      "graphql mutation",
+      "graphql unclassified",
+      "graphql unclassified",
+      "graphql mutation",
+    ]);
+  } finally {
+    fake.stop();
+  }
+});
+
 test("audits every GraphQL batch entry and records anything it cannot classify as a query", async () => {
   const fake = await startFakeGitHub("outside-graphql-audit");
   const post = (body: string) => fetch(`${fake.url}/graphql`, { method: "POST", body });

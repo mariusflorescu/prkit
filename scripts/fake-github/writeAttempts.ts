@@ -9,6 +9,7 @@ const Request = Schema.Struct({
   variables: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
 });
 const Body = Schema.fromJsonString(Schema.Json);
+const encodeBody = Schema.encodeSync(Body);
 
 /** Classify document operations, ignoring strings, comments and nested field names. */
 const operationKind = (text: string) => {
@@ -48,7 +49,18 @@ const operationKind = (text: string) => {
   return queries > 0 ? "query" : "unclassified";
 };
 
-export const recordGraphqlAttempt = (body: string) => {
+export const recordGraphqlAttempt = (method: string, url: URL, body: string) => {
+  if (method === "GET") {
+    const query = url.searchParams.get("query");
+    const operationName = url.searchParams.get("operationName");
+    if (query === null) return wrote("graphql unclassified", { method, operationName });
+    return recordGraphqlBody(encodeBody({ query, operationName }));
+  }
+  if (method !== "POST") return wrote("graphql unclassified", { method, body });
+  return recordGraphqlBody(body);
+};
+
+const recordGraphqlBody = (body: string) => {
   const parsed = Schema.decodeOption(Body)(body);
   if (Option.isNone(parsed)) return wrote("graphql unclassified", body);
   const requests = Array.isArray(parsed.value) ? parsed.value : [parsed.value];

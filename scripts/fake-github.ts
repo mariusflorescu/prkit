@@ -230,14 +230,24 @@ const server = NodeHttp.createServer((request, response) => {
     control(url, request.method ?? "GET", response);
     return;
   }
-  if (url.pathname === "/graphql" && request.method === "POST") {
+  if (url.pathname === "/graphql") {
     let body = "";
     request.setEncoding("utf8");
     request.on("data", (chunk: string) => {
       body += chunk;
     });
     request.on("end", () => {
-      recordGraphqlAttempt(body);
+      recordGraphqlAttempt(request.method ?? "GET", url, body);
+      if (request.method !== "POST") {
+        count("graphql:unsupported-method", 405, 0);
+        send(
+          response,
+          "graphql",
+          405,
+          '{"errors":[{"message":"The fake accepts GraphQL POST requests only."}]}',
+        );
+        return;
+      }
       if (remaining("graphql") === 0) {
         count("graphql:limited", 200, 0);
         send(
