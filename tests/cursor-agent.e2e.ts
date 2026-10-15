@@ -246,6 +246,7 @@ test(
       await browser.setViewport({ width: 1280, height: 860 });
       await browser.addInitScript("window.open = () => null;");
       await app.open(run.openUrl);
+      await expect(screen.getByRole("link", "Inbox")).toBeVisible({ timeout: 30_000 });
       await installAndSignIn({ app, screen, browser }, cursor, false);
 
       // A guide on Cursor: read-only tools, none of the user's or the repository's settings,
