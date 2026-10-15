@@ -194,8 +194,14 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
    * signed out: a timeout, a failed start or any other answer is unknown. The output is read for
    * that phrase alone and never logged.
    */
-  const loginStatus = (codex: string, args: ReadonlyArray<string>, codexHome: string) =>
-    shortCommand(
+  const loginStatus = (codex: string, args: ReadonlyArray<string>, codexHome: string) => {
+    /** Why the answer is unknown, for the log: never the output, which can name a key. */
+    const unknown = (why: string) =>
+      Effect.logWarning("Codex didn't confirm a login status").pipe(
+        Effect.annotateLogs({ instance: setup.id, why }),
+        Effect.as("unknown" as const),
+      );
+    return shortCommand(
       Effect.scoped(
         Effect.gen(function* () {
           const child = yield* spawner.spawn(
@@ -214,13 +220,18 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
             { concurrency: "unbounded" },
           );
           if (code === 0) return "signed-in" as const;
-          return /\bnot logged in\b/i.test(`${output}\n${errors}`)
-            ? ("signed-out" as const)
-            : ("unknown" as const);
+          if (/\bnot logged in\b/i.test(`${output}\n${errors}`)) return "signed-out" as const;
+          // Codex's own error line says what went wrong; any other output could name a key.
+          const error = /^Error\b.{0,200}/m.exec(errors)?.[0];
+          return yield* unknown(`exit ${code}${error === undefined ? "" : `: ${error}`}`);
         }),
       ),
-      "unknown" as const,
-    ).pipe(Effect.catchTag("PlatformError", () => Effect.succeed("unknown" as const)));
+      null,
+    ).pipe(
+      Effect.flatMap((status) => (status === null ? unknown("timed out") : Effect.succeed(status))),
+      Effect.catchTag("PlatformError", (error) => unknown(`couldn't start: ${error.message}`)),
+    );
+  };
   const loginState = (
     response: typeof Protocol.AccountResponse.Type,
     login: CodexHomeLogin,

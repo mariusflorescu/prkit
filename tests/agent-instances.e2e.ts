@@ -395,9 +395,20 @@ test(
       expect(NodeFS.existsSync(NodePath.join(home, "config.toml"))).toBe(true);
       await personal.getByRole("button", "Remove").tap();
       const confirm = screen.getByRole("alertdialog", "Remove Personal?");
+      await expect(confirm).toContainText(
+        "prkit signs out the ChatGPT login it holds for it, then deletes its folder. If Codex can't confirm the sign-out, nothing is removed.",
+      );
       await confirm.getByRole("button", "Remove").tap();
-      await expect(confirm).toBeHidden({ timeout: 30_000 });
-      expect(NodeFS.existsSync(home)).toBe(false);
+      // This instance's HOME is a stand-in with no keychain, so Codex can't say the login is
+      // signed out: the removal is refused and the home kept, as it must be.
+      await expect(confirm.getByRole("alert")).toHaveText(
+        "prkit couldn't confirm Personal's ChatGPT login is signed out, so it kept the agent. Try again.",
+        { timeout: 30_000 },
+      );
+      await shoot(app, browser, "u67-remove-agent-unconfirmed");
+      expect(NodeFS.existsSync(NodePath.join(home, "config.toml"))).toBe(true);
+      await confirm.getByRole("button", "Cancel").tap();
+      await expect(personal).toBeVisible();
     } finally {
       stopFakeInstance(`${NAME}-fixes`, { keepHome: false });
       fake.stop();
