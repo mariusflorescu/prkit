@@ -75,16 +75,27 @@ const oneLine = (text: string, max = 80) => {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 };
 
-/** Every session Claude Code saved under `configDir`, by id: `projects/<folder>/<id>.jsonl`. */
+/**
+ * Whether Claude Code saved session `sessionId` for `cwd` under `configDir`
+ * (`projects/<cwd's folder>/<id>.jsonl`): a resume only finds the sessions of its own folder.
+ */
 export const sessionFile = Effect.fn("ClaudeAgent.sessionFile")(function* (
   configDir: string,
   sessionId: string,
+  cwd: string,
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const projects = path.join(configDir, "projects");
+  // Claude Code names the folder after the cwd, every other character a dash, and cuts a long
+  // name at 200 characters before adding a hash. Both spellings of the cwd count.
+  const names = (yield* spellingsOf(fs, [cwd])).map((dir) => dir.replaceAll(/[^a-zA-Z0-9]/g, "-"));
   const folders = yield* fs.readDirectory(projects).pipe(Effect.orElseSucceed(() => []));
   for (const folder of folders) {
+    const ours = names.some((name) =>
+      name.length <= 200 ? folder === name : folder.startsWith(`${name.slice(0, 200)}-`),
+    );
+    if (!ours) continue;
     const file = path.join(projects, folder, `${sessionId}.jsonl`);
     const info = yield* fs.stat(file).pipe(Effect.option);
     if (Option.isSome(info) && info.value.type === "File" && info.value.size > 0) return true;
@@ -206,8 +217,8 @@ export const make = Effect.fn("ClaudeAgent.make")(function* (setup: InstanceSetu
    * Whether the session is still saved in this instance's config folder. The SDK's own lookup
    * reads the server's CLAUDE_CONFIG_DIR, which is one folder for every instance.
    */
-  const hasSession = (sessionId: string, _cwd: string) =>
-    sessionFile(configDir, sessionId).pipe(
+  const hasSession = (sessionId: string, cwd: string) =>
+    sessionFile(configDir, sessionId, cwd).pipe(
       Effect.provideService(FileSystem.FileSystem, fs),
       Effect.provideService(Path.Path, path),
     );
