@@ -8,6 +8,7 @@ import { RepoCache } from "../repo/RepoCache.ts";
 import type { AgentRuns } from "./agentRuns.ts";
 import type { ConflictTurn } from "./conflictTurn.ts";
 import type { FixerRow, TurnRow, WorkRequest } from "./fixerRows.ts";
+import { keepingEarlier } from "./keepEarlier.ts";
 import { FixerSettingsStore } from "./FixerSettingsStore.ts";
 import { type FixerState, plural, repositoryOf, reportSummary, short } from "./fixerState.ts";
 import { fixPrompt, revisePrompt } from "./prompt.ts";
@@ -269,31 +270,34 @@ export const makeTurnBodies = (
         const ready = yield* turnById(turnId);
         const session = ready === null ? null : yield* fixerById(ready.fixer_id);
         if (ready === null || session === null) return;
-        const { fixer, turn } = yield* current(session, ready);
-        if (turn.commit_sha === null || turn.head_sha === null) return;
-        const ref = refFromKey(fixer.pr_key);
+        if (ready.commit_sha === null || ready.head_sha === null) return;
+        const ref = refFromKey(session.pr_key);
         if (ref === null) return;
-        const commitSha = turn.commit_sha;
-        const parents = turn.commit_parents ?? [turn.head_sha];
+        const commitSha = ready.commit_sha;
+        const parents = ready.commit_parents ?? [ready.head_sha];
         /**
-         * A change that didn't work out leaves the earlier result as it was. If something the
-         * agent started may still be running, the checkout stays as it is and the change stops
-         * at Needs you, like any other turn.
+         * A change that didn't work out leaves the earlier result as it was, still naming the
+         * agent it ran on. If something the agent started may still be running, the checkout
+         * stays as it is and the change stops at Needs you, like any other turn.
          */
         const keepEarlier = (message: string) =>
           Effect.gen(function* () {
-            if ((yield* leftovers.pending(fixer.id)).length > 0)
+            yield* sql`UPDATE fixer_turns SET provider = ${ready.provider},
+              instance_id = ${ready.instance_id}, model = ${ready.model} WHERE id = ${turnId}`;
+            if ((yield* leftovers.pending(session.id)).length > 0)
               return yield* fail("checks", message);
-            yield* repo.resetFix(ref, fixer.id, commitSha).pipe(Effect.ignore);
+            yield* repo.resetFix(ref, session.id, commitSha).pipe(Effect.ignore);
             if (yield* transition(turnId, ["running"], { _tag: "ready" }))
               yield* appendActivity(
-                fixer.pr_key,
+                session.pr_key,
                 turnId,
                 "error",
                 `${message} The earlier result is unchanged.`,
               );
           });
         const body = Effect.gen(function* () {
+          // Inside the body: no agent to run the change on keeps the earlier result too.
+          const { fixer, turn } = yield* current(session, ready);
           const provider = yield* agentFor(turn);
           const identity = yield* identityFor(fixer);
           // Put the checkout back at the ready commit, rebuilding it if its git metadata
@@ -404,14 +408,7 @@ export const makeTurnBodies = (
           });
         });
         // A failed change request never throws away the result the owner already had.
-        yield* body.pipe(
-          Effect.catchTags({
-            TurnFailure: (failure) => keepEarlier(failure.message),
-            RepoError: (error) => keepEarlier(error.message),
-            LinkRefused: (error) => keepEarlier(error.message),
-            GitTampered: (error) => keepEarlier(error.message),
-          }),
-        );
+        yield* keepingEarlier(body, keepEarlier);
       });
 
     return { runTurn, reviseBody };

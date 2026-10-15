@@ -58,5 +58,21 @@ export const makeAgentChoice = Effect.gen(function* () {
       return { ...chosen, provider: entry.kind };
     });
 
-  return { chooseAgent };
+  /**
+   * For a turn queued without anyone picking an agent, which may run none (a revert): the agent
+   * `chooseAgent` falls back to, else the session's own, so no agent being ready never blocks it.
+   */
+  const chooseAgentOrKeep = (fixer: FixerRow) =>
+    chooseAgent(undefined, fixer).pipe(
+      Effect.catchTag("FixerError", () =>
+        Effect.succeed({
+          instance: fixer.instance_id,
+          provider: fixer.provider,
+          model: fixer.model,
+          options: fixer.model_options,
+        }),
+      ),
+    );
+
+  return { chooseAgent, chooseAgentOrKeep };
 });

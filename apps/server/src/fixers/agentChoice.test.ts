@@ -22,6 +22,8 @@ import * as NodeSqliteClient from "../persistence/NodeSqliteClient.ts";
 import * as GuideSettingsStore from "../reviews/GuideSettingsStore.ts";
 import { makeAgentChoice } from "./agentChoice.ts";
 import type { FixerRow } from "./fixerRows.ts";
+import { TurnFailure } from "./fixerState.ts";
+import { keepingEarlier } from "./keepEarlier.ts";
 
 const Config = Layer.effect(
   ServerConfig.ServerConfig,
@@ -54,6 +56,11 @@ const NoAgents = Layer.effectDiscard(
     yield* fs.chmod(`${folder}/agent`, 0o755);
     process.env.PRKIT_CLAUDE_PATH = `${folder}/agent`;
     process.env.PRKIT_CODEX_PATH = `${folder}/agent`;
+    // The agents' own folders too: no test reads or links the caller's real logins.
+    yield* fs.makeDirectory(`${folder}/codex-home`);
+    yield* fs.makeDirectory(`${folder}/claude-config`);
+    process.env.CODEX_HOME = `${folder}/codex-home`;
+    process.env.CLAUDE_CONFIG_DIR = `${folder}/claude-config`;
   }),
 );
 
@@ -123,6 +130,44 @@ describe("chooseAgent for a turn nobody picked an agent for", () => {
         expect(none.message).toBe(
           "No agent is ready. Sign one in under Settings > Agents, then check again.",
         );
+      }),
+    ));
+
+  it("never blocks a revert: with no agent ready it keeps the session's own", () =>
+    run(
+      Effect.gen(function* () {
+        const store = yield* AgentInstancesStore.AgentInstances;
+        const { chooseAgentOrKeep } = yield* makeAgentChoice;
+        yield* store.update({ ...defaultInstanceConfig("claude"), enabled: false });
+        expect(yield* chooseAgentOrKeep(session)).toEqual({
+          instance: "claude_work",
+          provider: "claude",
+          model: "claude-sonnet-5-5",
+          options: [],
+        });
+      }),
+    ));
+
+  it("keeps the earlier result when a change request finds no agent ready", () =>
+    run(
+      Effect.gen(function* () {
+        const store = yield* AgentInstancesStore.AgentInstances;
+        const { chooseAgent } = yield* makeAgentChoice;
+        yield* store.update({ ...defaultInstanceConfig("claude"), enabled: false });
+        const steps: Array<string> = [];
+        // As the change request runs it: choosing the agent comes first, inside the body.
+        const body = Effect.gen(function* () {
+          yield* chooseAgent(undefined, session).pipe(
+            Effect.catchTag("FixerError", (error) =>
+              Effect.fail(new TurnFailure({ reason: "agent-auth", message: error.message })),
+            ),
+          );
+          steps.push("ran the agent");
+        });
+        yield* keepingEarlier(body, (message) => Effect.sync(() => steps.push(`kept: ${message}`)));
+        expect(steps).toEqual([
+          "kept: No agent is ready. Sign one in under Settings > Agents, then check again.",
+        ]);
       }),
     ));
 });

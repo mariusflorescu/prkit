@@ -76,7 +76,16 @@ export const make = Effect.gen(function* () {
   );
   const { advance, enqueue, launch } = queue;
   const sessions = yield* makeSessions(state, queue, leftovers);
-  const { boundFixer, chooseAgent, dropTurn, ensureFixer, rebind, reconcile, stop } = sessions;
+  const {
+    boundFixer,
+    chooseAgent,
+    chooseAgentOrKeep,
+    dropTurn,
+    ensureFixer,
+    rebindOrKeep,
+    reconcile,
+    stop,
+  } = sessions;
   const runs = yield* makeAgentRuns(state, leftovers);
   const pushes = yield* makePushes(state, queue, sessions);
   const { pushAccess, pushTurn } = pushes;
@@ -343,7 +352,8 @@ export const make = Effect.gen(function* () {
             "retry",
           );
         case "revert": {
-          yield* enqueue(yield* rebind(fixer), row.work, "retry");
+          // A revert runs no agent: no agent being ready never blocks it.
+          yield* enqueue(yield* rebindOrKeep(fixer), row.work, "retry");
           return yield* snapshotOf(key);
         }
       }
@@ -356,7 +366,7 @@ export const make = Effect.gen(function* () {
         return yield* new FixerStateError({ key, message: outcome.message });
       if (row.commit_sha === null)
         return yield* new FixerError({ message: "There is no merge to revert." });
-      const bound = yield* ensureFixer(key, fixer.account_id, yield* chooseAgent(undefined, fixer));
+      const bound = yield* ensureFixer(key, fixer.account_id, yield* chooseAgentOrKeep(fixer));
       yield* enqueue(bound, { _tag: "revert", turnId, sha: row.commit_sha }, "user");
       return yield* snapshotOf(key);
     }).pipe(Effect.catchTags(dbFailures));

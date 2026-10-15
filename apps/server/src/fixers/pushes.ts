@@ -44,7 +44,7 @@ export const makePushes = (state: FixerState, queue: TurnQueue, sessions: Sessio
       transition,
     } = state;
     const { advance, enqueue } = queue;
-    const { rebind } = sessions;
+    const { rebindOrKeep } = sessions;
     const accessCache = new Map<string, { readonly at: number; readonly access: PushAccess }>();
 
     /** Pushes a ready turn's commit, only if the branch is still where the turn found it. */
@@ -99,9 +99,7 @@ export const makePushes = (state: FixerState, queue: TurnQueue, sessions: Sessio
           yield* repo.holdCommit(ref, turnId, null).pipe(Effect.ignore);
           yield* appendActivity(key, turnId, "note", message);
           // The redo runs on the session's agent, or the fallback when that one is off now.
-          const bound = yield* rebind(fixer).pipe(
-            Effect.catchTag("FixerError", () => Effect.succeed(fixer)),
-          );
+          const bound = yield* rebindOrKeep(fixer);
           yield* enqueue(bound, row.work, "redo", {
             createdAt: row.created_at,
             // The batch's drafts stay with the agent, now for the redo.
