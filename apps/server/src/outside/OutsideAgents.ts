@@ -27,6 +27,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { Base64Url, Hex } from "effect/encoding";
 
 import * as ServerConfig from "../config.ts";
+import { trustedFolderProblem } from "../trustedFolder.ts";
 import { launcherScript } from "./launcher.ts";
 
 const SETTINGS_KEY = "outsideAgents.settings";
@@ -71,6 +72,7 @@ export const make = Effect.gen(function* () {
   );
   let settings: OutsideAgentsSettings = stored;
   let tokenHash: string | null = null;
+  let launcherProblem: string | null = null;
   /** The bound port, once the server listens; nothing is written before. */
   let port: number | null = null;
   const clients = new Map<string, OutsideClient>();
@@ -103,6 +105,24 @@ export const make = Effect.gen(function* () {
       );
       yield* place(temporary, destination);
     }).pipe(Effect.uninterruptible);
+
+  const writeLaunchers = Effect.gen(function* () {
+    const directory = path.dirname(launcher);
+    const before = yield* trustedFolderProblem(directory, { allowMissing: true });
+    if (before !== null) return before;
+    yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
+    const problem = yield* trustedFolderProblem(directory);
+    if (problem !== null) return problem;
+    yield* writeLauncher(launcher, "mcp-bridge");
+    yield* writeLauncher(path.join(directory, "prkit"), "cli");
+    return null;
+  }).pipe(
+    Effect.catchTag("PlatformError", () =>
+      Effect.succeed(
+        `prkit couldn't write its launchers in ${path.dirname(launcher)}. Check the folder's permissions.`,
+      ),
+    ),
+  );
 
   const stageDiscovery = (file: OutsideDiscovery) =>
     Schema.encodeEffect(OutsideDiscoveryJson)(file).pipe(
@@ -154,6 +174,7 @@ export const make = Effect.gen(function* () {
       ...settings,
       clients: [...clients.values()].sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt)),
       launcher,
+      launcherProblem,
     };
   });
 
@@ -255,10 +276,10 @@ export const make = Effect.gen(function* () {
       gate.withPermits(1)(
         Effect.gen(function* () {
           port = boundPort;
-          yield* fs.makeDirectory(path.dirname(launcher), { recursive: true });
-          yield* writeLauncher(launcher, "mcp-bridge");
-          const cli = path.join(config.home, "bin", "prkit");
-          yield* writeLauncher(cli, "cli");
+          const problem = yield* writeLaunchers;
+          launcherProblem =
+            problem === null ? null : `${problem} Fix the folder, then restart prkit.`;
+          if (launcherProblem !== null) yield* Effect.logWarning(launcherProblem);
           tokenHash = yield* publish(settings);
         }),
       ),
@@ -284,6 +305,7 @@ export const make = Effect.gen(function* () {
     current: () => settings,
     discoveryPath,
     launcher,
+    launcherProblem: () => launcherProblem,
     port: () => Option.fromNullishOr(port),
   };
 });

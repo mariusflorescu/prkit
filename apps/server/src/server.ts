@@ -136,8 +136,8 @@ const layerServer = Layer.mergeAll(layerReadyLine, layerOutsideDiscovery).pipe(
   ),
   // What outside agents can do: the same services the app's buttons call.
   Layer.provideMerge(OutsideWork.layer),
-  Layer.provideMerge(OutsideAgents.layer),
   Layer.provideMerge(CliInstall.layer),
+  Layer.provideMerge(OutsideAgents.layer),
   Layer.provideMerge(Layer.mergeAll(ReviewComments.layer, AppearanceStore.layer)),
   Layer.provideMerge(layerFixers),
   Layer.provide(SqlitePersistence.layer),

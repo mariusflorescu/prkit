@@ -13,6 +13,8 @@ codex mcp add prkit -- <home>/bin/prkit-mcp
 
 No secret goes in a client's config. `bin/prkit-mcp` is a launcher prkit writes on every launch (mode 0700): it runs prkit's own server binary (`ELECTRON_RUN_AS_NODE=1` in the app) with `mcp-bridge`, which `bin.ts` picks before loading anything else. The bridge never opens the database or touches `prkit.lock`, so it runs beside the app.
 
+Before writing launchers, prkit checks `bin` and every ancestor using the shared trusted-folder check. Unsafe folders skip both launcher writes while the app keeps running and publishes discovery. Settings reports the component and reason instead of offering bridge setup commands, and the CLI install action refuses with the same problem. Fix the folder and restart prkit to create the launchers.
+
 ## Levels and parity inventory
 
 Read tools are available at **Read only** and **Read and start work**. Local state changes and agent starts are available only at **Read and start work** (Work below). Every tool has typed parameters and a typed success schema in `apps/server/src/outside/`, used by the MCP toolkit and available to the CLI.

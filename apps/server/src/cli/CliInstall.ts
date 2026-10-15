@@ -12,7 +12,9 @@ import * as Semaphore from "effect/Semaphore";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import { shellQuote } from "../outside/launcher.ts";
+import { OutsideAgents } from "../outside/OutsideAgents.ts";
 import { ServerConfig } from "../config.ts";
+import { trustedFolderProblem } from "../trustedFolder.ts";
 import { skillBuild } from "./skillBuild.ts";
 import { skillInstallCommand, skillTerminalScript } from "./skillCommand.ts";
 
@@ -20,46 +22,24 @@ export class CliInstall extends Context.Service<CliInstall, Effect.Success<typeo
   "@prkit/server/cli/CliInstall",
 ) {}
 
-const directoryProblem = (fs: FileSystem.FileSystem, directory: string, allowMissing = false) =>
-  Effect.gen(function* () {
-    const info = yield* fs.stat(directory);
-    if (info.type !== "Directory") return "it isn't a folder";
-    const uid = process.getuid?.();
-    if (uid === undefined || Option.isNone(info.uid) || info.uid.value !== uid)
-      return "it isn't owned by the current user";
-    if ((info.mode & 0o022) !== 0) return "it is writable by group or others";
-    yield* fs.access(directory, { writable: true });
-    return null;
-  }).pipe(
-    Effect.catchTag("PlatformError", (error) =>
-      Effect.succeed(
-        error.reason._tag === "NotFound" && allowMissing
-          ? null
-          : "prkit couldn't inspect or write to it",
-      ),
-    ),
-  );
-
 export const preferredInstallDirectory = (preferred: string, fallback: string) =>
   Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    return (yield* directoryProblem(fs, preferred)) === null ? preferred : fallback;
+    return (yield* trustedFolderProblem(preferred)) === null ? preferred : fallback;
   });
 
 export const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const config = yield* ServerConfig;
+  const outsideAgents = yield* OutsideAgents;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const writing = yield* Semaphore.make(1);
   const launcher = path.join(config.home, "bin", "prkit");
   const skillCommand = skillInstallCommand(skillBuild.repository, skillBuild.ref);
   const fail = (message: string) => Effect.fail(new CliInstallError({ message }));
   const requireDirectory = (directory: string, allowMissing = false) =>
-    directoryProblem(fs, directory, allowMissing).pipe(
-      Effect.flatMap((problem) =>
-        problem === null ? Effect.void : fail(`prkit can't use ${directory}: ${problem}.`),
-      ),
+    trustedFolderProblem(directory, { allowMissing }).pipe(
+      Effect.flatMap((problem) => (problem === null ? Effect.void : fail(problem))),
     );
   const location = Effect.gen(function* () {
     const override = process.env.PRKIT_CLI_INSTALL_PATH;
@@ -73,9 +53,7 @@ export const make = Effect.gen(function* () {
     const fallback = path.join(process.env.HOME ?? "", ".local", "bin");
     const directory =
       process.platform === "darwin"
-        ? yield* preferredInstallDirectory("/usr/local/bin", fallback).pipe(
-            Effect.provideService(FileSystem.FileSystem, fs),
-          )
+        ? yield* preferredInstallDirectory("/usr/local/bin", fallback)
         : fallback;
     yield* requireDirectory(directory, true);
     return path.join(directory, "prkit");
@@ -122,6 +100,8 @@ export const make = Effect.gen(function* () {
       return {
         path: file,
         launcher,
+        launcherProblem:
+          outsideAgents.launcherProblem() ?? (yield* trustedFolderProblem(path.dirname(launcher))),
         status: owned ? "installed" : linked.exists ? "foreign" : "absent",
         existing:
           linked.exists && !owned
@@ -145,6 +125,7 @@ export const make = Effect.gen(function* () {
     writing.withPermits(1)(
       Effect.gen(function* () {
         const state = yield* get();
+        if (install && state.launcherProblem !== null) return yield* fail(state.launcherProblem);
         if (state.status === "foreign")
           return yield* fail(
             `${state.existing} is at ${state.path}. prkit left it alone. Move it yourself before installing.`,
@@ -161,27 +142,31 @@ export const make = Effect.gen(function* () {
           });
           const moved = path.join(temporary, "prkit");
           let needsRestore = false;
+          const restoreFailure = (reason: string) =>
+            fail(
+              `prkit couldn't restore ${state.path}: ${reason}. The moved entry is preserved at ${moved}. To put it back, run: mv ${shellQuote(moved)} ${shellQuote(state.path)}`,
+            );
           const restore = Effect.gen(function* () {
             if (!needsRestore) return;
-            if (
-              (yield* fs.readDirectory(path.dirname(state.path))).includes(
-                path.basename(state.path),
-              )
-            )
-              return yield* fail(
-                `${state.path} changed during uninstall. prkit preserved the moved entry at ${moved} because the original location is occupied.`,
-              );
-            yield* fs
-              .rename(moved, state.path)
-              .pipe(
-                Effect.catchTag("PlatformError", () =>
-                  fail(
-                    `prkit couldn't restore ${state.path}. The moved entry is safe at ${moved}.`,
-                  ),
-                ),
-              );
             needsRestore = false;
-          });
+            const info = yield* Effect.tryPromise({
+              try: () => NodeFs.lstat(moved),
+              catch: () =>
+                new CliInstallError({
+                  message: "the moved entry couldn't be inspected",
+                }),
+            });
+            if (info.isFile()) yield* fs.link(moved, state.path);
+            else if (info.isSymbolicLink())
+              yield* fs.symlink(yield* fs.readLink(moved), state.path);
+            else return yield* fail("the moved entry is not a regular file or a symlink");
+            yield* fs.remove(moved);
+          }).pipe(
+            Effect.catchTags({
+              PlatformError: () => restoreFailure("the recovery operation failed"),
+              CliInstallError: (error) => restoreFailure(error.message),
+            }),
+          );
           yield* Effect.gen(function* () {
             yield* fs.rename(state.path, moved);
             needsRestore = true;

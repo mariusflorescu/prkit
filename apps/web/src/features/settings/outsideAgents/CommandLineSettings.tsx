@@ -42,6 +42,12 @@ export function CommandLineSettings({
         />
       ) : (
         <>
+          {state.data.launcherProblem !== null && (
+            <SettingsAlert
+              message={state.data.launcherProblem}
+              retry={() => void state.refetch()}
+            />
+          )}
           <p role="status" className="text-xs">
             {state.data.status === "installed"
               ? "Installed"
@@ -63,7 +69,11 @@ export function CommandLineSettings({
             <Button
               size="sm"
               variant="outline"
-              disabled={change.isPending || state.data.status === "foreign"}
+              disabled={
+                change.isPending ||
+                state.data.status === "foreign" ||
+                (state.data.status !== "installed" && state.data.launcherProblem !== null)
+              }
               aria-busy={change.isPending}
               onClick={() =>
                 change.mutate(state.data.status === "installed" ? "uninstall" : "install")

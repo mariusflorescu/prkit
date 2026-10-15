@@ -8,11 +8,15 @@ The CLI calls the existing `/mcp/outside` tools. It uses the bridge's trusted di
 
 The server writes its owner-only launcher at `$PRKIT_HOME/bin/prkit` on every launch. The installed link follows that launcher across app updates. In a packaged app the launcher uses the app's own Electron binary in Node mode, with the server entry's `cli` fast path.
 
-On macOS the link goes in `/usr/local/bin/prkit` when that directory is owned by the current user, writable without administrator access, and not writable by group or others. Otherwise it goes in `$HOME/.local/bin/prkit`. `PRKIT_CLI_INSTALL_PATH` overrides the complete destination path, which must be absolute and end in `prkit`. The same ownership and permission checks apply to the override's folder. A missing folder is created with mode 0755. Verification always sets this override inside a temporary HOME.
+On macOS the link goes in `/usr/local/bin/prkit` when that directory is owned by the current user, writable without administrator access, and reached through trusted folders. Otherwise it goes in `$HOME/.local/bin/prkit`. `PRKIT_CLI_INSTALL_PATH` overrides the complete destination path, which must be absolute and end in `prkit`. The same checks apply to the override's folder. A missing folder is created with mode 0755 and checked again. Verification always sets this override inside a temporary HOME.
+
+One check protects both the install folder and `$PRKIT_HOME/bin`. Every folder component must be owned by root or the current user, without group or other write access. Root-owned sticky directories are allowed. Only root-owned symlinks are followed, and their targets are checked too. The final folder must be owned by and writable by the current user. Unsafe launcher folders leave the app running; Settings shows the problem in both setup blocks and refuses installation until the folder is fixed and prkit restarted.
+
+These checks protect against planted entries and write access held by other local users. Processes already running as the same user are outside this boundary.
 
 prkit checks its process PATH and macOS's `/etc/paths`; it never executes a shell or reads startup files for this check. A terminal with a customized PATH may differ. When the folder is missing from both, Settings shows the exact `export PATH=...` line with Copy. Add it to your own shell profile and open a new terminal. prkit never edits profiles or requests administrator access.
 
-An existing file, directory or foreign link is shown and left alone. Uninstall moves the entry aside and checks it again before deleting only a link targeting this home's launcher. If the entry changed, prkit restores it and reports the change. Uninstalling the command leaves the app and its data in place.
+An existing file, directory or foreign link is shown and left alone. Uninstall moves the entry aside and checks it again before deleting only a link targeting this home's launcher. If the entry changed, prkit restores regular files or symlinks without replacing anything at the original path. A blocked restore or another entry type stays at the recovery path; the error names both paths and gives the exact `mv` command for manual recovery. Uninstalling the command leaves the app and its data in place.
 
 ## Commands
 

@@ -85,6 +85,39 @@ describe("outside launcher publication", () => {
       }).pipe(Effect.scoped, Effect.provide(Harness)),
     ));
 
+  it("leaves a symlinked launcher folder and both targets untouched while startup succeeds", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const { fs, home, outside } = yield* fixture;
+        const target = `${home}/foreign-bin`;
+        yield* fs.makeDirectory(target);
+        const victims = [
+          { name: "prkit", mode: 0o640 },
+          { name: "prkit-mcp", mode: 0o644 },
+        ];
+        for (const { name, mode } of victims) {
+          yield* fs.writeFileString(`${target}/${name}`, `${name} stays untouched\n`);
+          yield* fs.chmod(`${target}/${name}`, mode);
+        }
+        yield* fs.remove(`${home}/bin`, { recursive: true });
+        yield* fs.symlink(target, `${home}/bin`);
+
+        yield* outside.start(12345);
+
+        expect(NodeFs.lstatSync(`${home}/bin`).isSymbolicLink()).toBe(true);
+        expect((yield* fs.readDirectory(target)).sort()).toEqual(["prkit", "prkit-mcp"]);
+        for (const { name, mode } of victims) {
+          expect(yield* fs.readFileString(`${target}/${name}`)).toBe(`${name} stays untouched\n`);
+          expect((yield* fs.stat(`${target}/${name}`)).mode & 0o777).toBe(mode);
+        }
+        expect(yield* fs.exists(outside.discoveryPath)).toBe(true);
+        const state = yield* outside.get();
+        expect(state.launcherProblem).toContain(`${home}/bin`);
+        expect(state.launcherProblem).toContain("restart prkit");
+        expect(outside.launcherProblem()).toBe(state.launcherProblem);
+      }).pipe(Effect.scoped, Effect.provide(Harness)),
+    ));
+
   it.each(["prkit", "prkit-mcp"])("removes the staged file when %s cannot be replaced", (name) =>
     Effect.runPromise(
       Effect.gen(function* () {
@@ -93,11 +126,13 @@ describe("outside launcher publication", () => {
 
         const exit = yield* outside.start(12345).pipe(Effect.exit);
 
-        expect(Exit.isFailure(exit)).toBe(true);
+        expect(Exit.isSuccess(exit)).toBe(true);
         expect((yield* fs.stat(`${home}/bin/${name}`)).type).toBe("Directory");
         expect((yield* fs.readDirectory(`${home}/bin`)).some((file) => file.endsWith(".tmp"))).toBe(
           false,
         );
+        expect(yield* fs.exists(outside.discoveryPath)).toBe(true);
+        expect((yield* outside.get()).launcherProblem).toContain("restart prkit");
       }).pipe(Effect.scoped, Effect.provide(Harness)),
     ),
   );

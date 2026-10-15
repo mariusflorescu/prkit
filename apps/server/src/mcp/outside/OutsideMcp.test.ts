@@ -188,6 +188,7 @@ describe("outside agents' MCP endpoint", () => {
       seen: () => Effect.void,
       discoveryPath: "",
       launcher: "",
+      launcherProblem: () => null,
       port: () => Option.none(),
     });
     const layerWork = Layer.mock(OutsideWork, {

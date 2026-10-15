@@ -15,6 +15,66 @@ import { startBridge } from "./outsideBridge.ts";
 
 const Json = Schema.fromJsonString(Schema.Json);
 
+test("unsafe launcher folders leave startup running and explain both setup blocks", async ({
+  app,
+  screen,
+}) => {
+  const name = "u71-unsafe-launchers";
+  const fake = await startFakeGitHub(name);
+  const claude = setUpFakeClaude(name);
+  const home = NodePath.join(repoRoot, ".e2e/homes", name);
+  const directory = NodePath.join(fake.home, "foreign-bin");
+  const bin = NodePath.join(home, "bin");
+  const variables = {
+    PRKIT_CLI_INSTALL_PATH: NodePath.join(fake.home, "local-bin/prkit"),
+    CODEX_HOME: NodePath.join(fake.home, ".codex"),
+    CLAUDE_CONFIG_DIR: NodePath.join(fake.home, ".claude"),
+  };
+  const previous = Object.fromEntries(Object.keys(variables).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, variables);
+  try {
+    NodeFS.mkdirSync(home, { recursive: true });
+    NodeFS.mkdirSync(directory);
+    for (const command of ["prkit", "prkit-mcp"])
+      NodeFS.writeFileSync(NodePath.join(directory, command), `${command} stays untouched\n`, {
+        mode: 0o640,
+      });
+    NodeFS.symlinkSync(directory, bin);
+    const run = startFakeInstance(name, fake, ["--claude", claude.file]);
+    await app.open(run.openUrl);
+    await expect(screen.getByRole("link", "Inbox")).toBeVisible();
+    await app.open(`${run.url}/settings/outside-agents`);
+    const problem = `prkit can't use ${bin}: its symlink isn't owned by root. Fix the folder, then restart prkit.`;
+    await expect(screen.getByText(problem, { exact: true })).toHaveCount(2);
+    await expect(
+      screen.getByRole("button", "Install command line tool", { exact: true }),
+    ).toBeDisabled();
+    await app.screenshot("cli-unsafe-launcher-off");
+    await screen.getByRole("switch", "Let my coding agents use prkit").tap();
+    await expect(screen.getByText("Outside agents can read", { exact: true })).toBeVisible();
+    await expect(screen.getByText(problem, { exact: true })).toHaveCount(2);
+    await expect(screen.getByText("Add prkit to your client", { exact: true })).toHaveCount(0);
+    await app.screenshot("cli-unsafe-launcher-on");
+    await screen.getByText(problem, { exact: true }).nth(1).scrollIntoView();
+    await app.screenshot("cli-unsafe-launcher-mcp");
+    expect(NodeFS.lstatSync(bin).isSymbolicLink()).toBe(true);
+    expect(NodeFS.existsSync(NodePath.join(run.home, "outside-agents.json"))).toBe(true);
+    for (const command of ["prkit", "prkit-mcp"]) {
+      const file = NodePath.join(directory, command);
+      expect(NodeFS.readFileSync(file, "utf8")).toBe(`${command} stays untouched\n`);
+      expect(NodeFS.statSync(file).mode & 0o777).toBe(0o640);
+    }
+    expect(await fake.writes()).toEqual([]);
+  } finally {
+    stopFakeInstance(name, { keepHome: false });
+    fake.stop();
+    for (const key of Object.keys(variables)) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+  }
+});
+
 test(
   "the app installs its CLI safely and shell workflows use outside access",
   { timeout: 300_000 },

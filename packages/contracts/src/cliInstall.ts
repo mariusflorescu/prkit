@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 export const CliInstallState = Schema.Struct({
   path: Schema.String,
   launcher: Schema.String,
+  launcherProblem: Schema.NullOr(Schema.String),
   status: Schema.Literals(["installed", "absent", "foreign"]),
   existing: Schema.NullOr(Schema.String),
   pathSource: Schema.Literals(["process", "system", "missing"]),
