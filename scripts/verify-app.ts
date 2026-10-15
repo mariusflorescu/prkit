@@ -26,8 +26,8 @@
  * `--cursor-manifest <file>` installs the stand-in Cursor SDK packages it lists instead of
  * npm's (the server's PRKIT_CURSOR_SDK_MANIFEST, read only with `--e2e`), as
  * `tests/fakeCursor.ts` lays them out. `--cursor-sdk <dir>` loads Cursor's SDK from that package
- * folder instead of an installed one (the server's PRKIT_CURSOR_SDK_PATH), such as the real
- * development dependency for a live run.
+ * folder instead of an installed one (the server's PRKIT_CURSOR_SDK_PATH, also read only with
+ * `--e2e`), such as the real development dependency for a live run.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
@@ -411,6 +411,7 @@ if (watchInterval !== null && (!Number.isInteger(watchInterval) || watchInterval
   fail(`--watch-interval must be a whole number of milliseconds, at least 1000`);
 if ((values["github-api"] === undefined) !== (values["gh-home"] === undefined))
   fail("--github-api and --gh-home go together");
+if (values["cursor-sdk"] !== undefined && !values.e2e) fail("--cursor-sdk needs --e2e");
 
 switch (command) {
   case "start":

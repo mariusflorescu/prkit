@@ -8,7 +8,7 @@ import * as Effect from "effect/Effect";
 import * as Path from "effect/Path";
 import { describe, expect, it } from "vite-plus/test";
 
-import { runnerProfile, runtimeOf, SANDBOX_EXEC } from "./seatbelt.ts";
+import { runnerProfile, runtimeOf, runtimeReads, SANDBOX_EXEC } from "./seatbelt.ts";
 
 const HOMEBREW_NODE = "/opt/homebrew/opt/node/bin/node";
 
@@ -23,7 +23,7 @@ const runsUnderProfile = (executable: string) => {
   const real = NodeFs.realpathSync(executable);
   const profile = runnerProfile(path, {
     code: runtimeOf(path, real).filter((target) => NodeFs.existsSync(target)),
-    reads: [],
+    reads: runtimeReads(real).filter((target) => NodeFs.existsSync(target)),
     writes: [],
     guarded: [],
     sealedHome: null,
@@ -40,12 +40,26 @@ const runsUnderProfile = (executable: string) => {
 
 describe("the runner's runtime in its sandbox", () => {
   it("opens node's binary alone, never the folder it is installed in", () => {
-    expect(runtimeOf(path, "/usr/local/bin/node")).toContain("/usr/local/bin/node");
-    expect(runtimeOf(path, "/usr/local/bin/node")).not.toContain("/usr/local");
-    expect(runtimeOf(path, "/Users/octocat/bin/node")).not.toContain("/Users/octocat");
-    expect(runtimeOf(path, "/Applications/prkit.app/Contents/MacOS/prkit")).toContain(
+    expect(runtimeOf(path, "/usr/local/bin/node")).toEqual(["/usr/local/bin/node"]);
+    expect(runtimeOf(path, "/Users/octocat/bin/node")).toEqual(["/Users/octocat/bin/node"]);
+    expect(runtimeReads("/usr/local/bin/node")).toEqual([]);
+    expect(runtimeOf(path, "/Applications/prkit.app/Contents/MacOS/prkit")).toEqual([
       "/Applications/prkit.app/Contents",
-    );
+    ]);
+  });
+
+  it("opens Homebrew's folders only for Homebrew's own node", () => {
+    const node = "/opt/homebrew/Cellar/node/24.0.0/bin/node";
+    expect(runtimeOf(path, node)).toEqual([
+      node,
+      "/opt/homebrew/opt",
+      "/opt/homebrew/Cellar",
+      "/opt/homebrew/lib",
+    ]);
+    expect(runtimeReads(node)).toEqual([
+      "/opt/homebrew/etc/openssl@3",
+      "/opt/homebrew/etc/ca-certificates",
+    ]);
   });
 
   it("starts the node running these tests", () => {

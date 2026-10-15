@@ -432,6 +432,11 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
         // prkit's MCP server is the one local port the runner reaches (seatbelt.ts).
         const mcp = new URL(input.mcp.url);
         const mcpPort = Number(mcp.port === "" ? (mcp.protocol === "https:" ? 443 : 80) : mcp.port);
+        if (!Number.isInteger(mcpPort) || mcpPort < 1 || mcpPort > 65535)
+          return yield* new AgentError({
+            reason: "agent",
+            message: `prkit's MCP server has no usable port (${input.mcp.url}).`,
+          });
         const { pid, events, stderr } = yield* start(
           (common) => ({
             ...common,

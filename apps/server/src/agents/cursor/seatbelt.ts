@@ -39,21 +39,16 @@ const SYSTEM_READS = [
   "/private/etc",
   "/Library/Preferences/com.apple.networkd.plist",
   "/private/var/db/timezone",
-  // Homebrew's OpenSSL settings and CA bundle, which its node reads at start and for TLS.
-  ...["/opt/homebrew", "/usr/local"].flatMap((prefix) => [
-    `${prefix}/etc/openssl@3`,
-    `${prefix}/etc/ca-certificates`,
-  ]),
 ];
 
-/**
- * Where Homebrew keeps installed programs' libraries, which its node links (libuv, OpenSSL,
- * ICU); without them dyld stops it before it starts. Its `etc` and `var` stay closed, but for
- * OpenSSL's settings (SYSTEM_READS).
- */
-const HOMEBREW_CODE = ["/opt/homebrew", "/usr/local"].flatMap((prefix) =>
-  ["opt", "Cellar", "lib"].map((folder) => `${prefix}/${folder}`),
-);
+/** Where Homebrew installs, on Apple silicon and on Intel. */
+const HOMEBREW_PREFIXES = ["/opt/homebrew", "/usr/local"];
+
+/** The Homebrew prefix a runtime's real path lies in, or null for any other runtime. */
+const homebrewPrefixOf = (executable: string) =>
+  HOMEBREW_PREFIXES.find((prefix) =>
+    ["Cellar", "opt"].some((folder) => executable.startsWith(`${prefix}/${folder}/`)),
+  ) ?? null;
 
 const quoted = (text: string) => `"${text.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 
@@ -102,9 +97,11 @@ export const runnerProfile = (path: Path.Path, reach: RunnerReach) => {
     "(allow process-exec)",
     "(allow signal (target same-sandbox))",
     "(allow sysctl-read)",
-    // Cursor's backend, anywhere but this machine, and the resolver's socket; no other local
-    // socket (Docker's, an SSH agent's) and no local port but prkit's MCP server's.
-    '(allow network-outbound (remote ip "*:*") (literal "/private/var/run/mDNSResponder"))',
+    // Cursor's backend over IPv4, anywhere but this machine, and the resolver's socket; no other
+    // local socket (Docker's, an SSH agent's) and no local port but prkit's MCP server's. Not
+    // IPv6: `localhost` there misses IPv4-mapped addresses (`::ffff:127.0.0.1`), and Node falls
+    // back to IPv4 for a name with both.
+    '(allow network-outbound (remote ip4 "*:*") (literal "/private/var/run/mDNSResponder"))',
     '(deny network-outbound (remote ip "localhost:*"))',
     ...(reach.mcpPort === null
       ? []
@@ -123,11 +120,15 @@ export const runnerProfile = (path: Path.Path, reach: RunnerReach) => {
     `(deny file-write* (regex ${regexLiteral(`^${literalPattern(folder)}/${anySpelling(name)}(/|$)`)}))`;
   for (const folder of reach.guarded)
     for (const name of [".git", ".cursor"]) rules.push(closed(folder, name));
-  if (reach.sealedHome !== null)
+  if (reach.sealedHome !== null) {
+    // Inside `projects` only: the folder itself can't be renamed away or replaced by a link.
+    const projects = quoted(path.join(reach.sealedHome, ".cursor", "projects"));
     rules.push(
       closed(reach.sealedHome, ".cursor"),
-      `(allow file-write* (subpath ${quoted(path.join(reach.sealedHome, ".cursor", "projects"))}))`,
+      `(allow file-write* (subpath ${projects}))`,
+      `(deny file-write* (literal ${projects}))`,
     );
+  }
   return `${rules.join("\n")}\n`;
 };
 
@@ -135,16 +136,28 @@ export const runnerProfile = (path: Path.Path, reach: RunnerReach) => {
  * What the runner's runtime loads: the app bundle's `Contents` for Electron's binary
  * (`Contents/MacOS/prkit`), else node's binary alone, which is all an official build needs. A
  * prefix would open too much: `/usr/local` for nodejs.org's installer, the home for `~/bin/node`.
- * Homebrew's node also loads its libraries, from HOMEBREW_CODE.
+ * Homebrew's node also links the libraries of other installs (libuv, OpenSSL, ICU) from its
+ * prefix's `opt`, `Cellar` and `lib`, or dyld stops it before it starts.
  */
 export const runtimeOf = (path: Path.Path, executable: string) => {
   const macos = path.dirname(executable);
   const contents = path.dirname(macos);
-  return path.basename(macos) === "MacOS" &&
+  if (
+    path.basename(macos) === "MacOS" &&
     path.basename(contents) === "Contents" &&
     path.extname(path.dirname(contents)) === ".app"
-    ? [contents, ...HOMEBREW_CODE]
-    : [executable, ...HOMEBREW_CODE];
+  )
+    return [contents];
+  const prefix = homebrewPrefixOf(executable);
+  return prefix === null
+    ? [executable]
+    : [executable, ...["opt", "Cellar", "lib"].map((folder) => `${prefix}/${folder}`)];
+};
+
+/** What Homebrew's node reads at start and for TLS: OpenSSL's settings and CA bundle. */
+export const runtimeReads = (executable: string) => {
+  const prefix = homebrewPrefixOf(executable);
+  return prefix === null ? [] : [`${prefix}/etc/openssl@3`, `${prefix}/etc/ca-certificates`];
 };
 
 /**
@@ -200,7 +213,7 @@ export const runnerReach = (input: {
       sdkRootOf(path, input.sdk),
     ]);
     const home = yield* realPaths(fs, [input.home]);
-    const extra = yield* realPaths(fs, input.reads);
+    const extra = yield* realPaths(fs, [...runtimeReads(executable), ...input.reads]);
     const sealedHome = input.signs ? null : (home[0] ?? null);
     if (input.turn === null)
       return { code, reads: extra, writes: home, guarded: [], sealedHome, mcpPort: null };

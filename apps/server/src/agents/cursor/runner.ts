@@ -139,7 +139,8 @@ const toolEvent = (update: InteractionUpdate, cwd: string): Event | null => {
   if (update.type !== "tool-call-started") return null;
   const call = update.toolCall;
   const base = { type: "tool", callId: update.callId, path: null, pattern: null } as const;
-  if (call.type !== "mcp") return { ...base, tool: "other", name: call.type };
+  // A kind the SDK doesn't name yet arrives raw (`{ case, value }`), with no type.
+  if (call.type !== "mcp") return { ...base, tool: "other", name: String(call.type ?? "unknown") };
   const name = call.args.toolName ?? "";
   // A server Cursor doesn't have: the call fails without running anything.
   if (call.args.providerIdentifier !== CUSTOM_TOOLS_SERVER) return { ...base, tool: "mcp", name };

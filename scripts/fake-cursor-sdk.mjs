@@ -18,12 +18,18 @@
  *   shell-output   a turn reports a shell's output, as Cursor's own shell tool would
  *   partial-call   a turn reports a call to a custom tool while it is still being written,
  *                  before its server is named, as Cursor does
+ *   raw-call       a turn starts a tool of a kind the SDK doesn't name, which arrives raw
+ *                  (`{ case, value }`), then still tries submit_guide
  *   escape.json    what a turn tries first with Node's own calls, past prkit's tools: `reads`
  *                  and `writes` (paths), `renames` and `links` (hard, `[from, to]` pairs),
- *                  `children` (paths a child process reads), `sockets` (unix sockets) and
- *                  `ports` (local TCP ports); each outcome goes to escape.log
+ *                  `replaces` (`[target, path]`: removes path, then links it to target),
+ *                  `children` (paths a child process reads), `sockets` (unix sockets),
+ *                  `ports` (`[host, port]` TCP pairs) and `detached` (a count of processes
+ *                  started in a session of their own, whose pids go to detached.log); each
+ *                  outcome goes to escape.log
  *
- * In stand-in/: *   disposed.log   each agent disposed, written a moment after the dispose starts, as the
+ * In stand-in/:
+ *   disposed.log   each agent disposed, written a moment after the dispose starts, as the
  *                  SDK's own store writes land late
  *   probe.json     calls a turn makes first, `[{ "tool": "read_file", "args": {...} }]`
  *   runs.log       each turn appends what it was started with: tools, setting sources, sandbox,
@@ -241,6 +247,10 @@ class StandInAgent {
               resolve();
             });
             socket.once("error", reject);
+            socket.setTimeout(2000, () => {
+              socket.destroy();
+              reject(Object.assign(new Error("timed out"), { code: "timeout" }));
+            });
           });
         for (const path of steps.reads ?? [])
           await attempt("read", path, () => NodeFS.readFileSync(path));
@@ -250,6 +260,11 @@ class StandInAgent {
           await attempt("rename", `${from} -> ${to}`, () => NodeFS.renameSync(from, to));
         for (const [from, to] of steps.links ?? [])
           await attempt("link", `${from} -> ${to}`, () => NodeFS.linkSync(from, to));
+        for (const [target, path] of steps.replaces ?? [])
+          await attempt("replace", `${path} -> ${target}`, () => {
+            NodeFS.rmSync(path, { recursive: true, force: true });
+            NodeFS.symlinkSync(target, path);
+          });
         for (const path of steps.children ?? [])
           await attempt("child", path, () => {
             const child = NodeChildProcess.spawnSync("/bin/cat", [path], { encoding: "utf8" });
@@ -260,8 +275,20 @@ class StandInAgent {
           });
         for (const path of steps.sockets ?? [])
           await attempt("socket", path, () => connect({ path }));
-        for (const port of steps.ports ?? [])
-          await attempt("port", String(port), () => connect({ host: "127.0.0.1", port }));
+        for (const [host, port] of steps.ports ?? [])
+          await attempt("port", `${host} ${port}`, () => connect({ host, port }));
+        for (let i = 0; i < (steps.detached ?? 0); i++) {
+          const child = NodeChildProcess.spawn(
+            process.execPath,
+            ["-e", "setInterval(() => {}, 1000)"],
+            {
+              detached: true,
+              stdio: "ignore",
+            },
+          );
+          child.unref();
+          log("detached.log", { pid: child.pid });
+        }
       }
       const probe = controlFile("probe.json");
       if (probe !== null) for (const step of JSON.parse(probe)) await call(step.tool, step.args);
@@ -319,6 +346,16 @@ class StandInAgent {
           },
         });
         return { status: "finished" };
+      }
+      if (flagged("raw-call")) {
+        const callId = NodeCrypto.randomUUID();
+        const toolCall = { case: "futureTool", value: { args: {} } };
+        await onDelta({ update: { type: "tool-call-started", callId, toolCall } });
+        await call("submit_guide", {
+          summary: "After a tool of a kind the SDK doesn't name",
+          chapters: [],
+        });
+        return { status: state.cancelled ? "cancelled" : "finished" };
       }
       if (await flagged("builtin-read")) {
         const callId = NodeCrypto.randomUUID();

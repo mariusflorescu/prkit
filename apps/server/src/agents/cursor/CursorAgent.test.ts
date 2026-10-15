@@ -33,6 +33,7 @@ import {
 } from "../AgentProvider.ts";
 import { checkoutFor } from "../../repo/gitRun.ts";
 import * as CursorAgent from "./CursorAgent.ts";
+import { Event, eventMark, eventText, FORBIDDEN } from "./protocol.ts";
 import { SDK_PATH_VARIABLE } from "./sdkLoader.ts";
 import { ALLOWED_TOOLS, DENIED_TOOLS } from "./tools.ts";
 
@@ -171,24 +172,27 @@ const run = <A, E>(
     ),
   );
 
+const setupOf = (id: string, env: Record<string, string> = {}) => ({
+  id: AgentInstanceId.make(id),
+  label: id,
+  isDefault: id === "cursor",
+  configDir: null,
+  binaryPath: null,
+  environment: env,
+  login: "shared" as const,
+});
+
 /** An instance on the stand-in SDK, or on none when `installed` is false. */
 const instance = (
   id: string,
   options: { readonly installed?: boolean; readonly env?: Record<string, string> } = {},
 ) => {
   if (options.installed === false) delete process.env[SDK_PATH_VARIABLE];
-  else process.env[SDK_PATH_VARIABLE] = `${root}/sdk`;
-  return run(
-    CursorAgent.make({
-      id: AgentInstanceId.make(id),
-      label: id,
-      isDefault: id === "cursor",
-      configDir: null,
-      binaryPath: null,
-      environment: options.env ?? {},
-      login: "shared",
-    }),
-  );
+  else {
+    process.env.PRKIT_E2E = "1";
+    process.env[SDK_PATH_VARIABLE] = `${root}/sdk`;
+  }
+  return run(CursorAgent.make(setupOf(id, options.env)));
 };
 
 const flag = (name: string, on: boolean) =>
@@ -200,6 +204,8 @@ const flag = (name: string, on: boolean) =>
     }),
   );
 
+const decodeEvent = Schema.decodeUnknownSync(Schema.fromJsonString(Event));
+const Detached = Schema.fromJsonString(Schema.Struct({ pid: Schema.Number }));
 const Disposed = Schema.fromJsonString(Schema.Struct({ agentId: Schema.String }));
 const At = Schema.fromJsonString(Schema.Struct({ at: Schema.Number }));
 
@@ -260,9 +266,11 @@ const escapeTurn = async <A>(
     readonly writes?: ReadonlyArray<string>;
     readonly renames?: ReadonlyArray<readonly [string, string]>;
     readonly links?: ReadonlyArray<readonly [string, string]>;
+    readonly replaces?: ReadonlyArray<readonly [string, string]>;
     readonly children?: ReadonlyArray<string>;
     readonly sockets?: ReadonlyArray<string>;
-    readonly ports?: ReadonlyArray<number>;
+    readonly ports?: ReadonlyArray<readonly [string, number]>;
+    readonly detached?: number;
   },
   turn: () => Promise<A>,
 ) => {
@@ -373,6 +381,13 @@ describe("Cursor's status", () => {
       reason: "not-installed",
     });
     expect(await Effect.runPromise(provider.version)).toBeNull();
+  });
+
+  it("loads an SDK from PRKIT_CURSOR_SDK_PATH only in e2e", async () => {
+    await instance("cursor");
+    delete process.env.PRKIT_E2E;
+    const outside = await run(CursorAgent.make(setupOf("cursor")));
+    expect(await Effect.runPromise(outside.check)).toMatchObject({ reason: "not-installed" });
   });
 
   it("is signed out, then signed in for prkit through the browser, then turned down", async () => {
@@ -610,34 +625,33 @@ describe("Cursor turns", () => {
   });
 
   it("exits non-zero when Cursor ran one of its own tools", async () => {
-    const input = await turnInput("exit", { _tag: "read-only", tmpDir: `${root}/tmp-exit` });
     await flag("builtin-read", true);
-    const code = await new Promise<number | null>((resolve) => {
-      const child = NodeChildProcess.spawn(
-        process.execPath,
-        [new URL("./runner.ts", import.meta.url).pathname],
-        { cwd: input.cwd, env: { PATH: process.env.PATH, HOME: `${root}/exit-home` } },
-      );
-      child.on("exit", resolve);
-      child.stdin.end(
-        `${JSON.stringify({
-          op: "turn",
-          nonce: "n",
-          sdk: `${root}/sdk`,
-          apiKey: "stand-in-key",
-          cwd: input.cwd,
-          readableDirs: [],
-          message: input.prompt,
-          resumeSessionId: null,
-          model: null,
-          params: [],
-          fileTools: ["read_file"],
-          mcp: { url: mcpUrl, token: TOKEN, tools: [...GUIDE_TOOLS] },
-        })}\n`,
-      );
-    });
+    const { code } = await runRunner("exit");
     await flag("builtin-read", false);
     expect(code).toBe(1);
+  });
+
+  it("reports a tool of a kind the SDK doesn't name, and prkit refuses the turn", async () => {
+    await flag("raw-call", true);
+    const { code, stdout } = await runRunner("raw");
+    const provider = await instance("cursor_raw", { env: { CURSOR_API_KEY: "stand-in-key" } });
+    const exit = await Effect.runPromiseExit(
+      provider
+        .runTurn(await turnInput("raw-turn", { _tag: "read-only", tmpDir: `${root}/tmp-raw` }))
+        .pipe(Stream.runCollect, Effect.provideService(References.MinimumLogLevel, "Error")),
+    );
+    await flag("raw-call", false);
+    expect(code).toBe(1);
+    const mark = eventMark("n");
+    const tools = stdout
+      .split("\n")
+      .flatMap((line) => {
+        const text = eventText(line, mark);
+        return text === null ? [] : [decodeEvent(text)];
+      })
+      .filter((event) => event.type === "tool" && event.tool === "other");
+    expect(tools).toMatchObject([{ name: "unknown" }]);
+    expect(Exit.isFailure(exit) && JSON.stringify(exit.cause)).toContain(FORBIDDEN);
   });
 
   it("hears a turn end only once Cursor saved it, through the SDK's own stray output", async () => {
@@ -683,6 +697,37 @@ describe("Cursor turns", () => {
     expect(alive(pid)).toBe(false);
   });
 });
+
+/** Runs the runner itself on a guide turn in a checkout of `name`: its exit code and stdout. */
+const runRunner = async (name: string) => {
+  const input = await turnInput(name, { _tag: "read-only", tmpDir: `${root}/tmp-${name}` });
+  return new Promise<{ readonly code: number | null; readonly stdout: string }>((resolve) => {
+    const child = NodeChildProcess.spawn(
+      process.execPath,
+      [new URL("./runner.ts", import.meta.url).pathname],
+      { cwd: input.cwd, env: { PATH: process.env.PATH, HOME: `${root}/${name}-home` } },
+    );
+    let stdout = "";
+    child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+    child.on("close", (code) => resolve({ code, stdout }));
+    child.stdin.end(
+      `${JSON.stringify({
+        op: "turn",
+        nonce: "n",
+        sdk: `${root}/sdk`,
+        apiKey: "stand-in-key",
+        cwd: input.cwd,
+        readableDirs: [],
+        message: input.prompt,
+        resumeSessionId: null,
+        model: null,
+        params: [],
+        fileTools: ["read_file"],
+        mcp: { url: mcpUrl, token: TOKEN, tools: [...GUIDE_TOOLS] },
+      })}\n`,
+    );
+  });
+};
 
 describe("Cursor's sandbox", () => {
   it("keeps a guide's runner to reading its checkout, even through Node's own fs", async () => {
@@ -758,6 +803,7 @@ describe("Cursor's sandbox", () => {
         yield* fs.makeDirectory(tmpDir, { recursive: true });
         yield* fs.makeDirectory(`${own}/sdk`, { recursive: true });
         yield* fs.makeDirectory(`${own}/projects`, { recursive: true });
+        yield* fs.makeDirectory(`${root}/elsewhere`, { recursive: true });
       }),
     );
     try {
@@ -768,9 +814,21 @@ describe("Cursor's sandbox", () => {
             `${own.replace(/cursor$/, "CURSOR")}/sdk/auth.json`,
             `${own}/projects/transcript.txt`,
           ],
-          renames: [[`${own}/projects`, `${own}/sdk-moved`]],
+          renames: [
+            [`${own}/projects`, `${own}/sdk-moved`],
+            [`${own}/projects`, `${own}/projects-old`],
+          ],
+          // A link in its place would send the transcripts' writes anywhere.
+          replaces: [[`${root}/elsewhere`, `${own}/projects`]],
           sockets: [socket],
-          ports: [port],
+          ports: [
+            ["127.0.0.1", port],
+            // IPv4-mapped IPv6 reaches the same listener unless IPv6 stays closed.
+            ["::ffff:127.0.0.1", port],
+            ["::ffff:0.0.0.0", port],
+            // IPv6 outside this machine too (a documentation address, never routed).
+            ["2001:db8::1", 443],
+          ],
         },
         () => events(provider, input),
       );
@@ -779,13 +837,41 @@ describe("Cursor's sandbox", () => {
         `write ${own.replace(/cursor$/, "CURSOR")}/sdk/auth.json: EPERM`,
         `write ${own}/projects/transcript.txt: ok`,
         `rename ${own}/projects -> ${own}/sdk-moved: EPERM`,
+        `rename ${own}/projects -> ${own}/projects-old: EPERM`,
+        `replace ${own}/projects -> ${root}/elsewhere: EPERM`,
         `socket ${socket}: EPERM`,
-        `port ${port}: EPERM`,
+        `port 127.0.0.1 ${port}: EPERM`,
+        `port ::ffff:127.0.0.1 ${port}: EPERM`,
+        `port ::ffff:0.0.0.0 ${port}: EPERM`,
+        "port 2001:db8::1 443: EPERM",
       ]);
     } finally {
       unix.close();
       tcp.close();
     }
+  });
+
+  it("ends a process the turn started in a session of its own", async () => {
+    const provider = await instance("cursor_setsid", { env: { CURSOR_API_KEY: "stand-in-key" } });
+    const input = await turnInput("setsid", { _tag: "read-only", tmpDir: `${root}/tmp-setsid` });
+    await forget("detached.log");
+    await escapeTurn({ detached: 1 }, () => events(provider, input));
+    const pids = (await standIn("detached.log")).map(
+      (line) => Schema.decodeUnknownSync(Detached)(line).pid,
+    );
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const survivors = pids.filter(alive);
+    // The stand-in logged these pids itself: stop any that outlived the turn.
+    for (const pid of survivors) process.kill(pid, "SIGKILL");
+    expect(pids).toHaveLength(1);
+    expect(survivors).toEqual([]);
   });
 
   it("lets a fix's runner write its checkout, but never .git, .cursor or outside", async () => {

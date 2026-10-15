@@ -13,7 +13,10 @@ import { CURSOR_SDK_VERSION } from "./sdkPackages.ts";
  * Bundling it later instead would change only this module.
  */
 
-/** Dev and e2e: the SDK package folder to load instead (the dev dependency, or a stand-in). */
+/**
+ * e2e only (PRKIT_E2E=1): the SDK package folder to load instead (the dev dependency, or a
+ * stand-in). The runner's sandbox opens the whole `node_modules` above it.
+ */
 export const SDK_PATH_VARIABLE = "PRKIT_CURSOR_SDK_PATH";
 
 /** Where the installer puts this version's packages. */
@@ -27,7 +30,7 @@ export const sdkPackageDir = (
   env: Readonly<Record<string, string | undefined>>,
 ) => {
   const override = env[SDK_PATH_VARIABLE];
-  return override !== undefined && override !== ""
+  return env.PRKIT_E2E === "1" && override !== undefined && override !== ""
     ? path.resolve(override)
     : path.join(installRoot(path, home), "node_modules", "@cursor", "sdk");
 };
