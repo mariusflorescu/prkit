@@ -9,13 +9,13 @@ import {
   defaultInstanceConfig,
   environmentNameProblem,
   isDefaultInstance,
+  isReservedInstanceId,
 } from "@prkit/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -46,7 +46,7 @@ const isKind = Schema.is(AgentProviderKind);
 const Secrets = Schema.fromJsonString(
   Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String)),
 );
-const decodeSecrets = Schema.decodeUnknownOption(Secrets);
+const decodeSecrets = Schema.decodeUnknownEffect(Secrets);
 type SecretMap = Readonly<Record<string, Readonly<Record<string, string>>>>;
 const encodeSecrets = Schema.encodeSync(Secrets);
 
@@ -86,9 +86,24 @@ export const make = Effect.gen(function* () {
 
   const fail = (message: string) => () => Effect.fail(new AgentInstanceError({ message }));
 
+  /**
+   * The saved sensitive values. Only a missing file is empty: one that can't be read or decoded
+   * fails, so a save never rewrites it without the values it held.
+   */
   const readSecrets = fs.readFileString(secretsFile).pipe(
-    Effect.map((text) => Option.getOrElse(decodeSecrets(text), (): SecretMap => ({}))),
-    Effect.orElseSucceed((): SecretMap => ({})),
+    Effect.flatMap(decodeSecrets),
+    Effect.map((secrets): SecretMap => secrets),
+    Effect.catchTags({
+      PlatformError: (error) =>
+        error.reason._tag === "NotFound"
+          ? Effect.succeed<SecretMap>({})
+          : fail(
+              "prkit couldn't read agent-secrets.json in its folder, where it keeps sensitive values. Check that file's permissions, then try again.",
+            )(),
+      SchemaError: fail(
+        "agent-secrets.json in prkit's folder is damaged, so prkit left it as it is. Fix or remove that file, then try again.",
+      ),
+    }),
   );
   /** All but `id`'s secrets, plus `own` for it when there are any. */
   const withSecrets = (secrets: SecretMap, id: string, own: Readonly<Record<string, string>>) => {
@@ -182,18 +197,20 @@ export const make = Effect.gen(function* () {
       .withPermits(1)(
         Effect.gen(function* () {
           yield* checkConfig(config);
+          // Ids are unique whatever their case: `Claude_Work` would pass for `claude_work`.
           const existing = yield* sql<{
+            readonly id: string;
             readonly kind: string;
-          }>`SELECT kind FROM agent_instances WHERE id = ${config.id}`;
-          if (mode === "create" && (existing.length > 0 || isDefaultInstance(config.id)))
+          }>`SELECT id, kind FROM agent_instances WHERE lower(id) = lower(${config.id})`;
+          if (mode === "create" && (existing.length > 0 || isReservedInstanceId(config.id)))
             return yield* new AgentInstanceError({
               message: `An instance named '${config.id}' already exists.`,
             });
-          if (mode === "update" && existing.length === 0 && !isDefaultInstance(config.id))
+          const current = existing.find((row) => row.id === config.id);
+          if (mode === "update" && current === undefined && !isDefaultInstance(config.id))
             return yield* new AgentInstanceError({
               message: "That agent was removed. Check again.",
             });
-          const current = existing[0];
           if (current !== undefined && current.kind !== config.kind)
             return yield* new AgentInstanceError({
               message: "An instance can't change which agent it runs.",
@@ -263,8 +280,24 @@ export const make = Effect.gen(function* () {
         }),
       );
 
+  /** Whether a guide attempt or a fix turn is running on `id` now. */
+  const busy = (id: AgentInstanceId) =>
+    sql<{ readonly found: number }>`
+      SELECT 1 AS found FROM review_attempts WHERE instance_id = ${id} AND finished_at IS NULL
+      UNION ALL
+      SELECT 1 AS found FROM fixer_turns WHERE instance_id = ${id}
+        AND json_extract(status, '$._tag') IN ('preparing', 'running')
+      LIMIT 1`.pipe(
+      Effect.map((found) => found.length > 0),
+      Effect.catchTag(
+        "SqlError",
+        fail("prkit couldn't check whether that agent is busy. Try again."),
+      ),
+    );
+
   return {
     resolved,
+    busy,
     create: (config: AgentInstanceConfig) => save(config, "create"),
     update: (config: AgentInstanceConfig) => save(config, "update"),
     drop,

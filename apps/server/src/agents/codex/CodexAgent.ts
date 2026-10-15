@@ -7,6 +7,8 @@ import {
   type ModelOptionChoice,
   type ModelOptionDescriptor,
 } from "@prkit/contracts";
+import * as Context from "effect/Context";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -125,6 +127,18 @@ const toModel = (model: Protocol.CodexModel): AgentModel => {
   };
 };
 
+/** How long a short `codex` command (login status, logout) may take before prkit gives up on it. */
+export const CommandTimeout = Context.Reference<Duration.Input>(
+  "@prkit/server/agents/codex/CodexAgent/CommandTimeout",
+  { defaultValue: () => "15 seconds" },
+);
+/** `effect`, or `orElse` once it has taken longer than CommandTimeout. */
+const shortCommand = <A, E, R>(effect: Effect.Effect<A, E, R>, orElse: A) =>
+  Effect.gen(function* () {
+    const duration = yield* CommandTimeout;
+    return yield* Effect.timeoutOrElse(effect, { duration, orElse: () => Effect.succeed(orElse) });
+  });
+
 /**
  * One Codex instance. Codex gives every thread the AGENTS.md in its home, and no setting turns
  * that off, so each instance runs in a home of prkit's own, which shares the login file of the
@@ -158,23 +172,55 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
   );
   /** Whether a short `codex` command succeeded. Only the exit code is read: the output can name a key. */
   const succeeds = (codex: string, args: ReadonlyArray<string>, codexHome: string | undefined) =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const child = yield* spawner.spawn(
-          ChildProcess.make(codex, args, {
-            env: childEnv(process.env, { ...setup.environment, CODEX_HOME: codexHome }),
-            extendEnv: false,
-            stdin: "ignore",
-            stdout: "ignore",
-            stderr: "ignore",
-          }),
-        );
-        return (yield* child.exitCode) === 0;
-      }),
-    ).pipe(
-      Effect.timeoutOrElse({ duration: "15 seconds", orElse: () => Effect.succeed(false) }),
-      Effect.catchTag("PlatformError", () => Effect.succeed(false)),
-    );
+    shortCommand(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const child = yield* spawner.spawn(
+            ChildProcess.make(codex, args, {
+              env: childEnv(process.env, { ...setup.environment, CODEX_HOME: codexHome }),
+              extendEnv: false,
+              stdin: "ignore",
+              stdout: "ignore",
+              stderr: "ignore",
+            }),
+          );
+          return (yield* child.exitCode) === 0;
+        }),
+      ),
+      false,
+    ).pipe(Effect.catchTag("PlatformError", () => Effect.succeed(false)));
+  /**
+   * What `codex login status` says about `codexHome`. Only Codex's own "Not logged in" counts as
+   * signed out: a timeout, a failed start or any other answer is unknown. The output is read for
+   * that phrase alone and never logged.
+   */
+  const loginStatus = (codex: string, args: ReadonlyArray<string>, codexHome: string) =>
+    shortCommand(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const child = yield* spawner.spawn(
+            ChildProcess.make(codex, [...args, "login", "status"], {
+              env: childEnv(process.env, { ...setup.environment, CODEX_HOME: codexHome }),
+              extendEnv: false,
+              stdin: "ignore",
+            }),
+          );
+          const [output, errors, code] = yield* Effect.all(
+            [
+              child.stdout.pipe(Stream.decodeText(), Stream.mkString),
+              child.stderr.pipe(Stream.decodeText(), Stream.mkString),
+              child.exitCode,
+            ],
+            { concurrency: "unbounded" },
+          );
+          if (code === 0) return "signed-in" as const;
+          return /\bnot logged in\b/i.test(`${output}\n${errors}`)
+            ? ("signed-out" as const)
+            : ("unknown" as const);
+        }),
+      ),
+      "unknown" as const,
+    ).pipe(Effect.catchTag("PlatformError", () => Effect.succeed("unknown" as const)));
   const loginState = (
     response: typeof Protocol.AccountResponse.Type,
     login: CodexHomeLogin,
@@ -286,21 +332,32 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
   /**
    * Before the instance is removed: signs out the keychain login prkit may hold in its home,
    * pinned to the keychain so a shared login file is never touched, then deletes the home.
-   * A sign-out that fails keeps the home, so the login is never left with nothing to remove it.
+   * The home goes only once Codex itself says that login is signed out. Without Codex, or
+   * without that answer, the removal is refused and the home kept, so the login is never left
+   * with nothing to remove it.
    */
   const retire = preparing
     .withPermits(1)(
       Effect.gen(function* () {
         if (setup.isDefault) return;
-        const codex = yield* binary;
-        const holdsOwn = yield* fs.exists(path.join(home, "config.toml"));
-        if (holdsOwn && codex !== null) {
-          const pinned = ["-c", storeOverride({ _tag: "own" })];
-          yield* succeeds(codex, [...pinned, "logout"], home);
-          if (yield* succeeds(codex, [...pinned, "login", "status"], home))
+        // Only a home holding its own login has a config.toml; a shared one holds a link.
+        if (yield* fs.exists(path.join(home, "config.toml"))) {
+          const codex = yield* binary;
+          if (codex === null)
             return yield* new AgentError({
               reason: "auth",
-              message: `prkit couldn't sign out ${setup.label}'s login. Try again.`,
+              message: `prkit needs Codex to sign out ${setup.label}'s ChatGPT login before removing it, and can't find it. Install Codex or fix the binary path, then remove it again.`,
+            });
+          const pinned = ["-c", storeOverride({ _tag: "own" })];
+          yield* succeeds(codex, [...pinned, "logout"], home);
+          const status = yield* loginStatus(codex, pinned, home);
+          if (status !== "signed-out")
+            return yield* new AgentError({
+              reason: "auth",
+              message:
+                status === "signed-in"
+                  ? `prkit couldn't sign out ${setup.label}'s ChatGPT login, so it kept the agent. Try again.`
+                  : `prkit couldn't confirm ${setup.label}'s ChatGPT login is signed out, so it kept the agent. Try again.`,
             });
         }
         yield* fs.remove(home, { recursive: true, force: true });

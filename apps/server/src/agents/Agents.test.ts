@@ -15,6 +15,7 @@ import { runMigrations } from "../persistence/Migrations.ts";
 import * as NodeSqliteClient from "../persistence/NodeSqliteClient.ts";
 import * as AgentInstancesStore from "./AgentInstances.ts";
 import * as Agents from "./Agents.ts";
+import * as CodexAgent from "./codex/CodexAgent.ts";
 
 const id = AgentInstanceId.make;
 
@@ -40,9 +41,42 @@ const Config = Layer.effect(
   }),
 );
 
+/**
+ * Stand-ins for `claude` and `codex`, so no test reads a real login or runs a real agent. Each
+ * fails every command, except `codex login status`, which answers the way a signed-out Codex does.
+ */
+const FAKE_CLAUDE = "#!/bin/sh\nexit 1\n";
+const FAKE_CODEX = `#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = status ]; then echo "Not logged in" >&2; exit 1; fi
+done
+exit 1
+`;
+/** A Codex that never answers. */
+const HANGING_CODEX = "#!/bin/sh\nsleep 5\n";
+
+const FakeAgents = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const folder = yield* fs.makeTempDirectoryScoped({ prefix: "prkit-fake-agents-" });
+    for (const [name, script] of [
+      ["claude", FAKE_CLAUDE],
+      ["codex", FAKE_CODEX],
+      ["hanging-codex", HANGING_CODEX],
+    ] as const) {
+      yield* fs.writeFileString(`${folder}/${name}`, script);
+      yield* fs.chmod(`${folder}/${name}`, 0o755);
+    }
+    process.env.PRKIT_CLAUDE_PATH = `${folder}/claude`;
+    process.env.PRKIT_CODEX_PATH = `${folder}/codex`;
+    process.env.PRKIT_TEST_HANGING_CODEX = `${folder}/hanging-codex`;
+  }),
+);
+
 const Harness = Layer.effect(Agents.Agents, Agents.make).pipe(
   Layer.provideMerge(AgentInstancesStore.layer),
   Layer.provideMerge(Config),
+  Layer.provideMerge(FakeAgents),
   Layer.provideMerge(
     Layer.effectDiscard(runMigrations()).pipe(
       Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
@@ -53,8 +87,19 @@ const Harness = Layer.effect(Agents.Agents, Agents.make).pipe(
 
 const run = <A, E>(test: Effect.Effect<A, E, Layer.Success<typeof Harness>>) =>
   Effect.runPromise(
-    test.pipe(Effect.provide(Harness), Effect.provideService(References.MinimumLogLevel, "Error")),
+    test.pipe(
+      Effect.provide(Harness),
+      Effect.provideService(References.MinimumLogLevel, "Error"),
+      Effect.provideService(CodexAgent.CommandTimeout, "300 millis"),
+    ),
   );
+
+const side = (changes: Partial<AgentInstanceConfig> = {}): AgentInstanceConfig => ({
+  ...defaultInstanceConfig("codex"),
+  id: id("codex_side"),
+  label: "Side",
+  ...changes,
+});
 
 const work = (changes: Partial<AgentInstanceConfig> = {}): AgentInstanceConfig => ({
   ...defaultInstanceConfig("claude"),
@@ -140,11 +185,7 @@ describe("Agents", () => {
         const store = yield* AgentInstancesStore.AgentInstances;
         const fs = yield* FileSystem.FileSystem;
         const { home } = yield* ServerConfig.ServerConfig;
-        yield* store.create({
-          ...defaultInstanceConfig("codex"),
-          id: id("codex_side"),
-          label: "Side",
-        });
+        yield* store.create(side());
         const folder = `${home}/codex-instances/codex_side`;
         yield* fs.makeDirectory(folder, { recursive: true });
 
@@ -154,6 +195,67 @@ describe("Agents", () => {
 
         const refused = yield* agents.remove(id("codex")).pipe(Effect.flip);
         expect(refused.message).toContain("can't be removed");
+      }),
+    ));
+
+  it("deletes a home holding its own login only once Codex says it is signed out", () =>
+    run(
+      Effect.gen(function* () {
+        const agents = yield* Agents.Agents;
+        const store = yield* AgentInstancesStore.AgentInstances;
+        const fs = yield* FileSystem.FileSystem;
+        const { home } = yield* ServerConfig.ServerConfig;
+        const folder = `${home}/codex-instances/codex_side`;
+        const holdOwnLogin = Effect.gen(function* () {
+          yield* fs.makeDirectory(folder, { recursive: true });
+          yield* fs.writeFileString(`${folder}/config.toml`, "");
+        });
+
+        // No Codex to sign out with: refused, home kept.
+        yield* store.create(side({ login: "prkit", binaryPath: "/nonexistent/codex" }));
+        yield* holdOwnLogin;
+        const noBinary = yield* agents.remove(id("codex_side")).pipe(Effect.flip);
+        expect(noBinary.message).toContain("can't find it");
+        expect(yield* fs.exists(`${folder}/config.toml`)).toBe(true);
+
+        // A Codex that never answers: the sign-out isn't confirmed, so the home stays.
+        yield* store.update(
+          side({ login: "prkit", binaryPath: process.env.PRKIT_TEST_HANGING_CODEX ?? null }),
+        );
+        const timedOut = yield* agents.remove(id("codex_side")).pipe(Effect.flip);
+        expect(timedOut.message).toContain("couldn't confirm");
+        expect(yield* fs.exists(`${folder}/config.toml`)).toBe(true);
+        expect(yield* agents.get(id("codex_side"))).not.toBeNull();
+
+        // Codex says "Not logged in": the home and the instance go.
+        yield* store.update(side({ login: "prkit" }));
+        yield* agents.remove(id("codex_side"));
+        expect(yield* fs.exists(folder)).toBe(false);
+        expect(yield* agents.get(id("codex_side"))).toBeNull();
+      }),
+    ));
+
+  it("refuses to remove an instance a guide or fix is running on", () =>
+    run(
+      Effect.gen(function* () {
+        const agents = yield* Agents.Agents;
+        const store = yield* AgentInstancesStore.AgentInstances;
+        const sql = yield* SqlClient.SqlClient;
+        yield* store.create(work());
+        yield* sql`INSERT INTO reviews (id, pr_key, account_id, provider, instance_id, status,
+          created_at, updated_at) VALUES ('r1', 'github.com/acme/widgets#1', 'github.com/octocat',
+          'claude', 'claude_work', '{}', 'now', 'now')`;
+        yield* sql`INSERT INTO review_attempts (id, review_id, revision, trigger, run_id, phase,
+          started_at, instance_id) VALUES ('a1', 'r1', 1, 'manual', 'run', 'writing', 'now',
+          'claude_work')`;
+
+        const refused = yield* agents.remove(id("claude_work")).pipe(Effect.flip);
+        expect(refused.message).toBe("Work is busy with a guide or fix. Try again when it's done.");
+        expect(yield* agents.get(id("claude_work"))).not.toBeNull();
+
+        yield* sql`UPDATE review_attempts SET finished_at = 'now' WHERE id = 'a1'`;
+        yield* agents.remove(id("claude_work"));
+        expect(yield* agents.get(id("claude_work"))).toBeNull();
       }),
     ));
 });
@@ -224,6 +326,57 @@ describe("AgentInstances secrets", () => {
 
         yield* store.drop(id("claude_work"));
         expect(yield* Schema.decodeEffect(Secrets)(yield* fs.readFileString(file))).toEqual({});
+      }),
+    ));
+
+  it("fails a save on a secrets file it can't read, and leaves the file as it was", () =>
+    run(
+      Effect.gen(function* () {
+        const store = yield* AgentInstancesStore.AgentInstances;
+        const fs = yield* FileSystem.FileSystem;
+        const { home } = yield* ServerConfig.ServerConfig;
+        const file = `${home}/agent-secrets.json`;
+        const secret = { name: "MY_TOKEN", value: "s3cret", sensitive: true, valueRedacted: false };
+
+        yield* fs.writeFileString(file, "{ not json");
+        const damaged = yield* store.create(work({ environment: [secret] })).pipe(Effect.flip);
+        expect(damaged._tag).toBe("AgentInstanceError");
+        expect(damaged.message).toContain("damaged");
+        expect(yield* fs.readFileString(file)).toBe("{ not json");
+
+        yield* fs.remove(file);
+        yield* fs.makeDirectory(file);
+        const unreadable = yield* store.create(work({ environment: [secret] })).pipe(Effect.flip);
+        expect(unreadable.message).toContain("couldn't read agent-secrets.json");
+        expect((yield* fs.stat(file)).type).toBe("Directory");
+
+        // Only a missing file counts as empty.
+        yield* fs.remove(file, { recursive: true });
+        yield* store.create(work({ environment: [secret] }));
+        expect(yield* Schema.decodeEffect(Secrets)(yield* fs.readFileString(file))).toEqual({
+          claude_work: { MY_TOKEN: "s3cret" },
+        });
+      }),
+    ));
+
+  it("keeps ids unique whatever their case, defaults included", () =>
+    run(
+      Effect.gen(function* () {
+        const store = yield* AgentInstancesStore.AgentInstances;
+        yield* store.create(work());
+        for (const taken of ["Claude_Work", "CLAUDE_WORK", "Claude", "CODEX"]) {
+          const refused = yield* store
+            .create(work({ id: id(taken), kind: taken === "CODEX" ? "codex" : "claude" }))
+            .pipe(Effect.flip);
+          expect(refused.message, taken).toBe(`An instance named '${taken}' already exists.`);
+        }
+        const gone = yield* store.update(work({ id: id("Claude_Work") })).pipe(Effect.flip);
+        expect(gone.message).toBe("That agent was removed. Check again.");
+        expect((yield* store.resolved).map((entry) => entry.config.id)).toEqual([
+          "claude",
+          "codex",
+          "claude_work",
+        ]);
       }),
     ));
 

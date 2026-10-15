@@ -318,6 +318,10 @@ export const make = Effect.gen(function* () {
           message: "A default agent can't be removed. Reset it or turn it off instead.",
         });
       const found = (yield* instances).find((entry) => entry.config.id === id);
+      if (yield* store.busy(id))
+        return yield* new AgentInstanceError({
+          message: `${found?.config.label ?? id} is busy with a guide or fix. Try again when it's done.`,
+        });
       if (found !== undefined)
         yield* found.provider.retire.pipe(
           Effect.mapError((error) => new AgentInstanceError({ message: error.message })),
