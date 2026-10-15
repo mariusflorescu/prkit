@@ -99,6 +99,7 @@ import {
   type PromptInput,
 } from "./prompt.ts";
 import { reviewTarget } from "./reviewTarget.ts";
+import { StartedBy } from "../outside/StartedBy.ts";
 
 export const SubmitGuideReceipt = Schema.Struct({
   message: Schema.String,
@@ -173,6 +174,7 @@ export const AttemptRow = Schema.Struct({
   started_at: Schema.String,
   finished_at: Schema.NullOr(Schema.String),
   narration: Schema.NullOr(Schema.String),
+  started_by: Schema.NullOr(Schema.String),
   draft_outline: Schema.NullOr(Schema.fromJsonString(OutlineChapters)),
   draft_version: Schema.Int,
 });
@@ -338,7 +340,7 @@ const storedAgentOf = (review: Review): StoredAgent => ({
   options: review.modelOptions,
 });
 /** Who started a review: the user, or auto mode for a review request. */
-type Origin = "user" | "auto";
+type Origin = "user" | "auto" | "outside";
 
 /** One line, trimmed and cut to `max` characters, for what the agent reports. */
 const clip = (text: string, max: number) => {
@@ -525,7 +527,7 @@ export const make = Effect.gen(function* () {
       if (review === null) return { key, review: null, attempt: null, revisions: [] };
       const attempts = yield* sql`
         SELECT id, revision, trigger, phase, head_sha, commits, started_at, finished_at, narration,
-          draft_outline, draft_version FROM review_attempts
+          started_by, draft_outline, draft_version FROM review_attempts
         WHERE review_id = ${review.id} ORDER BY rowid DESC LIMIT 1`.pipe(
         Effect.flatMap(decodeAttempts),
       );
@@ -561,6 +563,7 @@ export const make = Effect.gen(function* () {
                 startedAt: attempt.started_at,
                 finishedAt: attempt.finished_at,
                 narration: attempt.narration,
+                startedBy: attempt.started_by,
                 files: files.map((file): AttemptFile => ({
                   path: file.path,
                   previousPath: file.previous_path,
@@ -718,11 +721,24 @@ export const make = Effect.gen(function* () {
     readonly at: string;
     /** The stack batch the attempt was started in, announced with the others. */
     readonly batch: string | null;
-  }) => sql`
-    INSERT INTO review_attempts (id, review_id, revision, trigger, run_id, phase, started_at, provider,
-      instance_id, model, batch_id)
-    VALUES (${input.id}, ${input.reviewId}, ${input.revision}, ${input.trigger}, ${runId}, 'preparing-code',
-      ${input.at}, ${input.agent.provider}, ${input.agent.instance}, ${input.agent.model}, ${input.batch})`;
+  }) =>
+    Effect.gen(function* () {
+      const startedBy = yield* StartedBy;
+      yield* sql`
+        INSERT INTO review_attempts (id, review_id, revision, trigger, run_id, phase, started_at, provider,
+          instance_id, model, batch_id, started_by)
+        VALUES (${input.id}, ${input.reviewId}, ${input.revision}, ${input.trigger}, ${runId}, 'preparing-code',
+          ${input.at}, ${input.agent.provider}, ${input.agent.instance}, ${input.agent.model}, ${input.batch},
+          ${startedBy})`;
+    });
+
+  /** Says in the attempt's activity which outside agent started it, if one did. */
+  const noteStartedBy = (key: PullRequestKey, reviewId: ReviewId, attemptId: AttemptId) =>
+    Effect.gen(function* () {
+      const startedBy = yield* StartedBy;
+      if (startedBy !== null)
+        yield* appendActivity(key, reviewId, attemptId, "note", `Started from ${startedBy}`);
+    });
 
   const batchOf = (attemptId: AttemptId) =>
     sql`SELECT batch_id FROM review_attempts WHERE id = ${attemptId}`.pipe(
@@ -1507,6 +1523,7 @@ export const make = Effect.gen(function* () {
         }),
       );
       if (revision === null) return false;
+      yield* noteStartedBy(review.key, review.id, attemptId);
       yield* launch(
         {
           ...review,
@@ -1571,6 +1588,7 @@ export const make = Effect.gen(function* () {
             model: agent.model ?? "default",
           }),
         );
+        yield* noteStartedBy(key, id, attemptId);
         yield* launch(review, attemptId, 1, "first");
         yield* publish(key);
       }
@@ -1640,7 +1658,12 @@ export const make = Effect.gen(function* () {
           expectedVersion: input.guidance.expectedVersion,
           edit: { _tag: "guidance", text: input.guidance.text, mode: input.guidance.mode },
         });
-      const { review, created } = yield* ensureReview(key, accountId, agent, "user");
+      const { review, created } = yield* ensureReview(
+        key,
+        accountId,
+        agent,
+        (yield* StartedBy) === null ? "user" : "outside",
+      );
       if (!created) {
         const outcome = decide("generate", review.status);
         if (outcome._tag === "start")

@@ -67,7 +67,8 @@ describe("016_AgentInstances", () => {
         const sql = yield* SqlClient.SqlClient;
         yield* migrateThrough(15);
         yield* seed;
-        yield* migrateThrough(16);
+        // Then every later migration too, the way prkit opens the database.
+        yield* migrateThrough(Number.POSITIVE_INFINITY);
 
         // Each table read the way prkit reads it, so a row it can't decode fails here.
         const pairs = (rows: ReadonlyArray<{ provider: string; instance_id: string }>) =>
@@ -91,7 +92,7 @@ describe("016_AgentInstances", () => {
         expect(pairs(turns)).toEqual(both);
         // Attempts as the review summary reads them, then the backfilled pair beside them.
         yield* sql`SELECT id, revision, trigger, phase, head_sha, commits, started_at, finished_at,
-          narration, draft_outline, draft_version FROM review_attempts`.pipe(
+          narration, draft_outline, draft_version, started_by FROM review_attempts`.pipe(
           Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(AttemptRow))),
         );
         const attempts =

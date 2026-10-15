@@ -144,6 +144,8 @@ export const AttemptSummary = Schema.Struct({
   /** The diff's files in order, empty until the head is fetched. */
   files: Schema.Array(AttemptFile),
   draft: Schema.NullOr(DraftOutline),
+  /** The outside agent that started it, by the name it gave; null when started in prkit. */
+  startedBy: Schema.NullOr(Schema.String),
 });
 export type AttemptSummary = typeof AttemptSummary.Type;
 

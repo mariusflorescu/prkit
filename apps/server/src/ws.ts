@@ -26,6 +26,7 @@ import { ReviewComments } from "./reviewComments/ReviewComments.ts";
 import { Fixers } from "./fixers/Fixers.ts";
 import { FixerSettingsStore } from "./fixers/FixerSettingsStore.ts";
 import { boundPort } from "./listenAddress.ts";
+import { OutsideAgents } from "./outside/OutsideAgents.ts";
 
 export type UpgradeDecision =
   | { readonly _tag: "Allow" }
@@ -72,6 +73,7 @@ const layerHandlers = WsRpcGroup.toLayer(
     const fixerSettings = yield* FixerSettingsStore;
     const appearance = yield* AppearanceStore;
     const guideConfig = yield* GuideConfigStore;
+    const outsideAgents = yield* OutsideAgents;
     return WsRpcGroup.of({
       [WS_METHODS.accountsList]: () => accounts.list(),
       [WS_METHODS.accountsRefresh]: () => accounts.refresh(),
@@ -103,6 +105,7 @@ const layerHandlers = WsRpcGroup.toLayer(
       [WS_METHODS.workspaceActivate]: ({ key }) => workspace.command({ kind: "activate", key }),
       [WS_METHODS.workspaceReorder]: ({ keys }) => workspace.command({ kind: "reorder", keys }),
       [WS_METHODS.workspaceSaveInboxFilters]: (filters) => workspace.saveInboxFilters(filters),
+      [WS_METHODS.workspaceChanges]: () => workspace.changes(),
       // Reviews, guides and agents.
       [WS_METHODS.reviewsGet]: ({ key }) => reviews.get(key),
       [WS_METHODS.reviewsGenerate]: ({ key, accountId, agent, guidance }) =>
@@ -194,6 +197,9 @@ const layerHandlers = WsRpcGroup.toLayer(
       [WS_METHODS.fixersPushAccess]: ({ key, accountId }) => fixers.pushAccess(key, accountId),
       [WS_METHODS.fixerSettingsList]: () => fixerSettings.list(),
       [WS_METHODS.fixerSettingsUpdate]: (patch) => fixerSettings.update(patch),
+      [WS_METHODS.outsideAgentsGet]: () => outsideAgents.get(),
+      [WS_METHODS.outsideAgentsUpdate]: (settings) => outsideAgents.update(settings),
+      [WS_METHODS.outsideAgentsReset]: () => outsideAgents.reset(),
       [WS_METHODS.appInfo]: () =>
         Effect.succeed({
           version: config.version,

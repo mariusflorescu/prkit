@@ -37,6 +37,12 @@ export const Workspace = Schema.Struct({
   inboxFilters: SavedInboxFilters,
 });
 export type Workspace = typeof Workspace.Type;
+/** A change to the open PRs made elsewhere; `focus` asks the window to show that PR and come forward. */
+export const WorkspaceChange = Schema.Struct({
+  workspace: Workspace,
+  focus: Schema.NullOr(Schema.Struct({ key: PullRequestKey, accountId: AccountId })),
+});
+export type WorkspaceChange = typeof WorkspaceChange.Type;
 export const WorkspaceCommand = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("open"), key: PullRequestKey, accountId: AccountId }),
   Schema.Struct({ kind: Schema.Literal("close"), key: PullRequestKey }),

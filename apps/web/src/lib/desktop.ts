@@ -37,6 +37,8 @@ export interface PrkitDesktopBridge {
   readonly onOpenGuide: (callback: (target: GuideTarget) => void) => () => void;
   /** Tells the shell the chosen theme, so the title bar, menus and Dock icon follow it. */
   readonly setTheme: (theme: ThemePreference) => void;
+  /** Brings this window to the front, for a PR an outside agent opened with focus. */
+  readonly bringForward: () => void;
   readonly updates: DesktopUpdatesBridge;
 }
 

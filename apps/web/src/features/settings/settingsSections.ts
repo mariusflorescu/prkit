@@ -6,6 +6,7 @@ import {
   InfoIcon,
   KeyboardIcon,
   PaletteIcon,
+  PlugIcon,
 } from "lucide-react";
 
 import { updatesBridge } from "~/lib/desktop";
@@ -15,6 +16,12 @@ export const SETTINGS_SECTIONS = [
   { id: "accounts", to: "/settings/accounts", label: "Accounts", icon: CircleUserRoundIcon },
   { id: "agents", to: "/settings/agents", label: "Agents", icon: BotIcon },
   { id: "guides", to: "/settings/guides", label: "Guides", icon: BookOpenTextIcon },
+  {
+    id: "outside-agents",
+    to: "/settings/outside-agents",
+    label: "Outside agents",
+    icon: PlugIcon,
+  },
   { id: "appearance", to: "/settings/appearance", label: "Appearance", icon: PaletteIcon },
   { id: "shortcuts", to: "/settings/shortcuts", label: "Keyboard shortcuts", icon: KeyboardIcon },
   { id: "updates", to: "/settings/updates", label: "Updates", icon: ArrowDownToLineIcon },

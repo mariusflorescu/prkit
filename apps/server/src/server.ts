@@ -21,6 +21,9 @@ import * as Agents from "./agents/Agents.ts";
 import * as CursorSdk from "./agents/cursor/CursorSdk.ts";
 import * as McpHttp from "./mcp/McpHttp.ts";
 import * as McpTokens from "./mcp/McpTokens.ts";
+import * as OutsideMcp from "./mcp/outside/OutsideMcp.ts";
+import * as OutsideAgents from "./outside/OutsideAgents.ts";
+import * as OutsideWork from "./outside/OutsideWork.ts";
 import * as RepoCache from "./repo/RepoCache.ts";
 import * as AutoGuides from "./reviews/AutoGuides.ts";
 import * as GuideConfigStore from "./reviews/GuideConfigStore.ts";
@@ -61,6 +64,19 @@ const layerReadyLine = Layer.effectDiscard(
   }),
 );
 
+/**
+ * Outside agents' launcher and discovery file, once the server listens; the file goes when
+ * it stops (docs/features/outside-agents.md).
+ */
+const layerOutsideDiscovery = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const server = yield* HttpServer.HttpServer;
+    const outside = yield* OutsideAgents.OutsideAgents;
+    const port = boundPort(server.address);
+    if (Option.isSome(port)) yield* outside.start(port.value);
+  }),
+);
+
 const layerHttpServer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
@@ -76,6 +92,7 @@ const layerRoutes = Layer.mergeAll(
   ServerHttp.layerAppearanceRoute,
   Ws.layer,
   McpHttp.layer,
+  OutsideMcp.layer,
   ServerHttp.layerStaticRoute,
 );
 
@@ -112,12 +129,15 @@ const layerFixers = FixerWatcher.layer.pipe(
   Layer.provideMerge(layerReviews),
 );
 
-const layerServer = layerReadyLine.pipe(
+const layerServer = Layer.mergeAll(layerReadyLine, layerOutsideDiscovery).pipe(
   Layer.provideMerge(
     HttpRouter.serve(layerRoutes, { disableListenLog: true, disableLogger: true }),
   ),
-  Layer.provide(Layer.mergeAll(ReviewComments.layer, AppearanceStore.layer)),
-  Layer.provide(layerFixers),
+  // What outside agents can do: the same services the app's buttons call.
+  Layer.provideMerge(OutsideWork.layer),
+  Layer.provideMerge(OutsideAgents.layer),
+  Layer.provideMerge(Layer.mergeAll(ReviewComments.layer, AppearanceStore.layer)),
+  Layer.provideMerge(layerFixers),
   Layer.provide(SqlitePersistence.layer),
   Layer.provideMerge(layerHttpServer),
 );

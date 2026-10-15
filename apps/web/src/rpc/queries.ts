@@ -15,6 +15,7 @@ import {
 import {
   getAgentCatalog,
   getAppearance,
+  getOutsideAgents,
   getGitHubBudget,
   getAttemptDiff,
   getDraft,
@@ -158,6 +159,14 @@ export const guideSettingsQuery = queryOptions({
   queryKey: ["guideSettings"],
   queryFn: getGuideSettings,
   staleTime: Infinity,
+  retry: false,
+});
+/** Outside agents' switch and level, and the clients seen; the list moves as clients call. */
+export const outsideAgentsQuery = queryOptions({
+  queryKey: ["outsideAgents"],
+  queryFn: getOutsideAgents,
+  staleTime: 0,
+  refetchInterval: 15_000,
   retry: false,
 });
 export const appearanceQuery = queryOptions({

@@ -148,9 +148,11 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
       fixer: FixerRow,
       row: TurnRow,
       status: Extract<FixerTurnStatus, { _tag: "discarded" }>,
+      from: ReadonlyArray<FixerTurnState> = DROPPABLE,
+      freshOnly = false,
     ) =>
       Effect.gen(function* () {
-        if (!(yield* transition(row.id, DROPPABLE, status))) return false;
+        if (!(yield* transition(row.id, from, status, freshOnly))) return false;
         yield* stopFiber(row.id);
         const ref = refFromKey(fixer.pr_key);
         if (ref !== null && row.head_sha !== null)

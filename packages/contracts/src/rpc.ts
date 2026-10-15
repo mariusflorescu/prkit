@@ -71,7 +71,14 @@ import {
 } from "./reviewComments.ts";
 import { AppearanceSettings, AppearanceSettingsError, ThemePreference } from "./appearance.ts";
 import { PullRequestStack, StackGuidesResult } from "./stack.ts";
-import { InboxFilters, SavedInboxFilters, Workspace, WorkspaceError } from "./workspace.ts";
+import {
+  InboxFilters,
+  SavedInboxFilters,
+  Workspace,
+  WorkspaceChange,
+  WorkspaceError,
+} from "./workspace.ts";
+import { OutsideAccess, OutsideAgentsError, OutsideAgentsState } from "./outsideAgents.ts";
 import {
   PullRequestActionError,
   PullRequestActionResult,
@@ -118,6 +125,7 @@ export const WS_METHODS = {
   workspaceActivate: "workspace.activate",
   workspaceReorder: "workspace.reorder",
   workspaceSaveInboxFilters: "workspace.saveInboxFilters",
+  workspaceChanges: "workspace.changes",
   reviewsGet: "reviews.get",
   reviewsGenerate: "reviews.generate",
   reviewsGenerateStack: "reviews.generateStack",
@@ -172,6 +180,9 @@ export const WS_METHODS = {
   fixersScriptAccess: "fixers.scriptAccess",
   fixerSettingsList: "fixerSettings.list",
   fixerSettingsUpdate: "fixerSettings.update",
+  outsideAgentsGet: "outsideAgents.get",
+  outsideAgentsUpdate: "outsideAgents.update",
+  outsideAgentsReset: "outsideAgents.reset",
 } as const;
 
 export const AppInfo = Schema.Struct({
@@ -325,6 +336,12 @@ export const WsRpcGroup = RpcGroup.make(
     payload: InboxFilters,
     success: SavedInboxFilters,
     error: WorkspaceError,
+  }),
+  // Open PRs changed by something other than this window, such as an outside agent.
+  Rpc.make(WS_METHODS.workspaceChanges, {
+    payload: Schema.Struct({}),
+    success: WorkspaceChange,
+    stream: true,
   }),
   // Reviews, guides and agents (docs/internals/architecture.md "The review lifecycle").
   Rpc.make(WS_METHODS.reviewsGet, {
@@ -676,5 +693,22 @@ export const WsRpcGroup = RpcGroup.make(
     }),
     success: RepositoryFixerSettings,
     error: FixerError,
+  }),
+  // Outside agents (docs/features/outside-agents.md).
+  Rpc.make(WS_METHODS.outsideAgentsGet, {
+    payload: Schema.Struct({}),
+    success: OutsideAgentsState,
+    error: OutsideAgentsError,
+  }),
+  Rpc.make(WS_METHODS.outsideAgentsUpdate, {
+    payload: Schema.Struct({ enabled: Schema.Boolean, access: OutsideAccess }),
+    success: OutsideAgentsState,
+    error: OutsideAgentsError,
+  }),
+  // A new token; every connected client is dropped and must read the new one.
+  Rpc.make(WS_METHODS.outsideAgentsReset, {
+    payload: Schema.Struct({}),
+    success: OutsideAgentsState,
+    error: OutsideAgentsError,
   }),
 );

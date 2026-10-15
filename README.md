@@ -15,6 +15,15 @@ vp run dev            # server + web; open the URL it prints
 vp run dev:desktop    # Electron window, which runs its own server
 ```
 
+Your own coding agent can use prkit too: turn on Settings > Outside agents, then add it to your client once.
+
+```sh
+claude mcp add --scope user prkit -- ~/.prkit/bin/prkit-mcp
+codex mcp add prkit -- ~/.prkit/bin/prkit-mcp
+```
+
+It can read your inbox, open PRs, start guides and send comments to the fix agent. Pushing, merging and posting to GitHub stay a click in prkit. More in [docs/features/outside-agents.md](docs/features/outside-agents.md).
+
 How it fits together: [docs/internals/architecture.md](docs/internals/architecture.md).
 
 The website lives in [apps/www](apps/www): `vp run dev:www` serves it, `vp run build:www` builds it.

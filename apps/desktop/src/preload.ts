@@ -23,6 +23,9 @@ contextBridge.exposeInMainWorld("prkitDesktop", {
   setTheme: (theme: ThemePreference) => {
     ipcRenderer.send("prkit:set-theme", theme);
   },
+  bringForward: () => {
+    ipcRenderer.send("prkit:bring-forward");
+  },
   onOpenGuide: (callback: (target: GuideTarget) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, target: GuideTarget) => callback(target);
     ipcRenderer.on("prkit:open-guide", listener);

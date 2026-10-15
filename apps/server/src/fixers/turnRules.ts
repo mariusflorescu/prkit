@@ -81,3 +81,16 @@ export const decideTurn = (command: TurnCommand, turn: FixerTurn): TurnOutcome =
     return reject("The revert changed nothing.");
   return TABLE[command][turn.status._tag];
 };
+
+/**
+ * Who a turn counts as started by. A retry or a redo runs the same request again, so it keeps
+ * the client that first asked, even when the owner clicks Retry; anything else is the caller's.
+ */
+export const startedByFor = (original: string | null, caller: string | null) => original ?? caller;
+
+/**
+ * Whether a ready turn pushes by itself: only where the repository allows it, and never for
+ * work an outside agent asked for (docs/features/outside-agents.md). Push stays the owner's click.
+ */
+export const pushesItself = (repositoryPushes: boolean, startedBy: string | null) =>
+  repositoryPushes && startedBy === null;

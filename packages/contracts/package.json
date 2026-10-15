@@ -11,6 +11,10 @@
     "./desktopUpdateIpc": {
       "types": "./src/desktopUpdateIpc.ts",
       "import": "./src/desktopUpdateIpc.ts"
+    },
+    "./outsideAgents": {
+      "types": "./src/outsideAgents.ts",
+      "import": "./src/outsideAgents.ts"
     }
   },
   "scripts": {
