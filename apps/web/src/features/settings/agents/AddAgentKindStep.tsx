@@ -12,7 +12,10 @@ interface Choice {
   readonly description: string;
 }
 
-/** What each kind offers to add. Codex can also hold a ChatGPT login of its own in prkit. */
+/**
+ * What each kind offers to add. Codex can also hold a ChatGPT login of its own in prkit; Cursor
+ * always holds its own.
+ */
 const CHOICES_BY_KIND: Record<AgentProviderKind, ReadonlyArray<Choice>> = {
   claude: [
     {
@@ -34,6 +37,15 @@ const CHOICES_BY_KIND: Record<AgentProviderKind, ReadonlyArray<Choice>> = {
       setup: "chatgpt",
       title: "Sign in with ChatGPT",
       description: "Another ChatGPT account. prkit keeps its sign-in for this agent alone.",
+    },
+  ],
+  cursor: [
+    {
+      kind: "cursor",
+      setup: "cursor",
+      title: AGENT_KIND_NAMES.cursor.name,
+      description:
+        "Another Cursor account, signed in for prkit alone. Writes guides, and fixes that only edit files.",
     },
   ],
 };

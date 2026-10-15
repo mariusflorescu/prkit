@@ -4,9 +4,26 @@ import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "~/components/ui/skeleton";
 import { scriptAccessQuery } from "~/rpc/queries";
 
-/** One quiet line: whether the fix agent runs this repository's check scripts on this PR, and why. */
-export function ScriptAccessNotice({ detail }: { detail: PullRequestDetail }) {
+import { CURSOR_SCRIPTS_REASON } from "./cursorFixes";
+
+/**
+ * One quiet line: whether the fix agent runs this repository's check scripts on this PR, and why.
+ * A Cursor agent never does, whoever opened the PR.
+ */
+export function ScriptAccessNotice({
+  detail,
+  cursor,
+}: {
+  detail: PullRequestDetail;
+  cursor: boolean;
+}) {
   const access = useQuery(scriptAccessQuery(detail.key, detail.accountId));
+  if (cursor)
+    return (
+      <p role="status" aria-label="Check scripts" className="text-xs text-muted-foreground">
+        {CURSOR_SCRIPTS_REASON}
+      </p>
+    );
   if (access.isPending)
     return (
       <Skeleton

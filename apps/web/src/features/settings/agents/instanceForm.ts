@@ -32,8 +32,8 @@ export const configFrom = (
   ...config,
   label: values.label.trim(),
   accent: values.accent,
-  binaryPath: blank(values.binaryPath),
-  configDir: config.login === "prkit" ? null : blank(values.configDir),
+  configDir: config.login === "prkit" || config.kind === "cursor" ? null : blank(values.configDir),
+  binaryPath: config.kind === "cursor" ? null : blank(values.binaryPath),
   environment: values.environment.map((variable) => ({
     name: variable.name.trim(),
     value: variable.value,
@@ -47,9 +47,12 @@ export const configFrom = (
 export const pathProblem = (value: string) =>
   value.trim() === "" ? true : (agentPathProblem(value.trim()) ?? true);
 
-/** Each kind's binary and folder fields: what they're called and why they matter. */
+/**
+ * Each kind's binary and folder fields: what they're called and why they matter. Cursor has
+ * neither: prkit runs it through its SDK, in a folder of its own.
+ */
 export const KIND_FIELDS: Record<
-  AgentProviderKind,
+  Exclude<AgentProviderKind, "cursor">,
   {
     readonly binary: string;
     readonly folder: {

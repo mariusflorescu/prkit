@@ -11,8 +11,11 @@ import { pathProblem } from "./instanceForm";
 
 export interface AddAgentValues {
   kind: AgentProviderKind;
-  /** Codex only: run on a Codex home's login, or a ChatGPT login prkit holds for this agent. */
-  setup: "manual" | "chatgpt";
+  /**
+   * Codex: run on a Codex home's login, or a ChatGPT login prkit holds for this agent. Cursor:
+   * always a sign-in prkit holds, or the instance's own CURSOR_API_KEY.
+   */
+  setup: "manual" | "chatgpt" | "cursor";
   label: string;
   /** Null follows the label; a typed id stays. */
   instanceId: string | null;
@@ -36,6 +39,8 @@ export const defaultsFor = (
 
 export const STEPS = ["Agent", "Name", "Setup"] as const;
 export const CHATGPT_STEPS = ["Agent", "Name", "Sign in"] as const;
+export const stepsFor = (setup: AddAgentValues["setup"]) =>
+  setup === "manual" ? STEPS : CHATGPT_STEPS;
 
 /** The id the new instance gets: the one typed, else one made from the label that is free. */
 export const instanceIdOf = (values: AddAgentValues, existing: ReadonlySet<string>) =>
@@ -80,8 +85,8 @@ export const configFromWizard = (
   label: values.label.trim(),
   accent: values.accent,
   enabled: true,
-  configDir: values.setup === "chatgpt" ? null : blank(values.configDir),
-  binaryPath: blank(values.binaryPath),
+  configDir: values.setup === "manual" ? blank(values.configDir) : null,
+  binaryPath: values.setup === "cursor" ? null : blank(values.binaryPath),
   environment: [],
   login: values.setup === "chatgpt" ? "prkit" : "shared",
 });

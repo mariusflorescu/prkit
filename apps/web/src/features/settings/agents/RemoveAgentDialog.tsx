@@ -21,6 +21,8 @@ const LEFT_BEHIND: Record<AgentProviderKind, (entry: AgentCatalogEntry) => strin
       ? `prkit signs out the ChatGPT login it holds for it, then deletes its folder. If Codex can't confirm the sign-out, nothing is removed.${yours}`
       : `prkit deletes its own folder for it, after signing out any login it holds there.${yours}`;
   },
+  cursor: () =>
+    "prkit signs out of the Cursor sign-in it holds for it, then deletes its folder. If Cursor can't confirm the sign-out, nothing is removed. The key that sign-in created stays valid until it expires: delete it in your Cursor dashboard to end it sooner.",
 };
 
 /**

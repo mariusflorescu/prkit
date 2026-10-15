@@ -10,7 +10,9 @@ import { agentCatalogQuery } from "~/rpc/queries";
 
 import { storeFixer } from "./fixerCache";
 import { RepositoryFixToggles } from "./RepositoryFixToggles";
+import { runsOnCursor } from "./cursorFixes";
 import { ScriptAccessNotice } from "./ScriptAccessNotice";
+import { useFixAgent } from "./useFixAgent";
 
 /** The session line: which agent works on this PR, its repository's opt-ins, and Stop. */
 export function FixesHeader({
@@ -22,6 +24,8 @@ export function FixesHeader({
 }) {
   const client = useQueryClient();
   const catalog = useQuery(agentCatalogQuery);
+  const agent = useFixAgent(detail.key, null);
+  const cursor = runsOnCursor(agent.catalog, agent.selection);
   const stop = useMutation({
     mutationFn: () => stopFixer(snapshot.key),
     onSuccess: (next) => storeFixer(client, next),
@@ -63,7 +67,7 @@ export function FixesHeader({
             <p className="mb-3 text-xs text-muted-foreground">
               For every pull request in {snapshot.settings.repository}.
             </p>
-            <RepositoryFixToggles settings={snapshot.settings} />
+            <RepositoryFixToggles settings={snapshot.settings} cursor={cursor} />
           </PopoverPopup>
         </Popover>
         {fixer?.status._tag === "active" && (
@@ -78,7 +82,7 @@ export function FixesHeader({
         )}
       </span>
       <div className="w-full">
-        <ScriptAccessNotice detail={detail} />
+        <ScriptAccessNotice detail={detail} cursor={cursor} />
       </div>
       {stop.error && (
         <p role="alert" className="w-full text-error-foreground">

@@ -5,9 +5,11 @@ import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
 import { pendingCommentsQuery, reviewThreadsQuery } from "~/rpc/queries";
 
+import { runsOnCursor } from "./cursorFixes";
 import { candidateId, fixCandidates } from "./fixCandidates";
 import { ScriptAccessNotice } from "./ScriptAccessNotice";
 import { SendToAgentFields } from "./SendToAgentFields";
+import { useFixAgent } from "./useFixAgent";
 
 /**
  * Hands comments to the PR's fix agent: which ones, anything else it should know,
@@ -28,6 +30,7 @@ export function SendToAgentForm({
   const own = detail.author?.login === login;
   const pending = useQuery(pendingCommentsQuery(detail.key, detail.accountId));
   const threads = useQuery(reviewThreadsQuery(detail.key, detail.accountId));
+  const agent = useFixAgent(detail.key, null);
   if (pending.isPending || (threads.isPending && only?._tag !== "draft"))
     return (
       <div aria-busy="true" aria-label="Loading comments" className="mt-3 space-y-2">
@@ -59,7 +62,7 @@ export function SendToAgentForm({
         <p role="status" className="text-xs text-muted-foreground">
           No comments to send. Comment on a line in Files first.
         </p>
-        <ScriptAccessNotice detail={detail} />
+        <ScriptAccessNotice detail={detail} cursor={runsOnCursor(agent.catalog, agent.selection)} />
       </div>
     );
   return (

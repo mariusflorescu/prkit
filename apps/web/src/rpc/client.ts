@@ -29,6 +29,7 @@ import {
   type AgentInstanceConfig,
   type AgentInstanceId,
   type AgentSelection,
+  type CursorSdkInstallProgress,
   type AttemptId,
   type DiffSnapshot,
   type DraftGuideResult,
@@ -306,6 +307,24 @@ export const signInAgent = (
         Effect.fail(new ServerUnreachableError({ cause })),
       ),
       Effect.raceFirst(cancelled),
+    ),
+  );
+};
+/** Downloads and checks Cursor's SDK on the user's request, telling each package as it starts. */
+export const installCursor = (
+  onProgress: (progress: CursorSdkInstallProgress) => void,
+): Promise<void> => {
+  const current = getRuntime();
+  if (current === null) return Promise.reject(new MissingSessionTokenError());
+  return current.runPromise(
+    WsClient.use((client) =>
+      client[WS_METHODS.agentsInstallCursor]({}).pipe(
+        Stream.runForEach((progress) => Effect.sync(() => onProgress(progress))),
+      ),
+    ).pipe(
+      Effect.catchIf(isRpcClientError, (cause) =>
+        Effect.fail(new ServerUnreachableError({ cause })),
+      ),
     ),
   );
 };

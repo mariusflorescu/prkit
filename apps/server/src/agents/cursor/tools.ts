@@ -18,10 +18,6 @@ export const NEVER_TOOLS = ["shell", "task"];
 export const toolSetFor = (access: AgentAccess) =>
   access._tag === "write" ? FIX_TOOL_SET : GUIDE_TOOL_SET;
 
-/** Why a Cursor fix runs no scripts, as the Fixes header and Repository settings say it. */
-export const CURSOR_SCRIPTS_REASON =
-  "Cursor fixes edit files only: Cursor can't ask before each command, so it never runs this repository's scripts.";
-
 const oneLine = (text: string, max: number) => text.replaceAll(/\s+/g, " ").trim().slice(0, max);
 
 type ToolEvent = Extract<Event, { readonly type: "tool" }>;

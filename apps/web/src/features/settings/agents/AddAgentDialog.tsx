@@ -10,20 +10,21 @@ import { AddAgentKindStep } from "./AddAgentKindStep";
 import { AddAgentNameStep } from "./AddAgentNameStep";
 import { AddAgentSetupStep } from "./AddAgentSetupStep";
 import { AddAgentSignInStep } from "./AddAgentSignInStep";
+import { AddCursorStep } from "./AddCursorStep";
 import {
   type AddAgentValues,
-  CHATGPT_STEPS,
   configFromWizard,
   defaultsFor,
-  STEPS,
   stepProblem,
+  stepsFor,
 } from "./addAgentWizard";
 import { useAgentInstanceActions } from "./useAgentInstanceActions";
 
 /**
  * Adds an agent instance in three steps: which agent, what it's called, and where it runs from.
  * Problems show once Next was refused, then follow what the user types. "Sign in with ChatGPT"
- * adds a Codex instance with prkit's own login and starts that sign-in right away.
+ * adds a Codex instance with prkit's own login and starts that sign-in right away; Cursor adds
+ * one that installs Cursor support and signs in from its last step.
  */
 export function AddAgentDialog({
   catalog,
@@ -53,7 +54,7 @@ export function AddAgentDialog({
     configDir,
   };
   const existing = new Set<string>(catalog.providers.map((entry) => entry.instance));
-  const steps = values.setup === "chatgpt" ? CHATGPT_STEPS : STEPS;
+  const steps = stepsFor(values.setup);
   const problem = attempted ? stepProblem(step, values, existing) : null;
   const last = step === steps.length - 1;
 
@@ -76,7 +77,7 @@ export function AddAgentDialog({
     }
     const config = configFromWizard(values, existing);
     create.mutate(config, {
-      onSuccess: () => (values.setup === "chatgpt" ? setCreated(config.id) : close()),
+      onSuccess: () => (values.setup === "manual" ? close() : setCreated(config.id)),
     });
   };
 
@@ -147,6 +148,7 @@ export function AddAgentDialog({
                 <AddAgentSetupStep form={form} problem={problem} />
               )}
               {step === 2 && values.setup === "chatgpt" && <AddAgentSignInStep created={created} />}
+              {step === 2 && values.setup === "cursor" && <AddCursorStep created={created} />}
             </fieldset>
             <div className="mt-5 flex items-center justify-end gap-2">
               {created === null && (
@@ -177,7 +179,7 @@ export function AddAgentDialog({
                     ? "Next"
                     : create.isPending
                       ? "Adding…"
-                      : values.setup === "chatgpt"
+                      : values.setup !== "manual"
                         ? "Add and sign in"
                         : "Add agent"}
               </Button>

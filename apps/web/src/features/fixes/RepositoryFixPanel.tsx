@@ -1,15 +1,23 @@
-import type { GuideRepository } from "@prkit/contracts";
+import { type GuideRepository, sessionSelection } from "@prkit/contracts";
 import { useQuery } from "@tanstack/react-query";
 
 import { ListError } from "~/components/ListError";
 import { Skeleton } from "~/components/ui/skeleton";
-import { fixerSettingsQuery } from "~/rpc/queries";
+import { agentCatalogQuery, fixerSettingsQuery, guideSettingsQuery } from "~/rpc/queries";
 
+import { runsOnCursor } from "./cursorFixes";
 import { RepositoryFixToggles } from "./RepositoryFixToggles";
 
 /** Settings > Guides > For one repository: the fix agent's opt-ins, next to the guide settings. */
 export function RepositoryFixPanel({ repository }: { repository: GuideRepository }) {
   const settings = useQuery(fixerSettingsQuery);
+  const catalog = useQuery(agentCatalogQuery);
+  const guides = useQuery(guideSettingsQuery);
+  // A pull request's fixes start on the default agent, so that's whose limits apply here.
+  const cursor =
+    catalog.data !== undefined &&
+    guides.data !== undefined &&
+    runsOnCursor(catalog.data, sessionSelection(catalog.data, null, guides.data.defaultAgent));
   const id = `${repository.host}/${repository.owner}/${repository.name}`;
   return (
     <section
@@ -37,6 +45,7 @@ export function RepositoryFixPanel({ repository }: { repository: GuideRepository
         </div>
       ) : (
         <RepositoryFixToggles
+          cursor={cursor}
           settings={
             settings.data.find((row) => row.repository === id) ?? {
               repository: id,
