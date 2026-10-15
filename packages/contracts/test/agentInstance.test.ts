@@ -132,7 +132,7 @@ describe("environmentNameProblem", () => {
       "BUN_OPTIONS",
       "BUN_INSPECT",
       "BUN_INSPECT_CONNECT_TO",
-      "NODE_EXTRA_CA_CERTS",
+      "NODE_REDIRECT_WARNINGS",
     ])
       expect(environmentNameProblem(name), name).toContain("runtime");
     for (const name of ["ANTHROPIC_CUSTOM_HEADERS", "OPENAI_ORG_ID"])
@@ -141,6 +141,9 @@ describe("environmentNameProblem", () => {
 
   it("takes ordinary names and refuses malformed ones", () => {
     expect(environmentNameProblem("HTTPS_PROXY")).toBeNull();
+    // The one named exception to NODE_*: a CA file for a corporate proxy.
+    expect(environmentNameProblem("NODE_EXTRA_CA_CERTS")).toBeNull();
+    expect(environmentNameProblem("node_extra_ca_certs")).toBeNull();
     expect(environmentNameProblem("_MY_FLAG2")).toBeNull();
     expect(environmentNameProblem("2FAST")).toContain("letters, digits");
     expect(environmentNameProblem("MY-FLAG")).toContain("letters, digits");

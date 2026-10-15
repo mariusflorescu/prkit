@@ -200,7 +200,8 @@ const BLOCKED_ENV: ReadonlyArray<{
     why: "It changes how the agent runs: settings, plugins, shells or logins from outside prkit. Use the Config folder field to point the agent at another setup.",
   },
   {
-    test: (name) => /^(BUN|NODE)_/.test(name),
+    // The one exception: a CA file for a corporate proxy, which runs no code.
+    test: (name) => /^(BUN|NODE)_/.test(name) && name !== "NODE_EXTRA_CA_CERTS",
     why: "It changes how the agent's runtime starts, and could load code around prkit's sandbox.",
   },
 ];
