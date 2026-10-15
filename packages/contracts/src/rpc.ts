@@ -11,13 +11,8 @@ import {
   ConfigDirNotAddedError,
   ConfigDirNotFoundError,
 } from "./accounts.ts";
-import {
-  AgentCatalog,
-  AgentProviderKind,
-  AgentSelection,
-  AgentSignInError,
-  AgentSignInPage,
-} from "./agent.ts";
+import { AgentCatalog, AgentSelection, AgentSignInError, AgentSignInPage } from "./agent.ts";
+import { AgentInstanceConfig, AgentInstanceError, AgentInstanceId } from "./agentInstance.ts";
 import { DiffSnapshot } from "./diffSnapshot.ts";
 import {
   FindRepositoryInput,
@@ -148,6 +143,10 @@ export const WS_METHODS = {
   agentsCatalog: "agents.catalog",
   agentsSignIn: "agents.signIn",
   agentsSignOut: "agents.signOut",
+  agentsCreate: "agents.create",
+  agentsUpdate: "agents.update",
+  agentsRemove: "agents.remove",
+  agentsReset: "agents.reset",
   fixersGet: "fixers.get",
   fixersWatch: "fixers.watch",
   fixersFeed: "fixers.feed",
@@ -383,7 +382,7 @@ export const WsRpcGroup = RpcGroup.make(
     error: Schema.Union([ReviewError, GuideNotFoundError]),
   }),
   Rpc.make(WS_METHODS.reviewsTypicalDuration, {
-    payload: Schema.Struct({ provider: AgentProviderKind, lines: Schema.Int }),
+    payload: Schema.Struct({ instance: AgentInstanceId, lines: Schema.Int }),
     success: Schema.NullOr(TypicalDuration),
     error: ReviewError,
   }),
@@ -446,21 +445,46 @@ export const WsRpcGroup = RpcGroup.make(
     success: ScopeConfig,
     error: Schema.Union([GuideConfigError, GuideConfigConflict]),
   }),
+  // `instance` checks only that one again; `refresh` without it checks every instance.
   Rpc.make(WS_METHODS.agentsCatalog, {
-    payload: Schema.Struct({ refresh: Schema.Boolean }),
+    payload: Schema.Struct({
+      refresh: Schema.Boolean,
+      instance: Schema.optionalKey(AgentInstanceId),
+    }),
     success: AgentCatalog,
   }),
   // prkit's own login for an agent: the sign-in page, then the stream ends once it signed in.
   Rpc.make(WS_METHODS.agentsSignIn, {
-    payload: Schema.Struct({ provider: AgentProviderKind }),
+    payload: Schema.Struct({ instance: AgentInstanceId }),
     success: AgentSignInPage,
     error: AgentSignInError,
     stream: true,
   }),
   Rpc.make(WS_METHODS.agentsSignOut, {
-    payload: Schema.Struct({ provider: AgentProviderKind }),
+    payload: Schema.Struct({ instance: AgentInstanceId }),
     success: AgentCatalog,
     error: AgentSignInError,
+  }),
+  // Agent instances (Settings > Agents). A sensitive variable sent back empty and redacted keeps its value.
+  Rpc.make(WS_METHODS.agentsCreate, {
+    payload: Schema.Struct({ config: AgentInstanceConfig }),
+    success: AgentCatalog,
+    error: AgentInstanceError,
+  }),
+  Rpc.make(WS_METHODS.agentsUpdate, {
+    payload: Schema.Struct({ config: AgentInstanceConfig }),
+    success: AgentCatalog,
+    error: AgentInstanceError,
+  }),
+  Rpc.make(WS_METHODS.agentsRemove, {
+    payload: Schema.Struct({ instance: AgentInstanceId }),
+    success: AgentCatalog,
+    error: AgentInstanceError,
+  }),
+  Rpc.make(WS_METHODS.agentsReset, {
+    payload: Schema.Struct({ instance: AgentInstanceId }),
+    success: AgentCatalog,
+    error: AgentInstanceError,
   }),
   // Pending review comments and GitHub review threads.
   Rpc.make(WS_METHODS.reviewCommentsList, {

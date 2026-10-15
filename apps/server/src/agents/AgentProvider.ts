@@ -1,4 +1,5 @@
 import type {
+  AgentInstanceId,
   AgentModel,
   AgentProviderKind,
   AgentProviderState,
@@ -77,6 +78,10 @@ export type AgentEvent =
       readonly message: string | null;
     };
 
+/** A turn whose agent instance was turned off or removed after it was queued. */
+export const AGENT_OFF =
+  "This pull request's agent is turned off or was removed. Pick another agent and retry.";
+
 export class AgentError extends Schema.TaggedError<AgentError>()("AgentError", {
   /** `auth` means the agent isn't installed, isn't logged in, or isn't on a subscription. */
   reason: Schema.Literals(["auth", "agent"]),
@@ -111,9 +116,31 @@ export interface TurnInput {
   readonly tools: ReadonlyArray<string>;
 }
 
+/** What one instance runs with, resolved by `Agents` from its settings. */
+export interface InstanceSetup {
+  readonly id: AgentInstanceId;
+  readonly label: string;
+  readonly isDefault: boolean;
+  /** CLAUDE_CONFIG_DIR or the user's CODEX_HOME, `~` expanded; null for the agent's own default. */
+  readonly configDir: string | null;
+  /** `~` expanded; null finds the agent on PATH. */
+  readonly binaryPath: string | null;
+  /** The instance's own variables, already checked against the names prkit refuses. */
+  readonly environment: Readonly<Record<string, string>>;
+  /** Codex: prkit holds this instance's own ChatGPT login instead of sharing the config folder's. */
+  readonly login: "shared" | "prkit";
+}
+
 export interface AgentProvider {
+  readonly instance: AgentInstanceId;
   readonly kind: AgentProviderKind;
   readonly label: string;
+  /** Instances with the same group share conversations (the folder the agent keeps sessions in). */
+  readonly group: string;
+  /** The installed agent's version, looked up again on every call. */
+  readonly version: Effect.Effect<string | null>;
+  /** Before the instance is removed: signs out any login prkit holds for it and deletes its files. */
+  readonly retire: Effect.Effect<void, AgentError>;
   /**
    * Reports `submit_guide`'s input while the agent writes it (`guide-input`), so the
    * agent writes the guide once and prkit shows it as it grows. Without it, the

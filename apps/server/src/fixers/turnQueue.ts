@@ -246,9 +246,11 @@ export const makeTurnQueue = (
         yield* sql.withTransaction(
           Effect.gen(function* () {
             yield* sql`
-              INSERT INTO fixer_turns (id, fixer_id, kind, work, trigger, status, provider, model, created_at)
+              INSERT INTO fixer_turns (id, fixer_id, kind, work, trigger, status, provider, instance_id, model,
+                created_at)
               VALUES (${turnId}, ${fixer.id}, ${work._tag}, ${encodeWork(work)}, ${trigger},
-                ${encodeStatus({ _tag: "queued" })}, ${fixer.provider}, ${fixer.model}, ${input.createdAt ?? at})`;
+                ${encodeStatus({ _tag: "queued" })}, ${fixer.provider}, ${fixer.instance_id}, ${fixer.model},
+                ${input.createdAt ?? at})`;
             if (input.prepare !== undefined) yield* input.prepare(turnId);
           }),
         );

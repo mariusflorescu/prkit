@@ -110,6 +110,14 @@ export const keychainLogin = (home: string) =>
     `CODEX_HOME='${home.replaceAll("'", `'\\''`)}' codex login`,
   );
 
+/** An instance whose ChatGPT login prkit holds itself, before it signed in. */
+export const signInForPrkit = (home: string) =>
+  unavailable(
+    "keychain-login",
+    "Sign in with your ChatGPT account for this agent.",
+    `CODEX_HOME='${home.replaceAll("'", `'\\''`)}' codex login`,
+  );
+
 /** Starting prkit's own sign-in, when Codex refuses it or doesn't answer. */
 export const SIGN_IN: RequestWording = {
   refused: (reason) =>

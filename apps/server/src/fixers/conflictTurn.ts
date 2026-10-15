@@ -9,6 +9,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { AGENT_OFF } from "../agents/AgentProvider.ts";
 import { Agents } from "../agents/Agents.ts";
 import { type Checkout, RepoCache } from "../repo/RepoCache.ts";
 import { Reviews } from "../reviews/Reviews.ts";
@@ -160,7 +161,9 @@ export const makeConflictTurn = (
         const ref = refFromKey(fixer.pr_key);
         if (ref === null)
           return yield* fail("repository", "This pull request's key can't be read.");
-        const provider = agents.get(turn.provider);
+        const provider = yield* agents.get(turn.instance_id).pipe(
+          Effect.flatMap((found) => (found === null ? fail("agent-auth", AGENT_OFF) : Effect.succeed(found))),
+        );
         const target = yield* targetOf(fixer, ref);
         if (target.state !== "open") return yield* end(fixer.pr_key, target.state);
         const identity = yield* identityFor(fixer);

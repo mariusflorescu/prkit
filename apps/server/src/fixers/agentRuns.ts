@@ -94,7 +94,7 @@ export const makeAgentRuns = (state: FixerState, leftovers: TurnLeftovers) =>
           const token = yield* tokens.issue({ _tag: "fixer", turnId, fixerId: fixer.id });
           const catalog = yield* agents.catalog();
           const current = (yield* fixerById(fixer.id)) ?? fixer;
-          const model = findAgentModel(catalog, current.provider, current.model);
+          const model = findAgentModel(catalog, current.instance_id, current.model);
           // Every setting goes in explicitly, so a resumed session doesn't keep an older choice.
           const options =
             model === undefined

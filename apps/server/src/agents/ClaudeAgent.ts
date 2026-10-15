@@ -1,9 +1,9 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- the SDK's spawn hook must return a node ChildProcess.
 import * as NodeChildProcess from "node:child_process";
+import * as NodeOS from "node:os";
 
 import {
   type CanUseTool,
-  getSessionInfo,
   type Options,
   query,
   type SDKMessage,
@@ -18,11 +18,12 @@ import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import packageJson from "../../package.json" with { type: "json" };
-import { executableAt, findOnPath } from "../executables.ts";
+import { agentBinary } from "../executables.ts";
 import {
   AgentError,
   type AgentEvent,
   type AgentProvider,
+  type InstanceSetup,
   QUIET_TOOLS,
   TOOL_LABELS,
   type TurnInput,
@@ -60,9 +61,8 @@ const AuthStatus = Schema.Struct({
 });
 const decodeAuthStatus = Schema.decodeUnknownOption(Schema.fromJsonString(AuthStatus));
 
-const NOT_INSTALLED =
-  "Claude Code isn't installed. Install it from claude.com/claude-code, sign in, then check again.";
 const LOGIN = "claude auth login";
+const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
 
 const unavailable = (
   reason: Extract<AgentProviderState, { _tag: "unavailable" }>["reason"],
@@ -75,26 +75,57 @@ const oneLine = (text: string, max = 80) => {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 };
 
-export const make = Effect.gen(function* () {
+/** Every session Claude Code saved under `configDir`, by id: `projects/<folder>/<id>.jsonl`. */
+export const sessionFile = Effect.fn("ClaudeAgent.sessionFile")(function* (
+  configDir: string,
+  sessionId: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const projects = path.join(configDir, "projects");
+  const folders = yield* fs.readDirectory(projects).pipe(Effect.orElseSucceed(() => []));
+  for (const folder of folders) {
+    const file = path.join(projects, folder, `${sessionId}.jsonl`);
+    const info = yield* fs.stat(file).pipe(Effect.option);
+    if (Option.isSome(info) && info.value.type === "File" && info.value.size > 0) return true;
+  }
+  return false;
+});
+
+/**
+ * One Claude Code instance: its binary and its config folder, which holds its login and its
+ * sessions. HOME stays the user's: Claude Code finds its keychain login through it, and names
+ * the entry for a moved config folder after a hash of CLAUDE_CONFIG_DIR exactly as given.
+ */
+export const make = Effect.fn("ClaudeAgent.make")(function* (setup: InstanceSetup) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const services = yield* Effect.context<never>();
-  const override = process.env.PRKIT_CLAUDE_PATH;
-  const claudePath =
-    override === undefined ? yield* findOnPath("claude") : yield* executableAt(override);
-  yield* claudePath === null
-    ? Effect.logWarning("Claude Code not found")
-    : Effect.logInfo("Resolved Claude Code").pipe(Effect.annotateLogs({ path: claudePath }));
+  const binary = agentBinary(setup.binaryPath, process.env.PRKIT_CLAUDE_PATH, "claude").pipe(
+    Effect.provideService(FileSystem.FileSystem, fs),
+    Effect.provideService(Path.Path, path),
+  );
+  const notInstalled =
+    setup.binaryPath === null
+      ? "Claude Code isn't installed. Install it from claude.com/claude-code, sign in, then check again."
+      : `There's no Claude Code at ${setup.binaryPath}. Fix the binary path in Settings > Agents, then check again.`;
+  const configDir = setup.configDir ?? path.join(NodeOS.homedir(), ".claude");
+  // The exact sign-in for this instance: its binary and its config folder.
+  const login = [
+    ...(setup.configDir === null ? [] : [`CLAUDE_CONFIG_DIR=${quote(setup.configDir)}`]),
+    setup.binaryPath === null ? LOGIN : `${quote(setup.binaryPath)} auth login`,
+  ].join(" ");
 
   /**
-   * The allowlisted environment, plus CLAUDE_CONFIG_DIR when the user moved Claude's
-   * config: that is where their login lives. Nothing that could switch billing
-   * (ANTHROPIC_API_KEY, CLAUDE_CODE_USE_BEDROCK, ...) is ever copied.
+   * The allowlisted environment, the instance's own variables, and its CLAUDE_CONFIG_DIR:
+   * that is where its login lives. Nothing that could switch billing (ANTHROPIC_API_KEY,
+   * CLAUDE_CODE_USE_BEDROCK, ...) is ever copied, and the instance can't set it either.
    */
   const agentEnv = (extras: Readonly<Record<string, string>> = {}) =>
     childEnv(process.env, {
-      CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
+      ...setup.environment,
+      CLAUDE_CONFIG_DIR: setup.configDir ?? undefined,
       CLAUDE_AGENT_SDK_CLIENT_APP: `prkit/${packageJson.version}`,
       // Tool input arrives as the model writes it instead of in buffered chunks, which
       // is what lets the guide show while submit_guide is still being written.
@@ -119,7 +150,8 @@ export const make = Effect.gen(function* () {
 
   /** `claude auth status --json` reads the stored login in about 0.2s without starting a model turn. */
   const check: Effect.Effect<AgentProviderState> = Effect.gen(function* () {
-    if (claudePath === null) return unavailable("not-installed", NOT_INSTALLED);
+    const claudePath = yield* binary;
+    if (claudePath === null) return unavailable("not-installed", notInstalled);
     const status = decodeAuthStatus(yield* output(claudePath, ["auth", "status", "--json"]));
     if (Option.isNone(status))
       return unavailable(
@@ -130,7 +162,7 @@ export const make = Effect.gen(function* () {
       return unavailable(
         "logged-out",
         "Claude Code isn't signed in. Sign in with your Claude account, then check again.",
-        LOGIN,
+        login,
       );
     if (
       status.value.authMethod !== "claude.ai" ||
@@ -139,7 +171,7 @@ export const make = Effect.gen(function* () {
       return unavailable(
         "not-subscription",
         `Claude Code is signed in with ${status.value.authMethod ?? "an API key"}, not a Claude subscription. prkit only runs Claude on your subscription: sign in with your Claude account.`,
-        LOGIN,
+        login,
       );
     const plan = status.value.subscriptionType ?? "";
     return {
@@ -152,7 +184,7 @@ export const make = Effect.gen(function* () {
     } satisfies AgentProviderState;
   }).pipe(
     Effect.catchTags({
-      PlatformError: () => Effect.succeed(unavailable("not-installed", NOT_INSTALLED)),
+      PlatformError: () => Effect.succeed(unavailable("not-installed", notInstalled)),
       TimeoutError: () =>
         Effect.succeed(
           unavailable("error", "Claude Code took too long to report its login. Check again."),
@@ -160,25 +192,32 @@ export const make = Effect.gen(function* () {
     }),
   );
 
-  /** The bundled models, checked against the installed Claude Code's version. */
-  const models = () =>
-    Effect.gen(function* () {
-      if (claudePath === null) return claudeModels(null);
-      const version = (yield* output(claudePath, ["--version"])).trim();
-      return claudeModels(version === "" ? null : version);
-    }).pipe(Effect.orElseSucceed(() => claudeModels(null)));
+  const version = Effect.gen(function* () {
+    const claudePath = yield* binary;
+    if (claudePath === null) return null;
+    const text = (yield* output(claudePath, ["--version"])).trim().split(" ")[0] ?? "";
+    return text === "" ? null : text;
+  }).pipe(Effect.orElseSucceed(() => null));
 
-  const hasSession = (sessionId: string, cwd: string) =>
-    Effect.tryPromise(() => getSessionInfo(sessionId, { dir: cwd })).pipe(
-      Effect.map((info) => info !== undefined),
-      Effect.orElseSucceed(() => false),
+  /** The bundled models, checked against the installed Claude Code's version. */
+  const models = () => version.pipe(Effect.map(claudeModels));
+
+  /**
+   * Whether the session is still saved in this instance's config folder. The SDK's own lookup
+   * reads the server's CLAUDE_CONFIG_DIR, which is one folder for every instance.
+   */
+  const hasSession = (sessionId: string, _cwd: string) =>
+    sessionFile(configDir, sessionId).pipe(
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
     );
 
   const runTurn = (input: TurnInput): Stream.Stream<AgentEvent, AgentError> =>
     Stream.unwrap(
       Effect.gen(function* () {
+        const claudePath = yield* binary;
         if (claudePath === null)
-          return yield* new AgentError({ reason: "auth", message: NOT_INSTALLED });
+          return yield* new AgentError({ reason: "auth", message: notInstalled });
         const log = (effect: Effect.Effect<void>) => {
           Effect.runForkWith(services)(effect);
         };
@@ -514,7 +553,7 @@ export const make = Effect.gen(function* () {
           // waits two seconds before its own SIGTERM, so the group gets one first.
           return: async () => {
             if (!ended && child !== null && !exited(child) && child.pid !== undefined)
-              Effect.runSync(signalGroup(child.pid, "SIGTERM"));
+              Effect.runSyncWith(services)(signalGroup(child.pid, "SIGTERM"));
             return turn.return();
           },
         };
@@ -540,8 +579,13 @@ export const make = Effect.gen(function* () {
     );
 
   return {
+    instance: setup.id,
     kind: "claude",
-    label: "Claude",
+    label: setup.label,
+    group: `claude:${path.resolve(configDir)}`,
+    version,
+    // prkit keeps nothing of its own for a Claude instance: the config folder is the user's.
+    retire: Effect.void,
     streamsGuideInput: true,
     check,
     models,

@@ -1,6 +1,7 @@
 import {
   type AccountId,
   AccountId as AccountIdSchema,
+  AgentInstanceId,
   type AgentSelection,
   AgentProviderKind,
   AttemptConfig,
@@ -16,6 +17,7 @@ import {
   type DraftGuideResult,
   effectiveSelection,
   FailureReason,
+  findAgentEntry,
   findAgentModel,
   type GuidanceEdit,
   type Guide,
@@ -147,6 +149,7 @@ const ReviewRow = Schema.Struct({
   pr_key: PullRequestKey,
   account_id: AccountIdSchema,
   provider: AgentProviderKind,
+  instance_id: AgentInstanceId,
   model: Schema.NullOr(Schema.String),
   model_options: Schema.fromJsonString(Schema.Array(ModelOptionSelection)),
   session_id: Schema.NullOr(Schema.String),
@@ -295,6 +298,7 @@ const toReview = (row: typeof ReviewRow.Type): Review => ({
   key: row.pr_key,
   accountId: row.account_id,
   provider: row.provider,
+  instance: row.instance_id,
   model: row.model,
   modelOptions: row.model_options,
   sessionId: row.session_id,
@@ -321,10 +325,18 @@ const toFeedEntry = (row: typeof FeedRow.Type): ReviewFeedEntry => ({
 
 /** A review's agent: what the user picked, or `model` null for the agent's own default. */
 interface StoredAgent {
-  readonly provider: AgentSelection["provider"];
+  readonly instance: AgentInstanceId;
+  /** The instance's kind, so a review still names its agent after the instance is removed. */
+  readonly provider: AgentProviderKind;
   readonly model: string | null;
   readonly options: AgentSelection["options"];
 }
+const storedAgentOf = (review: Review): StoredAgent => ({
+  instance: review.instance,
+  provider: review.provider,
+  model: review.model,
+  options: review.modelOptions,
+});
 /** Who started a review: the user, or auto mode for a review request. */
 type Origin = "user" | "auto";
 
@@ -707,9 +719,10 @@ export const make = Effect.gen(function* () {
     /** The stack batch the attempt was started in, announced with the others. */
     readonly batch: string | null;
   }) => sql`
-    INSERT INTO review_attempts (id, review_id, revision, trigger, run_id, phase, started_at, provider, model, batch_id)
+    INSERT INTO review_attempts (id, review_id, revision, trigger, run_id, phase, started_at, provider,
+      instance_id, model, batch_id)
     VALUES (${input.id}, ${input.reviewId}, ${input.revision}, ${input.trigger}, ${runId}, 'preparing-code',
-      ${input.at}, ${input.agent.provider}, ${input.agent.model}, ${input.batch})`;
+      ${input.at}, ${input.agent.provider}, ${input.agent.instance}, ${input.agent.model}, ${input.batch})`;
 
   const batchOf = (attemptId: AttemptId) =>
     sql`SELECT batch_id FROM review_attempts WHERE id = ${attemptId}`.pipe(
@@ -1059,7 +1072,12 @@ export const make = Effect.gen(function* () {
       yield* setPhase(review.key, review.id, attemptId, "preparing-code");
       const ref = refFromKey(review.key);
       if (ref === null) return yield* fail("repository", "This pull request's key can't be read.");
-      const provider = agents.get(review.provider);
+      const provider = yield* agents.get(review.instance);
+      if (provider === null)
+        return yield* fail(
+          "agent-auth",
+          "This guide's agent is turned off or was removed. Pick another agent and retry.",
+        );
       const state = yield* provider.check;
       if (state._tag === "unavailable") {
         yield* agents.invalidate;
@@ -1246,7 +1264,7 @@ export const make = Effect.gen(function* () {
       );
       const current = yield* findReviewById(review.id);
       const catalog = yield* agents.catalog();
-      const model = findAgentModel(catalog, review.provider, current?.model ?? null);
+      const model = findAgentModel(catalog, review.instance, current?.model ?? null);
       const stored = current?.modelOptions ?? [];
       // Every setting the model takes goes in explicitly, so a resumed session
       // doesn't keep a choice from an earlier attempt.
@@ -1419,6 +1437,23 @@ export const make = Effect.gen(function* () {
     });
 
   /**
+   * The agent a review runs on now: its own instance while that is on, else its kind's default
+   * instance (same model), else the default agent. Nothing ready keeps the review's own, and the
+   * attempt then says why it can't run.
+   */
+  const usableAgent = (agent: StoredAgent) =>
+    Effect.gen(function* () {
+      const instance = yield* agents.usable(agent.instance, agent.provider);
+      if (instance === agent.instance) return agent;
+      if (instance !== null) return { ...agent, instance };
+      const catalog = yield* agents.catalog();
+      const settings = yield* guideSettings.get();
+      const chosen = effectiveSelection(catalog, settings.defaultAgent);
+      const entry = chosen === null ? undefined : findAgentEntry(catalog, chosen.instance);
+      return chosen === null || entry === undefined ? agent : { ...chosen, provider: entry.kind };
+    }).pipe(Effect.catchTag("GuideSettingsError", () => Effect.succeed(agent)));
+
+  /**
    * Moves the review from one of `from` to `preparing` with a new attempt and runs it.
    * A new `agent` replaces the review's; a different provider starts a new
    * conversation with it.
@@ -1428,7 +1463,7 @@ export const make = Effect.gen(function* () {
     trigger: AttemptTrigger,
     {
       from = STARTABLE,
-      agent = { provider: review.provider, model: review.model, options: review.modelOptions },
+      agent = storedAgentOf(review),
       batch = null,
     }: {
       from?: ReadonlyArray<ReviewStatus["_tag"]>;
@@ -1437,9 +1472,12 @@ export const make = Effect.gen(function* () {
     } = {},
   ) =>
     Effect.gen(function* () {
+      // A turned-off or removed instance quietly gives way to its kind's default, else the default agent.
+      const usable = yield* usableAgent(agent);
       const attemptId = AttemptId.make(yield* newId);
       const at = yield* now;
-      const provider = agent.provider;
+      // Another conversation group (another kind or config folder) starts a new conversation.
+      const sameGroup = yield* agents.sameGroup(usable.instance);
       // The revision number comes from the row the compare-and-set wins, not from the
       // caller's read, which a revision committed since would make stale.
       const revision = yield* sql.withTransaction(
@@ -1447,9 +1485,9 @@ export const make = Effect.gen(function* () {
           const rows = yield* sql`
             UPDATE reviews SET status = ${encodeStatus({ _tag: "preparing", attemptId })},
               current_attempt_id = ${attemptId}, updated_at = ${at},
-              session_id = CASE WHEN provider = ${provider} THEN session_id ELSE NULL END,
-              provider = ${provider}, model = ${agent.model},
-              model_options = ${encodeOptions(agent.options)}
+              session_id = CASE WHEN instance_id IN ${sql.in(sameGroup)} THEN session_id ELSE NULL END,
+              provider = ${usable.provider}, instance_id = ${usable.instance}, model = ${usable.model},
+              model_options = ${encodeOptions(usable.options)}
             WHERE id = ${review.id} AND current_attempt_id IS NULL
               AND json_extract(status, '$._tag') IN ${sql.in(from)}
             RETURNING latest_revision`.pipe(Effect.flatMap(decodeStarted));
@@ -1461,7 +1499,7 @@ export const make = Effect.gen(function* () {
             reviewId: review.id,
             revision: next,
             trigger,
-            agent,
+            agent: usable,
             at,
             batch,
           });
@@ -1470,7 +1508,12 @@ export const make = Effect.gen(function* () {
       );
       if (revision === null) return false;
       yield* launch(
-        { ...review, provider, sessionId: provider === review.provider ? review.sessionId : null },
+        {
+          ...review,
+          provider: usable.provider,
+          instance: usable.instance,
+          sessionId: sameGroup.includes(review.instance) ? review.sessionId : null,
+        },
         attemptId,
         revision,
         trigger,
@@ -1495,9 +1538,9 @@ export const make = Effect.gen(function* () {
       const created = yield* sql.withTransaction(
         Effect.gen(function* () {
           const rows = yield* sql`
-            INSERT INTO reviews (id, pr_key, account_id, provider, model, model_options, origin,
-              status, current_attempt_id, created_at, updated_at)
-            VALUES (${id}, ${key}, ${accountId}, ${agent.provider}, ${agent.model},
+            INSERT INTO reviews (id, pr_key, account_id, provider, instance_id, model, model_options,
+              origin, status, current_attempt_id, created_at, updated_at)
+            VALUES (${id}, ${key}, ${accountId}, ${agent.provider}, ${agent.instance}, ${agent.model},
               ${encodeOptions(agent.options)}, ${origin},
               ${encodeStatus({ _tag: "preparing", attemptId })}, ${attemptId}, ${at}, ${at})
             ON CONFLICT (pr_key) DO NOTHING RETURNING id`;
@@ -1524,7 +1567,7 @@ export const make = Effect.gen(function* () {
             key,
             accountId,
             origin,
-            provider: agent.provider,
+            instance: agent.instance,
             model: agent.model ?? "default",
           }),
         );
@@ -1551,13 +1594,14 @@ export const make = Effect.gen(function* () {
    */
   const chooseAgent = (requested: AgentSelection | undefined, review: Review | null) =>
     Effect.gen(function* () {
-      if (requested === undefined && review !== null)
-        return { provider: review.provider, model: review.model, options: review.modelOptions };
+      if (requested === undefined && review !== null) return storedAgentOf(review);
       const catalog = yield* agents.catalog();
       if (requested !== undefined) {
         const problem = selectionProblem(catalog, requested);
-        if (problem !== null) return yield* new ReviewError({ message: problem });
-        return requested;
+        const entry = findAgentEntry(catalog, requested.instance);
+        if (problem !== null || entry === undefined)
+          return yield* new ReviewError({ message: problem ?? "Pick an agent." });
+        return { ...requested, provider: entry.kind };
       }
       const settings = yield* guideSettings
         .get()
@@ -1567,12 +1611,13 @@ export const make = Effect.gen(function* () {
           ),
         );
       const chosen = effectiveSelection(catalog, settings.defaultAgent);
-      if (chosen === null)
+      const entry = chosen === null ? undefined : findAgentEntry(catalog, chosen.instance);
+      if (chosen === null || entry === undefined)
         return yield* new ReviewError({
           message:
-            "No agent is ready to write guides. Sign in to Claude Code or Codex, then check again.",
+            "No agent is ready to write guides. Sign one in under Settings > Agents, then check again.",
         });
-      return chosen;
+      return { ...chosen, provider: entry.kind };
     });
 
   /**
@@ -2106,15 +2151,15 @@ export const make = Effect.gen(function* () {
     }).pipe(Effect.catchTags(dbFailures));
 
   /**
-   * The median click-to-guide time of past full guides by the same provider on
+   * The median click-to-guide time of past full guides by the same agent instance on
    * diffs of a similar size (half to double the changed lines). Null with fewer
    * than two such guides: no estimate prkit can't back up.
    */
-  const typicalDuration = (provider: AgentProviderKind, lines: number) =>
+  const typicalDuration = (instance: AgentInstanceId, lines: number) =>
     Effect.gen(function* () {
       const rows = yield* sql`
         SELECT (julianday(finished_at) - julianday(started_at)) * 86400.0 AS seconds FROM review_attempts
-        WHERE outcome = 'accepted' AND provider = ${provider}
+        WHERE outcome = 'accepted' AND instance_id = ${instance}
           AND trigger IN ('first', 'retry', 'rewritten', 'retargeted')
           AND changed_lines BETWEEN ${Math.max(0, Math.floor(lines / 2) - 20)} AND ${lines * 2 + 20}
         ORDER BY rowid DESC LIMIT 15`.pipe(Effect.flatMap(decodeDurations));

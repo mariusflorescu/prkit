@@ -1,5 +1,6 @@
 import {
   type AccountId,
+  type AgentInstanceId,
   type AgentProviderKind,
   type AgentSelection,
   type DoneReason,
@@ -18,6 +19,7 @@ import { ChildProcessSpawner } from "effect/process";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { reapAgentGroup } from "../agents/agentProcess.ts";
+import { Agents } from "../agents/Agents.ts";
 import { turnTmpDir } from "../agents/commandReach.ts";
 import { RepoCache } from "../repo/RepoCache.ts";
 import {
@@ -50,6 +52,7 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const repo = yield* RepoCache;
+    const agents = yield* Agents;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const {
       appendActivity,
@@ -69,11 +72,15 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
     } = state;
     const { advance, stopFiber } = queue;
 
-    /** The fixer for a PR, created or brought back with the agent given; a new provider starts a new conversation. */
+    /**
+     * The fixer for a PR, created or brought back with the agent given; an instance in another
+     * conversation group (another kind or config folder) starts a new conversation.
+     */
     const ensureFixer = (
       key: PullRequestKey,
       accountId: AccountId,
       agent: {
+        readonly instance: AgentInstanceId;
         readonly provider: AgentProviderKind;
         readonly model: string | null;
         readonly options: AgentSelection["options"];
@@ -82,12 +89,16 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
       Effect.gen(function* () {
         const at = yield* now;
         const id = FixerId.make(yield* newId);
+        const sameGroup = yield* agents.sameGroup(agent.instance);
         yield* sql`
-          INSERT INTO fixers (id, pr_key, account_id, provider, model, model_options, created_at, updated_at)
-          VALUES (${id}, ${key}, ${accountId}, ${agent.provider}, ${agent.model}, ${encodeOptions(agent.options)}, ${at}, ${at})
+          INSERT INTO fixers (id, pr_key, account_id, provider, instance_id, model, model_options,
+            created_at, updated_at)
+          VALUES (${id}, ${key}, ${accountId}, ${agent.provider}, ${agent.instance}, ${agent.model},
+            ${encodeOptions(agent.options)}, ${at}, ${at})
           ON CONFLICT (pr_key) DO UPDATE SET
-            session_id = CASE WHEN fixers.provider = excluded.provider THEN fixers.session_id ELSE NULL END,
-            provider = excluded.provider, model = excluded.model, model_options = excluded.model_options,
+            session_id = CASE WHEN fixers.instance_id IN ${sql.in(sameGroup)} THEN fixers.session_id ELSE NULL END,
+            provider = excluded.provider, instance_id = excluded.instance_id, model = excluded.model,
+            model_options = excluded.model_options,
             ended = NULL, updated_at = excluded.updated_at`;
         const fixer = yield* findFixer(key);
         if (fixer === null)

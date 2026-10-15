@@ -1,6 +1,7 @@
 import { type FixerTurnId, refFromKey, type TurnScripts } from "@prkit/contracts";
 import * as Effect from "effect/Effect";
 
+import { AGENT_OFF } from "../agents/AgentProvider.ts";
 import { Agents } from "../agents/Agents.ts";
 import { RepoCache } from "../repo/RepoCache.ts";
 import type { AgentRuns } from "./agentRuns.ts";
@@ -37,13 +38,22 @@ export const makeTurnBodies = (
     const { identityFor, recordHead, repoFailure, settleReady, targetOf } = steps;
     const { agentHeld, conflictsBody, recordConflicted, verifyResolution } = conflicts;
     const { end } = sessions;
+    /** The turn's agent instance, which may have been turned off or removed since it was queued. */
+    const agentFor = (turn: TurnRow) =>
+      agents
+        .get(turn.instance_id)
+        .pipe(
+          Effect.flatMap((found) =>
+            found === null ? fail("agent-auth", AGENT_OFF) : Effect.succeed(found),
+          ),
+        );
 
     const fixBody = (fixer: FixerRow, turn: TurnRow, work: Extract<WorkRequest, { _tag: "fix" }>) =>
       Effect.gen(function* () {
         const ref = refFromKey(fixer.pr_key);
         if (ref === null)
           return yield* fail("repository", "This pull request's key can't be read.");
-        const provider = agents.get(turn.provider);
+        const provider = yield* agentFor(turn);
         const target = yield* targetOf(fixer, ref);
         if (target.state !== "open") return yield* end(fixer.pr_key, target.state);
         const identity = yield* identityFor(fixer);
@@ -207,8 +217,8 @@ export const makeTurnBodies = (
         const fixer = turn === null ? null : yield* fixerById(turn.fixer_id);
         if (turn === null || fixer === null) return;
         yield* appendActivity(fixer.pr_key, turnId, "phase", "preparing-code");
-        const provider = agents.get(turn.provider);
         if (turn.work._tag !== "revert") {
+          const provider = yield* agentFor(turn);
           const state = yield* provider.check;
           if (state._tag === "unavailable") {
             yield* agents.invalidate;
@@ -255,7 +265,7 @@ export const makeTurnBodies = (
               );
           });
         const body = Effect.gen(function* () {
-          const provider = agents.get(turn.provider);
+          const provider = yield* agentFor(turn);
           const identity = yield* identityFor(fixer);
           // Put the checkout back at the ready commit, rebuilding it if its git metadata
           // drifted, so this behaves like ensureWorktree rather than giving up.

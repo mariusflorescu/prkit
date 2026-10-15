@@ -3,6 +3,7 @@ import {
   type AgentSelection,
   type ConflictStrategy,
   effectiveSelection,
+  findAgentEntry,
   FIXER_BUSY,
   type FixComment,
   FixerError,
@@ -99,13 +100,25 @@ export const make = Effect.gen(function* () {
    */
   const chooseAgent = (requested: AgentSelection | undefined, fixer: FixerRow | null) =>
     Effect.gen(function* () {
-      if (requested === undefined && fixer !== null)
-        return { provider: fixer.provider, model: fixer.model, options: fixer.model_options };
+      const own =
+        requested === undefined && fixer !== null
+          ? yield* agents.usable(fixer.instance_id, fixer.provider)
+          : null;
+      // The session's own instance, or its kind's default while the instance is off or gone.
+      if (requested === undefined && fixer !== null && own !== null)
+        return {
+          instance: own,
+          provider: fixer.provider,
+          model: fixer.model,
+          options: fixer.model_options,
+        };
       const catalog = yield* agents.catalog();
       if (requested !== undefined) {
         const problem = selectionProblem(catalog, requested);
-        if (problem !== null) return yield* new FixerError({ message: problem });
-        return requested;
+        const entry = findAgentEntry(catalog, requested.instance);
+        if (problem !== null || entry === undefined)
+          return yield* new FixerError({ message: problem ?? "Pick an agent." });
+        return { ...requested, provider: entry.kind };
       }
       const stored = yield* guideSettings
         .get()
@@ -115,11 +128,12 @@ export const make = Effect.gen(function* () {
           ),
         );
       const chosen = effectiveSelection(catalog, stored.defaultAgent);
-      if (chosen === null)
+      const entry = chosen === null ? undefined : findAgentEntry(catalog, chosen.instance);
+      if (chosen === null || entry === undefined)
         return yield* new FixerError({
-          message: "No agent is ready. Sign in to Claude Code or Codex, then check again.",
+          message: "No agent is ready. Sign one in under Settings > Agents, then check again.",
         });
-      return chosen;
+      return { ...chosen, provider: entry.kind };
     });
 
   const get = (key: PullRequestKey) => snapshotOf(key).pipe(Effect.catchTags(dbFailures));
@@ -392,6 +406,7 @@ export const make = Effect.gen(function* () {
       if (row.commit_sha === null)
         return yield* new FixerError({ message: "There is no merge to revert." });
       yield* ensureFixer(key, fixer.account_id, {
+        instance: fixer.instance_id,
         provider: fixer.provider,
         model: fixer.model,
         options: fixer.model_options,
