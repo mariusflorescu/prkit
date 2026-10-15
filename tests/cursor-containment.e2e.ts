@@ -4,9 +4,10 @@ import * as NodeHttp from "node:http";
 import * as NodePath from "node:path";
 
 import { type Browser, describe, test } from "@e2e-dev/web";
-import { expect, type Screen } from "e2e";
+import { expect, type Screen, type TestFixtures } from "e2e";
 import * as Schema from "effect/Schema";
 
+import { eventText } from "../apps/server/src/agents/cursor/protocol.ts";
 import { childEnv } from "../packages/contracts/src/childEnv.ts";
 import { repoRoot } from "../scripts/verify-run.ts";
 import { startInstance, stopFakeInstance } from "./fakeGitHub.ts";
@@ -252,16 +253,15 @@ const runTurn = (input: {
     child.on("error", reject);
     child.on("exit", () =>
       resolve(
-        stdout
-          .split("\n")
-          .filter((line) => line.startsWith("{"))
-          .flatMap((line) => {
-            try {
-              return [Schema.decodeUnknownSync(RunnerEvent)(line)];
-            } catch {
-              return [];
-            }
-          }),
+        stdout.split("\n").flatMap((line) => {
+          const text = eventText(line);
+          if (text === null) return [];
+          try {
+            return [Schema.decodeUnknownSync(RunnerEvent)(text)];
+          } catch {
+            return [];
+          }
+        }),
       ),
     );
     child.stdin.end(
@@ -303,9 +303,72 @@ const openAgents = async (screen: Screen, browser: Browser) => {
   return screen.getByRole("region", "Agents").getByRole("list", "Agents");
 };
 
+/** Every string in the instance's files shaped like a prkit MCP token: 32 random bytes, base64url. */
+const tokenShaped = (home: string) =>
+  new Set(
+    NodeFS.globSync(`${home}/**/*`)
+      .filter((file) => NodeFS.statSync(file).isFile())
+      .flatMap((file) =>
+        [
+          ...NodeFS.readFileSync(file, "utf8").matchAll(
+            /(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g,
+          ),
+        ].map((match) => match[0]),
+      ),
+  );
+
+/**
+ * How many of `candidates` prkit's MCP server takes as a live token. prkit keeps a turn's token
+ * only in memory, so this is how a test tells whether its actual value reached Cursor's files:
+ * any other string is turned down with 401.
+ */
+const liveTokens = async (origin: string, candidates: ReadonlySet<string>) => {
+  let live = 0;
+  for (const candidate of candidates) {
+    const response = await fetch(`${origin}/mcp`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${candidate}`,
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+    });
+    if (response.status !== 401) live++;
+  }
+  return live;
+};
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Opens the fixture PR's Guide tab on the live instance and starts a guide on Cursor's own pick. */
+const startGuide = async (
+  { app, screen, browser }: Pick<TestFixtures, "app" | "screen"> & { browser: Browser },
+  run: ReturnType<typeof startInstance>,
+  number: number,
+) => {
+  await browser.setViewport({ width: 1280, height: 860 });
+  await app.open(run.openUrl);
+  const card = (await openAgents(screen, browser)).getByRole("listitem", "Cursor");
+  await expect(card.getByRole("status", "Cursor status")).toHaveText(/^Signed in · /, {
+    timeout: 60_000,
+  });
+  await app.open(`${run.url}${prPath(FIXTURE_REPO, number, "guide")}`);
+  const setup = screen.getByRole("form", "Start a guide");
+  await setup.getByRole("button", /^Agent and model: /).tap({ timeout: 60_000 });
+  // Search matches model names; Cursor's are its own ("Auto"...), so pick from its group.
+  await screen
+    .getByRole("group", /^Cursor/)
+    .getByRole("option")
+    .first()
+    .tap({ timeout: 60_000 });
+  await setup.getByRole("button", "Generate guide").tap();
+  return `github.com/${FIXTURE_REPO}#${number}`;
+};
+
 describe("Cursor's agent, live", { tags: ["agent", "cursor"], skip: NEEDS_FIXTURE }, () => {
   test(
-    "a guide through prkit's own tools, a resumed turn, then Stop with nothing left running",
+    "a guide through prkit's own tools only, with no live token in Cursor's files",
     { timeout: 1_500_000 },
     async ({ app, screen, browser }) => {
       test.skip(!LIVE, SKIP);
@@ -313,46 +376,66 @@ describe("Cursor's agent, live", { tags: ["agent", "cursor"], skip: NEEDS_FIXTUR
       const run = startInstance(NAME, ["--cursor-sdk", SDK]);
       const home = NodePath.join(run.home, "cursor-instances", "cursor", "home");
       try {
-        await browser.setViewport({ width: 1280, height: 860 });
-        await app.open(run.openUrl);
-        const card = (await openAgents(screen, browser)).getByRole("listitem", "Cursor");
-        await expect(card.getByRole("status", "Cursor status")).toHaveText(/^Signed in · /, {
-          timeout: 60_000,
-        });
-        await app.screenshot("u68-live-cursor-signed-in");
-
         // (d) A guide only arrives through prkit's MCP tools, which the runner calls with the
-        // turn's token; Cursor never holds it.
-        await app.open(`${run.url}${prPath(FIXTURE_REPO, fixture.number, "guide")}`);
-        const setup = screen.getByRole("form", "Start a guide");
-        await setup.getByRole("button", /^Agent and model: /).tap({ timeout: 60_000 });
-        // Search matches model names; Cursor's are its own ("Auto"...), so pick from its group.
-        await screen
-          .getByRole("group", /^Cursor/)
-          .getByRole("option")
-          .first()
-          .tap({ timeout: 60_000 });
-        await setup.getByRole("button", "Generate guide").tap();
+        // turn's token; Cursor's normal tool calls never trip the check on its own tools.
+        const key = await startGuide({ app, screen, browser }, run, fixture.number);
+        const accepted = () =>
+          readRows(run.home, "SELECT outcome FROM review_attempts ORDER BY rowid DESC LIMIT 1")[0]
+            ?.outcome === "accepted";
+        // While the turn's token is live, nothing token-shaped in Cursor's files opens prkit.
+        let scans = 0;
+        let live = 0;
+        for (let waited = 0; !accepted() && waited < 600_000; waited += 10_000) {
+          live += await liveTokens(run.url, tokenShaped(home));
+          if (!accepted()) scans++;
+          await sleep(10_000);
+        }
         await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r1 · ", {
-          timeout: 600_000,
+          timeout: 60_000,
         });
         await expect(browser.locator("[data-guide-view]")).toContainText(LIMITS_PATH);
         await app.screenshot("u68-live-guide");
-        const key = `github.com/${FIXTURE_REPO}#${fixture.number}`;
-        const [first] = readRows(
+        const [review] = readRows(
           run.home,
-          `SELECT instance_id, session_id FROM reviews WHERE pr_key = '${key}'`,
+          `SELECT instance_id FROM reviews WHERE pr_key = '${key}'`,
         );
-        expect(first?.instance_id).toBe("cursor");
-        const stored = NodeFS.globSync(`${home}/agents/**/*`).filter((file) =>
+        expect(review?.instance_id).toBe("cursor");
+        const stored = NodeFS.globSync(`${home}/**/*`).filter((file) =>
           NodeFS.statSync(file).isFile(),
         );
         const bearer = stored.filter((file) =>
           NodeFS.readFileSync(file, "utf8").includes("Bearer"),
         );
-        save("guide-store.json", JSON.stringify({ files: stored.length, bearer }, null, 2));
-        expect(stored.length).toBeGreaterThan(0);
+        save(
+          "guide-store.json",
+          JSON.stringify({ files: stored.length, bearer, scansWhileLive: scans, live }, null, 2),
+        );
         expect(bearer).toEqual([]);
+        expect(scans).toBeGreaterThan(0);
+        expect(live).toBe(0);
+      } finally {
+        stopFakeInstance(NAME, { keepHome: true });
+        closeFixFixture(fixture);
+      }
+    },
+  );
+
+  test(
+    "Generate again resumes the same Cursor session, then Stop leaves nothing running",
+    { timeout: 1_500_000 },
+    async ({ app, screen, browser }) => {
+      test.skip(!LIVE, SKIP);
+      const fixture = createFixFixture(`${Date.now()}`);
+      const run = startInstance(NAME, ["--cursor-sdk", SDK]);
+      try {
+        const key = await startGuide({ app, screen, browser }, run, fixture.number);
+        await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r1 · ", {
+          timeout: 600_000,
+        });
+        const [first] = readRows(
+          run.home,
+          `SELECT session_id FROM reviews WHERE pr_key = '${key}'`,
+        );
 
         // (e) and (f) Generate again resumes the same Cursor conversation; Stop mid-turn ends
         // the runner's whole process group.

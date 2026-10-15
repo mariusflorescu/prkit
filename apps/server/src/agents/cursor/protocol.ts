@@ -75,6 +75,19 @@ export const RunnerModel = Schema.Struct({
 });
 export type RunnerModel = typeof RunnerModel.Type;
 
+/**
+ * What starts each event line the runner writes. The SDK may print to stdout too, even half a
+ * line with no newline; prkit reads an event from its last mark on a line, so stray output
+ * before it can't swallow it.
+ */
+export const EVENT_MARK = "\u001eprkit-event:";
+
+/** The event a line carries, read from its last mark; null when it has none. */
+export const eventText = (line: string) => {
+  const at = line.lastIndexOf(EVENT_MARK);
+  return at === -1 ? null : line.slice(at + EVENT_MARK.length);
+};
+
 export const Event = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("status"),

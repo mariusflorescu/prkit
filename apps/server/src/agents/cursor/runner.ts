@@ -17,7 +17,7 @@ import * as Schema from "effect/Schema";
 import { checkoutPaths } from "../checkoutPaths.ts";
 import { makeFileTools, type ToolResult } from "./fileTools.ts";
 import { connectPrkitTools } from "./prkitTools.ts";
-import { type Event, Request, type TurnRequest } from "./protocol.ts";
+import { type Event, EVENT_MARK, Request, type TurnRequest } from "./protocol.ts";
 import { loadSdk } from "./sdkLoader.ts";
 import { ALLOWED_TOOLS, CUSTOM_TOOLS_SERVER, DENIED_TOOLS } from "./tools.ts";
 
@@ -27,7 +27,7 @@ const CURSOR_BACKEND = "https://api2.cursor.sh";
 type Sdk = Awaited<ReturnType<typeof loadSdk>>;
 
 const emit = (event: Event) => {
-  process.stdout.write(`${JSON.stringify(event)}\n`);
+  process.stdout.write(`${EVENT_MARK}${JSON.stringify(event)}\n`);
 };
 const oneLine = (text: string) => text.replaceAll(/\s+/g, " ").trim().slice(0, 300);
 
@@ -158,6 +158,19 @@ const toolEvent = (update: InteractionUpdate, cwd: string): Event | null => {
 
 const FILE_TOOLS = new Set(["read_file", "list_dir", "glob", "grep", "write_file", "edit_file"]);
 
+/**
+ * Set once Cursor starts a tool prkit didn't give it, one of its own: the SDK runs whatever
+ * Cursor's backend asks for, so the turn stops there, prkit's tools refuse every later call, and
+ * the turn fails so nothing from it is kept.
+ */
+let forbidden: string | null = null;
+const FORBIDDEN =
+  "Cursor tried to use one of its own tools, which prkit doesn't allow. Nothing from this run was kept.";
+
+/** Whether a started call is one of the custom tools the turn gave Cursor. */
+const isOwnTool = (update: Extract<InteractionUpdate, { type: "tool-call-started" }>) =>
+  update.toolCall.type === "mcp" && update.toolCall.args.providerIdentifier === CUSTOM_TOOLS_SERVER;
+
 const asCustomTool = (tool: {
   readonly description: string;
   readonly inputSchema: Readonly<Record<string, Schema.MutableJson>>;
@@ -168,6 +181,7 @@ const asCustomTool = (tool: {
   inputSchema: tool.inputSchema,
   annotations: { readOnlyHint: tool.readOnly, openWorldHint: false },
   execute: async (args) => {
+    if (forbidden !== null) return { content: [{ type: "text", text: FORBIDDEN }], isError: true };
     const result = await tool.run(args);
     return { content: [{ type: "text", text: result.text }], isError: !result.ok };
   },
@@ -249,10 +263,22 @@ const turn = async (sdk: Sdk, request: TurnRequest) => {
     onDelta: ({ update }) => {
       const event = toolEvent(update, request.cwd);
       if (event !== null) emit(event);
+      if (update.type === "tool-call-started" && !isOwnTool(update) && forbidden === null) {
+        forbidden = update.toolCall.type;
+        void stop?.();
+      }
     },
   });
   stop = () => run.cancel();
+  if (forbidden !== null) void run.cancel();
   const result = await run.wait();
+  // The conversation's last writes land before prkit hears the turn ended and stops the runner.
+  await agent[Symbol.asyncDispose]();
+  if (forbidden !== null) {
+    emit({ type: "error", reason: "agent", message: FORBIDDEN });
+    process.exitCode = 1;
+    return;
+  }
   emit({
     type: "finished",
     outcome:
@@ -263,7 +289,6 @@ const turn = async (sdk: Sdk, request: TurnRequest) => {
           : "failed",
     message: result.status === "error" ? "Cursor stopped with an error. Retry." : null,
   });
-  agent.close();
 };
 
 const failure = (sdk: Sdk | null, error: Error): Event => {

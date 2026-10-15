@@ -9,16 +9,20 @@
  *   reject-keys    Cursor turns every key down
  *   hold           a turn keeps writing until the file is removed
  *   many-models    Cursor lists 400 more models, more than a pipe takes at once
+ *   builtin-read   a turn calls Cursor's own read tool, then still tries submit_guide
+ *   disposed.log   each agent disposed, written a moment after the dispose starts, as the
+ *                  SDK's own store writes land late
  *   probe.json     calls a turn makes first, `[{ "tool": "read_file", "args": {...} }]`
  *   runs.log       each turn appends what it was started with: tools, setting sources, sandbox,
- *                  MCP servers, custom tool names, cwd, and whether it resumed
+ *                  MCP servers, custom tool names, cwd, HOME, HTTPS_PROXY, whether
+ *                  CURSOR_API_KEY was in its environment, and whether it resumed
  *   calls.log      each custom tool call: its name, arguments, whether it worked, and its text
  *
  * Like Cursor, it offers the model only the custom tools it was given, under the
  * `custom-user-tools` server, and runs them in the host process. A guide turn reads the first
  * file the prompt lists, reports progress and submits a guide with one chapter holding every
- * file; a fix writes `stand-in.md` and reports every comment fixed. Keys are `stand-in-...`;
- * anything else is turned down.
+ * file; a fix writes `stand-in.md` and reports every comment fixed. Every turn ends with half a
+ * line of its own on stdout, as SDKs print. Keys are `stand-in-...`; anything else is turned down.
  */
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
@@ -198,6 +202,13 @@ class StandInAgent {
       await call("report_progress", { message: "Reading the change with a stand-in Cursor" });
       while (flagged("hold") && !state.cancelled) await sleep(200);
       if (state.cancelled) return { status: "cancelled" };
+      if (flagged("builtin-read")) {
+        const callId = NodeCrypto.randomUUID();
+        const toolCall = { type: "read", args: { path: "/etc/hosts" } };
+        await onDelta({ update: { type: "tool-call-started", callId, toolCall } });
+        await call("submit_guide", { summary: "After a tool of Cursor's own", chapters: [] });
+        return { status: state.cancelled ? "cancelled" : "finished" };
+      }
       if (message.includes("`finish_fixes`")) {
         const ids =
           /one entry for each of (.+), then end your turn\./.exec(message)?.[1]?.split(", ") ?? [];
@@ -223,7 +234,10 @@ class StandInAgent {
       });
       return { status: submitted.ok ? "finished" : "error" };
     };
-    const done = work();
+    const done = work().then((result) => {
+      process.stdout.write("stand-in SDK noise without a newline ");
+      return result;
+    });
     return {
       wait: () => done,
       cancel: async () => {
@@ -232,6 +246,11 @@ class StandInAgent {
     };
   }
   close() {}
+  async [Symbol.asyncDispose]() {
+    await sleep(300);
+    if (CONTROL !== "")
+      NodeFS.appendFileSync(NodePath.join(CONTROL, "disposed.log"), `${this.agentId}\n`);
+  }
 }
 
 const record = (options, resumed) => {
@@ -247,6 +266,8 @@ const record = (options, resumed) => {
       customTools: Object.keys(options.local?.customTools ?? {}).sort(),
       cwd: options.local?.cwd ?? null,
       home: process.env.HOME ?? null,
+      proxy: process.env.HTTPS_PROXY ?? null,
+      keyInEnv: process.env.CURSOR_API_KEY !== undefined,
       resumed,
     })}\n`,
   );

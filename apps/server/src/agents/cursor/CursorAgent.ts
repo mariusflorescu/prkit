@@ -20,7 +20,7 @@ import {
 } from "../AgentProvider.ts";
 import { TURN_MARKER, watchTurn } from "../turnEnd.ts";
 import { toModels } from "./models.ts";
-import { Event, Request } from "./protocol.ts";
+import { Event, eventText, Request } from "./protocol.ts";
 import { layOutHome, workspaceSandboxProblem } from "./sandbox.ts";
 import { findSdk } from "./sdkLoader.ts";
 import { CURSOR_SDK_VERSION } from "./sdkPackages.ts";
@@ -41,8 +41,23 @@ const unavailable = (
 type Common = { readonly sdk: string; readonly apiKey: string | null };
 
 /** The turn's rules and its task in one message: Cursor takes no system prompt from prkit. */
+/**
+ * What Cursor really has, since the rules and prompts are written for agents with a shell: no
+ * git, no rg, no check scripts, only prkit's file tools and its MCP tools.
+ */
+const cursorTools = (input: TurnInput) =>
+  [
+    "You run in Cursor without a shell or git: where these rules or the task below name a command (git diff, git show, rg, a check script), you can't run it. Your tools:",
+    "- read_file, list_dir, glob and grep: the files in the working directory, and any diff file the task names.",
+    ...(input.access._tag === "write"
+      ? ["- write_file and edit_file: change files in the working directory."]
+      : []),
+    `- prkit's own tools: ${input.tools.join(", ")}.`,
+    "What changed, and what the base branch had, come from the task below and any diff file it names: a diff shows each changed line's old version.",
+  ].join("\n");
+
 const turnMessage = (input: TurnInput) =>
-  `<prkit-rules>\n${input.instructions}\n</prkit-rules>\n\n${input.prompt}`;
+  `<prkit-rules>\n${input.instructions}\n\n${cursorTools(input)}\n</prkit-rules>\n\n${input.prompt}`;
 
 /**
  * One Cursor instance. Cursor's SDK runs in a child process of prkit's (runner.ts), one per
@@ -60,6 +75,8 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
   const home = path.join(instanceDir, "home");
   /** The instance's own key, when it has one; otherwise the key its sign-in saved. */
   const apiKey = setup.environment.CURSOR_API_KEY ?? null;
+  /** The instance's other variables (a proxy, extra CAs) for the runner; the key goes on stdin. */
+  const { CURSOR_API_KEY: _key, ...instanceEnv } = setup.environment;
   const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
       Effect.provideService(FileSystem.FileSystem, fs),
@@ -79,8 +96,9 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
 
   /**
    * Starts the runner on one request; the process lives as long as the scope. Its environment is
-   * childEnv's allowlist plus HOME, so no CURSOR_ setting of the server's reaches it, and the
-   * key and prkit's MCP token travel in the request on stdin.
+   * childEnv's allowlist, the instance's own variables but its key, and HOME, so no CURSOR_
+   * setting of the server's reaches it, and the key and prkit's MCP token travel in the request
+   * on stdin.
    */
   const start = (
     request: (common: Common) => typeof Request.Type,
@@ -99,6 +117,7 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
         ChildProcess.make(process.execPath, [script], {
           cwd: options.cwd,
           env: childEnv(process.env, {
+            ...instanceEnv,
             ...options.env,
             HOME: home,
             // The packaged server runs on Electron's Node, which needs this to stay Node.
@@ -121,9 +140,12 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
       const events = child.stdout.pipe(
         Stream.decodeText(),
         Stream.splitLines,
-        Stream.flatMap((line) =>
-          Option.match(decodeEvent(line), { onNone: () => Stream.empty, onSome: Stream.make }),
-        ),
+        Stream.flatMap((line) => {
+          const text = eventText(line);
+          return text === null
+            ? Stream.empty
+            : Option.match(decodeEvent(text), { onNone: () => Stream.empty, onSome: Stream.make });
+        }),
         Stream.mapError(
           () =>
             new AgentError({ reason: "agent", message: "Cursor's runner stopped unexpectedly." }),
@@ -297,31 +319,21 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
   );
 
   /**
-   * Before the instance is removed: signs out the key its sign-in saved, then deletes its folder.
-   * The folder goes only once Cursor confirms the sign-out, so the key is never left behind with
-   * nothing to remove it.
+   * Before the instance is removed: signs out the key its sign-in saved, when Cursor support is
+   * installed, then deletes its folder either way. Signing out only forgets the key on this
+   * machine, and the key lives in that folder, so the folder going is what forgets it.
    */
   const retire = Effect.gen(function* () {
     if (setup.isDefault) return;
-    if (yield* fs.exists(path.join(home, ".cursor", "sdk", "auth.json"))) {
-      const confirmed = yield* logOut.pipe(
-        Effect.mapError(
-          (error) =>
-            new AgentError({
-              reason: "auth",
-              message:
-                error.message === NOT_INSTALLED
-                  ? `prkit needs Cursor support to sign ${setup.label} out before removing it. Install it, then remove it again.`
-                  : `prkit couldn't sign ${setup.label} out of Cursor, so it kept the agent. Try again.`,
-            }),
+    if (yield* fs.exists(path.join(home, ".cursor", "sdk", "auth.json")))
+      yield* logOut.pipe(
+        Effect.tapError((error) =>
+          Effect.logInfo("Cursor didn't sign out before its folder went").pipe(
+            Effect.annotateLogs({ instance: setup.id, message: error.message }),
+          ),
         ),
+        Effect.ignore,
       );
-      if (!confirmed)
-        return yield* new AgentError({
-          reason: "auth",
-          message: `prkit couldn't confirm ${setup.label} is signed out of Cursor, so it kept the agent. Try again.`,
-        });
-    }
     yield* fs.remove(instanceDir, { recursive: true, force: true });
     yield* Effect.logInfo("Removed a Cursor instance's home").pipe(
       Effect.annotateLogs({ instance: setup.id }),

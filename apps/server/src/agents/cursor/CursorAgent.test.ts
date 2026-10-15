@@ -42,6 +42,8 @@ const Run = Schema.fromJsonString(
     customTools: Schema.Array(Schema.String),
     cwd: Schema.NullOr(Schema.String),
     home: Schema.NullOr(Schema.String),
+    proxy: Schema.NullOr(Schema.String),
+    keyInEnv: Schema.Boolean,
     resumed: Schema.Boolean,
   }),
 );
@@ -383,7 +385,10 @@ describe("Cursor turns", () => {
   });
 
   it("edits files in a fix through prkit's tools, and never offers a command", async () => {
-    const provider = await instance("cursor_fix", { env: { CURSOR_API_KEY: "stand-in-key" } });
+    // The instance's own variables reach the runner, all but its key, which goes on stdin.
+    const provider = await instance("cursor_fix", {
+      env: { CURSOR_API_KEY: "stand-in-key", HTTPS_PROXY: "http://proxy.test:8080" },
+    });
     const before = (await runs()).length;
     const input = await turnInput("fix", {
       _tag: "write",
@@ -407,6 +412,8 @@ describe("Cursor turns", () => {
     expect(written).toBe("Written by the stand-in Cursor.\n");
     const [started] = (await runs()).slice(before);
     expect(started?.tools).toEqual(ALLOWED_TOOLS);
+    expect(started?.proxy).toBe("http://proxy.test:8080");
+    expect(started?.keyInEnv).toBe(false);
     expect(started?.customTools).toEqual(
       [...FIX_TOOLS, "edit_file", "glob", "grep", "list_dir", "read_file", "write_file"].sort(),
     );
@@ -431,6 +438,47 @@ describe("Cursor turns", () => {
       provider.runTurn({ ...input, resumeSessionId: "agent-1" }).pipe(Stream.runCollect),
     );
     expect(Exit.isFailure(resumed)).toBe(true);
+  });
+
+  it("fails the turn when Cursor runs one of its own tools, and keeps nothing from it", async () => {
+    const provider = await instance("cursor_builtin", { env: { CURSOR_API_KEY: "stand-in-key" } });
+    mcpCalls.length = 0;
+    await flag("builtin-read", true);
+    const input = await turnInput("builtin", { _tag: "read-only", tmpDir: `${root}/tmp-builtin` });
+    const exit = await Effect.runPromiseExit(
+      provider
+        .runTurn(input)
+        .pipe(Stream.runCollect, Effect.provideService(References.MinimumLogLevel, "Error")),
+    );
+    await flag("builtin-read", false);
+    expect(Exit.isFailure(exit) && JSON.stringify(exit.cause)).toContain(
+      "Cursor tried to use one of its own tools, which prkit doesn't allow. Nothing from this run was kept.",
+    );
+    // prkit's tools refused every call after it: the guide never reached prkit.
+    expect(
+      mcpCalls.filter((call) => call.method === "tools/call").map((call) => call.tool),
+    ).toEqual(["report_progress"]);
+    // prkit's own tools alone still finish a turn.
+    const ok = await events(provider, await turnInput("builtin-ok", input.access));
+    expect(ok.at(-1)).toEqual({ _tag: "finished", outcome: "completed", message: null });
+  });
+
+  it("hears a turn end only once Cursor saved it, through the SDK's own stray output", async () => {
+    const provider = await instance("cursor_dispose", { env: { CURSOR_API_KEY: "stand-in-key" } });
+    const all = await events(
+      provider,
+      await turnInput("dispose", { _tag: "read-only", tmpDir: `${root}/tmp-dispose` }),
+    );
+    // The stand-in prints half a line before the runner's last event; the event still arrives.
+    expect(all.at(-1)).toEqual({ _tag: "finished", outcome: "completed", message: null });
+    const session = all.find((event) => event._tag === "session");
+    const disposed = await fsRun(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        return yield* fs.readFileString(`${control}/disposed.log`);
+      }),
+    );
+    expect(disposed.split("\n")).toContain(session?._tag === "session" ? session.sessionId : "");
   });
 
   it("stops the runner's whole process group when the turn is stopped", async () => {
@@ -477,21 +525,18 @@ describe("removing a Cursor instance", () => {
     ).toBe(false);
   });
 
-  it("keeps an instance signed in when Cursor support isn't there to sign it out", async () => {
+  it("removes an instance and its saved key even when Cursor support isn't installed", async () => {
     const provider = await instance("cursor_kept");
     await signIn(provider);
     const without = await instance("cursor_kept", { installed: false });
-    const exit = await Effect.runPromiseExit(without.retire);
-    expect(Exit.isFailure(exit) && JSON.stringify(exit.cause)).toContain("needs Cursor support");
+    await Effect.runPromise(without.retire);
     expect(
       await fsRun(
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
-          return yield* fs.exists(
-            `${home}/cursor-instances/cursor_kept/home/.cursor/sdk/auth.json`,
-          );
+          return yield* fs.exists(`${home}/cursor-instances/cursor_kept`);
         }),
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 });
