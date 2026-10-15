@@ -5,7 +5,9 @@ import * as Migrator from "effect/sql/Migrator";
 import * as SqlClient from "effect/sql/SqlClient";
 import { describe, expect, it } from "vite-plus/test";
 
+import { FixerRow, TURN_COLUMNS, TurnRow } from "../fixers/fixerRows.ts";
 import * as GuideSettingsStore from "../reviews/GuideSettingsStore.ts";
+import { ReviewRow } from "../reviews/Reviews.ts";
 import { migrationEntries } from "./Migrations.ts";
 import * as NodeSqliteClient from "./NodeSqliteClient.ts";
 
@@ -37,13 +39,14 @@ const seed = Effect.gen(function* () {
   ] as const) {
     yield* sql`INSERT INTO reviews (id, pr_key, account_id, provider, model, status, created_at, updated_at)
       VALUES (${id}, ${`github.com/acme/widgets#${id}`}, 'github.com/octocat', ${provider}, 'm',
-        '{"_tag":"watching"}', ${AT}, ${AT})`;
+        ${`{"_tag":"watching","headSha":"abc1234","checkedAt":"${AT}"}`}, ${AT}, ${AT})`;
     yield* sql`INSERT INTO review_attempts (id, review_id, revision, trigger, run_id, phase, started_at, provider, model)
       VALUES (${`${id}-1`}, ${id}, 1, 'first', 'run', 'done', ${AT}, ${provider}, 'm')`;
     yield* sql`INSERT INTO fixers (id, pr_key, account_id, provider, created_at, updated_at)
       VALUES (${`fixer-${provider}`}, ${`github.com/acme/widgets#${id}`}, 'github.com/octocat', ${provider}, ${AT}, ${AT})`;
     yield* sql`INSERT INTO fixer_turns (id, fixer_id, kind, work, trigger, status, provider, created_at)
-      VALUES (${`turn-${provider}`}, ${`fixer-${provider}`}, 'fix', '{}', 'user', '{"_tag":"failed"}', ${provider}, ${AT})`;
+      VALUES (${`turn-${provider}`}, ${`fixer-${provider}`}, 'conflicts', '{"_tag":"conflicts","strategy":"merge"}', 'user',
+        '{"_tag":"failed","reason":"agent","message":"The agent stopped."}', ${provider}, ${AT})`;
   }
   yield* sql`INSERT INTO settings (key, value) VALUES ('guides.defaultAgent',
     '{"provider":"codex","model":"gpt-6.1","options":[{"id":"reasoningEffort","value":"high"}]}')`;
@@ -66,16 +69,31 @@ describe("016_AgentInstances", () => {
         yield* seed;
         yield* migrateThrough(16);
 
-        for (const table of ["reviews", "review_attempts", "fixers", "fixer_turns"]) {
-          const rows =
-            yield* sql`SELECT provider, instance_id FROM ${sql(table)} ORDER BY provider`.pipe(
-              Effect.flatMap(decodeRows),
-            );
-          expect(rows, table).toEqual([
-            { provider: "claude", instance_id: "claude" },
-            { provider: "codex", instance_id: "codex" },
-          ]);
-        }
+        // Each table read the way prkit reads it, so a row it can't decode fails here.
+        const pairs = (rows: ReadonlyArray<{ provider: string; instance_id: string }>) =>
+          rows.map(({ provider, instance_id }) => ({ provider, instance_id }));
+        const both = [
+          { provider: "claude", instance_id: "claude" },
+          { provider: "codex", instance_id: "codex" },
+        ];
+        const reviews = yield* sql`SELECT * FROM reviews ORDER BY provider`.pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(ReviewRow))),
+        );
+        expect(pairs(reviews)).toEqual(both);
+        const fixers = yield* sql`SELECT * FROM fixers ORDER BY provider`.pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(FixerRow))),
+        );
+        expect(pairs(fixers)).toEqual(both);
+        const turns =
+          yield* sql`SELECT ${sql.literal(TURN_COLUMNS)} FROM fixer_turns ORDER BY provider`.pipe(
+            Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(TurnRow))),
+          );
+        expect(pairs(turns)).toEqual(both);
+        const attempts =
+          yield* sql`SELECT provider, instance_id FROM review_attempts ORDER BY provider`.pipe(
+            Effect.flatMap(decodeRows),
+          );
+        expect(attempts).toEqual(both);
 
         const stored =
           yield* sql`SELECT value FROM settings WHERE key = 'guides.defaultAgent'`.pipe(

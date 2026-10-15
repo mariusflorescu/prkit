@@ -144,7 +144,7 @@ class AttemptFailure extends Schema.TaggedError<AttemptFailure>()("AttemptFailur
   message: Schema.String,
 }) {}
 
-const ReviewRow = Schema.Struct({
+export const ReviewRow = Schema.Struct({
   id: ReviewId,
   pr_key: PullRequestKey,
   account_id: AccountIdSchema,

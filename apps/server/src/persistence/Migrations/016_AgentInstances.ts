@@ -11,7 +11,7 @@ export default Effect.gen(function* () {
   // `environment` is a JSON array of { name, value, sensitive }, with sensitive values
   // kept apart from the database (`agent-secrets.json`) and stored here as "".
   yield* sql`
-    CREATE TABLE agent_instances (
+    CREATE TABLE IF NOT EXISTS agent_instances (
       id TEXT PRIMARY KEY NOT NULL,
       kind TEXT NOT NULL,
       label TEXT NOT NULL,
