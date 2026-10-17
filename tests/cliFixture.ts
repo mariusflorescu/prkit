@@ -4,8 +4,19 @@ import * as NodePath from "node:path";
 
 import type { FakeGitHub } from "./fakeGitHub.ts";
 
-/** Real local git objects behind the API fake. No git request can leave the journey's HOME. */
-export const cliFixture = async (fake: FakeGitHub) => {
+type Files = Readonly<Record<string, string>>;
+
+/** What PR 9 is by default: one file whose limit goes from 1 to 2. */
+const DEFAULT_FILES: { readonly base: Files; readonly head: Files } = {
+  base: { "src/limits.ts": "export const limit = 1;\n" },
+  head: { "src/limits.ts": "export const limit = 2;\nexport const enabled = true;\n" },
+};
+
+/**
+ * Real local git objects behind the API fake. No git request can leave the journey's HOME.
+ * `files` are the base of PR 9 and the head's changes on top of it.
+ */
+export const cliFixture = async (fake: FakeGitHub, files = DEFAULT_FILES) => {
   const repo = NodePath.join(fake.home, "source");
   const bin = NodePath.join(fake.home, "git-bin");
   NodeFS.mkdirSync(repo, { recursive: true });
@@ -29,22 +40,28 @@ export const cliFixture = async (fake: FakeGitHub) => {
         GIT_COMMITTER_EMAIL: "fixture@example.invalid",
       },
     }).trim();
+  const write = (changes: Files) => {
+    for (const [path, content] of Object.entries(changes)) {
+      NodeFS.mkdirSync(NodePath.dirname(NodePath.join(repo, path)), { recursive: true });
+      NodeFS.writeFileSync(NodePath.join(repo, path), content);
+    }
+    git(["add", ...Object.keys(changes)]);
+  };
+  /** Moves PR 9's branch and ref to a new commit and tells the fake, so a watcher sees a real new head. */
+  const advance = async (message: string) => {
+    git(["commit", "-m", message]);
+    const head = git(["rev-parse", "HEAD"]);
+    git(["update-ref", "refs/pull/9/head", head]);
+    git(["update-ref", "refs/heads/feature-9", head]);
+    await fetch(`${fake.url}/__fake/git-head?pr=9&sha=${head}`, { method: "POST" });
+    return head;
+  };
   git(["init", "--initial-branch=main"]);
-  NodeFS.mkdirSync(NodePath.join(repo, "src"));
-  NodeFS.writeFileSync(NodePath.join(repo, "src/limits.ts"), "export const limit = 1;\n");
-  git(["add", "src/limits.ts"]);
+  write(files.base);
   git(["commit", "-m", "Base"]);
   git(["checkout", "-b", "change"]);
-  NodeFS.writeFileSync(
-    NodePath.join(repo, "src/limits.ts"),
-    "export const limit = 2;\nexport const enabled = true;\n",
-  );
-  git(["add", "src/limits.ts"]);
-  git(["commit", "-m", "Change limit"]);
-  const head = git(["rev-parse", "HEAD"]);
-  git(["update-ref", "refs/pull/9/head", head]);
-  git(["update-ref", "refs/heads/feature-9", head]);
-  await fetch(`${fake.url}/__fake/git-head?pr=9&sha=${head}`, { method: "POST" });
+  write(files.head);
+  const head = await advance("Change limit");
   const script = NodePath.join(bin, "git.mjs");
   NodeFS.writeFileSync(
     script,
@@ -68,5 +85,13 @@ process.exit(result.status ?? 1);
     `#!/bin/sh\nexec '${process.execPath}' '${script}' "$@"\n`,
     { mode: 0o700 },
   );
-  return { path: `${bin}:${process.env.PATH ?? "/usr/bin:/bin"}`, head };
+  return {
+    path: `${bin}:${process.env.PATH ?? "/usr/bin:/bin"}`,
+    head,
+    /** A new commit on the PR's branch with these files changed; answers its sha. */
+    commit: async (changes: Files, message: string) => {
+      write(changes);
+      return advance(message);
+    },
+  };
 };

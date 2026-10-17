@@ -2,6 +2,7 @@
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import { seededIssues, seededThreads, seeds } from "./context.ts";
 import {
   archived,
   BASE,
@@ -545,6 +546,23 @@ export const graphql = (
     };
   }
   const pull = pullFrom(variables["number"]);
+  const seed = pull === undefined ? undefined : seeds.get(pull.number);
+  if (query.includes("PrkitClosingIssues"))
+    return {
+      kind: "graphql:closing-issues",
+      cost: 1,
+      data: {
+        repository: {
+          pullRequest:
+            pull === undefined
+              ? null
+              : {
+                  closingIssuesReferences:
+                    seed === undefined ? { totalCount: 0, nodes: [] } : seededIssues(seed),
+                },
+        },
+      },
+    };
   if (query.includes("reviewThreads"))
     return {
       kind: "graphql:threads",
@@ -556,7 +574,10 @@ export const graphql = (
               ? null
               : {
                   headRefOid: head(pull),
-                  reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+                  reviewThreads: {
+                    pageInfo: { hasNextPage: false, endCursor: null },
+                    nodes: seed === undefined ? [] : seededThreads(pull, seed),
+                  },
                 },
         },
       },

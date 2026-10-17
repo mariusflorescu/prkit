@@ -25,7 +25,9 @@
  *   linger    a `sleep` that a command left in the background; the command runs in a session
  *             of its own for a second, as Claude Code runs commands. Its PID goes in `linger.pid`
  *
- * Every turn appends `{configDir, session, resumed}` to `runs.log` there. With CLAUDE_CONFIG_DIR
+ * Every turn appends `{configDir, session, resumed}` to `runs.log` there, and its prompt to
+ * `prompts.jsonl` with a copy of the context file the prompt names (`context-<turn>.json`),
+ * because the attempt removes its diffs folder when it ends. With CLAUDE_CONFIG_DIR
  * set to a folder under `.e2e/`, it also saves the session as Claude Code does, under `projects/`,
  * so prkit can resume it with `--resume`. Any other folder is the user's own: it saves nothing.
  */
@@ -310,8 +312,27 @@ const resolve = async (prompt: string) => {
   );
 };
 
+/** The prompt of this turn, and a copy of the file it names with what GitHub says besides the diff. */
+const keepPrompt = (prompt: string) => {
+  if (control === "") return;
+  const lines = prompt.split("\n");
+  const named = lines.findIndex((line) => line.endsWith("is in this JSON file:"));
+  const source = named === -1 ? null : (lines[named + 1] ?? null);
+  const turns = NodeFS.existsSync(NodePath.join(control, "prompts.jsonl"))
+    ? NodeFS.readFileSync(NodePath.join(control, "prompts.jsonl"), "utf8").split("\n").length - 1
+    : 0;
+  const copy = source === null ? null : `context-${turns}.json`;
+  if (source !== null && copy !== null && NodeFS.existsSync(source))
+    NodeFS.copyFileSync(source, NodePath.join(control, copy));
+  NodeFS.appendFileSync(
+    NodePath.join(control, "prompts.jsonl"),
+    `${JSON.stringify({ prompt, context: copy })}\n`,
+  );
+};
+
 const turn = async (prompt: string) => {
   record();
+  keepPrompt(prompt);
   write({
     type: "system",
     subtype: "init",

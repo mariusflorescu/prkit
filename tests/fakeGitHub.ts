@@ -6,6 +6,7 @@ import * as NodeReadline from "node:readline";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import type { ContextSeed } from "../scripts/fake-github/context.ts";
 import { readRun, repoRoot } from "../scripts/verify-run.ts";
 
 const Ready = Schema.fromJsonString(
@@ -88,6 +89,17 @@ export const startFakeGitHub = async (
     latency: (ms: number, resource?: "graphql" | "core") =>
       post(`latency?ms=${ms}${resource === undefined ? "" : `&resource=${resource}`}`),
     archive: (repo: string) => post(`archive?repo=${repo}`),
+    /** Only `count` requests (or points, for graphql) are left in the window, like GitHub's header says. */
+    remaining: (resource: "graphql" | "core", count: number) =>
+      post(`remaining?resource=${resource}&count=${count}`),
+    /** What the PR says besides its diff: check runs, review threads and the issues it closes. Replaces the last seed. */
+    context: async (pr: number, seed: ContextSeed) => {
+      const response = await fetch(`${url}/__fake/context?pr=${pr}`, {
+        method: "POST",
+        body: JSON.stringify(seed),
+      });
+      if (!response.ok) throw new Error(`The fake refused the seed: ${await response.text()}`);
+    },
     resetStats: () => post("reset-stats"),
     comment: (pr: number, size = 0) => post(`comment?pr=${pr}&size=${size}`),
     push: (pr: number) => post(`push?pr=${pr}`),
