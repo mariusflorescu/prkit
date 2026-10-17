@@ -32,7 +32,7 @@ const CurrentCaller = Context.Reference<McpCaller | null>(
 
 const SubmitGuide = Tool.make("submit_guide", {
   description:
-    "Submit the guide for this pull request. prkit checks it against the diff: every changed file in exactly one chapter, every chapter and flow reference resolves, and every line note lands inside a hunk of a file with a text diff. If something is wrong, the call fails with a list of problems; fix them with revise_guide, which takes only what changes. After a valid call, end your turn.",
+    "Submit the guide for this pull request. prkit checks it against the diff: every changed file in exactly one chapter, every chapter and flow reference resolves, and every line note and every flow row's `at` lands inside a hunk of a file with a text diff. If something is wrong, the call fails with a list of problems; fix them with revise_guide, which takes only what changes. After a valid call, end your turn.",
   parameters: Guide,
   success: SubmitGuideReceipt,
   failure: SubmitGuideRejected,
@@ -45,7 +45,7 @@ const SubmitGuide = Tool.make("submit_guide", {
 
 const ReviseGuide = Tool.make("revise_guide", {
   description:
-    "Fix the guide submit_guide last rejected without writing it again. Send only what changes: top-level fields you send replace the rejected ones, and each chapter you send replaces the chapter with the same id, so send it whole with its files. prkit checks the result exactly like submit_guide. After a valid call, end your turn.",
+    "Fix the guide submit_guide last rejected without writing it again. Send only what changes: top-level fields you send replace the rejected ones whole (a new `flow` can also switch between a graph and rows), and each chapter you send replaces the chapter with the same id, so send it whole with its files. prkit checks the result exactly like submit_guide. After a valid call, end your turn.",
   parameters: GuidePatch,
   success: SubmitGuideReceipt,
   failure: SubmitGuideRejected,
@@ -84,7 +84,7 @@ const NoteFile = Tool.make("note_file", {
 
 const SubmitDraft = Tool.make("submit_draft", {
   description:
-    "Share the guide while you write it, so the reviewer can start reading. First call: the overview (summary, steps, flow) and every planned chapter with its id and title but no files. Then, each time you finish a chapter, call again with only that chapter (same id, now with its body and files). Fields you send replace earlier ones and chapters merge by id. prkit checks that every path, line note and reference resolves, but not yet that every file is covered. A draft never becomes the guide: finish with submit_guide.",
+    "Share the guide while you write it, so the reviewer can start reading. First call: the overview (summary, flow, background, steps) and every planned chapter with its id and title but no files. Then, each time you finish a chapter, call again with only that chapter (same id, now with its body and files). Fields you send replace earlier ones and chapters merge by id. prkit checks that every path, line note and reference resolves, but not yet that every file is covered. A draft never becomes the guide: finish with submit_guide.",
   parameters: DraftGuide,
   success: ToolReceipt,
   failure: ToolRejected,

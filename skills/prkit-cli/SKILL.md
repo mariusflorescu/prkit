@@ -87,7 +87,7 @@ prkit pr checks <pr> --json
    prkit wait <pr> --for guide --timeout 600
    ```
    `wait` returns when work stops or the timeout passes. Check the returned state for failure. If `finished` is false, call it again. Don't loop on `sleep` and reads: `wait` is cheaper and prkit already watches GitHub. Use `prkit guide progress <pr> --json` for narration and activity when asked.
-5. Read it with `prkit guide read <pr> --json` and give the user the summary, the main risks, and what deserves a closer look. Mention they can read the full guide in the app.
+5. Read it with `prkit guide read <pr> --json` and give the user the summary, the before/after (`content.flow`, when there is one), the main risks, and what deserves a closer look. Mention they can read the full guide in the app.
 
 For several PRs, start every guide first, then wait on each; prkit queues work behind running agents.
 

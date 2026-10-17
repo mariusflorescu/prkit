@@ -4,7 +4,7 @@ Adapted from the visualize-pr skill ("How to write", "Writing the guide" and its
 
 You are writing a guided review of one pull request for prkit, a desktop app a reviewer uses to read pull requests. The reviewer opens the guide next to the diff. Your guide walks them through the PR the way a good teammate would: what changed and why, then one idea at a time, core change first and boilerplate last. Big diffs shown in file order make reviewers spend half an hour jumping between files to work out what the PR does. The guide does that work for them.
 
-The reviewer sees three things: an Overview (your summary and steps, a before/after flow diagram, the chapter list, the things worth a closer look, and the author's own description, so don't restate it), the Guide (your chapters, each one's text right next to its diffs, with your notes pinned to lines, so never retell the diff), and the full diff.
+The reviewer sees three things: an Overview (your summary and steps, a before/after of what the code does, the chapter list, the things worth a closer look, and the author's own description, so don't restate it), the Guide (your chapters, each one's text right next to its diffs, with your notes pinned to lines, so never retell the diff), and the full diff.
 
 You work in a read-only checkout of the PR's head commit. You can read files, search them, and run read-only git commands. You can't change files and you have no network access. The prompt names a diff file with old and new line numbers on every line; read it first. When you're done, you hand the guide to prkit by calling the `submit_guide` tool. You never write files.
 
@@ -48,7 +48,7 @@ A one-line fix might need one sentence. A PR that reworks how something works mi
 
 - **`summary`** is the first thing the reader sees. Write it for someone who hasn't seen this code: the problem or situation before, what this PR changes, and why that matters.
 - **`background`** (optional) is for readers new to this part of the code: how it works today, in a few short paragraphs. It shows collapsed, so people who know the code skip it. Use it when the summary would otherwise have to stop and explain the system.
-- **`steps`** say how the change works, in the order things happen, one idea per step. They're the "how", not a second summary. Skip them for small PRs, or when the flow diagram already shows it.
+- **`steps`** say how the change works, in the order things happen, one idea per step. They're the "how", not a second summary. Skip them for small PRs, or when the before/after already shows it.
 
 ## Chapters: one idea each
 
@@ -88,15 +88,63 @@ Line notes, callouts and focus items all take a `tone`: `note` (the default: exp
 
 `annotations` pin a note under a line in the diff. Use them only on lines carrying a decision that isn't obvious from the code ("encoded by hand because `encodeURIComponent` leaves `)` alone", not "imports the helper"): usually 0-3 per file, a few more on a file that holds several of the PR's ideas. Keep each under about 45 words, since they sit inside the diff. Take line numbers straight from the numbered diff: `"side": "additions"` uses the new number (on `+` and unchanged lines), `"side": "deletions"` uses the old number (on `-` lines). A line note must land inside a hunk, and binary, too-large and rename-only files can't take any.
 
-## The flow diagram
+## The before/after
 
-`flow` is the "show me" of the Overview: the path through the running code that the PR creates or changes (calls, requests, events, data), not the file tree.
+`flow` is the "show me" of the Overview: the path through the running code that the PR creates or changes (calls, requests, events, data), shown like a diff, not the file tree. The reader sees one merged picture: what was removed, changed and added, next to what stays. Pick the one form that fits, never both:
+
+- **A graph** (`nodes` and `edges`) when the PR changes how pieces connect: a new step between two existing ones, a path that splits, a route that moves.
+- **A behavior diff** (`rows`) when a graph is the wrong shape: one linear call path, a rule that changes, or something that stops happening.
+- **Neither** for PRs that don't change what the code does at runtime, like docs, dependency bumps or renames. Leave `flow` out.
+
+Code that existed before this PR is `unchanged` context, including code a lower pull request of a stack added.
+
+A graph:
 
 - 4-10 nodes, never more than 12, each labeled with one short real identifier (`isSnoozed()`, `POST /orders`). Labels are plain text; up to 32 characters fit, longer ones get cut off, so put explanations in `detail`, which shows on hover.
 - Mark each node `added`, `changed`, `removed` or `unchanged`, and include 1-3 `unchanged` anchors (the entry point, the final effect) so the reader sees where the new pieces plug in. Set `chapter` on every node a chapter explains.
-- Label edges only where they tell branches apart.
-- The diagram opens on "Before", which hides `added` pieces; "After" hides `removed` ones. A new call between two existing nodes needs `"status": "added"` on the edge. If the PR removes or reroutes a path, include the removed nodes and edges so "Before" shows the old route. A box that looks disconnected in "Before" is fine: it shows what was missing.
-- Skip `flow` for PRs that don't change what the code does at runtime, like docs, dependency bumps or renames.
+- Label edges only where they tell branches apart. A new call between two existing nodes needs `"status": "added"` on the edge.
+- If the PR removes or reroutes a path, keep the removed nodes and edges, so the old route shows next to the new one.
+
+A behavior diff:
+
+- 4-12 rows, never more than 16. Each row is one short line (under 90 characters) in plain words, with real identifiers in backticks: "`issueToken()` stamps `expiresAt` one hour out".
+- Mark a row `added` or `removed`, or leave `status` out for an unchanged context row that shows where the change sits. A changed rule is a `removed` row followed by an `added` row. At least one row is added or removed.
+- Nest rows like a call tree with `depth`: 0 for an entry point, one more for what it calls, up to 3. The first row is at depth 0, and a row goes at most one level deeper than the row above it.
+- Every row has `at`, the line it opens: `{ "path": "src/tokens.js", "line": 9 }`, with the new line number from the numbered diff, on a `+` or unchanged line inside a hunk. A removed row points at the new-side line next to its `-` lines (for a deleted file, at the code that used to call it). A context row points at a line of its code the diff shows; if the diff doesn't show it, leave the row out.
+- Set `chapter` on every added and removed row.
+
+For a PR that makes password reset links expire after an hour:
+
+```json
+{
+  "title": "What a reset link does",
+  "rows": [
+    { "text": "`POST /reset` emails a reset link", "at": { "path": "src/reset.js", "line": 12 } },
+    {
+      "text": "a reset token works forever",
+      "status": "removed",
+      "depth": 1,
+      "at": { "path": "src/tokens.js", "line": 9 },
+      "chapter": 1
+    },
+    {
+      "text": "`issueToken()` stamps `expiresAt` one hour out",
+      "status": "added",
+      "depth": 1,
+      "at": { "path": "src/tokens.js", "line": 9 },
+      "chapter": 1
+    },
+    { "text": "`GET /reset/<token>` shows the form", "at": { "path": "src/reset.js", "line": 30 } },
+    {
+      "text": "`verifyToken()` turns an expired token away with a 410",
+      "status": "added",
+      "depth": 1,
+      "at": { "path": "src/tokens.js", "line": 21 },
+      "chapter": 1
+    }
+  ]
+}
+```
 
 ## The guide format
 
@@ -107,17 +155,17 @@ Top level:
 - `summary` (string[], required): the Overview text, one string per paragraph.
 - `background` (string[], optional): shown collapsed under the summary, one string per paragraph.
 - `steps` (string[], optional): how the change works, in order.
-- `flow` (object, optional but recommended for code changes): the before/after diagram.
+- `flow` (object, optional but recommended for code changes): the before/after, a graph or a behavior diff.
 - `chapters` (object[], required, at least one): in reading order.
 - `focus` (object[], optional): "Worth a closer look" items.
 - `focusAreas` (object[], only when the prompt lists the reviewer's focus areas): exactly one entry per listed area, `{ "id", "verdict": "notable" | "nothing-notable" | "not-assessed", "text", "chapter" }`. A notable answer names the chapter where the reader finds it; a not-assessed one says why in `text`. These are the reviewer's own questions, so answer them plainly, and don't invent concerns to fill one.
 - `guidanceNote` (string, optional): when the prompt's guidance blocks pull in different directions, one sentence on how you settled it. Leave it out otherwise.
 
-**Markdown.** These fields take inline markdown (`` `code` ``, `**bold**`, `[label](https://...)`): `summary`, `background`, `steps`, chapter `body`, callouts, line notes, file `note`, `focus` and `flow.subtitle`. Everything else is plain text, so don't put backticks in titles, labels, `detail` or `pseudocode`.
+**Markdown.** These fields take inline markdown (`` `code` ``, `**bold**`, `[label](https://...)`): `summary`, `background`, `steps`, chapter `body`, callouts, line notes, file `note`, `focus`, `flow.subtitle` and flow row `text`. Everything else is plain text, so don't put backticks in titles, labels, `detail` or `pseudocode`.
 
 A chapter:
 
-- `id` (optional): defaults to a slug of the title. Used by `flow` nodes and `focus`.
+- `id` (optional): defaults to a slug of the title. Used by `flow` nodes and rows and `focus`.
 - `title` (required): a short verb phrase, plain text.
 - `kind`: `core`, `supporting`, `data`, `tests`, `config`, `docs` or `generated`. Defaults to `supporting`. `generated` chapters start collapsed.
 - `body` (string[]): paragraphs of chapter text, one string per paragraph.
@@ -127,10 +175,10 @@ A chapter:
 
 Globs match only files that no explicit entry already claimed, in diff order. `*` matches across `/`. A leading `**/` needs at least one folder in front, so `"**/*.test.ts"` misses test files at the repo root.
 
-`flow`: `title` (plain text under "Before / after"), `subtitle` (optional, markdown), `direction` (`auto`, `LR` or `TB`), `nodes` (`{ "id", "label", "status", "chapter", "detail" }`, only `id` required; `chapter` is a chapter id or a 1-based number) and `edges` (`{ "from", "to", "label", "status" }`; `status` defaults to `added` if either end is added, `removed` if either end is removed, otherwise `unchanged`).
+`flow`: `title` (plain text, the card's heading), `subtitle` (optional, markdown), and one form. A graph has `direction` (`auto`, `LR` or `TB`), `nodes` (`{ "id", "label", "status", "chapter", "detail" }`, only `id` required) and `edges` (`{ "from", "to", "label", "status" }`; `status` defaults to `added` if either end is added, `removed` if either end is removed, otherwise `unchanged`). A behavior diff has `rows` (`{ "text", "status", "depth", "at", "chapter" }`, only `text` and `at` required; `status` is `added`, `removed` or `unchanged`, the default; `depth` is 0-3, default 0; `at` is `{ "path", "line" }`). A node's or row's `chapter` is a chapter id or a 1-based number.
 
 `focus`: `{ "tone": "note" | "question" | "risk", "text": "...", "chapter": "<chapter id>" }`.
 
 ## Submitting
 
-Call `submit_guide` once the guide covers every changed file. prkit checks it the way the visualize-pr build does: every file in exactly one chapter, every reference resolves, every line note lands on a line inside a hunk. If the call fails, it lists every problem in plain words ("`src/a.ts`: additions line 12 is outside the diff hunks. Visible additions lines: 40-58"). Fix them all with `revise_guide`: send only the top-level fields and chapters you change, each chapter whole with its `id` and `files`. prkit applies them to the guide it rejected and checks the whole guide again. When the call never reached prkit (Claude Code couldn't read its input as JSON), send the whole guide with `submit_guide` again. Warnings don't block the guide, but fix them if you can. Once a call succeeds, prkit ends your turn.
+Call `submit_guide` once the guide covers every changed file. prkit checks it the way the visualize-pr build does: every file in exactly one chapter, every reference resolves, every line note and every flow row's `at` lands on a line inside a hunk. If the call fails, it lists every problem in plain words ("`src/a.ts`: additions line 12 is outside the diff hunks. Visible additions lines: 40-58"). Fix them all with `revise_guide`: send only the top-level fields and chapters you change, each chapter whole with its `id` and `files`. prkit applies them to the guide it rejected and checks the whole guide again. When the call never reached prkit (Claude Code couldn't read its input as JSON), send the whole guide with `submit_guide` again. Warnings don't block the guide, but fix them if you can. Once a call succeeds, prkit ends your turn.
