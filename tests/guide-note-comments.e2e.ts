@@ -1,6 +1,7 @@
 import { type Browser, test } from "@e2e-dev/web";
 import { expect, type Screen, type TestFixtures } from "e2e";
 import * as Schema from "effect/Schema";
+import { chromium } from "playwright";
 
 import { type FakeNote, setUpFakeClaude } from "./fakeClaude.ts";
 import {
@@ -20,6 +21,33 @@ const PR = "/pr/github.com/budget/fixtures/9?account=github.com%2Fbudget-test";
 const SLUG = "Why does a slug get its own limit here instead of in the shared config?";
 const URL_RISK = "Dropping the 1024 limit lets far longer links through. Is that on purpose?";
 const DOUBLED = "The URL limit doubles to 2048.";
+const CHECK = "Should an empty URL pass this check?";
+const BRACE = "Does short need a test of its own?";
+const GENERATED = "Is this generated file meant to be in the PR?";
+
+/** PR 9's limits with two checks, whose `}` rows read the same four lines apart. */
+const CHECKS = `export const limits = {
+  url: 2048,
+  slug: 64,
+  title: 120,
+};
+
+export const schemes = ["http", "https"];
+
+export function check(url: string) {
+  return url.length <= limits.url;
+}
+
+export function short(slug: string) {
+  return slug.length <= limits.slug;
+}
+`;
+/** Four lines above the code, and the first check's line changed. */
+const MOVED = `// Limits for links and slugs.
+// Every value is a length in characters.
+// Change them here and nowhere else.
+// The checks below read them.
+${CHECKS.replace("return url.length <= limits.url;", "return url.length > 0 && url.length <= limits.url;")}`;
 
 const question = (line: number, text: string): FakeNote => ({
   line,
@@ -58,6 +86,21 @@ const postedReview = async (fake: FakeGitHub) => {
   expect(writes.map((write) => write.kind)).toEqual(["POST pulls/9/reviews"]);
   return Schema.decodeUnknownSync(Review)(writes[0]?.input);
 };
+
+/** GitHub's files answer for PR 9 when only `src/limits.ts` has a diff. */
+const servedLimits = (patch: string) => ({
+  filename: LIMITS,
+  status: "modified",
+  additions: patch.split("\n").filter((line) => line.startsWith("+")).length,
+  deletions: patch.split("\n").filter((line) => line.startsWith("-")).length,
+  patch,
+});
+
+const revisionCount = (home: string) =>
+  readRows(
+    home,
+    `SELECT COUNT(*) AS n FROM review_revisions r JOIN reviews v ON v.id = r.review_id WHERE v.pr_key = '${KEY}'`,
+  )[0]?.n;
 
 const draftRows = (home: string) =>
   readRows(
@@ -203,6 +246,246 @@ test(
       ]);
       await url.scrollIntoView();
       await screenshotLightAndDark(app, browser, "posted");
+    } finally {
+      stopFakeInstance(name, { keepHome: false });
+      fake.stop();
+    }
+  },
+);
+
+test(
+  "guide notes: a note a second window already added is refused, and the first window keeps its words",
+  { timeout: 300_000 },
+  async ({ app, screen, browser }) => {
+    const name = "note-comments-twice";
+    const { fake, claude, git, launch } = await fixtures(name);
+    const other = await chromium.launch({ headless: true, args: ["--use-mock-keychain"] });
+    try {
+      await fake.gitHead(9, git.head(9));
+      claude.notes({ [LIMITS]: [question(3, SLUG)] });
+      const run = launch();
+      await openGuide({ app, screen, browser }, run, true);
+      const slug = noteIn(browser, LIMITS, "question", SLUG);
+      await slug.scrollIntoView();
+      await slug.getByRole("button", "Add as comment, question on line 3").tap();
+      const field = screen.getByRole("textbox", "Comment on line 3");
+      await field.fill("Words from the first window");
+
+      const page = await other.newPage();
+      await page.goto(run.openUrl);
+      await page.getByRole("link", { name: "Inbox", exact: true }).waitFor({ timeout: 30_000 });
+      await page.goto(`${run.url}${PR}&tab=guide`);
+      await page.getByRole("button", { name: "Add as comment, question on line 3" }).click();
+      await page.getByRole("button", { name: "Add review comment" }).click();
+      await page
+        .getByRole("article", { name: "Pending comment on src/limits.ts line 3" })
+        .waitFor({ timeout: 30_000 });
+
+      await screen.getByRole("button", "Add review comment").tap();
+      await expect(screen.getByText("You already added this note to your review.")).toBeVisible();
+      await expect(field).toHaveValue("Words from the first window");
+      await expect(slug.getByRole("status")).toHaveText("In your review.");
+      expect(draftRows(run.home)).toEqual([
+        { side: "new", line: 3, body: SLUG, state: "draft", fromNote: 1 },
+      ]);
+      await screenshotLightAndDark(app, browser, "duplicate-refused");
+
+      await field.press("Escape");
+      await expect(field).toBeHidden();
+      await screen
+        .getByRole("article", "Pending comment on src/limits.ts line 3")
+        .getByRole("button", "Delete pending comment")
+        .tap();
+      await expect(slug.getByRole("button", "Add as comment, question on line 3")).toBeVisible();
+      expect(draftRows(run.home)).toEqual([]);
+      expect(await fake.writes()).toEqual([]);
+    } finally {
+      await other.close();
+      stopFakeInstance(name, { keepHome: false });
+      fake.stop();
+    }
+  },
+);
+
+test(
+  "guide notes: on a revision for an older head a note lands where its code is now or not at all, and a new revision waits for the comment",
+  { timeout: 480_000 },
+  async ({ app, screen, browser }) => {
+    const name = "note-comments-moved";
+    const { fake, claude, git, launch } = await fixtures(name);
+    try {
+      const first = git.commit(9, { [LIMITS]: CHECKS });
+      await fake.files(9, [servedLimits(git.patch(9, LIMITS))]);
+      await fake.gitHead(9, first);
+      claude.notes({
+        [LIMITS]: [question(3, SLUG), risk(2, URL_RISK), question(10, CHECK), question(15, BRACE)],
+        "src/change-0.ts": [question(1, GENERATED)],
+      });
+      const run = launch();
+      await openGuide({ app, screen, browser }, run, true);
+
+      claude.hold();
+      const moved = git.commit(9, { [LIMITS]: MOVED });
+      await fake.files(9, [servedLimits(git.patch(9, LIMITS))]);
+      await fake.gitHead(9, moved);
+      const tabs = screen.getByRole("navigation", "Pull request tabs");
+      await tabs.getByRole("link", "Files").tap();
+      await expect(screen.getByRole("region", LIMITS)).toContainText("+14 -1", {
+        timeout: 60_000,
+      });
+      await tabs.getByRole("link", "Guide").tap();
+      const revision = screen.getByRole("combobox", "Guide revision");
+      await expect(revision).toContainText("r1 · ");
+
+      const url = noteIn(browser, LIMITS, "risk", URL_RISK);
+      await url.scrollIntoView();
+      await url.getByRole("button", "Add as comment, risk on old line 2").tap();
+      await screen.getByRole("textbox", "Comment on old line 2").press("Meta+Enter");
+      await expect(url.getByRole("status")).toHaveText("In your review.");
+      await expect(
+        screen.getByRole("article", "Pending comment on src/limits.ts old line 2"),
+      ).toBeVisible();
+
+      const check = noteIn(browser, LIMITS, "question", CHECK);
+      await check.getByRole("button", "Add as comment, question on line 10").tap();
+      await expect(screen.getByText("This line changed after the guide was written")).toBeVisible();
+      await expect(
+        screen.getByText(
+          "prkit won't guess where the comment goes. Comment on the latest code in Files.",
+        ),
+      ).toBeVisible();
+      await screenshotLightAndDark(app, browser, "changed-line-toast");
+      await expect(screen.getByRole("textbox", /^Comment on/)).toHaveCount(0);
+
+      const brace = noteIn(browser, LIMITS, "question", BRACE);
+      await brace.scrollIntoView();
+      await brace.getByRole("button", "Add as comment, question on line 15").tap();
+      await screen
+        .getByRole("textbox", "Comment on line 19, where this line is now")
+        .press("Meta+Enter");
+      await expect(brace.getByRole("status")).toHaveText(
+        "In your review, on line 19 of the latest code.",
+      );
+
+      const generated = noteIn(browser, "src/change-0.ts", "question", GENERATED);
+      await generated.scrollIntoView();
+      await generated.getByRole("button", "Add as comment, question on line 1").tap();
+      await expect(
+        screen.getByText(
+          "GitHub shows no diff for this file now, so prkit can't place a comment on it.",
+        ),
+      ).toBeVisible();
+      expect(draftRows(run.home)).toHaveLength(2);
+
+      const slug = noteIn(browser, LIMITS, "question", SLUG);
+      await slug.scrollIntoView();
+      await slug.getByRole("button", "Add as comment, question on line 3").tap();
+      const field = screen.getByRole("textbox", "Comment on line 7, where this line is now");
+      await expect(field).toHaveValue(SLUG);
+      await screenshotLightAndDark(app, browser, "moved-composer");
+      await field.fill("Could the slug limit live in the shared config instead?");
+
+      claude.notes({
+        [LIMITS]: [question(7, SLUG), risk(2, URL_RISK), question(14, CHECK), question(19, BRACE)],
+        "src/change-0.ts": [question(1, GENERATED)],
+      });
+      claude.release();
+      await expect.poll(() => revisionCount(run.home), { timeout: 120_000 }).toBe(2);
+      await expect(revision).toContainText("r1 · ");
+      await expect(field).toHaveValue("Could the slug limit live in the shared config instead?");
+      await screenshotLightAndDark(app, browser, "held-revision");
+      await field.press("Meta+Enter");
+      await expect(revision).toContainText("r2 · ", { timeout: 30_000 });
+
+      await slug.scrollIntoView();
+      await expect(slug.getByRole("status")).toHaveText("In your review.");
+      await expect(url.getByRole("status")).toHaveText("In your review.");
+      await expect(brace.getByRole("status")).toHaveText("In your review.");
+      await expect(check.getByRole("button", "Add as comment, question on line 14")).toBeVisible();
+      await screenshotLightAndDark(app, browser, "revision-2");
+
+      await revision.tap();
+      await screen.getByRole("option", /^r1 · /).tap();
+      await expect(revision).toContainText("r1 · ");
+      await slug.scrollIntoView();
+      await expect(slug.getByRole("status")).toHaveText(
+        "In your review, on line 7 of the latest code.",
+      );
+      await screenshotLightAndDark(app, browser, "moved-status");
+
+      await tabs.getByRole("link", "Files").tap();
+      await expect(
+        screen.getByRole("article", "Pending comment on src/limits.ts line 7"),
+      ).toContainText("Could the slug limit live in the shared config instead?");
+      await expect(
+        screen.getByRole("article", "Pending comment on src/limits.ts line 19"),
+      ).toBeVisible();
+
+      await screen.getByRole("button", "Review, 3 pending").first().tap();
+      const dialog = screen.getByRole("dialog", "Finish your review");
+      await dialog.getByRole("button", "Submit review").tap();
+      await expect(dialog).toBeHidden({ timeout: 30_000 });
+      const review = await postedReview(fake);
+      expect(review.commit_id).toBe(moved);
+      expect(review.comments).toEqual([
+        { path: LIMITS, body: URL_RISK, line: 2, side: "LEFT" },
+        { path: LIMITS, body: BRACE, line: 19, side: "RIGHT" },
+        {
+          path: LIMITS,
+          body: "Could the slug limit live in the shared config instead?",
+          line: 7,
+          side: "RIGHT",
+        },
+      ]);
+    } finally {
+      claude.release();
+      stopFakeInstance(name, { keepHome: false });
+      fake.stop();
+    }
+  },
+);
+
+test(
+  "guide notes: a new revision after an unrelated push keeps what became of each remark",
+  { timeout: 360_000 },
+  async ({ app, screen, browser }) => {
+    const name = "note-comments-again";
+    const { fake, claude, git, launch } = await fixtures(name);
+    try {
+      await fake.gitHead(9, git.head(9));
+      claude.notes({ [LIMITS]: [question(3, SLUG), risk(2, URL_RISK)] });
+      const run = launch();
+      await openGuide({ app, screen, browser }, run, true);
+      const slug = noteIn(browser, LIMITS, "question", SLUG);
+      const url = noteIn(browser, LIMITS, "risk", URL_RISK);
+      await slug.scrollIntoView();
+      await slug.getByRole("button", "Add as comment, question on line 3").tap();
+      await screen.getByRole("textbox", "Comment on line 3").press("Meta+Enter");
+      await url.getByRole("button", "Add as comment, risk on old line 2").tap();
+      await screen.getByRole("textbox", "Comment on old line 2").press("Meta+Enter");
+      await expect(url.getByRole("status")).toHaveText("In your review.");
+      await screen.getByRole("button", "Review, 2 pending").first().tap();
+      const dialog = screen.getByRole("dialog", "Finish your review");
+      await dialog.getByRole("button", "Submit review").tap();
+      await expect(dialog).toBeHidden({ timeout: 30_000 });
+      await expect(slug.getByRole("status")).toHaveText("Posted on GitHub.", { timeout: 30_000 });
+
+      claude.notes({
+        [LIMITS]: [question(3, SLUG), risk(2, URL_RISK), question(2, DOUBLED)],
+      });
+      const generatedFile = `${Array.from({ length: 1600 }, (_, index) => `// Fixture detail ${index}`).join("\n")}\nexport const change0 = "Second fixture 9";\n`;
+      await fake.gitHead(9, git.commit(9, { "src/change-0.ts": generatedFile }));
+      const revision = screen.getByRole("combobox", "Guide revision");
+      await expect(revision).toContainText("r2 · ", { timeout: 120_000 });
+      await slug.scrollIntoView();
+      await expect(slug.getByRole("status")).toHaveText("Posted on GitHub.");
+      await expect(url.getByRole("status")).toHaveText("Posted on GitHub.");
+      await expect(slug.getByRole("button")).toHaveCount(0);
+      await expect(url.getByRole("button")).toHaveCount(0);
+      const doubled = noteIn(browser, LIMITS, "question", DOUBLED);
+      await expect(doubled.getByRole("button", "Add as comment, question on line 2")).toBeVisible();
+      await screenshotLightAndDark(app, browser, "revision-2-posted");
+      expect((await postedReview(fake)).comments).toHaveLength(2);
     } finally {
       stopFakeInstance(name, { keepHome: false });
       fake.stop();
