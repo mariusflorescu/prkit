@@ -6,46 +6,37 @@ import type { AttemptConfig, SkippedFile } from "./guideConfig.ts";
 import { describeRule } from "./guideConfigResolve.ts";
 import { globTokens, matchesGlob } from "./guideGlob.ts";
 import {
-  type DiffLineRef,
   type DraftGuide,
   type Guide,
   type GuidePatch,
-  GuideFlowStatus,
   GuideKind,
-  GuideRowDepth,
-  type GuideRowStatus,
   GuideSide,
   GuideTone,
   type NormalizedGuide,
 } from "./guide.ts";
+import {
+  type GuideCheckContext,
+  type Mode,
+  type Report,
+  asList,
+  didYouMean,
+  hunkRanges,
+  listRanges,
+  paragraphs,
+  repr,
+  resolveChapter,
+  slugify,
+  trim,
+  words,
+} from "./guideCheck.ts";
+import { checkFlowLengths, flowTexts, normalizeFlow } from "./guideFlow.ts";
 
-type Report = { errors: Array<string>; warnings: Array<string> };
-/** `draft` skips the checks a guide can only pass once it is finished: coverage and empty chapters. */
-type Mode = "guide" | "draft";
+export type { GuideCheckContext };
+
 type RawChapter = DraftChapter | Guide["chapters"][number];
 type DraftChapter = NonNullable<DraftGuide["chapters"]>[number];
 type Chapter = NormalizedGuide["chapters"][number];
 type FileEntry = Exclude<Guide["chapters"][number]["files"][number], string>;
-type Flow = NonNullable<NormalizedGuide["flow"]>;
-type FlowGraph = Extract<Flow, { readonly _tag: "graph" }>;
-type BehaviorDiff = Extract<Flow, { readonly _tag: "behavior" }>;
-type RawFlow = NonNullable<Guide["flow"]>;
-type Range = readonly [number, number];
-
-/**
- * What one attempt asked for, so the checks that depend on the reviewer's settings
- * run. Without it a guide is checked as the visualize-pr format alone.
- */
-export interface GuideCheckContext {
-  /** The active focus areas, by the id the agent answers under: exactly one entry each. */
-  readonly focusAreas: ReadonlyArray<{
-    readonly handle: string;
-    readonly label: string;
-    readonly question: string;
-  }>;
-  /** Files the ignore rules skip. They are not in the snapshot the guide is checked against. */
-  readonly skipped: ReadonlyArray<SkippedFile>;
-}
 
 export const checkContextOf = (config: AttemptConfig): GuideCheckContext => ({
   focusAreas: config.focusAreas.flatMap((area) =>
@@ -59,13 +50,9 @@ export const checkContextOf = (config: AttemptConfig): GuideCheckContext => ({
 /** The chapter prkit appends for skipped files; an agent's chapter can't take its id. */
 export const SKIPPED_CHAPTER_ID = "skipped-by-your-ignore-rules";
 const GUIDANCE_NOTE_MAX = 300;
-const FLOW_NODES_MAX = 12;
-const FLOW_ROWS_MAX = 16;
-const FLOW_ROW_TEXT_MAX = 90;
 
 const isKind = Schema.is(GuideKind);
 const isTone = Schema.is(GuideTone);
-const isDepth = Schema.is(GuideRowDepth);
 const sideAliases = new Map<string, typeof GuideSide.Type>([
   ["additions", "additions"],
   ["new", "additions"],
@@ -76,72 +63,6 @@ const sideAliases = new Map<string, typeof GuideSide.Type>([
   ["left", "deletions"],
   ["-", "deletions"],
 ]);
-const statusAliases = new Map<string, typeof GuideFlowStatus.Type>([
-  ["added", "added"],
-  ["new", "added"],
-  ["add", "added"],
-  ["changed", "changed"],
-  ["modified", "changed"],
-  ["updated", "changed"],
-  ["removed", "removed"],
-  ["deleted", "removed"],
-  ["gone", "removed"],
-  ["unchanged", "unchanged"],
-  ["same", "unchanged"],
-  ["existing", "unchanged"],
-]);
-
-const slugify = (text: string) =>
-  text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "chapter";
-const asList = (value: string | ReadonlyArray<string> | undefined): ReadonlyArray<string> =>
-  value === undefined ? [] : typeof value === "string" ? [value] : value;
-const whitespace =
-  "\\t-\\r\\x1c-\\x20\\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000";
-const trimWhitespace = new RegExp(`^[${whitespace}]+|[${whitespace}]+$`, "gu");
-const wordSeparator = new RegExp(`[${whitespace}]+`, "u");
-const trim = (text: string) => text.replace(trimWhitespace, "");
-const paragraphs = (value: string | ReadonlyArray<string> | undefined) =>
-  asList(value).map(trim).filter(Boolean);
-const words = (text: string) => (trim(text) ? trim(text).split(wordSeparator).length : 0);
-const repr = (text: string) => {
-  const quote = text.includes("'") && !text.includes('"') ? '"' : "'";
-  return (
-    quote +
-    text
-      .replace(/\\/g, "\\\\")
-      .replaceAll(quote, "\\" + quote)
-      .replace(/\n/g, "\\n")
-      .replace(/\r/g, "\\r")
-      .replace(/\t/g, "\\t") +
-    quote
-  );
-};
-
-const hunkRanges = (patch: string) => {
-  const additions: Array<Range> = [];
-  const deletions: Array<Range> = [];
-  for (const match of patch.matchAll(/(?:^|\n)@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/g)) {
-    const oldStart = Number(match[1]);
-    const oldLength = Number(match[2] ?? 1);
-    const newStart = Number(match[3]);
-    const newLength = Number(match[4] ?? 1);
-    if (oldLength) deletions.push([oldStart, oldStart + oldLength - 1]);
-    if (newLength) additions.push([newStart, newStart + newLength - 1]);
-  }
-  return { additions, deletions };
-};
-
-const listRanges = (ranges: ReadonlyArray<Range>) =>
-  ranges.map(([low, high]) => `${low}-${high}`).join(", ") || "none";
-
-const didYouMean = (path: string, snapshot: DiffSnapshot) => {
-  const basename = path.split("/").at(-1);
-  const close = snapshot.files.find((candidate) => candidate.path.endsWith("/" + basename));
-  return close === undefined ? "" : ` Did you mean ${repr(close.path)}?`;
-};
 
 const normalizeEntry = (
   entry: FileEntry,
@@ -343,279 +264,6 @@ const normalizeChapters = (
   return chapters;
 };
 
-const resolveChapter = (
-  value: string | number | undefined,
-  chapterIds: ReadonlyArray<string>,
-  where: string,
-  report: Report,
-) => {
-  if (value === undefined || value === "") return null;
-  if (typeof value === "number") {
-    const id = Number.isInteger(value) && value >= 1 ? chapterIds[value - 1] : undefined;
-    if (id !== undefined) return id;
-    report.errors.push(
-      `${where}: chapter number ${value} is out of range (1-${chapterIds.length}).`,
-    );
-    return null;
-  }
-  const id = slugify(value);
-  if (chapterIds.includes(id)) return id;
-  report.errors.push(
-    `${where}: chapter \`${value}\` doesn't exist. Chapter ids: ${chapterIds.join(", ")}.`,
-  );
-  return null;
-};
-
-/** Appended to the outside-the-hunks message for the rows that have no new-side line of their own. */
-const outsideHints: Record<typeof GuideRowStatus.Type, string> = {
-  added: "",
-  removed: " A removed row points at the new-side line next to its `-` lines.",
-  unchanged:
-    " A context row points at a line of its code the diff shows; leave the row out if the diff doesn't show it.",
-};
-
-/**
- * Where a row opens, checked like a line note: a new-side line inside a hunk of a text
- * diff, because Pierre renders only hunk lines without loaded contents and throws on a
- * selection it did not render. `hint` is appended when the line is outside the hunks.
- */
-const checkDiffLine = (
-  at: DiffLineRef,
-  where: string,
-  hint: string,
-  snapshot: DiffSnapshot,
-  context: GuideCheckContext | null,
-  report: Report,
-) => {
-  const { path, line } = at;
-  const file = snapshot.files.find((candidate) => candidate.path === path);
-  if (file === undefined) {
-    const left = context?.skipped.find((candidate) => candidate.path === path);
-    report.errors.push(
-      left === undefined
-        ? `${where}: \`${path}\` is not a file in this PR.${didYouMean(path, snapshot)}`
-        : `${where}: \`${path}\` is skipped by the reviewer's ignore rules (${left.reasons.map(describeRule).join(", ")}). Point the row at a reviewed file.`,
-    );
-    return;
-  }
-  if (!Number.isInteger(line) || line < 1) {
-    report.errors.push(`${where}: \`at.line\` must be a positive line number, got ${line}.`);
-    return;
-  }
-  if (file.patch._tag !== "text") {
-    report.errors.push(
-      `${where}: \`${path}\` has a \`${file.patch._tag}\` patch, so \`at\` can't point into it. Point at a line of a text diff.`,
-    );
-    return;
-  }
-  const ranges = hunkRanges(file.patch.patch);
-  if (ranges.additions.length === 0 && ranges.deletions.length === 0) {
-    report.errors.push(
-      `${where}: \`${path}\` has no diff hunks (a rename only), so \`at\` can't point into it. Point at a file with changed lines.`,
-    );
-    return;
-  }
-  if (ranges.additions.length === 0) {
-    report.errors.push(
-      `${where}: \`${path}\` is deleted, so it has no new-side lines. Point the row at a file that still exists, such as the code that used to call it.`,
-    );
-    return;
-  }
-  if (!ranges.additions.some(([low, high]) => low <= line && line <= high))
-    report.errors.push(
-      `${where}: \`${path}\` line ${line} is not a new-side line inside the diff hunks, so it can't open. New-side lines: ${listRanges(ranges.additions)}.${hint}`,
-    );
-};
-
-/**
- * A behavior diff: rows like diff lines, nested like a call tree. Checks every row so one
- * rejection lists every problem.
- */
-const normalizeBehavior = (
-  raw: RawFlow,
-  rows: NonNullable<RawFlow["rows"]>,
-  chapterIds: ReadonlyArray<string>,
-  snapshot: DiffSnapshot,
-  mode: Mode,
-  context: GuideCheckContext | null,
-  report: Report,
-): BehaviorDiff | null => {
-  if (rows.length === 0) {
-    report.errors.push("`flow.rows` is empty. Send 4-12 rows, or a graph instead.");
-    return null;
-  }
-  if (rows.length > FLOW_ROWS_MAX)
-    report.errors.push(
-      `\`flow\` has ${rows.length} rows - past ${FLOW_ROWS_MAX} it stops being a quick read. Keep the path the PR changes (4-12 rows) and leave the details to the chapters.`,
-    );
-  if (rows.every((row) => (row.status ?? "unchanged") === "unchanged"))
-    report.errors.push(
-      "`flow.rows` has no `added` or `removed` row, so it shows no change. Mark the rows this PR adds or removes.",
-    );
-  const normalized: Array<BehaviorDiff["rows"][number]> = [];
-  let above = -1;
-  for (const [index, row] of rows.entries()) {
-    const where = `flow row ${index + 1}`;
-    const status = row.status ?? "unchanged";
-    const depth = row.depth ?? 0;
-    const level = isDepth(depth) ? depth : null;
-    const text = trim(row.text);
-    if (!text)
-      report.errors.push(`${where} has no \`text\`. Say in a few plain words what happens.`);
-    if (level === null) {
-      report.errors.push(
-        `${where}: \`depth\` ${depth} must be 0-3. Flatten the tree: four levels is the most that stays readable.`,
-      );
-    } else {
-      if (index === 0 && level > 0)
-        report.errors.push(
-          `${where}: \`depth\` ${level} has no row above it. The first row is at depth 0.`,
-        );
-      else if (index > 0 && above >= 0 && level > above + 1)
-        report.errors.push(
-          `${where}: \`depth\` ${level} follows a row at depth ${above}. A row goes at most one level deeper than the row above it.`,
-        );
-      above = level;
-    }
-    if (
-      mode === "guide" &&
-      status !== "unchanged" &&
-      (row.chapter === undefined || row.chapter === "")
-    )
-      report.errors.push(
-        `${where} is ${status} but has no \`chapter\`. Set it to the chapter that explains it, by id or 1-based number.`,
-      );
-    checkDiffLine(row.at, where, outsideHints[status], snapshot, context, report);
-    normalized.push({
-      status,
-      text,
-      depth: level ?? 0,
-      at: row.at,
-      chapter: resolveChapter(row.chapter, chapterIds, where, report),
-    });
-  }
-  return {
-    _tag: "behavior",
-    title: raw.title || "How it fits together",
-    subtitle: raw.subtitle || null,
-    rows: normalized,
-  };
-};
-
-/** The graph form: nodes and edges, each checked against the other. */
-const normalizeGraph = (
-  raw: RawFlow,
-  rawNodes: NonNullable<RawFlow["nodes"]>,
-  rawEdges: NonNullable<RawFlow["edges"]>,
-  chapterIds: ReadonlyArray<string>,
-  report: Report,
-): FlowGraph | null => {
-  const nodes: Array<FlowGraph["nodes"][number]> = [];
-  const statuses = new Map<string, FlowGraph["nodes"][number]["status"]>();
-  for (const node of rawNodes) {
-    const id = trim(node.id);
-    if (!id || statuses.has(id)) {
-      const nodeRepr =
-        "{" +
-        Object.entries(node)
-          .map(([key, value]) => `${repr(key)}: ${typeof value === "string" ? repr(value) : value}`)
-          .join(", ") +
-        "}";
-      report.errors.push(`flow node ${nodeRepr}: every node needs a unique \`id\`.`);
-      continue;
-    }
-    let status = statusAliases.get((node.status ?? "unchanged").toLowerCase());
-    if (status === undefined) {
-      report.errors.push(
-        `flow node \`${id}\`: status must be added, changed, removed or unchanged.`,
-      );
-      status = "unchanged";
-    }
-    statuses.set(id, status);
-    nodes.push({
-      id,
-      label: node.label || id,
-      status,
-      chapter: resolveChapter(node.chapter, chapterIds, `flow node \`${id}\``, report),
-      detail: node.detail || null,
-    });
-  }
-  if (nodes.length === 0) {
-    report.errors.push("`flow.nodes` is empty.");
-    return null;
-  }
-  const edges: Array<FlowGraph["edges"][number]> = [];
-  for (const edge of rawEdges) {
-    const fromStatus = statuses.get(edge.from);
-    const toStatus = statuses.get(edge.to);
-    if (fromStatus === undefined || toStatus === undefined) {
-      report.errors.push(`flow edge ${edge.from} -> ${edge.to}: both ends must be node ids.`);
-      continue;
-    }
-    let status = edge.status;
-    if (status === undefined)
-      status =
-        fromStatus === "added" || toStatus === "added"
-          ? "added"
-          : fromStatus === "removed" || toStatus === "removed"
-            ? "removed"
-            : "unchanged";
-    edges.push({
-      from: edge.from,
-      to: edge.to,
-      label: edge.label || null,
-      status: statusAliases.get(status.toLowerCase()) ?? "unchanged",
-    });
-  }
-  if (nodes.length > FLOW_NODES_MAX)
-    report.errors.push(
-      `\`flow\` has ${nodes.length} nodes - past ${FLOW_NODES_MAX} it stops being readable. Keep the main path (4-10 nodes), or send a behavior diff (\`rows\`) instead.`,
-    );
-  const direction = (raw.direction ?? "auto").toUpperCase();
-  return {
-    _tag: "graph",
-    title: raw.title || "How it fits together",
-    subtitle: raw.subtitle || null,
-    direction: direction === "LR" || direction === "TB" ? direction : "auto",
-    nodes,
-    edges,
-  };
-};
-
-/** The before/after in the one form it was written in, or null when it was left out or is broken. */
-const normalizeFlow = (
-  raw: Guide["flow"],
-  chapterIds: ReadonlyArray<string>,
-  snapshot: DiffSnapshot,
-  mode: Mode,
-  context: GuideCheckContext | null,
-  report: Report,
-): Flow | null => {
-  if (raw === undefined) {
-    if (snapshot.files.some((file) => !/\.(md|mdx|rst|txt|adoc)$/iu.test(file.path)))
-      report.warnings.push(
-        "no `flow` - a before/after (a graph or a behavior diff) is the fastest way to show what changed. Skip it only if this PR doesn't change what the code does.",
-      );
-    return null;
-  }
-  const isGraph = raw.nodes !== undefined || raw.edges !== undefined;
-  if (isGraph && raw.rows !== undefined) {
-    report.errors.push(
-      "`flow` has both a graph (`nodes`/`edges`) and a behavior diff (`rows`). Pick the one form that shows this change best and send `flow` again with only that form.",
-    );
-    return null;
-  }
-  if (raw.rows !== undefined)
-    return normalizeBehavior(raw, raw.rows, chapterIds, snapshot, mode, context, report);
-  if (!isGraph) {
-    report.errors.push(
-      "`flow` needs a graph (`nodes` and `edges`) or a behavior diff (`rows`). Send one, or leave `flow` out if neither helps.",
-    );
-    return null;
-  }
-  return normalizeGraph(raw, raw.nodes ?? [], raw.edges ?? [], chapterIds, report);
-};
-
 const checkLengths = (guide: NormalizedGuide, report: Report) => {
   for (const chapter of guide.chapters) {
     for (const callout of chapter.callouts) {
@@ -635,24 +283,7 @@ const checkLengths = (guide: NormalizedGuide, report: Report) => {
       }
     }
   }
-  const flow = guide.flow;
-  if (flow?._tag === "graph") {
-    for (const node of flow.nodes) {
-      const length = Array.from(node.label).length;
-      if (length > 32)
-        report.warnings.push(
-          `flow node \`${node.id}\` label is ${length} chars and will be cut off - use one short identifier and put the rest in \`detail\`.`,
-        );
-    }
-  } else if (flow?._tag === "behavior") {
-    for (const [index, row] of flow.rows.entries()) {
-      const length = Array.from(row.text).length;
-      if (length > FLOW_ROW_TEXT_MAX)
-        report.warnings.push(
-          `flow row ${index + 1} is ${length} characters and will wrap - keep a row to one short line and leave the why to its chapter.`,
-        );
-    }
-  }
+  checkFlowLengths(guide.flow, report);
 };
 
 function* guideTexts(guide: NormalizedGuide) {
@@ -669,19 +300,7 @@ function* guideTexts(guide: NormalizedGuide) {
       for (const annotation of file.annotations) yield annotation.text;
     }
   }
-  if (guide.flow !== null) {
-    yield guide.flow.title;
-    yield guide.flow.subtitle ?? "";
-    if (guide.flow._tag === "graph") {
-      for (const node of guide.flow.nodes) {
-        yield node.label;
-        yield node.detail ?? "";
-      }
-      for (const edge of guide.flow.edges) yield edge.label ?? "";
-    } else {
-      for (const row of guide.flow.rows) yield row.text;
-    }
-  }
+  if (guide.flow !== null) yield* flowTexts(guide.flow);
   for (const item of guide.focus) yield item.text;
   for (const area of guide.focusAreas) yield area.text;
   yield guide.guidanceNote ?? "";
