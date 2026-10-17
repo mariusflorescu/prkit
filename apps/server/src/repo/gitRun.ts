@@ -52,23 +52,57 @@ export const checkoutFor = (path: Path.Path, repo: string, worktree: string): Ch
   gitDir: path.join(repo, "worktrees", path.basename(worktree)),
 });
 
+/**
+ * The user's own repository, which prkit only reads, with every dir it found pinned. The
+ * index is a prkit temp file, so nothing prkit runs reads or writes the user's.
+ */
+export interface UserRepository {
+  readonly _tag: "user";
+  readonly gitDir: string;
+  readonly commonDir: string;
+  readonly workTree: string;
+  readonly indexFile: string;
+  /**
+   * Copying objects only: new objects and git's temp files go here, and the user's objects
+   * are read as alternates. Without it git writes its temp files into the user's objects.
+   */
+  readonly objectDirectory?: string;
+}
+
 /** Where a git command runs, and the dirs prkit pins so git never discovers them from the checkout. */
 export type GitTarget =
   /** Creating the cache: no dir is pinned, because none exists yet. */
   | { readonly _tag: "plain" }
   | { readonly _tag: "bare"; readonly repo: string }
-  | { readonly _tag: "worktree"; readonly checkout: Checkout };
+  | { readonly _tag: "worktree"; readonly checkout: Checkout }
+  | UserRepository;
+
+/**
+ * Config that makes a read write to the user's repository: a split or untracked-cache index
+ * written next to theirs, and automatic gc or maintenance after a command.
+ */
+const USER_READ_FLAGS: ReadonlyArray<string> = [
+  "-c",
+  "core.splitIndex=false",
+  "-c",
+  "core.untrackedCache=false",
+  "-c",
+  "gc.auto=0",
+  "-c",
+  "maintenance.auto=false",
+];
 
 /** The full argument list: the safety flags come before the subcommand, where `-c` must sit. */
-export const gitArgs = (args: ReadonlyArray<string>): ReadonlyArray<string> => [
+export const gitArgs = (args: ReadonlyArray<string>, target: GitTarget): ReadonlyArray<string> => [
   ...GIT_SAFETY_FLAGS,
+  ...(target._tag === "user" ? USER_READ_FLAGS : []),
   ...args,
 ];
 
 /**
- * The GIT_DIR / GIT_COMMON_DIR / GIT_WORK_TREE a command runs under. Setting all three
- * makes git ignore the worktree's `.git` file and its `commondir`, so a rewrite of either
- * can't point git at a planted config.
+ * The GIT_DIR / GIT_COMMON_DIR / GIT_WORK_TREE a command runs under, and in the user's
+ * repository its index. Setting all three makes git ignore the worktree's `.git` file and its
+ * `commondir`, so a rewrite of either can't point git at a planted config.
  */
 export const gitDirEnv = (target: GitTarget): Record<string, string> => {
   switch (target._tag) {
@@ -82,15 +116,38 @@ export const gitDirEnv = (target: GitTarget): Record<string, string> => {
         GIT_COMMON_DIR: target.checkout.repo,
         GIT_WORK_TREE: target.checkout.worktree,
       };
+    case "user":
+      return {
+        GIT_DIR: target.gitDir,
+        GIT_COMMON_DIR: target.commonDir,
+        GIT_WORK_TREE: target.workTree,
+        GIT_INDEX_FILE: target.indexFile,
+        // Replace refs would make the user's objects read as others; optional locks would
+        // let a read refresh the index.
+        GIT_NO_REPLACE_OBJECTS: "1",
+        GIT_OPTIONAL_LOCKS: "0",
+        ...(target.objectDirectory === undefined
+          ? {}
+          : {
+              GIT_OBJECT_DIRECTORY: target.objectDirectory,
+              GIT_ALTERNATE_OBJECT_DIRECTORIES: `${target.commonDir}/objects`,
+            }),
+      };
   }
 };
 
-export const cwdOf = (target: GitTarget): string | undefined =>
-  target._tag === "plain"
-    ? undefined
-    : target._tag === "bare"
-      ? target.repo
-      : target.checkout.worktree;
+export const cwdOf = (target: GitTarget): string | undefined => {
+  switch (target._tag) {
+    case "plain":
+      return undefined;
+    case "bare":
+      return target.repo;
+    case "worktree":
+      return target.checkout.worktree;
+    case "user":
+      return target.workTree;
+  }
+};
 
 export class RepoError extends Schema.TaggedError<RepoError>()("RepoError", {
   reason: Schema.Literals(["account", "repository"]),

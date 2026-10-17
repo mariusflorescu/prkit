@@ -172,7 +172,7 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const cwd = cwdOf(options.target);
         const child = yield* spawner.spawn(
-          ChildProcess.make("git", gitArgs(args), {
+          ChildProcess.make("git", gitArgs(args, options.target), {
             ...(cwd === undefined ? {} : { cwd }),
             env: childEnv(process.env, {
               ...isolatedGitEnv,
