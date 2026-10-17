@@ -4,9 +4,14 @@ import {
   type CommentPlacement,
   diffRows,
   FileSide,
+  type GuideRevision,
   NoteKey,
+  type NoteRef,
+  noteKey,
+  notePoint,
   type PendingComment,
   PendingCommentState,
+  placeNote,
   type PullRequestKey,
   refFromKey,
   ReviewCommentId,
@@ -25,6 +30,7 @@ import type { SqlError } from "effect/sql/SqlError";
 import { GitHubApi } from "../github/GitHubApi.ts";
 import { makeKeyedGate } from "../github/keyedGate.ts";
 import { PullRequests } from "../pullRequests/PullRequests.ts";
+import { Reviews } from "../reviews/Reviews.ts";
 
 const Row = Schema.Struct({
   id: ReviewCommentId,
@@ -68,6 +74,12 @@ const EVENTS = {
   "request-changes": { request: "REQUEST_CHANGES", state: "CHANGES_REQUESTED" },
 } as const satisfies Record<ReviewEvent, { request: string; state: string }>;
 const GITHUB_SIDE = { old: "LEFT", new: "RIGHT" } as const;
+/** Why a guide note can't become a draft on GitHub's diff now. */
+const LOST = {
+  file: "GitHub shows no diff for this file now, so prkit can't place a comment on it.",
+  lines:
+    "This line changed after the guide was written, and prkit won't guess where the comment goes. Comment on the latest code in Files.",
+} as const;
 /** How far before a submission started GitHub's clock may put the review it created. */
 const CLOCK_SKEW_MS = 10 * 60_000;
 
@@ -88,6 +100,16 @@ const toComment = (row: typeof Row.Type): PendingComment => ({
   updatedAt: row.updated_at,
 });
 
+/** The note at `ref` and the rows of the diff its revision was written on. */
+const findNote = (revision: GuideRevision, ref: NoteRef) => {
+  const note = revision.normalized.chapters
+    .flatMap((chapter) => chapter.files)
+    .find((entry) => entry.path === ref.path)?.annotations[ref.index];
+  const file = revision.snapshot.files.find((candidate) => candidate.path === ref.path);
+  if (note === undefined || file?.patch._tag !== "text") return null;
+  return { note, rows: diffRows(file.patch.patch) };
+};
+
 const toGitHubComment = (comment: PendingComment) => {
   const { path, start, end } = comment.anchor;
   const single = start.side === end.side && start.line === end.line;
@@ -107,6 +129,7 @@ export class ReviewComments extends Context.Service<ReviewComments, Effect.Succe
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const pullRequests = yield* PullRequests;
+  const reviews = yield* Reviews;
   const api = yield* GitHubApi;
   const crypto = yield* Crypto.Crypto;
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
@@ -226,6 +249,27 @@ export const make = Effect.gen(function* () {
       ),
     );
 
+  const sameHost = (key: PullRequestKey, accountId: AccountId) => {
+    const ref = refFromKey(key);
+    return ref !== null && accountId.startsWith(`${ref.host}/`)
+      ? Effect.void
+      : fail("This pull request and GitHub account must belong to the same host.");
+  };
+  /** One insert for both ways a draft starts; the caller holds the gate. */
+  const insert = (
+    key: PullRequestKey,
+    accountId: AccountId,
+    placement: CommentPlacement,
+    body: string,
+    note: NoteKey | null,
+  ) =>
+    Effect.gen(function* () {
+      const at = yield* now;
+      const { anchor } = placement;
+      yield* sql`INSERT INTO pending_comments (id, pr_key, account_id, path, start_side, start_line, end_side, end_line, snippet, commit_sha, body, state, submission_id, note_key, created_at, updated_at)
+        VALUES (${yield* newId}, ${key}, ${accountId}, ${anchor.path}, ${anchor.start.side}, ${anchor.start.line}, ${anchor.end.side}, ${anchor.end.line}, ${placement.snippet}, ${placement.commitSha}, ${body}, 'draft', NULL, ${note}, ${at}, ${at})`;
+    });
+
   const add = (
     key: PullRequestKey,
     accountId: AccountId,
@@ -236,16 +280,52 @@ export const make = Effect.gen(function* () {
       key,
       accountId,
     )(
+      sameHost(key, accountId).pipe(
+        Effect.andThen(insert(key, accountId, placement, body, null)),
+        Effect.andThen(read(key, accountId)),
+        storage,
+      ),
+    );
+
+  /**
+   * A draft from a guide note, in the user's words. The note is found in its revision and
+   * placed on GitHub's diff now, never on a line that only looks like its own. A note that
+   * already made a draft, in any state, is refused, so a second window can't add it twice.
+   */
+  const addFromNote = (key: PullRequestKey, accountId: AccountId, ref: NoteRef, body: string) =>
+    gate(
+      key,
+      accountId,
+    )(
       Effect.gen(function* () {
-        const ref = refFromKey(key);
-        if (ref === null || !accountId.startsWith(`${ref.host}/`))
-          return yield* fail("This pull request and GitHub account must belong to the same host.");
-        const at = yield* now;
-        const { anchor } = placement;
-        yield* sql`INSERT INTO pending_comments (id, pr_key, account_id, path, start_side, start_line, end_side, end_line, snippet, commit_sha, body, state, submission_id, created_at, updated_at)
-          VALUES (${yield* newId}, ${key}, ${accountId}, ${anchor.path}, ${anchor.start.side}, ${anchor.start.line}, ${anchor.end.side}, ${anchor.end.line}, ${placement.snippet}, ${placement.commitSha}, ${body}, 'draft', NULL, ${at}, ${at})`;
+        yield* sameHost(key, accountId);
+        const found = findNote(yield* reviews.guide(key, ref.revision), ref);
+        const note = found && noteKey(ref.path, found.rows, found.note);
+        if (found === null || note === null)
+          return yield* fail("This note isn't in the guide anymore. Refresh and retry.");
+        const taken =
+          yield* sql`SELECT id FROM pending_comments WHERE pr_key = ${key} AND account_id = ${accountId} AND note_key = ${note}`;
+        if (taken.length > 0) return yield* fail("You already added this note to your review.");
+        // Placed on the head GitHub has now, as at submit, not the one a cache last saw.
+        yield* pullRequests.current(key, accountId);
+        const placed = placeNote({
+          path: ref.path,
+          point: notePoint(found.note),
+          written: found.rows,
+          files: yield* pullRequests.files(key, accountId),
+        });
+        if (placed._tag === "lost") return yield* fail(LOST[placed.reason]);
+        yield* insert(key, accountId, placed.placement, body, note);
         return yield* read(key, accountId);
-      }).pipe(storage),
+      }).pipe(
+        Effect.catchTags({
+          GuideNotFoundError: () => fail("This guide revision is gone. Refresh and retry."),
+          ReviewError: (error) => fail(error.message),
+          GitHubRequestError: (error) => fail(error.message),
+          PullRequestReadError: (error) => fail(error.message),
+        }),
+        storage,
+      ),
     );
 
   /** Changes one draft that no submission has taken yet. */
@@ -369,7 +449,7 @@ export const make = Effect.gen(function* () {
       ),
     );
 
-  return { list, add, edit, move, remove, submit };
+  return { list, add, addFromNote, edit, move, remove, submit };
 });
 
 export const layer = Layer.effect(ReviewComments, make);
