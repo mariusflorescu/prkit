@@ -92,6 +92,11 @@ export const cwdOf = (target: GitTarget): string | undefined =>
       ? target.repo
       : target.checkout.worktree;
 
+export class RepoError extends Schema.TaggedError<RepoError>()("RepoError", {
+  reason: Schema.Literals(["account", "repository"]),
+  message: Schema.String,
+}) {}
+
 /** prkit refused a git step because the checkout's git metadata was changed under it. */
 export class GitTampered extends Schema.TaggedError<GitTampered>()("GitTampered", {
   worktree: Schema.String,

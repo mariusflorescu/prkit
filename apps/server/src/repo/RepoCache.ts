@@ -36,17 +36,13 @@ import {
   GitTampered,
   gitArgs,
   gitDirEnv,
+  RepoError,
 } from "./gitRun.ts";
 import { linksRefusal, newLinks } from "./links.ts";
 import { type NestedEntry, nestedGitEntries } from "./nestedRepos.ts";
 import { rebaseStateHash } from "./rebaseState.ts";
 
-export { type Checkout, GitTampered } from "./gitRun.ts";
-
-export class RepoError extends Schema.TaggedError<RepoError>()("RepoError", {
-  reason: Schema.Literals(["account", "repository"]),
-  message: Schema.String,
-}) {}
+export { type Checkout, GitTampered, RepoError } from "./gitRun.ts";
 
 /** prkit committed nothing: the agent made or changed a symlink or submodule (docs/internals/fix-agent.md). */
 export class LinkRefused extends Schema.TaggedError<LinkRefused>()("LinkRefused", {
