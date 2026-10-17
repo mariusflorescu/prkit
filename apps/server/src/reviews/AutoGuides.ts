@@ -11,6 +11,7 @@ import * as Stream from "effect/Stream";
 import * as ServerConfig from "../config.ts";
 import { inBackground } from "../github/GitHubApi.ts";
 import { PullRequests } from "../pullRequests/PullRequests.ts";
+import { unattended } from "./ContextPriority.ts";
 import { GuideSettingsStore } from "./GuideSettingsStore.ts";
 import { Reviews } from "./Reviews.ts";
 
@@ -48,7 +49,7 @@ export const make = Effect.gen(function* () {
             entry.isDraft
           )
             continue;
-          if (!(yield* reviews.autoGenerate(key, entry.accountId))) continue;
+          if (!(yield* unattended(reviews.autoGenerate(key, entry.accountId)))) continue;
           yield* Effect.logInfo("Auto mode started a guide").pipe(
             Effect.annotateLogs({ key, accountId: entry.accountId }),
           );

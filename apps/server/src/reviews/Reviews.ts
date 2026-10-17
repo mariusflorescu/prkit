@@ -81,12 +81,14 @@ import type { FileRead } from "../agents/commandReads.ts";
 import { processStartTime, reapAgentGroup } from "../agents/agentProcess.ts";
 import { Agents } from "../agents/Agents.ts";
 import * as ServerConfig from "../config.ts";
-import { GitHubApi } from "../github/GitHubApi.ts";
+import { GitHubApi, GitHubPriority } from "../github/GitHubApi.ts";
 import { makeKeyedGate } from "../github/keyedGate.ts";
 import { boundPort } from "../listenAddress.ts";
 import { McpTokens } from "../mcp/McpTokens.ts";
 import { PullRequests } from "../pullRequests/PullRequests.ts";
 import { type Checkout, RepoCache, type Since } from "../repo/RepoCache.ts";
+import { ContextPriority, unattended } from "./ContextPriority.ts";
+import { contextJson, contextNotes } from "./contextFile.ts";
 import { GuideConfigStore } from "./GuideConfigStore.ts";
 import { makeGuideStream } from "./guideStream.ts";
 import { GuideSettingsStore } from "./GuideSettingsStore.ts";
@@ -1155,6 +1157,7 @@ export const make = Effect.gen(function* () {
         diff: path.join(diffDir, "pull-request.diff"),
         since: path.join(diffDir, `since-revision-${previous?.revision ?? 0}.diff`),
         guide: path.join(diffDir, `guide-revision-${previous?.revision ?? 0}.json`),
+        context: path.join(diffDir, "pull-request-context.json"),
       };
       const related = following(previous, since, files);
       const follows =
@@ -1230,6 +1233,11 @@ export const make = Effect.gen(function* () {
         "note",
         follows.note === null ? checkedOut : `${checkedOut}. ${follows.note}`,
       );
+      const context = yield* pullRequests
+        .context(review.key, review.accountId, ready.headSha)
+        .pipe(Effect.provideService(GitHubPriority, yield* ContextPriority));
+      for (const note of contextNotes(context))
+        yield* appendActivity(review.key, review.id, attemptId, "note", note);
       if (
         !(yield* setStatus(
           review.id,
@@ -1248,6 +1256,10 @@ export const make = Effect.gen(function* () {
           yield* fs.remove(tmpDir, { recursive: true, force: true });
           yield* fs.makeDirectory(tmpDir, { mode: 0o700 });
           yield* fs.writeFileString(files.diff, diff.text);
+          yield* fs.writeFileString(
+            files.context,
+            contextJson(context, { ref, headSha: ready.headSha }),
+          );
           readContexts.set(attemptId, {
             worktree: ready.worktree,
             diffFile: files.diff,
@@ -1301,6 +1313,7 @@ export const make = Effect.gen(function* () {
           guidance: settings.guidance.filter((block) => block.replacedBy === null),
           focusAreas: settings.focusAreas.filter((area) => area.active),
         },
+        context: { file: files.context, read: context },
         stack,
         previous: follows.prompt,
         streamsGuideInput: provider.streamsGuideInput,
@@ -2418,7 +2431,7 @@ export const make = Effect.gen(function* () {
         review.status._tag === "failed" && review.status.attemptId !== null
           ? yield* batchOf(review.status.attemptId)
           : null;
-      yield* startAttempt(review, "retry", { batch });
+      yield* unattended(startAttempt(review, "retry", { batch }));
     }
     const live = new Set(
       (yield* sql`SELECT id FROM reviews WHERE json_extract(status, '$._tag') != 'done'`.pipe(
