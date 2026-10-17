@@ -31,7 +31,7 @@ Inbox flags are `--reason review-requested|authored|involved`, `--repo owner/rep
 | `prkit pr file <pr> --path src/a.ts --side new --json` | Old or new file contents as text pages; join by `offset`.                                            |
 | `prkit pr timeline <pr> --json`                        | Paged timeline events.                                                                               |
 | `prkit pr threads <pr> --json`                         | Paged GitHub threads, anchors and permissions. No reply or resolution.                               |
-| `prkit pr checks <pr> --json`                          | Paged check names, states and links.                                                                 |
+| `prkit pr checks <pr> --json`                          | Paged check names, states, links and GitHub's short summaries.                                       |
 | `prkit pr conversation <pr> --json`                    | Paged issue comments, reviews and review comments.                                                   |
 | `prkit pr stack <pr> --json`                           | Paged stack layers from bottom to top; a non-stacked PR has a null stack.                            |
 | `prkit pr candidates <pr> --json`                      | Paged reviewer, team and label choices. Reading them doesn't apply them.                             |
