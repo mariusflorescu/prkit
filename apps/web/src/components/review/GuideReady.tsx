@@ -10,9 +10,10 @@ import { useCallback, useState } from "react";
 
 import type { LoadContents } from "~/components/diff";
 import { GuideView } from "~/components/guide";
+import { useReviewCommentsStore } from "~/features/reviewComments/reviewCommentsStore";
 import { useDiffComments } from "~/features/reviewComments/useDiffComments";
 import { getFileContents } from "~/rpc/client";
-import { guideQuery } from "~/rpc/queries";
+import { guideQuery, pendingCommentsQuery } from "~/rpc/queries";
 
 import { GuidanceNoteLine } from "./config/GuidanceNoteLine";
 import { DraftView } from "./DraftView";
@@ -51,8 +52,19 @@ export function GuideReady({
     running && attempt?.draft != null
       ? { attempt, version: attempt.draft.version, growing: attempt.draft.growing }
       : null;
-  const revision = revisions.find((entry) => entry.revision === picked) ?? latest;
+  // A comment being written from a note keeps its revision on screen, so a new one
+  // doesn't replace the guide under it; then the view follows the newest again.
+  const held = useReviewCommentsStore((state) =>
+    state.composer?.key === detail.key ? (state.composer.note?.ref.revision ?? null) : null,
+  );
+  const closeComposer = useReviewCommentsStore((state) => state.closeComposer);
+  const revision =
+    revisions.find((entry) => entry.revision === picked) ??
+    revisions.find((entry) => entry.revision === held) ??
+    latest;
   const guide = useQuery(guideQuery(detail.key, revision.revision));
+  // Notes say what became of their drafts with the first paint, never a moment later.
+  const pending = useQuery(pendingCommentsQuery(detail.key, detail.accountId));
   const { retry } = useReviewActions(detail.key);
   const loadContents = useCallback<LoadContents>(
     async (file) => {
@@ -72,6 +84,7 @@ export function GuideReady({
     commitSha: revision.headSha,
     threads: current,
     outdated: false,
+    revision: revision.revision,
   });
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -81,7 +94,10 @@ export function GuideReady({
         attempt={attempt}
         revisions={revisions}
         selected={picked === "draft" && draft !== null ? "draft" : revision.revision}
-        onSelect={(next) => setPicked(next === latest.revision ? null : next)}
+        onSelect={(next) => {
+          if (held !== null && next !== held) closeComposer();
+          setPicked(next === latest.revision ? null : next);
+        }}
         shown={
           guide.data === undefined || (picked === "draft" && draft !== null)
             ? null
@@ -106,7 +122,7 @@ export function GuideReady({
             growing={draft.growing}
           />
         </div>
-      ) : guide.isPending ? (
+      ) : guide.isPending || pending.isPending ? (
         <GuideSkeleton />
       ) : guide.isError ? (
         <ReviewAlert

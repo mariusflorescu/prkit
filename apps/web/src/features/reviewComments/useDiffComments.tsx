@@ -1,5 +1,4 @@
 import {
-  type AccountId,
   anchorHolds,
   type CommentPlacement,
   type DiffFile,
@@ -7,8 +6,10 @@ import {
   diffRows,
   findSnippet,
   type LinePoint,
+  noteKey,
+  notePoint,
   type PendingComment,
-  type PullRequestKey,
+  type PullRequestDetail,
   rangeRows,
   type ReviewCommentId,
   type ReviewThread,
@@ -21,9 +22,12 @@ import { toastManager } from "~/components/ui/toast";
 import { movePendingComment } from "~/rpc/client";
 import { pendingCommentsQuery, reviewThreadsQuery } from "~/rpc/queries";
 import { CommentPin } from "./CommentPin";
+import { NoteCommentButton } from "./NoteCommentButton";
+import { NoteCommentStatus } from "./NoteCommentStatus";
 import { OutdatedComments } from "./OutdatedComments";
 import { storePending } from "./reviewCommentsCache";
-import { useReviewCommentsStore } from "./reviewCommentsStore";
+import { COMMENTABLE } from "./reviewCommentPresentation";
+import { type NoteDraft, useReviewCommentsStore } from "./reviewCommentsStore";
 
 export type CommentScope = {
   /** The head commit of the diff on screen. */
@@ -32,13 +36,15 @@ export type CommentScope = {
   threads: boolean;
   /** Whether drafts and threads whose lines are gone are listed under each file. */
   outdated: boolean;
+  /** The guide revision on screen, whose question and risk notes can become drafts. Null on Files. */
+  revision: number | null;
 };
 
 type Pin = {
   point: LinePoint;
   threads: Array<ReviewThread>;
   drafts: Array<PendingComment>;
-  composer: CommentPlacement | null;
+  composer: { placement: CommentPlacement; note: NoteDraft | null } | null;
 };
 
 const locate = (
@@ -62,11 +68,11 @@ const locate = (
  * layer. Drafts sit where their lines still read the same; others are outdated.
  */
 export function useDiffComments(
-  pr: { key: PullRequestKey; accountId: AccountId },
+  pr: Pick<PullRequestDetail, "key" | "accountId" | "headSha" | "baseSha">,
   files: ReadonlyArray<DiffFile>,
   scope: CommentScope,
 ) {
-  const { key, accountId } = pr;
+  const { key, accountId, headSha, baseSha } = pr;
   const client = useQueryClient();
   const pending = useQuery(pendingCommentsQuery(key, accountId));
   const threads = useQuery({ ...reviewThreadsQuery(key, accountId), enabled: scope.threads });
@@ -93,8 +99,14 @@ export function useDiffComments(
       }),
   });
   const moveComment = move.mutate;
-  const { commitSha, outdated: showOutdated } = scope;
+  const { commitSha, outdated: showOutdated, revision } = scope;
   const drafts = pending.data?.comments;
+  const fromNotes = pending.data?.fromNotes;
+  // A note's composer sits on its revision's line numbers, so only that revision shows it.
+  const shown =
+    composer !== null && (composer.note === null || composer.note.ref.revision === revision)
+      ? composer
+      : null;
   // GitHub numbers threads against the head it had when they were read, so they are
   // placed only on a diff of that head, and read again once the diff moves on.
   const threadsHead = threads.data?.headSha;
@@ -106,6 +118,7 @@ export function useDiffComments(
   }, [staleThreads, client, key, accountId]);
   return useMemo(() => {
     const owner = { key, accountId };
+    const byNote = new Map((fromNotes ?? []).map((comment) => [comment.note, comment]));
     const build = (file: DiffFile): DiffComments | undefined => {
       if (drafts === undefined || file.patch._tag !== "text") return undefined;
       const rows = diffRows(file.patch.patch);
@@ -142,8 +155,8 @@ export function useDiffComments(
         }
       }
       const open =
-        composer?.path === file.path ? locate(rows, file.path, composer.range, commitSha) : null;
-      if (open) pinAt(open.anchor.end).composer = open;
+        shown?.path === file.path ? locate(rows, file.path, shown.range, commitSha) : null;
+      if (open) pinAt(open.anchor.end).composer = { placement: open, note: shown?.note ?? null };
       return {
         pins: [...pins.values()].map((pin) => pin.point),
         render: (point) => {
@@ -174,6 +187,7 @@ export function useDiffComments(
               key,
               path: file.path,
               range: { start: placement.anchor.start, end: placement.anchor.end },
+              note: null,
             });
         },
         footer:
@@ -186,6 +200,40 @@ export function useDiffComments(
             />
           ) : null,
         count: fileDrafts.length + fileThreads.length,
+        noteFooter:
+          revision === null
+            ? undefined
+            : (note, index) => {
+                if (!COMMENTABLE[note.tone]) return null;
+                const id = noteKey(file.path, rows, note);
+                const comment = id === null ? undefined : byNote.get(id);
+                if (comment === undefined)
+                  return (
+                    <NoteCommentButton
+                      pr={{ key, accountId, headSha, baseSha }}
+                      path={file.path}
+                      rows={rows}
+                      revision={revision}
+                      note={note}
+                      index={index}
+                      composing={
+                        shown?.note?.ref.path === file.path && shown.note.ref.index === index
+                      }
+                    />
+                  );
+                const point = notePoint(note);
+                const { end } = comment.anchor;
+                return (
+                  <NoteCommentStatus
+                    comment={comment}
+                    pinned={
+                      end.side === point.side &&
+                      end.line === point.line &&
+                      anchorHolds(rows, comment.anchor, comment.snippet)
+                    }
+                  />
+                );
+              },
       };
     };
     const layers = new Map(files.map((file) => [file.path, build(file)]));
@@ -193,13 +241,17 @@ export function useDiffComments(
   }, [
     key,
     accountId,
+    headSha,
+    baseSha,
     files,
     drafts,
+    fromNotes,
     threadList,
-    composer,
+    shown,
     moving,
     commitSha,
     showOutdated,
+    revision,
     compose,
     moveComment,
   ]);

@@ -27,5 +27,7 @@ export type DiffComments = {
   onSelect: (range: LineRange) => void;
   /** Shown under the diff, for comments whose lines are no longer in it. */
   footer: ReactNode;
+  /** Shown under a guide note's text, by the note's place among the file's notes. */
+  noteFooter?: ((note: DiffAnnotation, index: number) => ReactNode) | undefined;
   count: number;
 };

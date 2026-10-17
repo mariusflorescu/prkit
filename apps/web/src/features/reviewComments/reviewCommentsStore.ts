@@ -1,10 +1,15 @@
-import type { PullRequestKey, ReviewCommentId } from "@prkit/contracts";
+import type { CommentAnchor, NoteRef, PullRequestKey, ReviewCommentId } from "@prkit/contracts";
 import { create } from "zustand";
 
 import type { LineRange } from "~/components/diff";
 
+/**
+ * A comment started from a guide note: which note, its words, and where it lands in
+ * GitHub's diff now when that isn't the note's own line.
+ */
+export type NoteDraft = { ref: NoteRef; text: string; lands: CommentAnchor | null };
 /** Where a new comment is being written; one composer at a time, like GitHub. */
-type Composer = { key: PullRequestKey; path: string; range: LineRange };
+type Composer = { key: PullRequestKey; path: string; range: LineRange; note: NoteDraft | null };
 /** An outdated draft waiting for the user to pick its new line in the same file. */
 type Moving = { key: PullRequestKey; path: string; id: ReviewCommentId };
 

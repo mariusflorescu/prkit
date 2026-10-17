@@ -25,7 +25,9 @@ import type {
   LoadContents,
 } from "./types";
 
-type Pin = { kind: "note"; note: DiffAnnotation } | { kind: "comment"; point: LinePoint };
+type Pin =
+  | { kind: "note"; note: DiffAnnotation; index: number }
+  | { kind: "comment"; point: LinePoint };
 
 const toPierreSide = (side: LinePoint["side"]): AnnotationSide =>
   side === "old" ? "deletions" : "additions";
@@ -146,10 +148,10 @@ export function DiffBody({
   const pinKeys = (comments?.pins ?? []).map(pointKey).join(",");
   const lineAnnotations = useMemo<Array<DiffLineAnnotation<Pin>>>(
     () => [
-      ...annotations.map((note) => ({
+      ...annotations.map((note, index) => ({
         side: note.side,
         lineNumber: note.line,
-        metadata: { kind: "note" as const, note },
+        metadata: { kind: "note" as const, note, index },
       })),
       ...(pinKeys === "" ? [] : pinKeys.split(",")).map((key) => {
         const point = keyPoint(key);
@@ -163,6 +165,7 @@ export function DiffBody({
     [annotations, pinKeys],
   );
   const renderComment = comments?.render;
+  const noteFooter = comments?.noteFooter;
   const renderAnnotation = useCallback(
     (annotation: DiffLineAnnotation<Pin>) =>
       annotation.metadata.kind === "note" ? (
@@ -171,11 +174,13 @@ export function DiffBody({
           tone={annotation.metadata.note.tone}
           prUrl={prUrl}
           pinned
-        />
+        >
+          {noteFooter?.(annotation.metadata.note, annotation.metadata.index)}
+        </GuideNote>
       ) : (
         renderComment?.(annotation.metadata.point)
       ),
-    [prUrl, renderComment],
+    [prUrl, renderComment, noteFooter],
   );
   const selection = comments?.selection;
   const composing = selection ? `${pointKey(selection.start)},${pointKey(selection.end)}` : "";

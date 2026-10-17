@@ -45,6 +45,7 @@ export function CommentForm({
       if (node.getClientRects().length === 0) return;
       shown.disconnect();
       node.focus();
+      node.setSelectionRange(node.value.length, node.value.length);
     });
     shown.observe(node);
     return () => shown.disconnect();
