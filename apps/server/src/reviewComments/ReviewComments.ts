@@ -4,6 +4,7 @@ import {
   type CommentPlacement,
   diffRows,
   FileSide,
+  NoteKey,
   type PendingComment,
   PendingCommentState,
   type PullRequestKey,
@@ -39,6 +40,7 @@ const Row = Schema.Struct({
   body: Schema.String,
   state: PendingCommentState,
   submission_id: Schema.NullOr(Schema.String),
+  note_key: Schema.NullOr(NoteKey),
   created_at: Schema.String,
   updated_at: Schema.String,
 });
@@ -69,13 +71,15 @@ const GITHUB_SIDE = { old: "LEFT", new: "RIGHT" } as const;
 /** How far before a submission started GitHub's clock may put the review it created. */
 const CLOCK_SKEW_MS = 10 * 60_000;
 
+const anchorOf = (row: typeof Row.Type) => ({
+  path: row.path,
+  start: { side: row.start_side, line: row.start_line },
+  end: { side: row.end_side, line: row.end_line },
+});
+
 const toComment = (row: typeof Row.Type): PendingComment => ({
   id: row.id,
-  anchor: {
-    path: row.path,
-    start: { side: row.start_side, line: row.start_line },
-    end: { side: row.end_side, line: row.end_line },
-  },
+  anchor: anchorOf(row),
   snippet: row.snippet,
   commitSha: row.commit_sha,
   body: row.body,
@@ -125,10 +129,28 @@ export const make = Effect.gen(function* () {
     );
 
   const read = (key: string, accountId: string) =>
-    // Published drafts live on GitHub now, and resolved ones in the Fixes tab.
-    sql`SELECT * FROM pending_comments WHERE pr_key = ${key} AND account_id = ${accountId} AND state IN ('draft', 'sent-to-agent') ORDER BY created_at, id`.pipe(
+    // Published drafts live on GitHub now, and resolved ones in the Fixes tab; a note
+    // still says what became of the draft it made.
+    sql`SELECT * FROM pending_comments WHERE pr_key = ${key} AND account_id = ${accountId} AND (state IN ('draft', 'sent-to-agent') OR note_key IS NOT NULL) ORDER BY created_at, id`.pipe(
       Effect.flatMap(decodeRows),
-      Effect.map((rows) => ({ comments: rows.map(toComment) })),
+      Effect.map((rows) => ({
+        comments: rows
+          .filter((row) => row.state === "draft" || row.state === "sent-to-agent")
+          .map(toComment),
+        fromNotes: rows.flatMap((row) =>
+          row.note_key === null
+            ? []
+            : [
+                {
+                  note: row.note_key,
+                  id: row.id,
+                  state: row.state,
+                  anchor: anchorOf(row),
+                  snippet: row.snippet,
+                },
+              ],
+        ),
+      })),
     );
 
   const finish = (submission: string, review: typeof PostedReview.Type) =>

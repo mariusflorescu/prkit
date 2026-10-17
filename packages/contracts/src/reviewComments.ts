@@ -51,8 +51,37 @@ export const PendingComment = Schema.Struct({
 });
 export type PendingComment = typeof PendingComment.Type;
 
+/** A guide line note by where it is: its revision, its file, and its place among that file's notes. */
+export const NoteRef = Schema.Struct({
+  revision: Schema.Int.check(Schema.isGreaterThan(0)),
+  path: Schema.String,
+  index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export type NoteRef = typeof NoteRef.Type;
+
+/**
+ * What makes two notes the same remark: the file, the side and diff row it sits on, and
+ * its words. A later revision that keeps the note on the same code has the same key.
+ */
+export const NoteKey = Schema.NonEmptyString.pipe(Schema.brand("NoteKey"));
+export type NoteKey = typeof NoteKey.Type;
+
+/** A draft made from a guide note, in whatever state it reached, so its note can say so. */
+export const NoteComment = Schema.Struct({
+  note: NoteKey,
+  id: ReviewCommentId,
+  state: PendingCommentState,
+  anchor: CommentAnchor,
+  snippet: Schema.String,
+});
+export type NoteComment = typeof NoteComment.Type;
+
 /** The comments prkit holds for one PR and account that are not on GitHub yet. */
-export const PendingComments = Schema.Struct({ comments: Schema.Array(PendingComment) });
+export const PendingComments = Schema.Struct({
+  comments: Schema.Array(PendingComment),
+  /** Every draft made from a guide note, published and fixed ones included. */
+  fromNotes: Schema.Array(NoteComment),
+});
 export type PendingComments = typeof PendingComments.Type;
 
 export const ReviewEvent = Schema.Literals(["comment", "approve", "request-changes"]);
