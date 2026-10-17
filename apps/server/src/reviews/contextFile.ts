@@ -65,7 +65,8 @@ const Issues = Schema.Struct({
     }),
   ),
 });
-const ContextFile = Schema.Struct({
+/** The file's shape; the journeys decode what the agent read with it. */
+export const ContextFile = Schema.Struct({
   about: Schema.String,
   checks: Schema.Union([Unread, Checks]),
   threads: Schema.Union([Unread, Threads]),

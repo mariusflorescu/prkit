@@ -41,8 +41,8 @@ interface ContextReads {
   ) => Effect.Effect<ClosingIssues, PullRequestReadError>;
 }
 
-const moved = (now: string) =>
-  `The pull request moved on to ${now.slice(0, 7)} while prkit prepared this guide, so its checks and threads belong to a newer commit.`;
+const elsewhere = (what: string, read: string, head: string) =>
+  `GitHub's ${what} were read for ${read.slice(0, 7)}, not for ${head.slice(0, 7)}, the commit this guide is written for, so they are left out.`;
 
 const unread = (error: {
   readonly message: string;
@@ -66,7 +66,8 @@ export const makePullRequestContext = (reads: ContextReads) => {
           reads.detail(key, accountId).pipe(
             Effect.map((detail): ContextPart<ReadonlyArray<PullRequestCheck>> => {
               if (detail.freshness.problem !== null) return unread(detail.freshness.problem);
-              if (detail.headSha !== headSha) return unread({ message: moved(detail.headSha) });
+              if (detail.headSha !== headSha)
+                return unread({ message: elsewhere("checks", detail.headSha, headSha) });
               const open = detail.checks.filter(
                 (check) => check.status === "failing" || check.status === "pending",
               );
@@ -86,7 +87,7 @@ export const makePullRequestContext = (reads: ContextReads) => {
             .pipe(
               Effect.map((read): ContextPart<ReadonlyArray<ReviewThread>> =>
                 read.headSha !== headSha
-                  ? unread({ message: moved(read.headSha) })
+                  ? unread({ message: elsewhere("review threads", read.headSha, headSha) })
                   : { _tag: "read", value: read.threads.filter((thread) => !thread.resolved) },
               ),
             ),
