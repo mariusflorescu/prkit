@@ -2,39 +2,37 @@ import { useId, useMemo } from "react";
 
 import { FlowNode } from "./FlowNode";
 import { FlowSkeleton } from "./FlowSkeleton";
-import { flowEdgePath, flowVisible, layoutFlow } from "./flowLayout";
-import type { FlowMode, GuideFlow, IndexedFlowNode } from "./types";
+import { flowEdgePath, indexFlowNodes, layoutFlow } from "./flowLayout";
+import type { FlowGraph, GuideChapter } from "./types";
 import { useElementWidth } from "./useElementWidth";
 
 const statuses = ["unchanged", "added", "removed", "changed"] as const;
 
 export function FlowDiagram({
   flow,
-  nodes,
-  mode,
+  chapters,
   onChapter,
 }: {
-  flow: GuideFlow;
-  nodes: ReadonlyArray<IndexedFlowNode>;
-  mode: FlowMode;
+  flow: FlowGraph;
+  chapters: ReadonlyArray<GuideChapter>;
   onChapter: (id: string) => void;
 }) {
   const { ref, width } = useElementWidth();
   const id = useId().replaceAll(":", "");
-  const layouts = useMemo(
-    () => ({
+  const layouts = useMemo(() => {
+    const nodes = indexFlowNodes(flow, chapters);
+    return {
       LR: layoutFlow(nodes, flow.edges, "LR"),
       TB: flow.direction === "LR" ? null : layoutFlow(nodes, flow.edges, "TB"),
-    }),
-    [nodes, flow.edges, flow.direction],
-  );
+    };
+  }, [flow, chapters]);
   const layout =
     flow.direction === "TB" || (flow.direction === "auto" && layouts.LR.width > width)
       ? (layouts.TB ?? layouts.LR)
       : layouts.LR;
   const scale = width && layout.width > width ? Math.max(0.6, width / layout.width) : 1;
   return (
-    <div data-flow-canvas="" ref={ref} aria-label={`${flow.title}, ${mode}`}>
+    <div data-flow-canvas="" ref={ref} aria-label={flow.title}>
       {width === 0 ? (
         <FlowSkeleton />
       ) : (
@@ -73,7 +71,6 @@ export function FlowDiagram({
                   d={flowEdgePath(edge.points)}
                   data-flow-edge=""
                   data-status={edge.status}
-                  data-hidden={!flowVisible(edge.status, mode) || undefined}
                   markerEnd={`url(#${id}-${edge.status})`}
                 />
               ))}
@@ -84,19 +81,13 @@ export function FlowDiagram({
                 <span
                   key={edge.key}
                   data-flow-edge-label=""
-                  data-hidden={!flowVisible(edge.status, mode) || undefined}
                   style={{ left: edge.labelX, top: edge.labelY }}
                 >
                   {edge.label}
                 </span>
               ))}
             {layout.nodes.map((node) => (
-              <FlowNode
-                key={node.id}
-                node={node}
-                hidden={!flowVisible(node.status, mode)}
-                onChapter={onChapter}
-              />
+              <FlowNode key={node.id} node={node} onChapter={onChapter} />
             ))}
           </div>
         </div>

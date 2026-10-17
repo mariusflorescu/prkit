@@ -1,7 +1,7 @@
 import dagre, { type EdgeLabel, type GraphLabel, type NodeLabel } from "@dagrejs/dagre";
 import * as Schema from "effect/Schema";
 
-import type { FlowMode, GuideFlow, IndexedFlowNode } from "./types";
+import type { FlowGraph, IndexedFlowNode } from "./types";
 
 const NodePosition = Schema.Struct({
   x: Schema.Number,
@@ -11,13 +11,9 @@ const NodePosition = Schema.Struct({
 });
 const decodeNode = Schema.decodeUnknownSync(NodePosition);
 
-export function flowVisible(status: GuideFlow["nodes"][number]["status"], mode: FlowMode) {
-  return mode === "before" ? status !== "added" : status !== "removed";
-}
-
 export function layoutFlow(
   nodes: ReadonlyArray<IndexedFlowNode>,
-  edges: GuideFlow["edges"],
+  edges: FlowGraph["edges"],
   rankdir: "LR" | "TB",
 ) {
   const graph = new dagre.graphlib.Graph<GraphLabel, NodeLabel, EdgeLabel>({ multigraph: true });
@@ -96,7 +92,7 @@ export function flowEdgePath(points: ReadonlyArray<{ x: number; y: number }>) {
   return path;
 }
 
-export function indexFlowNodes(flow: GuideFlow, chapters: ReadonlyArray<{ id: string }>) {
+export function indexFlowNodes(flow: FlowGraph, chapters: ReadonlyArray<{ id: string }>) {
   const indexes = new Map(chapters.map((chapter, index) => [chapter.id, index + 1]));
   return flow.nodes.map((node) => ({
     ...node,

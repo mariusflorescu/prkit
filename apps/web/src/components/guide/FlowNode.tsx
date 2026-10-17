@@ -4,11 +4,9 @@ const markers = { added: "+", removed: "-", changed: "~", unchanged: "" };
 
 export function FlowNode({
   node,
-  hidden,
   onChapter,
 }: {
   node: FlowLayout["nodes"][number];
-  hidden: boolean;
   onChapter: (id: string) => void;
 }) {
   const content = (
@@ -27,11 +25,8 @@ export function FlowNode({
         type="button"
         data-flow-node=""
         data-status={node.status}
-        data-hidden={hidden || undefined}
         style={style}
         title={node.detail ?? `${node.label}. Open chapter ${node.chapterIndex}`}
-        tabIndex={hidden ? -1 : 0}
-        aria-hidden={hidden}
         onClick={() => {
           if (node.chapter) onChapter(node.chapter);
         }}
@@ -43,10 +38,8 @@ export function FlowNode({
     <div
       data-flow-node=""
       data-status={node.status}
-      data-hidden={hidden || undefined}
       style={style}
       title={node.detail ?? node.label}
-      aria-hidden={hidden}
     >
       {content}
     </div>

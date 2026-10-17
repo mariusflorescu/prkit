@@ -31,7 +31,7 @@ const makeStop = (cell: HTMLElement, point: LinePoint) => {
   cell.ariaLabel = `Comment on ${point.side === "old" ? "old " : ""}line ${point.line}`;
 };
 
-const cellAt = (root: ParentNode, point: LinePoint) =>
+export const cellAt = (root: ParentNode, point: LinePoint) =>
   [...root.querySelectorAll<HTMLElement>(NUMBER)].find((cell) => sameLine(pointOf(cell), point));
 
 /**

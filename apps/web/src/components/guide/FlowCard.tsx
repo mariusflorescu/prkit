@@ -1,70 +1,83 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import type { DiffLineRef } from "@prkit/contracts";
+import { lazy, Suspense } from "react";
 
 import { InlineMarkdown } from "~/components/diff/InlineMarkdown";
 import { RenderBoundary } from "~/components/diff/RenderBoundary";
-import { Button } from "~/components/ui/button";
 
+import { BehaviorDiff } from "./BehaviorDiff";
 import { FlowSkeleton } from "./FlowSkeleton";
-import { indexFlowNodes } from "./flowLayout";
-import type { FlowMode, GuideChapter, GuideFlow } from "./types";
+import type { GuideChapter, GuideFlow } from "./types";
 
 const Diagram = lazy(() =>
   import("./FlowDiagram").then((module) => ({ default: module.FlowDiagram })),
 );
 
+const legends = {
+  graph: {
+    statuses: [
+      ["added", "+ added"],
+      ["changed", "~ changed"],
+      ["removed", "- removed"],
+      ["unchanged", "unchanged"],
+    ],
+    hint: "Numbers open chapters",
+  },
+  behavior: {
+    statuses: [
+      ["added", "+ added"],
+      ["removed", "- removed"],
+      ["unchanged", "context"],
+    ],
+    hint: "A file:line opens the diff, numbers open chapters",
+  },
+} as const;
+
 export function FlowCard({
   flow,
   chapters,
   onChapter,
+  onLine,
   prUrl,
 }: {
   flow: GuideFlow;
   chapters: ReadonlyArray<GuideChapter>;
   onChapter: (id: string) => void;
+  onLine: (at: DiffLineRef) => void;
   prUrl?: string | undefined;
 }) {
-  const [mode, setMode] = useState<FlowMode>("before");
-  const nodes = useMemo(() => indexFlowNodes(flow, chapters), [flow, chapters]);
+  const legend = legends[flow._tag];
   return (
     <section data-flow-card="" aria-label="Before and after">
-      <div data-flow-card-heading="">
-        <h3>{flow.title}</h3>
-        <div className="flex gap-1" aria-label="Flow view">
-          <Button
-            size="compact"
-            variant={mode === "before" ? "secondary" : "ghost"}
-            aria-pressed={mode === "before"}
-            onClick={() => setMode("before")}
-          >
-            Before
-          </Button>
-          <Button
-            size="compact"
-            variant={mode === "after" ? "secondary" : "ghost"}
-            aria-pressed={mode === "after"}
-            onClick={() => setMode("after")}
-          >
-            After
-          </Button>
-        </div>
-      </div>
+      <h3>{flow.title}</h3>
       {flow.subtitle && (
         <p data-flow-subtitle="">
           <InlineMarkdown text={flow.subtitle} prUrl={prUrl} />
         </p>
       )}
-      <RenderBoundary title="The flow diagram">
-        <Suspense fallback={<FlowSkeleton />}>
-          <Diagram flow={flow} nodes={nodes} mode={mode} onChapter={onChapter} />
-        </Suspense>
+      <RenderBoundary title="The before and after">
+        {flow._tag === "graph" ? (
+          <Suspense fallback={<FlowSkeleton />}>
+            <Diagram flow={flow} chapters={chapters} onChapter={onChapter} />
+          </Suspense>
+        ) : (
+          <BehaviorDiff
+            flow={flow}
+            chapters={chapters}
+            onChapter={onChapter}
+            onLine={onLine}
+            prUrl={prUrl}
+          />
+        )}
       </RenderBoundary>
-      <div data-flow-legend="">
-        <span data-status="added">+ new</span>
-        <span data-status="changed">~ changed</span>
-        <span data-status="removed">- removed</span>
-        <span>unchanged</span>
-        <span>Numbers open chapters</span>
-      </div>
+      <ul data-flow-legend="" data-form={flow._tag} aria-label="Legend">
+        {legend.statuses.map(([status, label]) => (
+          <li key={status}>
+            <span data-flow-swatch="" data-status={status} aria-hidden="true" />
+            {label}
+          </li>
+        ))}
+        <li>{legend.hint}</li>
+      </ul>
     </section>
   );
 }
