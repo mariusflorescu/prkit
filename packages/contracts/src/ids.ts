@@ -17,3 +17,16 @@ export type ReviewId = typeof ReviewId.Type;
 /** A comment prkit holds for the user until the review is finished. */
 export const ReviewCommentId = makeEntityId("ReviewCommentId");
 export type ReviewCommentId = typeof ReviewCommentId.Type;
+
+/**
+ * `local:<16 hex>`: the key of a review of local changes. It never reads as a pull request
+ * (`refFromKey` answers null), so nothing reads it through an account.
+ */
+export const LocalReviewKey = Schema.String.check(Schema.isPattern(/^local:[0-9a-f]{16}$/)).pipe(
+  Schema.brand("LocalReviewKey"),
+);
+export type LocalReviewKey = typeof LocalReviewKey.Type;
+
+/** Any review's key, for the parts of a review that don't care what it is about. */
+export const ReviewKey = Schema.Union([LocalReviewKey, PullRequestKey]);
+export type ReviewKey = typeof ReviewKey.Type;

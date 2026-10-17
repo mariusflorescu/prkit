@@ -11,8 +11,18 @@ import type { PullRequestContext } from "../pullRequests/pullRequestContext.ts";
 import { contextLines, contextSection } from "./contextFile.ts";
 import type { ReviewTarget } from "./reviewTarget.ts";
 
-export interface PromptInput {
+/** What the guide is about. */
+export type PromptSubject = {
+  readonly _tag: "pull-request";
   readonly target: ReviewTarget;
+  /** The stack the PR is a layer of, bottom to top; null when it isn't in one. */
+  readonly stack: PullRequestStack | null;
+  /** What GitHub says about the PR besides its diff, as a file the agent reads. */
+  readonly context: { readonly file: string; readonly read: PullRequestContext };
+};
+
+export interface PromptInput {
+  readonly subject: PromptSubject;
   readonly mergeBaseSha: string;
   /** The files the agent reviews: the snapshot without the ones the ignore rules skip. */
   readonly snapshot: DiffSnapshot;
@@ -26,10 +36,6 @@ export interface PromptInput {
     /** Active areas only. */
     readonly focusAreas: ReadonlyArray<EffectiveFocusArea>;
   };
-  /** What GitHub says about the PR besides its diff, as a file the agent reads; null for a review with no pull request. */
-  readonly context: { readonly file: string; readonly read: PullRequestContext } | null;
-  /** The stack the PR is a layer of, bottom to top; null when it isn't in one. */
-  readonly stack: PullRequestStack | null;
   /** The last accepted revision, when its head or base is not what this attempt writes for. */
   readonly previous:
     | {
@@ -174,14 +180,15 @@ const stackContext = (stack: PullRequestStack | null, number: number, baseRef: s
  * Pure: structured input in, prompt out.
  */
 export const buildPrompt = (input: PromptInput) => {
-  const { target, snapshot, settings } = input;
+  const { snapshot, settings } = input;
+  const { target } = input.subject;
   const body = target.body.trim();
-  const stack = stackContext(input.stack, target.ref.number, target.baseRef);
+  const stack = stackContext(input.subject.stack, target.ref.number, target.baseRef);
   const sections = [
     `task:${input.previous?._tag ?? "first"}`,
     `files:${snapshot.files.length}`,
     `hand-over:${input.streamsGuideInput ? "streamed" : "drafts"}`,
-    ...contextSection(input.context?.read ?? null),
+    ...contextSection(input.subject.context.read),
     ...(stack === null ? [] : [stack.label]),
     ...(settings.skipped > 0 ? [`skipped:${settings.skipped}`] : []),
     ...settings.guidance.map((block) => `guidance:${block.scope}`),
@@ -216,7 +223,7 @@ export const buildPrompt = (input: PromptInput) => {
     body === "" ? "(no description)" : body,
     "</description>",
     "",
-    ...contextLines(input.context),
+    ...contextLines(input.subject.context),
     ...(stack?.lines ?? []),
     ...guidanceLines(settings.guidance),
     ...focusLines(settings.focusAreas),
