@@ -9,6 +9,7 @@ import {
   type ReviewId,
 } from "@prkit/contracts";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -39,6 +40,7 @@ import {
   RepoError,
 } from "./gitRun.ts";
 import { linksRefusal, newLinks } from "./links.ts";
+import { makeLocalCapture } from "./localCapture.ts";
 import { type NestedEntry, nestedGitEntries } from "./nestedRepos.ts";
 import { rebaseStateHash } from "./rebaseState.ts";
 
@@ -118,6 +120,7 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const accounts = yield* GitHubAccounts;
+  const crypto = yield* Crypto.Crypto;
   const reposDir = path.join(config.home, "repos");
   const localDir = path.join(config.home, "local");
   const worktreesDir = path.join(config.home, "worktrees");
@@ -1237,6 +1240,22 @@ export const make = Effect.gen(function* () {
       } satisfies DiffTexts;
     });
 
+  /** Guides of local changes: snapshots of the user's own repository, in copies prkit owns. */
+  const local = makeLocalCapture({
+    fs,
+    path,
+    crypto,
+    home: config.home,
+    run,
+    git,
+    serialized,
+    ensureWorktree,
+    snapshotOf: (repo, from, to) => snapshotOf(bare(repo), from, to),
+    relation,
+    commitsSince,
+    worktreePath,
+  });
+
   return {
     isolatedGitEnv,
     checkout,
@@ -1269,6 +1288,7 @@ export const make = Effect.gen(function* () {
     removeFixer,
     listFixers,
     readTexts,
+    local,
   };
 });
 
