@@ -14,7 +14,9 @@
  *       first side of every conflict in each file and reports the files resolved.
  *
  * In FAKE_CLAUDE_DIR, a `hold` file keeps the turn writing until the file is removed, and a
- * `fail` file ends the turn with an error instead of a guide. Before a fix or resolution
+ * `fail` file ends the turn with an error instead of a guide. A `notes` file, JSON of
+ * `{ [path]: [{ line, side, tone, text }] }`, gives those files line notes in the guide,
+ * read when the guide is submitted; without it the guide has none. Before a fix or resolution
  * reports, it also plants what these files ask for, as something outside prkit's sandboxes
  * could:
  *
@@ -104,6 +106,19 @@ const Line = Schema.fromJsonString(
       }),
     }),
   ]),
+);
+const Notes = Schema.fromJsonString(
+  Schema.Record(
+    Schema.String,
+    Schema.Array(
+      Schema.Struct({
+        line: Schema.Int,
+        side: Schema.Literals(["additions", "deletions"]),
+        tone: Schema.Literals(["note", "question", "risk"]),
+        text: Schema.String,
+      }),
+    ),
+  ),
 );
 const McpReply = Schema.fromJsonString(
   Schema.Struct({
@@ -326,11 +341,22 @@ const turn = async (prompt: string) => {
   if (prompt.includes("`finish_fixes`")) return fix(prompt);
   if (prompt.includes("`finish_conflicts`")) return resolve(prompt);
   const files = changedFiles(prompt);
+  const notes = flagged("notes")
+    ? Schema.decodeUnknownSync(Notes)(NodeFS.readFileSync(NodePath.join(control, "notes"), "utf8"))
+    : {};
   const submitted = await mcp("tools/call", {
     name: "submit_guide",
     arguments: {
       summary: "A guide written by the stand-in agent.",
-      chapters: [{ title: "Every change", files }],
+      chapters: [
+        {
+          title: "Every change",
+          files: files.map((path) => {
+            const annotations = notes[path];
+            return annotations === undefined ? path : { path, annotations };
+          }),
+        },
+      ],
       focusAreas: [...prompt.matchAll(/^- `([^`]+)` .+: .+$/gm)].map((match) => ({
         id: match[1] ?? "",
         verdict: "nothing-notable",

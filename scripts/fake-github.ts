@@ -37,6 +37,8 @@
  *   POST reset-stats
  *   POST comment?pr=<n>                 a new issue comment (bumps updatedAt)
  *   POST push?pr=<n>                    a new head commit (bumps updatedAt)
+ *   POST git-head?pr=<n>&sha=<sha>      a local commit is its one head (bumps updatedAt)
+ *   POST files?pr=<n>                   its files answer from then on: the JSON list of files in the body
  *   POST checks?pr=<n>&status=<s>       check run status: queued, in_progress or completed
  *   POST conflict?pr=<n>                the base moved under it: mergeable false, DIRTY
  *   POST checking?pr=<n>                GitHub is still working out mergeability: mergeable null, UNKNOWN
@@ -55,7 +57,7 @@ import * as NodeFS from "node:fs";
 import * as NodeHttp from "node:http";
 import * as NodePath from "node:path";
 
-import type * as Schema from "effect/Schema";
+import * as Schema from "effect/Schema";
 
 import { graphql } from "./fake-github/graphql.ts";
 import {
@@ -70,6 +72,7 @@ import {
   pulls,
   resetStats,
   SECOND_LOGIN,
+  servedFiles,
   sha,
   stats,
   writes,
@@ -79,6 +82,19 @@ import { recordGraphqlAttempt, recordRestAttempt } from "./fake-github/writeAtte
 import { rest } from "./fake-github/rest.ts";
 
 const LIMIT = 5000;
+const decodeFiles = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Array(
+      Schema.Struct({
+        filename: Schema.String,
+        status: Schema.String,
+        additions: Schema.Int,
+        deletions: Schema.Int,
+        patch: Schema.optionalKey(Schema.String),
+      }),
+    ),
+  ),
+);
 let nextComment = 10_000;
 /** Rate limit state per resource, like GitHub's own windows. */
 const quotas = {
@@ -125,7 +141,7 @@ const send = (
   }, latency[resource]);
 };
 
-const control = (url: URL, method: string, response: NodeHttp.ServerResponse) => {
+const control = (url: URL, method: string, text: string, response: NodeHttp.ServerResponse) => {
   const answer = (body: Schema.Json) => {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(encodeJson(body));
@@ -151,6 +167,11 @@ const control = (url: URL, method: string, response: NodeHttp.ServerResponse) =>
     pull.heads = [
       { sha: gitHead, at: pull.heads[0]?.at ?? Date.now(), message: "Local fixture head" },
     ];
+    pull.updatedAt = Date.now();
+    return answer({ ok: true });
+  }
+  if (name === "files" && method === "POST" && pull !== undefined) {
+    servedFiles.set(pull.number, decodeFiles(text));
     return answer({ ok: true });
   }
   if (name === "comment" && pull !== undefined) {
@@ -239,8 +260,12 @@ const control = (url: URL, method: string, response: NodeHttp.ServerResponse) =>
 const server = NodeHttp.createServer((request, response) => {
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
   if (url.pathname.startsWith("/__fake/")) {
-    request.resume();
-    control(url, request.method ?? "GET", response);
+    let text = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk: string) => {
+      text += chunk;
+    });
+    request.on("end", () => control(url, request.method ?? "GET", text, response));
     return;
   }
   if (url.pathname === "/graphql") {

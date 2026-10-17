@@ -13,11 +13,20 @@ const Run = Schema.fromJsonString(
   }),
 );
 
+/** A line note as the stand-in writes it into a guide. */
+export type FakeNote = {
+  line: number;
+  side: "additions" | "deletions";
+  tone: "note" | "question" | "risk";
+  text: string;
+};
+
 /**
  * The stand-in Claude Code of scripts/fake-claude.ts, in a folder of its own: pass `file` to
  * `verify-app start --claude`. `hold` keeps its next turns writing until `release`,
- * `failing` makes them end with an error instead of a guide, and `plant` has its next fixes
- * and resolutions leave something behind (scripts/fake-claude.ts lists what).
+ * `failing` makes them end with an error instead of a guide, `notes` gives its guides line
+ * notes, and `plant` has its next fixes and resolutions leave something behind
+ * (scripts/fake-claude.ts lists what).
  */
 export const setUpFakeClaude = (name: string) => {
   const dir = NodePath.join(repoRoot, ".e2e", "fake", `${name}-claude`);
@@ -39,6 +48,9 @@ export const setUpFakeClaude = (name: string) => {
     hold: () => flag("hold", true),
     release: () => flag("hold", false),
     failing: (on: boolean) => flag("fail", on),
+    /** The line notes its guides give each file, by path, from the next submitted guide. */
+    notes: (notes: Record<string, ReadonlyArray<FakeNote>>) =>
+      NodeFS.writeFileSync(NodePath.join(dir, "notes"), JSON.stringify(notes)),
     /** `nested` takes the path for the repository; `null` stops planting it. */
     plant: (what: "nested" | "todo" | "linger", value: string | null) =>
       value === null
