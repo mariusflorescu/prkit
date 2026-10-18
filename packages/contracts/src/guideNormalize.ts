@@ -32,6 +32,7 @@ import {
 } from "./guideCheck.ts";
 import { checkFlowLengths, flowTexts, normalizeFlow } from "./guideFlow.ts";
 import { manualCheckTexts, normalizeManualCheck } from "./guideManualCheck.ts";
+import { normalizePseudocode, pseudocodeTexts } from "./guidePseudocode.ts";
 import { normalizeRisk, riskTexts } from "./guideRisk.ts";
 import { normalizePreflight, preflightTexts } from "./guidePreflight.ts";
 
@@ -192,7 +193,7 @@ const normalizeChapters = (
       title: raw.title,
       kind,
       body,
-      pseudocode: raw.pseudocode || null,
+      pseudocode: null,
       callouts,
       files: [],
       risk: null,
@@ -301,7 +302,7 @@ function* guideTexts(guide: NormalizedGuide) {
   for (const chapter of guide.chapters) {
     yield chapter.title;
     yield* chapter.body;
-    yield chapter.pseudocode ?? "";
+    yield* pseudocodeTexts(chapter);
     for (const callout of chapter.callouts) yield callout.text;
     for (const file of chapter.files) {
       yield file.note ?? "";
@@ -411,7 +412,12 @@ const normalize = (
     );
   const { risk, chapters } = normalizeRisk({
     raw: { risk: guide.risk, chapters: guide.chapters ?? [] },
-    chapters: normalizeChapters(guide.chapters ?? [], snapshot, report, mode, context),
+    chapters: normalizePseudocode({
+      raw: guide.chapters ?? [],
+      chapters: normalizeChapters(guide.chapters ?? [], snapshot, report, mode, context),
+      snapshot,
+      report,
+    }),
     snapshot,
     mode,
     context,

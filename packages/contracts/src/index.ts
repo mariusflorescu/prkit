@@ -15,6 +15,7 @@ export * from "./guideConfigResolve.ts";
 export * from "./guideManualCheck.ts";
 export * from "./guideNormalize.ts";
 export { forReader } from "./guidePreflight.ts";
+export { type PseudocodeRow, pseudocodeRows } from "./guidePseudocode.ts";
 export * from "./github.ts";
 export * from "./ids.ts";
 export * from "./inbox.ts";
