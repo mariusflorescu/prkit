@@ -48,8 +48,10 @@ const detailCache = Effect.gen(function* () {
   const reads = yield* Ref.make(0);
   const github = (answer: Effect.Effect<string, GitHubRequestError>) =>
     Ref.update(reads, (count) => count + 1).pipe(Effect.andThen(answer));
-  const read = (answer: Effect.Effect<string, GitHubRequestError>) =>
-    cache.read(KEY, github(answer)).pipe(Effect.map(shown));
+  const read = (
+    answer: Effect.Effect<string, GitHubRequestError>,
+    opts?: { readonly maxAgeMs?: number },
+  ) => cache.read(KEY, github(answer), opts).pipe(Effect.map(shown));
   return { read, reads: Ref.get(reads), changed: Queue.take(changed) };
 });
 
@@ -122,6 +124,30 @@ describe("makeReadCache", () => {
           fetchedAt: 0,
           problem: { _tag: "unavailable", message: "GitHub didn't answer." },
         });
+      }),
+    ));
+
+  it("reads GitHub again for a caller that won't take an answer older than it says, and not for a younger one", () =>
+    run(
+      Effect.gen(function* () {
+        const detail = yield* detailCache;
+        yield* detail.read(Effect.succeed("first"));
+
+        yield* TestClock.adjust("2 minutes");
+        expect(yield* detail.read(Effect.succeed("second"), { maxAgeMs: 3 * 60_000 })).toEqual({
+          value: "first",
+          fetchedAt: 0,
+          problem: null,
+        });
+        expect(yield* detail.reads).toBe(1);
+
+        yield* TestClock.adjust("2 minutes");
+        expect(yield* detail.read(Effect.succeed("second"), { maxAgeMs: 3 * 60_000 })).toEqual({
+          value: "second",
+          fetchedAt: 240_000,
+          problem: null,
+        });
+        expect(yield* detail.reads).toBe(2);
       }),
     ));
 });
