@@ -52,6 +52,7 @@ const layerReadyLine = Layer.effectDiscard(
     const config = yield* ServerConfig.ServerConfig;
     const stdio = yield* Stdio.Stdio;
     const appearance = yield* AppearanceStore.AppearanceStore;
+    const readiness = yield* ServerHttp.Readiness;
     const port = Option.getOrElse(boundPort(server.address), () => config.port);
     const line = yield* encodeReadyLine({
       type: "ready",
@@ -59,6 +60,7 @@ const layerReadyLine = Layer.effectDiscard(
       url: `http://${config.host}:${port}`,
       theme: yield* appearance.current(),
     });
+    yield* readiness.markReady;
     yield* Stream.make(`${line}\n`).pipe(Stream.run(stdio.stdout()));
     yield* Effect.logInfo("prkit server listening").pipe(
       Effect.annotateLogs({ port, home: config.home }),
@@ -131,10 +133,12 @@ const layerFixers = FixerWatcher.layer.pipe(
   Layer.provideMerge(layerReviews),
 );
 
-const layerServer = Layer.mergeAll(layerReadyLine, layerOutsideDiscovery).pipe(
+const layerServer = layerReadyLine.pipe(
+  Layer.provide(layerOutsideDiscovery),
   Layer.provideMerge(
     HttpRouter.serve(layerRoutes, { disableListenLog: true, disableLogger: true }),
   ),
+  Layer.provideMerge(ServerHttp.layerReadiness),
   // What outside agents can do: the same services the app's buttons call.
   Layer.provideMerge(OutsideWork.layer),
   Layer.provideMerge(CliInstall.layer),
