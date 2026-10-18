@@ -1,21 +1,20 @@
 import {
   type AccountId,
-  anchorHolds,
+  capture,
+  type CommentAnchor,
+  CommentContext,
   type CommentPlacement,
   diffRows,
-  FileSide,
   type GuideRevision,
-  NoteKey,
+  type NoteKey,
   NOTE_LOST,
   type NoteRef,
   noteKey,
   notePoint,
-  type PendingComment,
-  PendingCommentState,
-  placeNote,
+  placeOn,
   type PullRequestKey,
   refFromKey,
-  ReviewCommentId,
+  type ReviewCommentId,
   ReviewCommentsError,
   type ReviewEvent,
 } from "@prkit/contracts";
@@ -32,26 +31,9 @@ import { GitHubApi } from "../github/GitHubApi.ts";
 import { makeKeyedGate } from "../github/keyedGate.ts";
 import { PullRequests } from "../pullRequests/PullRequests.ts";
 import { Reviews } from "../reviews/Reviews.ts";
+import { anchorOf, decodeRows, toComment } from "./pendingRow.ts";
 
-const Row = Schema.Struct({
-  id: ReviewCommentId,
-  pr_key: Schema.String,
-  account_id: Schema.String,
-  path: Schema.String,
-  start_side: FileSide,
-  start_line: Schema.Int,
-  end_side: FileSide,
-  end_line: Schema.Int,
-  snippet: Schema.String,
-  commit_sha: Schema.String,
-  body: Schema.String,
-  state: PendingCommentState,
-  submission_id: Schema.NullOr(Schema.String),
-  note_key: Schema.NullOr(NoteKey),
-  created_at: Schema.String,
-  updated_at: Schema.String,
-});
-const decodeRows = Schema.decodeUnknownEffect(Schema.Array(Row));
+const encodeContext = Schema.encodeSync(Schema.fromJsonString(CommentContext));
 const Submission = Schema.Struct({
   id: Schema.String,
   event: Schema.Literals(["comment", "approve", "request-changes"]),
@@ -78,38 +60,24 @@ const GITHUB_SIDE = { old: "LEFT", new: "RIGHT" } as const;
 /** How far before a submission started GitHub's clock may put the review it created. */
 const CLOCK_SKEW_MS = 10 * 60_000;
 
-const anchorOf = (row: typeof Row.Type) => ({
-  path: row.path,
-  start: { side: row.start_side, line: row.start_line },
-  end: { side: row.end_side, line: row.end_line },
-});
-
-const toComment = (row: typeof Row.Type): PendingComment => ({
-  id: row.id,
-  anchor: anchorOf(row),
-  snippet: row.snippet,
-  commitSha: row.commit_sha,
-  body: row.body,
-  state: row.state,
-  createdAt: row.created_at,
-  updatedAt: row.updated_at,
-});
-
 const findNote = (revision: GuideRevision, ref: NoteRef) => {
   const note = revision.normalized.chapters
     .flatMap((chapter) => chapter.files)
     .find((entry) => entry.path === ref.path)?.annotations[ref.index];
   const file = revision.snapshot.files.find((candidate) => candidate.path === ref.path);
   if (note === undefined || file?.patch._tag !== "text") return null;
-  return { note, rows: diffRows(file.patch.patch) };
+  const rows = diffRows(file.patch.patch);
+  const point = notePoint(note);
+  const written = capture(rows, { path: ref.path, start: point, end: point }, revision.headSha);
+  return written && { note, rows, written };
 };
 
-const toGitHubComment = (comment: PendingComment) => {
-  const { path, start, end } = comment.anchor;
+const toGitHubComment = (anchor: CommentAnchor, body: string) => {
+  const { path, start, end } = anchor;
   const single = start.side === end.side && start.line === end.line;
   return {
     path,
-    body: comment.body,
+    body,
     line: end.line,
     side: GITHUB_SIDE[end.side],
     ...(single ? {} : { start_line: start.line, start_side: GITHUB_SIDE[start.side] }),
@@ -164,6 +132,8 @@ export const make = Effect.gen(function* () {
                   state: row.state,
                   anchor: anchorOf(row),
                   snippet: row.snippet,
+                  context: row.context,
+                  commitSha: row.commit_sha,
                 },
               ],
         ),
@@ -260,8 +230,8 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const at = yield* now;
       const { anchor } = placement;
-      yield* sql`INSERT INTO pending_comments (id, pr_key, account_id, path, start_side, start_line, end_side, end_line, snippet, commit_sha, body, state, submission_id, note_key, created_at, updated_at)
-        VALUES (${yield* newId}, ${key}, ${accountId}, ${anchor.path}, ${anchor.start.side}, ${anchor.start.line}, ${anchor.end.side}, ${anchor.end.line}, ${placement.snippet}, ${placement.commitSha}, ${body}, 'draft', NULL, ${note}, ${at}, ${at})`;
+      yield* sql`INSERT INTO pending_comments (id, pr_key, account_id, path, start_side, start_line, end_side, end_line, snippet, context, commit_sha, body, state, submission_id, note_key, created_at, updated_at)
+        VALUES (${yield* newId}, ${key}, ${accountId}, ${anchor.path}, ${anchor.start.side}, ${anchor.start.line}, ${anchor.end.side}, ${anchor.end.line}, ${placement.snippet}, ${encodeContext(placement.context)}, ${placement.commitSha}, ${body}, 'draft', NULL, ${note}, ${at}, ${at})`;
     });
 
   const add = (
@@ -302,14 +272,9 @@ export const make = Effect.gen(function* () {
         if (taken.length > 0) return yield* fail("You already added this note to your review.");
         // Placed on the head GitHub has now, as at submit, not the one a cache last saw.
         yield* pullRequests.current(key, accountId);
-        const placed = placeNote({
-          path: ref.path,
-          point: notePoint(found.note),
-          writtenRows: found.rows,
-          files: yield* pullRequests.files(key, accountId),
-        });
-        if (placed._tag === "lost") {
-          const { title, description } = NOTE_LOST[placed.reason];
+        const placed = placeOn(found.written, yield* pullRequests.files(key, accountId));
+        if (placed._tag === "outdated") {
+          const { title, description } = NOTE_LOST[placed.why];
           return yield* fail(`${title}. ${description}`);
         }
         yield* insert(key, accountId, placed.placement, body, note);
@@ -363,14 +328,15 @@ export const make = Effect.gen(function* () {
   const move = (id: ReviewCommentId, placement: CommentPlacement) =>
     changeDraft(id, (at) => {
       const { anchor } = placement;
-      return sql`UPDATE pending_comments SET path = ${anchor.path}, start_side = ${anchor.start.side}, start_line = ${anchor.start.line}, end_side = ${anchor.end.side}, end_line = ${anchor.end.line}, snippet = ${placement.snippet}, commit_sha = ${placement.commitSha}, updated_at = ${at} WHERE id = ${id}`;
+      return sql`UPDATE pending_comments SET path = ${anchor.path}, start_side = ${anchor.start.side}, start_line = ${anchor.start.line}, end_side = ${anchor.end.side}, end_line = ${anchor.end.line}, snippet = ${placement.snippet}, context = ${encodeContext(placement.context)}, commit_sha = ${placement.commitSha}, updated_at = ${at} WHERE id = ${id}`;
     });
   const remove = (id: ReviewCommentId) =>
     changeDraft(id, () => sql`DELETE FROM pending_comments WHERE id = ${id}`);
 
   /**
-   * Finishes the review on GitHub: one review with every draft whose lines are
-   * still in the PR's current diff. Drafts whose lines moved stay drafts.
+   * Finishes the review on GitHub: one review with every draft placed on the PR's current
+   * diff, at its own lines or where they moved to. Outdated drafts stay drafts, and every
+   * draft keeps the lines it was written on.
    */
   const submit = (key: PullRequestKey, accountId: AccountId, event: ReviewEvent, body: string) =>
     gate(
@@ -385,15 +351,11 @@ export const make = Effect.gen(function* () {
         // The review goes on the head GitHub has now, not the one a cache last saw.
         yield* pullRequests.current(key, accountId);
         const files = yield* pullRequests.files(key, accountId);
-        const rows = new Map(
-          files.files.map((file) => [
-            file.path,
-            file.patch._tag === "text" ? diffRows(file.patch.patch) : [],
-          ]),
-        );
-        const current = drafts.filter((comment) =>
-          anchorHolds(rows.get(comment.anchor.path) ?? [], comment.anchor, comment.snippet),
-        );
+        const current = drafts.flatMap((comment) => {
+          const placed = placeOn(comment, files);
+          return placed._tag === "outdated" ? [] : [{ comment, placed }];
+        });
+        const moved = current.filter(({ placed }) => placed._tag === "moved").length;
         const outdated = drafts.length - current.length;
         if (event !== "approve" && current.length === 0 && body.trim().length === 0)
           return yield* fail(
@@ -408,7 +370,7 @@ export const make = Effect.gen(function* () {
           Effect.gen(function* () {
             yield* sql`INSERT INTO review_submissions (id, pr_key, account_id, event, body, commit_sha, started_at)
               VALUES (${submission}, ${key}, ${accountId}, ${event}, ${body}, ${files.headSha}, ${yield* now})`;
-            for (const comment of current)
+            for (const { comment } of current)
               yield* sql`UPDATE pending_comments SET submission_id = ${submission} WHERE id = ${comment.id}`;
           }),
         );
@@ -424,7 +386,9 @@ export const make = Effect.gen(function* () {
                 commit_id: files.headSha,
                 event: EVENTS[event].request,
                 body,
-                comments: current.map(toGitHubComment),
+                comments: current.map(({ comment, placed }) =>
+                  toGitHubComment(placed.placement.anchor, comment.body),
+                ),
               },
             )
             .pipe(
@@ -434,9 +398,9 @@ export const make = Effect.gen(function* () {
         );
         yield* pullRequests.invalidate(key, accountId);
         yield* Effect.logInfo("Review submitted").pipe(
-          Effect.annotateLogs({ key, accountId, event, posted: current.length, outdated }),
+          Effect.annotateLogs({ key, accountId, event, posted: current.length, moved, outdated }),
         );
-        return { url: review.html_url, posted: current.length, outdated };
+        return { url: review.html_url, posted: current.length, moved, outdated };
       }).pipe(
         Effect.catchTags({
           GitHubRequestError: (error) => fail(error.message),

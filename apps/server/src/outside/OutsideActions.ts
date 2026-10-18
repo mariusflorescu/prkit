@@ -10,6 +10,7 @@ import { PullRequests } from "../pullRequests/PullRequests.ts";
 import { Workspace } from "../workspace/Workspace.ts";
 import { requestedAgent } from "./agentSelection.ts";
 import { asFailure, fail } from "./errors.ts";
+import { placementOn } from "./githubLines.ts";
 import type { ResolveTarget } from "./OutsideReads.ts";
 import type * as Inputs from "./paritySchemas.ts";
 import type {
@@ -158,7 +159,13 @@ export const makeOutsideActions = (
             "not-found",
             "This draft isn't on this pull request and account, or it was already sent. Read list_review_comments again.",
           );
-        return yield* comments.move(input.id, input.placement);
+        // GitHub's head now, not a cached one, so lines read before a push are refused.
+        yield* pulls.current(target.key, target.accountId);
+        const placement = yield* placementOn(
+          yield* pulls.files(target.key, target.accountId),
+          input,
+        );
+        return yield* comments.move(input.id, placement);
       }).pipe(Effect.mapError(asFailure));
 
     return {

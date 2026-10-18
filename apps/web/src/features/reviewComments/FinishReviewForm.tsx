@@ -1,5 +1,6 @@
-import { anchorHolds, diffRows, type PullRequestDetail, type ReviewEvent } from "@prkit/contracts";
+import { placeOn, type PullRequestDetail, type ReviewEvent } from "@prkit/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { useForm, useWatch } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
@@ -7,6 +8,8 @@ import { toastManager } from "~/components/ui/toast";
 import { refreshPullRequestReads } from "~/features/github/pullRequestReads";
 import { submitReview } from "~/rpc/client";
 import { pendingCommentsQuery, pullRequestFilesQuery, reviewThreadsQuery } from "~/rpc/queries";
+
+const movedClause = (moved: number) => `${moved} moved with ${moved === 1 ? "its" : "their"} code.`;
 
 const EVENTS: ReadonlyArray<{
   value: ReviewEvent;
@@ -49,20 +52,15 @@ export function FinishReviewForm({
   const files = useQuery(
     pullRequestFilesQuery(detail.key, detail.accountId, detail.headSha, detail.baseSha),
   );
-  const drafts = pending.data?.comments.filter((comment) => comment.state === "draft") ?? [];
-  const patches = new Map(
-    (files.data?.files ?? []).map((file) => [
-      file.path,
-      file.patch._tag === "text" ? diffRows(file.patch.patch) : [],
-    ]),
-  );
-  const outdated = files.data
-    ? drafts.filter(
-        (comment) =>
-          !anchorHolds(patches.get(comment.anchor.path) ?? [], comment.anchor, comment.snippet),
-      ).length
-    : 0;
-  const ready = drafts.length - outdated;
+  const comments = pending.data?.comments;
+  const current = files.data;
+  const { ready, moved, outdated } = useMemo(() => {
+    const drafts = (comments ?? []).filter((comment) => comment.state === "draft");
+    const placed = current ? drafts.map((comment) => placeOn(comment, current)._tag) : [];
+    const outdated = placed.filter((tag) => tag === "outdated").length;
+    const moved = placed.filter((tag) => tag === "moved").length;
+    return { ready: drafts.length - outdated, moved, outdated };
+  }, [comments, current]);
   const {
     register,
     handleSubmit,
@@ -103,6 +101,7 @@ export function FinishReviewForm({
         title: "Review submitted",
         description: [
           `${result.posted} ${result.posted === 1 ? "comment" : "comments"} posted on GitHub.`,
+          result.moved > 0 && movedClause(result.moved),
           result.outdated > 0 &&
             `${result.outdated} outdated ${result.outdated === 1 ? "draft stays" : "drafts stay"} in prkit.`,
         ]
@@ -182,6 +181,7 @@ export function FinishReviewForm({
         {ready === 0
           ? "No pending comments."
           : `${ready} pending ${ready === 1 ? "comment" : "comments"} will be posted.`}
+        {moved > 0 && ` ${movedClause(moved)}`}
         {outdated > 0 &&
           ` ${outdated} outdated ${outdated === 1 ? "draft stays" : "drafts stay"} in prkit until moved to a current line.`}
       </p>

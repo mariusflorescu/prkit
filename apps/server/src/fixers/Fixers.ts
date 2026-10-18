@@ -14,6 +14,7 @@ import {
   type FixerTurnState,
   FixerWorkRefused,
   type FixTarget,
+  placeOn,
   type PullRequestKey,
   refFromKey,
 } from "@prkit/contracts";
@@ -21,7 +22,6 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
-import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
@@ -31,6 +31,7 @@ import { makeKeyedGate } from "../github/keyedGate.ts";
 import { PullRequests } from "../pullRequests/PullRequests.ts";
 import { StartedBy } from "../outside/StartedBy.ts";
 import { RepoCache } from "../repo/RepoCache.ts";
+import { decodeRows, toComment } from "../reviewComments/pendingRow.ts";
 import { reviewTarget } from "../reviews/reviewTarget.ts";
 import { makeAgentRuns } from "./agentRuns.ts";
 import { makeConflictTurn } from "./conflictTurn.ts";
@@ -120,28 +121,21 @@ export const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       const draftIds = targets.flatMap((target) => (target._tag === "draft" ? [target.id] : []));
-      const drafts =
+      const rows =
         draftIds.length === 0
           ? []
-          : yield* sql`SELECT id, path, start_side, start_line, end_side, end_line, snippet, body, state, submission_id
-              FROM pending_comments WHERE pr_key = ${key} AND account_id = ${accountId} AND id IN ${sql.in(draftIds)}`.pipe(
-              Effect.flatMap(
-                Schema.decodeUnknownEffect(
-                  Schema.Array(
-                    Schema.Struct({
-                      id: Schema.String,
-                      path: Schema.String,
-                      start_side: Schema.Literals(["old", "new"]),
-                      start_line: Schema.Int,
-                      end_side: Schema.Literals(["old", "new"]),
-                      end_line: Schema.Int,
-                      snippet: Schema.String,
-                      body: Schema.String,
-                      state: Schema.String,
-                      submission_id: Schema.NullOr(Schema.String),
-                    }),
-                  ),
-                ),
+          : yield* sql`SELECT * FROM pending_comments WHERE pr_key = ${key} AND account_id = ${accountId} AND id IN ${sql.in(draftIds)}`.pipe(
+              Effect.flatMap(decodeRows),
+            );
+      const drafts =
+        rows.length === 0
+          ? []
+          : yield* pullRequests.files(key, accountId).pipe(
+              Effect.map((files) =>
+                rows.map((row) => ({ row, placed: placeOn(toComment(row), files) })),
+              ),
+              Effect.catchTag("PullRequestReadError", (error) =>
+                Effect.fail(new FixerError({ message: error.message })),
               ),
             );
       const threads = targets.some((target) => target._tag === "thread")
@@ -157,19 +151,25 @@ export const make = Effect.gen(function* () {
       for (const target of targets) {
         const id = `c${comments.length + 1}`;
         if (target._tag === "draft") {
-          const draft = drafts.find((row) => row.id === target.id);
-          if (draft === undefined || draft.state !== "draft" || draft.submission_id !== null)
+          const draft = drafts.find(({ row }) => row.id === target.id);
+          if (
+            draft === undefined ||
+            draft.row.state !== "draft" ||
+            draft.row.submission_id !== null
+          )
             return yield* new FixerError({
               message:
                 "A comment you picked was sent or changed meanwhile. Refresh and pick again.",
             });
+          const { row, placed } = draft;
+          const at = placed._tag === "outdated" ? null : placed.placement.anchor;
           comments.push({
             id,
             source: { _tag: "draft", draftId: target.id },
-            path: draft.path,
-            lines: { side: draft.end_side, start: draft.start_line, end: draft.end_line },
-            snippet: draft.snippet,
-            body: draft.body,
+            path: row.path,
+            lines: at && { side: at.end.side, start: at.start.line, end: at.end.line },
+            snippet: row.snippet,
+            body: row.body,
           });
           continue;
         }

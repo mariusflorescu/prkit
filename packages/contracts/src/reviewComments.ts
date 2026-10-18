@@ -19,11 +19,29 @@ export const CommentAnchor = Schema.Struct({
 });
 export type CommentAnchor = typeof CommentAnchor.Type;
 
-/** Where a pending comment sits and what it was written on. */
+/** Diff rows as `snippet` writes them, `+`, `-` or a space and then the line, one per entry. */
+const ContextRows = Schema.Array(Schema.String).check(Schema.isMaxLength(3));
+
+/**
+ * The rows around a comment's rows on the diff it was written on, inside their hunk. Only
+ * rows on the side of the diff its first (`before`) or last (`after`) line is on count, so
+ * a deletion beside a new line, or an addition beside a removed one, isn't part of it.
+ * Fewer than three only where the hunk ends.
+ */
+export const CommentContext = Schema.Struct({
+  /** Nearest rows above its first row, top to bottom. */
+  before: ContextRows,
+  /** Nearest rows below its last row, top to bottom. */
+  after: ContextRows,
+});
+export type CommentContext = typeof CommentContext.Type;
+
+/** Where a pending comment sits and what it was written on. `capture` makes one. */
 export const CommentPlacement = Schema.Struct({
   anchor: CommentAnchor,
   /** The diff rows it was written on, each `+`, `-` or a space and then the line. */
   snippet: Schema.String,
+  context: CommentContext,
   /** The head commit of the diff it was written on. */
   commitSha: Schema.String,
 });
@@ -44,6 +62,8 @@ export type PendingCommentState = typeof PendingCommentState.Type;
 export const PendingComment = Schema.Struct({
   id: ReviewCommentId,
   ...CommentPlacement.fields,
+  /** Null only for a draft written before prkit kept these rows. */
+  context: Schema.NullOr(CommentContext),
   body: Schema.String,
   state: PendingCommentState,
   createdAt: Schema.String,
@@ -73,6 +93,8 @@ export const NoteComment = Schema.Struct({
   state: PendingCommentState,
   anchor: CommentAnchor,
   snippet: Schema.String,
+  context: PendingComment.fields.context,
+  commitSha: Schema.String,
 });
 export type NoteComment = typeof NoteComment.Type;
 
@@ -90,6 +112,8 @@ export type ReviewEvent = typeof ReviewEvent.Type;
 export const ReviewSubmitted = Schema.Struct({
   url: Schema.String,
   posted: Schema.Int,
+  /** Of `posted`, those sent where their lines moved to. */
+  moved: Schema.Int,
   /** Drafts left out because their lines changed; they stay drafts. */
   outdated: Schema.Int,
 });

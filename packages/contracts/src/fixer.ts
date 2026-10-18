@@ -33,7 +33,7 @@ export const FixComment = Schema.Struct({
     }),
   ]),
   path: Schema.String,
-  /** Its lines in the PR's diff; null for a thread GitHub marks outdated. */
+  /** Where its lines are in the PR's diff now; null when they changed since it was written. */
   lines: Schema.NullOr(Schema.Struct({ side: FileSide, start: Schema.Int, end: Schema.Int })),
   /** The diff rows it was written on, each `+`, `-` or a space and then the line. */
   snippet: Schema.String,

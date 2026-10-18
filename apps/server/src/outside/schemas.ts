@@ -332,6 +332,7 @@ export const CommentsResult = Schema.Struct({
       side: Schema.Literals(["old", "new"]),
       startLine: Schema.Int,
       line: Schema.Int,
+      outdated: Schema.Boolean,
       body: Schema.String,
       state: Schema.String,
     }),
@@ -373,6 +374,10 @@ export const AddCommentInput = Schema.Struct({
       Schema.Literals(["new", "old"]),
       "new (the pull request's version, the default) or old (the base's, for removed lines).",
     ),
+  ),
+  headSha: describe(
+    Schema.NonEmptyString,
+    "The head commit these lines are numbered against, as read_pull_request reports it.",
   ),
   body: describe(Schema.NonEmptyString, "The comment, in Markdown."),
   clientRequestId: ClientRequestId,

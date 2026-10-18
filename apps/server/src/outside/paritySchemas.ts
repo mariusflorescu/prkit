@@ -7,7 +7,6 @@ import {
   AttemptId,
   AttemptSummary,
   ChapterReview,
-  CommentPlacement,
   DraftGuideResult,
   FileReviewState,
   FileSide,
@@ -56,6 +55,7 @@ import * as Schema from "effect/Schema";
 import { ResponseFields } from "./responseSchemas.ts";
 import { PageFields, PageInfo, pageSchema } from "./pageSchemas.ts";
 import {
+  AddCommentInput,
   GuideStatus,
   FixResult,
   HOST_NAME,
@@ -264,7 +264,11 @@ export const EditCommentInput = Schema.Struct({
 export const MoveCommentInput = Schema.Struct({
   ...TargetFields,
   id: ReviewCommentId,
-  placement: CommentPlacement,
+  path: AddCommentInput.fields.path,
+  line: AddCommentInput.fields.line,
+  startLine: AddCommentInput.fields.startLine,
+  side: AddCommentInput.fields.side,
+  headSha: AddCommentInput.fields.headSha,
 });
 export const CommentsResult = PendingComments;
 export const FixesResult = pageSchema(FixerFeedEntry);

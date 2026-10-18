@@ -11,6 +11,7 @@ import {
   AddedComment,
   InboxListResult,
   OpenPullRequestsResult,
+  PullRequestResult,
   WaitResult,
 } from "../apps/server/src/outside/schemas.ts";
 import { repoRoot } from "../scripts/verify-run.ts";
@@ -355,11 +356,15 @@ test(
       await ok("stop_guide", pr);
       await ok("stop_guide", { ...pr, number: 2 });
 
+      const { headSha } = Schema.decodeUnknownSync(PullRequestResult)(
+        await ok("read_pull_request", ninth),
+      );
       const draft = Schema.decodeUnknownSync(AddedComment)(
         await ok("add_review_comment", {
           ...ninth,
           path: "src/limits.ts",
           line: 2,
+          headSha,
           body: "Explain these limits",
         }),
       );
@@ -369,16 +374,13 @@ test(
         { ...pr, id: draft.id, body: "Wrong PR" },
         "isn't on this pull request",
       );
-      const placement = {
-        anchor: {
-          path: "src/limits.ts",
-          start: { side: "new", line: 3 },
-          end: { side: "new", line: 3 },
-        },
-        snippet: "+  slug: 64,",
-        commitSha: files.headSha,
-      };
-      await ok("move_review_comment", { ...ninth, id: draft.id, placement });
+      const moveTo = { ...ninth, id: draft.id, path: "src/limits.ts", line: 3 };
+      await refusal(
+        "move_review_comment",
+        { ...moveTo, headSha: "0".repeat(40) },
+        "since 000000000000. Read it again and name the lines on its new head.",
+      );
+      await ok("move_review_comment", { ...moveTo, headSha });
       const sent = await ok("send_to_fix_agent", {
         ...ninth,
         ...selection,

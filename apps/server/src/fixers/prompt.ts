@@ -21,7 +21,10 @@ const pullLine = (target: ReviewTarget) =>
   `${target.ref.owner}/${target.ref.repo}#${target.ref.number}: ${target.title}`;
 
 const where = (comment: FixComment) => {
-  if (comment.lines === null) return `${comment.path} (GitHub marks these lines outdated)`;
+  if (comment.lines === null)
+    return comment.source._tag === "draft"
+      ? `${comment.path} (its lines changed since the comment was written)`
+      : `${comment.path} (GitHub marks these lines outdated)`;
   const { start, end, side } = comment.lines;
   const range = start === end ? `line ${start}` : `lines ${start}-${end}`;
   return `${comment.path}, ${range} (${side === "new" ? "the pull request's side" : "the old side, before the pull request"})`;

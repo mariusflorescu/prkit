@@ -1,22 +1,23 @@
 import {
   type AccountId,
-  anchorHolds,
+  capture,
   type CommentPlacement,
   type DiffFile,
-  type DiffRow,
   diffRows,
-  findSnippet,
+  inOneHunk,
+  type Landed,
   type LinePoint,
+  type Outdated,
   type PendingComment,
+  place,
   type PullRequestKey,
-  rangeRows,
   type ReviewCommentId,
   type ReviewThread,
 } from "@prkit/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
 
-import type { DiffComments, LineRange } from "~/components/diff";
+import type { DiffComments } from "~/components/diff";
 import { toastManager } from "~/components/ui/toast";
 import { movePendingComment } from "~/rpc/client";
 import { pendingCommentsQuery, reviewThreadsQuery } from "~/rpc/queries";
@@ -40,29 +41,14 @@ export type CommentScope = {
 type Pin = {
   point: LinePoint;
   threads: Array<ReviewThread>;
-  drafts: Array<PendingComment>;
+  drafts: Array<{ comment: PendingComment; placed: Landed }>;
   composer: { placement: CommentPlacement; note: NoteDraft | null } | null;
-};
-
-const locate = (
-  rows: ReadonlyArray<DiffRow>,
-  path: string,
-  range: LineRange,
-  commitSha: string,
-): CommentPlacement | null => {
-  const found = rangeRows(rows, range.start, range.end);
-  return (
-    found && {
-      anchor: { path, start: found.start, end: found.end },
-      snippet: found.snippet,
-      commitSha,
-    }
-  );
 };
 
 /**
  * Review comments for the diffs of one PR, as a function from a file to its comment
- * layer. Drafts sit where their lines still read the same; others are outdated.
+ * layer. Drafts sit where their lines, and the lines around them, read the same; others
+ * are outdated.
  */
 export function useDiffComments(
   pr: { key: PullRequestKey; accountId: AccountId },
@@ -132,28 +118,19 @@ export function useDiffComments(
       const fileThreads = (threadList ?? []).filter((thread) => thread.path === file.path);
       const outdatedThreads: Array<ReviewThread> = [];
       for (const thread of fileThreads) {
-        if (thread.anchor && rangeRows(rows, thread.anchor.start, thread.anchor.end))
+        if (thread.anchor && inOneHunk(rows, thread.anchor.start, thread.anchor.end))
           pinAt(thread.anchor.end).threads.push(thread);
         else outdatedThreads.push(thread);
       }
-      const outdatedDrafts: Array<{
-        comment: PendingComment;
-        suggestion: CommentPlacement | null;
-      }> = [];
+      const outdatedDrafts: Array<{ comment: PendingComment; placed: Outdated }> = [];
       for (const comment of fileDrafts) {
-        if (anchorHolds(rows, comment.anchor, comment.snippet))
-          pinAt(comment.anchor.end).drafts.push(comment);
-        else {
-          const anchor = findSnippet(rows, file.path, comment.snippet);
-          outdatedDrafts.push({
-            comment,
-            suggestion: anchor && { anchor, snippet: comment.snippet, commitSha },
-          });
-        }
+        const placed = place(comment, rows, commitSha);
+        if (placed._tag === "outdated") outdatedDrafts.push({ comment, placed });
+        else pinAt(placed.placement.anchor.end).drafts.push({ comment, placed });
       }
       const open =
         visibleComposer?.path === file.path
-          ? locate(rows, file.path, visibleComposer.range, commitSha)
+          ? capture(rows, { path: file.path, ...visibleComposer.range }, commitSha)
           : null;
       if (open)
         pinAt(open.anchor.end).composer = { placement: open, note: visibleComposer?.note ?? null };
@@ -174,7 +151,7 @@ export function useDiffComments(
         },
         selection: open && { start: open.anchor.start, end: open.anchor.end },
         onSelect: (range) => {
-          const placement = locate(rows, file.path, range, commitSha);
+          const placement = capture(rows, { path: file.path, ...range }, commitSha);
           if (placement === null)
             toastManager.add({
               type: "warning",
@@ -208,6 +185,7 @@ export function useDiffComments(
                   pr={owner}
                   path={file.path}
                   rows={rows}
+                  revisionHead={commitSha}
                   revision={guideRevision}
                   note={note}
                   index={index}

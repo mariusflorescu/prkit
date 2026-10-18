@@ -389,9 +389,7 @@ test(
       await screen
         .getByRole("textbox", "Comment on line 19, where this line is now")
         .press("Meta+Enter");
-      await expect(brace.getByRole("status")).toHaveText(
-        "In your review, on line 19 of the latest code.",
-      );
+      await expect(brace.getByRole("status")).toHaveText("In your review.");
 
       const generated = noteIn(browser, "src/change-0.ts", "question", GENERATED);
       await generated.scrollIntoView();

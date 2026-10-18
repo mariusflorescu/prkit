@@ -640,7 +640,7 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
   const MoveReviewComment = work(
     Tool.make("move_review_comment", {
       description:
-        "Move a local draft’s diff placement on the named PR and account. Nothing is posted to GitHub.",
+        "Move a local draft to lines of the named PR's diff now, on that PR and account. prkit keeps the rows around them, so the draft follows its code. Nothing is posted to GitHub.",
       parameters: Parity.MoveCommentInput,
       success: limited(Parity.CommentsResult),
       failure: OutsideToolFailure,

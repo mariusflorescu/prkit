@@ -1,4 +1,10 @@
-import type { AccountId, CommentPlacement, PendingComment, PullRequestKey } from "@prkit/contracts";
+import type {
+  AccountId,
+  CommentPlacement,
+  PendingComment,
+  Placed,
+  PullRequestKey,
+} from "@prkit/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { PencilIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -11,22 +17,22 @@ import { CommentCard } from "./CommentCard";
 import { CommentForm } from "./CommentForm";
 import { DiffSnippet } from "./DiffSnippet";
 import { storePending } from "./reviewCommentsCache";
-import { rangeLabel } from "./reviewCommentPresentation";
+import { OUTDATED_WHY, rangeLabel, suggestionLabel } from "./reviewCommentPresentation";
 import { useReviewCommentsStore } from "./reviewCommentsStore";
 
 /**
- * A draft that goes out with the review. An outdated one shows the lines it was
- * written on and offers to move it, since GitHub only takes it on a current line.
+ * A draft that goes out with the review, where it sits on the diff on screen. A moved one
+ * says where it was written. An outdated one shows the lines it was written on and offers
+ * to move it, since GitHub only takes it on a current line.
  */
 export function PendingCommentCard({
   comment,
   pr,
-  outdated = null,
+  placed,
 }: {
   comment: PendingComment;
   pr: { key: PullRequestKey; accountId: AccountId };
-  /** Set when its lines changed: where the same lines sit now, if they still exist. */
-  outdated?: { suggestion: CommentPlacement | null } | null;
+  placed: Placed;
 }) {
   const client = useQueryClient();
   const store = storePending(client, pr.key, pr.accountId);
@@ -34,6 +40,7 @@ export function PendingCommentCard({
   const moving = useReviewCommentsStore((state) => state.moving?.id === comment.id);
   const startMove = useReviewCommentsStore((state) => state.startMove);
   const stopMove = useReviewCommentsStore((state) => state.stopMove);
+  const here = placed._tag === "outdated" ? null : placed.placement;
   const edit = useMutation({
     mutationFn: (body: string) => editPendingComment(comment.id, body),
     onSuccess: (comments) => {
@@ -57,19 +64,28 @@ export function PendingCommentCard({
     window.addEventListener("keydown", cancel);
     return () => window.removeEventListener("keydown", cancel);
   }, [moving, stopMove]);
-  const where = rangeLabel(comment.anchor);
+  const where = rangeLabel(here?.anchor ?? comment.anchor);
+  const written = placed._tag === "moved" ? rangeLabel(comment.anchor) : null;
   const error = remove.error ?? move.error;
   const withAgent = comment.state === "sent-to-agent";
   return (
-    <CommentCard draft label={`Pending comment on ${comment.anchor.path} ${where}`}>
+    <CommentCard
+      draft
+      label={`Pending comment on ${comment.anchor.path} ${where}${written === null ? "" : `, written on ${written}`}`}
+    >
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <span className="rounded bg-warning-surface px-1.5 py-0.5 text-3xs font-medium text-warning-foreground">
           {withAgent ? "With the agent" : "Pending"}
         </span>
-        {outdated !== null && (
-          <span className="rounded border border-border/60 px-1 text-3xs">Outdated</span>
+        {placed._tag !== "kept" && (
+          <span className="rounded border border-border/60 px-1 text-3xs">
+            {placed._tag === "moved" ? "Moved" : "Outdated"}
+          </span>
         )}
-        <span className="min-w-0 truncate">{where}</span>
+        <span className="min-w-0 truncate">
+          {where}
+          {written !== null && `, written on ${written}`}
+        </span>
         {/* While the agent works on it, it can't change; its fix ends that in the Fixes tab. */}
         <span className={withAgent ? "hidden" : "ml-auto flex items-center gap-0.5"}>
           <SendToAgentButton
@@ -97,22 +113,23 @@ export function PendingCommentCard({
           </Button>
         </span>
       </div>
-      {outdated !== null && (
+      {placed._tag === "outdated" && (
         <div className="mt-2 space-y-2">
-          <p className="text-xs text-muted-foreground">
-            These lines changed after you wrote this, so it won't be sent until it is on a current
-            line.
-          </p>
-          <DiffSnippet text={comment.snippet} label="Lines this comment was written on" />
+          <p className="text-xs text-muted-foreground">{OUTDATED_WHY[placed.why]}</p>
+          <DiffSnippet
+            text={comment.snippet}
+            context={comment.context}
+            label="Lines this comment was written on"
+          />
           <div className="flex flex-wrap items-center gap-2">
-            {outdated.suggestion && (
+            {placed.suggestion && (
               <Button
                 size="xs"
                 variant="outline"
                 disabled={move.isPending}
-                onClick={() => outdated.suggestion && move.mutate(outdated.suggestion)}
+                onClick={() => placed.suggestion && move.mutate(placed.suggestion)}
               >
-                Move to {rangeLabel(outdated.suggestion.anchor)}
+                {suggestionLabel(comment.anchor, placed.suggestion.anchor)}
               </Button>
             )}
             {moving ? (

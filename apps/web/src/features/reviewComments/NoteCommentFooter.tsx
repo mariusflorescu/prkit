@@ -1,11 +1,11 @@
 import {
   type AccountId,
-  anchorHolds,
   type DiffRow,
   type NoteComment,
   type NoteKey,
   noteKey,
   notePoint,
+  place,
   type PullRequestKey,
 } from "@prkit/contracts";
 
@@ -19,6 +19,7 @@ export function NoteCommentFooter({
   pr,
   path,
   rows,
+  revisionHead,
   revision,
   note,
   index,
@@ -29,6 +30,7 @@ export function NoteCommentFooter({
   path: string;
   /** The rows of the revision's diff of this file, which the note is written on. */
   rows: ReadonlyArray<DiffRow>;
+  revisionHead: string;
   revision: number;
   note: DiffAnnotation;
   index: number;
@@ -44,6 +46,7 @@ export function NoteCommentFooter({
         pr={pr}
         path={path}
         rows={rows}
+        revisionHead={revisionHead}
         revision={revision}
         note={note}
         index={index}
@@ -51,15 +54,12 @@ export function NoteCommentFooter({
       />
     );
   const point = notePoint(note);
-  const { end } = comment.anchor;
+  const placed = place(comment, rows, revisionHead);
+  const end = placed._tag === "outdated" ? null : placed.placement.anchor.end;
   return (
     <NoteCommentStatus
       comment={comment}
-      underNote={
-        end.side === point.side &&
-        end.line === point.line &&
-        anchorHolds(rows, comment.anchor, comment.snippet)
-      }
+      underNote={end?.side === point.side && end.line === point.line}
     />
   );
 }

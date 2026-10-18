@@ -454,10 +454,15 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
         await app.screenshot("outside-agents-opened-pr");
 
         // A draft comment, once however often the client retries it.
+        const read = await bridge.call("read_pull_request", { url: PR_9 });
+        const { headSha } = Schema.decodeUnknownSync(Schema.Struct({ headSha: Schema.String }))(
+          "json" in read ? read.json : {},
+        );
         const comment = {
           url: PR_9,
           path: "src/limits.ts",
           line: 2,
+          headSha,
           body: "Name the limit.",
           clientRequestId: "e2e-comment-1",
         };
@@ -686,16 +691,19 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
 
         const detail = await bridge.call("read_pull_request", pr);
         log.note("read_pull_request", detail);
-        const added = Schema.decodeUnknownSync(
+        const read = Schema.decodeUnknownSync(
           Schema.Struct({
+            headSha: Schema.String,
             files: Schema.Array(Schema.Struct({ path: Schema.String, status: Schema.String })),
           }),
-        )("json" in detail ? detail.json : {}).files.find((file) => file.status === "added");
+        )("json" in detail ? detail.json : {});
+        const added = read.files.find((file) => file.status === "added");
         expect(added).toBeDefined();
         const comment = await bridge.call("add_review_comment", {
           ...pr,
           path: added?.path ?? "",
           line: 1,
+          headSha: read.headSha,
           body: "Say what this file is for in one line at its top.",
           clientRequestId: "fixture-comment-1",
         });
