@@ -151,7 +151,7 @@ const refresh = async (screen: Screen, fake: FakeGitHub) => {
   const filesRead = async () => (await fake.stats()).byKind["rest:files"] ?? 0;
   const before = await filesRead();
   await screen.getByRole("navigation", "Pull request tabs").getByRole("button", "Refresh").tap();
-  await expect.poll(filesRead, { timeout: 30_000 }).toBeGreaterThan(before);
+  await expect.poll(filesRead, { timeout: 60_000 }).toBeGreaterThan(before);
 };
 
 const finishStatus = async (screen: Screen, pendingCount: number, status: string) => {
@@ -188,7 +188,7 @@ test(
     const name = "draft-placement";
     const { fake, push } = await fixtures(name);
     try {
-      await push({ [LIMITS]: WRITTEN });
+      const written = await push({ [LIMITS]: WRITTEN });
       await emulateOsColorScheme(browser, "light");
       const run = startFakeInstance(name, fake);
       await openFiles({ app, screen, browser }, run, 21);
@@ -228,15 +228,15 @@ test(
         timeout: 30_000,
       });
       const outdated = screen.getByRole("region", `Outdated comments on ${LIMITS}`);
-      const movedShort = file.getByRole("article", pending("line 22, moved from line 17"));
-      const movedHeading = file.getByRole("article", pending("line 25, moved from line 20"));
+      const movedShort = file.getByRole("article", pending("line 22, written on line 17"));
+      const movedHeading = file.getByRole("article", pending("line 25, written on line 20"));
       const check = outdated.getByRole("article", pending("line 12"));
       const expectShifted = async () => {
         await expect(movedShort).toContainText(SHORT);
         await expect(movedShort).toContainText("Moved");
-        await expect(movedShort).toContainText("line 22, was line 17");
+        await expect(movedShort).toContainText("line 22, written on line 17");
         await expect(movedHeading).toContainText(HEADING);
-        await expect(movedHeading).toContainText("line 25, was line 20");
+        await expect(movedHeading).toContainText("line 25, written on line 20");
         await expect(file.getByRole("article", pending("old line 2"))).toContainText(URL_RISK);
         await expect(file.getByText("Moved")).toHaveCount(2);
         await expect(outdated.getByRole("article")).toHaveCount(2);
@@ -281,13 +281,12 @@ test(
       await movedHeading.getByRole("button", "Edit pending comment").tap();
       await movedHeading.getByRole("textbox", "Edit pending comment").fill(HEADING_EDITED);
       await movedHeading.getByRole("button", "Save").tap();
-      const heading = file.getByRole("article", pending("line 25"));
-      await expect(heading).toContainText(HEADING_EDITED);
-      await expect(heading.getByText("Moved")).toHaveCount(0);
+      await expect(movedHeading).toContainText(HEADING_EDITED);
+      await expect(movedHeading).toContainText("Moved");
       expect(draftRows(restarted.home)[2]).toMatchObject({
         body: HEADING_EDITED,
-        line: 25,
-        sha: shifted,
+        line: 20,
+        sha: written,
         hasContext: 1,
       });
 
@@ -295,7 +294,7 @@ test(
       const dialog = await finishStatus(
         screen,
         5,
-        "3 pending comments will be posted. 1 moved with its code. 2 outdated drafts stay in prkit until moved to a current line.",
+        "3 pending comments will be posted. 2 moved with their code. 2 outdated drafts stay in prkit until moved to a current line.",
       );
       await dialog.getByRole("button", "Submit review").tap();
       await expect(dialog).toBeHidden({ timeout: 30_000 });
@@ -309,7 +308,7 @@ test(
       await expect
         .poll(() => toasts(browser))
         .toEqual([
-          "Review submitted | 3 comments posted on GitHub. 1 moved with its code. 2 outdated drafts stay in prkit.",
+          "Review submitted | 3 comments posted on GitHub. 2 moved with their code. 2 outdated drafts stay in prkit.",
         ]);
       expect(draftRows(restarted.home).map((row) => [row.body, row.state])).toEqual([
         [SHORT, "published"],

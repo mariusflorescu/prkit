@@ -8,7 +8,7 @@ import {
   type FixerTurn,
   type FixerTurnId,
   type FixTarget,
-  place,
+  placeOn,
   type PullRequestKey,
   pullRequestKey,
   refFromKey,
@@ -481,7 +481,7 @@ export const make = Effect.gen(function* () {
       const files = yield* pullRequests.files(target.key, target.accountId);
       const result = {
         drafts: drafts.comments.map((comment) => {
-          const placed = place(comment, files);
+          const placed = placeOn(comment, files);
           // Where it sits now; an outdated draft names the lines it was written on, as threads do.
           const { start, end } =
             placed._tag === "outdated" ? comment.anchor : placed.placement.anchor;
@@ -768,6 +768,7 @@ export const make = Effect.gen(function* () {
       readonly line: number;
       readonly startLine?: number;
       readonly side?: "new" | "old";
+      readonly headSha: string;
       readonly body: string;
       readonly clientRequestId?: string;
     },
@@ -784,11 +785,14 @@ export const make = Effect.gen(function* () {
             input.line,
             input.startLine ?? input.line,
             input.side ?? "new",
+            input.headSha,
             input.body,
           ],
         },
         AddedComment,
         Effect.gen(function* () {
+          // GitHub's head now, not a cached one, so lines read before a push are refused.
+          yield* pullRequests.current(target.key, target.accountId);
           const placement = yield* placementOn(
             yield* pullRequests.files(target.key, target.accountId),
             input,

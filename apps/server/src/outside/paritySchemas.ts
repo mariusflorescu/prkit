@@ -268,6 +268,7 @@ export const MoveCommentInput = Schema.Struct({
   line: AddCommentInput.fields.line,
   startLine: AddCommentInput.fields.startLine,
   side: AddCommentInput.fields.side,
+  headSha: AddCommentInput.fields.headSha,
 });
 export const CommentsResult = PendingComments;
 export const FixesResult = pageSchema(FixerFeedEntry);

@@ -145,7 +145,7 @@ export const makeOutsideActions = (
             "not-found",
             "This draft isn't on this pull request and account, or it was already sent. Read list_review_comments again.",
           );
-        return yield* comments.edit(input.id, input.body, null);
+        return yield* comments.edit(input.id, input.body);
       }).pipe(Effect.mapError(asFailure));
     const moveComment = (input: typeof Inputs.MoveCommentInput.Type) =>
       Effect.gen(function* () {
@@ -159,6 +159,8 @@ export const makeOutsideActions = (
             "not-found",
             "This draft isn't on this pull request and account, or it was already sent. Read list_review_comments again.",
           );
+        // GitHub's head now, not a cached one, so lines read before a push are refused.
+        yield* pulls.current(target.key, target.accountId);
         const placement = yield* placementOn(
           yield* pulls.files(target.key, target.accountId),
           input,

@@ -22,7 +22,7 @@ import { useReviewCommentsStore } from "./reviewCommentsStore";
 
 /**
  * A draft that goes out with the review, where it sits on the diff on screen. A moved one
- * says where its lines were. An outdated one shows the lines it was written on and offers
+ * says where it was written. An outdated one shows the lines it was written on and offers
  * to move it, since GitHub only takes it on a current line.
  */
 export function PendingCommentCard({
@@ -40,10 +40,9 @@ export function PendingCommentCard({
   const moving = useReviewCommentsStore((state) => state.moving?.id === comment.id);
   const startMove = useReviewCommentsStore((state) => state.startMove);
   const stopMove = useReviewCommentsStore((state) => state.stopMove);
-  // Editing a draft that sits on this diff keeps the lines around it fresh.
   const here = placed._tag === "outdated" ? null : placed.placement;
   const edit = useMutation({
-    mutationFn: (body: string) => editPendingComment(comment.id, body, here),
+    mutationFn: (body: string) => editPendingComment(comment.id, body),
     onSuccess: (comments) => {
       store(comments);
       setEditing(false);
@@ -66,13 +65,13 @@ export function PendingCommentCard({
     return () => window.removeEventListener("keydown", cancel);
   }, [moving, stopMove]);
   const where = rangeLabel(here?.anchor ?? comment.anchor);
-  const was = placed._tag === "moved" ? rangeLabel(comment.anchor) : null;
+  const written = placed._tag === "moved" ? rangeLabel(comment.anchor) : null;
   const error = remove.error ?? move.error;
   const withAgent = comment.state === "sent-to-agent";
   return (
     <CommentCard
       draft
-      label={`Pending comment on ${comment.anchor.path} ${where}${was === null ? "" : `, moved from ${was}`}`}
+      label={`Pending comment on ${comment.anchor.path} ${where}${written === null ? "" : `, written on ${written}`}`}
     >
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <span className="rounded bg-warning-surface px-1.5 py-0.5 text-3xs font-medium text-warning-foreground">
@@ -85,7 +84,7 @@ export function PendingCommentCard({
         )}
         <span className="min-w-0 truncate">
           {where}
-          {was !== null && `, was ${was}`}
+          {written !== null && `, written on ${written}`}
         </span>
         {/* While the agent works on it, it can't change; its fix ends that in the Fixes tab. */}
         <span className={withAgent ? "hidden" : "ml-auto flex items-center gap-0.5"}>

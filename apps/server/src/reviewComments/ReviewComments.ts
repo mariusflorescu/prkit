@@ -5,19 +5,16 @@ import {
   CommentContext,
   type CommentPlacement,
   diffRows,
-  FileSide,
   type GuideRevision,
-  NoteKey,
+  type NoteKey,
   NOTE_LOST,
   type NoteRef,
   noteKey,
   notePoint,
-  type PendingComment,
-  PendingCommentState,
-  place,
+  placeOn,
   type PullRequestKey,
   refFromKey,
-  ReviewCommentId,
+  type ReviewCommentId,
   ReviewCommentsError,
   type ReviewEvent,
 } from "@prkit/contracts";
@@ -34,27 +31,8 @@ import { GitHubApi } from "../github/GitHubApi.ts";
 import { makeKeyedGate } from "../github/keyedGate.ts";
 import { PullRequests } from "../pullRequests/PullRequests.ts";
 import { Reviews } from "../reviews/Reviews.ts";
+import { anchorOf, decodeRows, toComment } from "./pendingRow.ts";
 
-const Row = Schema.Struct({
-  id: ReviewCommentId,
-  pr_key: Schema.String,
-  account_id: Schema.String,
-  path: Schema.String,
-  start_side: FileSide,
-  start_line: Schema.Int,
-  end_side: FileSide,
-  end_line: Schema.Int,
-  snippet: Schema.String,
-  context: Schema.NullOr(Schema.fromJsonString(CommentContext)),
-  commit_sha: Schema.String,
-  body: Schema.String,
-  state: PendingCommentState,
-  submission_id: Schema.NullOr(Schema.String),
-  note_key: Schema.NullOr(NoteKey),
-  created_at: Schema.String,
-  updated_at: Schema.String,
-});
-const decodeRows = Schema.decodeUnknownEffect(Schema.Array(Row));
 const encodeContext = Schema.encodeSync(Schema.fromJsonString(CommentContext));
 const Submission = Schema.Struct({
   id: Schema.String,
@@ -81,24 +59,6 @@ const EVENTS = {
 const GITHUB_SIDE = { old: "LEFT", new: "RIGHT" } as const;
 /** How far before a submission started GitHub's clock may put the review it created. */
 const CLOCK_SKEW_MS = 10 * 60_000;
-
-const anchorOf = (row: typeof Row.Type) => ({
-  path: row.path,
-  start: { side: row.start_side, line: row.start_line },
-  end: { side: row.end_side, line: row.end_line },
-});
-
-const toComment = (row: typeof Row.Type): PendingComment => ({
-  id: row.id,
-  anchor: anchorOf(row),
-  snippet: row.snippet,
-  context: row.context,
-  commitSha: row.commit_sha,
-  body: row.body,
-  state: row.state,
-  createdAt: row.created_at,
-  updatedAt: row.updated_at,
-});
 
 const findNote = (revision: GuideRevision, ref: NoteRef) => {
   const note = revision.normalized.chapters
@@ -312,7 +272,7 @@ export const make = Effect.gen(function* () {
         if (taken.length > 0) return yield* fail("You already added this note to your review.");
         // Placed on the head GitHub has now, as at submit, not the one a cache last saw.
         yield* pullRequests.current(key, accountId);
-        const placed = place(found.written, yield* pullRequests.files(key, accountId));
+        const placed = placeOn(found.written, yield* pullRequests.files(key, accountId));
         if (placed._tag === "outdated") {
           const { title, description } = NOTE_LOST[placed.why];
           return yield* fail(`${title}. ${description}`);
@@ -360,23 +320,16 @@ export const make = Effect.gen(function* () {
         }),
       );
     }).pipe(storage);
-  const placeAt = (placement: CommentPlacement) => {
-    const { anchor } = placement;
-    return sql`path = ${anchor.path}, start_side = ${anchor.start.side}, start_line = ${anchor.start.line}, end_side = ${anchor.end.side}, end_line = ${anchor.end.line}, snippet = ${placement.snippet}, context = ${encodeContext(placement.context)}, commit_sha = ${placement.commitSha}`;
-  };
-  /** New words, and with a placement the lines it sits on now, so it keeps fresh rows. */
-  const edit = (id: ReviewCommentId, body: string, placement: CommentPlacement | null) =>
-    changeDraft(id, (at) =>
-      placement === null
-        ? sql`UPDATE pending_comments SET body = ${body}, updated_at = ${at} WHERE id = ${id}`
-        : sql`UPDATE pending_comments SET body = ${body}, ${placeAt(placement)}, updated_at = ${at} WHERE id = ${id}`,
-    );
-  const move = (id: ReviewCommentId, placement: CommentPlacement) =>
+  const edit = (id: ReviewCommentId, body: string) =>
     changeDraft(
       id,
-      (at) =>
-        sql`UPDATE pending_comments SET ${placeAt(placement)}, updated_at = ${at} WHERE id = ${id}`,
+      (at) => sql`UPDATE pending_comments SET body = ${body}, updated_at = ${at} WHERE id = ${id}`,
     );
+  const move = (id: ReviewCommentId, placement: CommentPlacement) =>
+    changeDraft(id, (at) => {
+      const { anchor } = placement;
+      return sql`UPDATE pending_comments SET path = ${anchor.path}, start_side = ${anchor.start.side}, start_line = ${anchor.start.line}, end_side = ${anchor.end.side}, end_line = ${anchor.end.line}, snippet = ${placement.snippet}, context = ${encodeContext(placement.context)}, commit_sha = ${placement.commitSha}, updated_at = ${at} WHERE id = ${id}`;
+    });
   const remove = (id: ReviewCommentId) =>
     changeDraft(id, () => sql`DELETE FROM pending_comments WHERE id = ${id}`);
 
@@ -399,7 +352,7 @@ export const make = Effect.gen(function* () {
         yield* pullRequests.current(key, accountId);
         const files = yield* pullRequests.files(key, accountId);
         const current = drafts.flatMap((comment) => {
-          const placed = place(comment, files);
+          const placed = placeOn(comment, files);
           return placed._tag === "outdated" ? [] : [{ comment, placed }];
         });
         const moved = current.filter(({ placed }) => placed._tag === "moved").length;

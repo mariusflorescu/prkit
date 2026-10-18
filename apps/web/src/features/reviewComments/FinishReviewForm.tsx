@@ -1,5 +1,6 @@
-import { place, type PullRequestDetail, type ReviewEvent } from "@prkit/contracts";
+import { placeOn, type PullRequestDetail, type ReviewEvent } from "@prkit/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { useForm, useWatch } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
@@ -51,12 +52,15 @@ export function FinishReviewForm({
   const files = useQuery(
     pullRequestFilesQuery(detail.key, detail.accountId, detail.headSha, detail.baseSha),
   );
-  const drafts = pending.data?.comments.filter((comment) => comment.state === "draft") ?? [];
-  const diff = files.data;
-  const placed = diff ? drafts.map((comment) => place(comment, diff)._tag) : [];
-  const outdated = placed.filter((tag) => tag === "outdated").length;
-  const moved = placed.filter((tag) => tag === "moved").length;
-  const ready = drafts.length - outdated;
+  const comments = pending.data?.comments;
+  const current = files.data;
+  const { ready, moved, outdated } = useMemo(() => {
+    const drafts = (comments ?? []).filter((comment) => comment.state === "draft");
+    const placed = current ? drafts.map((comment) => placeOn(comment, current)._tag) : [];
+    const outdated = placed.filter((tag) => tag === "outdated").length;
+    const moved = placed.filter((tag) => tag === "moved").length;
+    return { ready: drafts.length - outdated, moved, outdated };
+  }, [comments, current]);
   const {
     register,
     handleSubmit,

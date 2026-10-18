@@ -97,7 +97,7 @@ For several PRs, start every guide first, then wait on each; prkit queues work b
 ### Hand review comments to the fix agent
 
 ```sh
-prkit comments add <pr> --path src/a.ts --line 42 --body "Handle the empty list" --request-id comment-42
+prkit comments add <pr> --path src/a.ts --line 42 --head-sha <headSha> --body "Handle the empty list" --request-id comment-42
 prkit fix send <pr> --request-id fix-42
 prkit wait <pr> --for fix --timeout 600
 prkit fix read <pr> --json

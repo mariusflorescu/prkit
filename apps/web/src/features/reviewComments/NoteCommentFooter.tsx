@@ -1,7 +1,6 @@
 import {
   type AccountId,
   type DiffRow,
-  type HeadDiff,
   type NoteComment,
   type NoteKey,
   noteKey,
@@ -20,7 +19,7 @@ export function NoteCommentFooter({
   pr,
   path,
   rows,
-  diff,
+  revisionHead,
   revision,
   note,
   index,
@@ -31,8 +30,7 @@ export function NoteCommentFooter({
   path: string;
   /** The rows of the revision's diff of this file, which the note is written on. */
   rows: ReadonlyArray<DiffRow>;
-  /** The revision's diff of this file, at the revision's head. */
-  diff: HeadDiff;
+  revisionHead: string;
   revision: number;
   note: DiffAnnotation;
   index: number;
@@ -48,7 +46,7 @@ export function NoteCommentFooter({
         pr={pr}
         path={path}
         rows={rows}
-        revisionHead={diff.headSha}
+        revisionHead={revisionHead}
         revision={revision}
         note={note}
         index={index}
@@ -56,13 +54,12 @@ export function NoteCommentFooter({
       />
     );
   const point = notePoint(note);
-  const { end } = comment.anchor;
+  const placed = place(comment, rows, revisionHead);
+  const end = placed._tag === "outdated" ? null : placed.placement.anchor.end;
   return (
     <NoteCommentStatus
       comment={comment}
-      underNote={
-        end.side === point.side && end.line === point.line && place(comment, diff)._tag === "kept"
-      }
+      underNote={end?.side === point.side && end.line === point.line}
     />
   );
 }

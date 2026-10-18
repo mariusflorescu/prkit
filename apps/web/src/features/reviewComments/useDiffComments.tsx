@@ -4,6 +4,7 @@ import {
   type CommentPlacement,
   type DiffFile,
   diffRows,
+  inOneHunk,
   type Landed,
   type LinePoint,
   type Outdated,
@@ -104,7 +105,6 @@ export function useDiffComments(
     const build = (file: DiffFile): DiffComments | undefined => {
       if (drafts === undefined || file.patch._tag !== "text") return undefined;
       const rows = diffRows(file.patch.patch);
-      const diff = { headSha: commitSha, files: [file] };
       const pins = new Map<string, Pin>();
       const pinAt = (point: LinePoint) => {
         const id = `${point.side}:${point.line}`;
@@ -118,13 +118,13 @@ export function useDiffComments(
       const fileThreads = (threadList ?? []).filter((thread) => thread.path === file.path);
       const outdatedThreads: Array<ReviewThread> = [];
       for (const thread of fileThreads) {
-        if (thread.anchor && capture(rows, thread.anchor, commitSha) !== null)
+        if (thread.anchor && inOneHunk(rows, thread.anchor.start, thread.anchor.end))
           pinAt(thread.anchor.end).threads.push(thread);
         else outdatedThreads.push(thread);
       }
       const outdatedDrafts: Array<{ comment: PendingComment; placed: Outdated }> = [];
       for (const comment of fileDrafts) {
-        const placed = place(comment, diff);
+        const placed = place(comment, rows, commitSha);
         if (placed._tag === "outdated") outdatedDrafts.push({ comment, placed });
         else pinAt(placed.placement.anchor.end).drafts.push({ comment, placed });
       }
@@ -185,7 +185,7 @@ export function useDiffComments(
                   pr={owner}
                   path={file.path}
                   rows={rows}
-                  diff={diff}
+                  revisionHead={commitSha}
                   revision={guideRevision}
                   note={note}
                   index={index}

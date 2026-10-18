@@ -150,8 +150,7 @@ const layerHandlers = WsRpcGroup.toLayer(
         reviewComments.add(key, accountId, placement, body),
       [WS_METHODS.reviewCommentsAddFromNote]: ({ key, accountId, note, body }) =>
         reviewComments.addFromNote(key, accountId, note, body),
-      [WS_METHODS.reviewCommentsEdit]: ({ id, body, placement }) =>
-        reviewComments.edit(id, body, placement),
+      [WS_METHODS.reviewCommentsEdit]: ({ id, body }) => reviewComments.edit(id, body),
       [WS_METHODS.reviewCommentsMove]: ({ id, placement }) => reviewComments.move(id, placement),
       [WS_METHODS.reviewCommentsDelete]: ({ id }) => reviewComments.remove(id),
       [WS_METHODS.reviewCommentsSubmit]: ({ key, accountId, event, body }) =>

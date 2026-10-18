@@ -50,7 +50,7 @@ prkit guide read acme/widgets#42 --json
 prkit guide revisions acme/widgets#42 --json
 prkit pr diff acme/widgets#42 --attempt-id <attempt-id> --json
 prkit comments list acme/widgets#42 --json
-prkit comments add acme/widgets#42 --path src/a.ts --line 42 --body 'Handle an empty list' --request-id comment-42
+prkit comments add acme/widgets#42 --path src/a.ts --line 42 --head-sha <headSha> --body 'Handle an empty list' --request-id comment-42
 prkit fix send acme/widgets#42 --request-id fix-42
 prkit wait acme/widgets#42 --for fix --timeout 600
 prkit fix read acme/widgets#42 --json

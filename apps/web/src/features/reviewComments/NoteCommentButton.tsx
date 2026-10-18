@@ -4,7 +4,7 @@ import {
   type DiffRow,
   NOTE_LOST,
   notePoint,
-  place,
+  placeOn,
   type PullRequestKey,
 } from "@prkit/contracts";
 import { useMutation } from "@tanstack/react-query";
@@ -36,7 +36,6 @@ export function NoteCommentButton({
   path: string;
   /** The rows of the revision's diff of this file, which the note is written on. */
   rows: ReadonlyArray<DiffRow>;
-  /** The head commit of the revision's diff. */
   revisionHead: string;
   revision: number;
   note: DiffAnnotation;
@@ -50,7 +49,7 @@ export function NoteCommentButton({
     mutationFn: () => getPullRequestFiles(pr.key, pr.accountId),
     onSuccess: (files) => {
       const written = capture(rows, { path, start: point, end: point }, revisionHead);
-      const placed = written && place(written, files);
+      const placed = written && placeOn(written, files);
       if (placed === null || placed._tag === "outdated")
         toastManager.add({ type: "warning", ...NOTE_LOST[placed?.why ?? "lines"] });
       else

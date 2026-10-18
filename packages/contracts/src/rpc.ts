@@ -583,12 +583,7 @@ export const WsRpcGroup = RpcGroup.make(
     error: ReviewCommentsError,
   }),
   Rpc.make(WS_METHODS.reviewCommentsEdit, {
-    payload: Schema.Struct({
-      id: ReviewCommentId,
-      body: Schema.NonEmptyString,
-      /** Where it sits on the diff on screen, kept with the new words; null keeps its lines. */
-      placement: Schema.NullOr(CommentPlacement),
-    }),
+    payload: Schema.Struct({ id: ReviewCommentId, body: Schema.NonEmptyString }),
     success: PendingComments,
     error: ReviewCommentsError,
   }),

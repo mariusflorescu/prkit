@@ -1,6 +1,5 @@
-import type { DiffFile } from "./diffSnapshot.ts";
 import type { NormalizedGuide } from "./guide.ts";
-import type { FileSide } from "./pullRequest.ts";
+import type { FileSide, PullRequestFiles } from "./pullRequest.ts";
 import {
   type CommentContext,
   type CommentPlacement,
@@ -110,32 +109,31 @@ const cut = (
   };
 };
 
+/** Both points' rows in diff order, each with its point's side, when one hunk holds both. */
+const spanOf = (rows: ReadonlyArray<DiffRow>, a: LinePoint, b: LinePoint) => {
+  const at = rowIndex(rows, a);
+  const bt = rowIndex(rows, b);
+  if (at < 0 || bt < 0 || rows[at]?.hunk !== rows[bt]?.hunk) return null;
+  return at <= bt
+    ? { first: at, last: bt, start: a.side, end: b.side }
+    : { first: bt, last: at, start: b.side, end: a.side };
+};
+
+/** Whether the patch shows both points inside one hunk: GitHub only takes comments there. */
+export const inOneHunk = (rows: ReadonlyArray<DiffRow>, a: LinePoint, b: LinePoint) =>
+  spanOf(rows, a, b) !== null;
+
 /**
  * The rows between two points, in either order, and the rows around them, as a placement on
- * the diff at `commitSha`. Null when the patch doesn't show both inside one hunk: GitHub only
- * takes comments on such ranges.
+ * the diff at `commitSha`. Null unless both are inside one hunk.
  */
 export const capture = (
   rows: ReadonlyArray<DiffRow>,
   range: { path: string; start: LinePoint; end: LinePoint },
   commitSha: string,
 ) => {
-  const a = rowIndex(rows, range.start);
-  const b = rowIndex(rows, range.end);
-  if (a < 0 || b < 0 || rows[a]?.hunk !== rows[b]?.hunk) return null;
-  const [start, end] = a <= b ? [range.start, range.end] : [range.end, range.start];
-  return cut(
-    rows,
-    range.path,
-    { first: Math.min(a, b), last: Math.max(a, b), start: start.side, end: end.side },
-    commitSha,
-  );
-};
-
-/** A diff at one head: GitHub's files for the PR now, or a guide revision's snapshot. */
-export type HeadDiff = {
-  headSha: string;
-  files: ReadonlyArray<Pick<DiffFile, "path" | "patch">>;
+  const span = spanOf(rows, range.start, range.end);
+  return span && cut(rows, range.path, span, commitSha);
 };
 
 /** It can't be sent until a person picks its line. */
@@ -170,54 +168,57 @@ const reads = (have: ReadonlyArray<string>, want: ReadonlyArray<string>) =>
 
 /**
  * Every row where the comment's own rows start, inside one hunk, with each end on its side.
- * With `context`, the rows around them on those sides must read it too. A comment recorded
- * with nothing around it must have nothing around it here either, or a lone `+}` would be
- * placed by its numbers alone.
+ * With `context`, the rows around them on those sides must read it too.
  */
 const starts = (
   rows: ReadonlyArray<DiffRow>,
   own: ReadonlyArray<string>,
   sides: { start: FileSide; end: FileSide },
   context: CommentContext | null,
-) =>
-  rows.flatMap((first, index) => {
-    const last = index + own.length - 1;
-    const slice = rows.slice(index, last + 1);
-    if (
-      slice.length !== own.length ||
-      slice.at(-1)?.hunk !== first.hunk ||
-      first[sides.start] === null ||
-      slice.at(-1)?.[sides.end] === null ||
-      !reads(slice.map(rowText), own)
-    )
-      return [];
-    if (context === null) return [index];
+) => {
+  const found: Array<number> = [];
+  for (const [first, row] of rows.entries()) {
+    const last = first + own.length - 1;
+    const same = own.every((line, offset) => {
+      const at = rows[first + offset];
+      return at?.hunk === row.hunk && rowText(at) === line;
+    });
+    if (!same || row[sides.start] === null || rows[last]?.[sides.end] === null) continue;
+    if (context === null) {
+      found.push(first);
+      continue;
+    }
     const { before, after } = context;
-    const alone = before.length === 0 && after.length === 0;
-    const above = neighbours(rows, index, -1, sides.start, alone ? 1 : before.length).toReversed();
-    const below = neighbours(rows, last, 1, sides.end, alone ? 1 : after.length);
-    return reads(above, before) && reads(below, after) ? [index] : [];
-  });
+    const around =
+      before.length === 0 && after.length === 0
+        ? // A comment recorded with nothing around it must have nothing around it here
+          // either, or a lone `+}` would be placed by its numbers alone.
+          neighbours(rows, first, -1, sides.start, 1).length === 0 &&
+          neighbours(rows, last, 1, sides.end, 1).length === 0
+        : reads(neighbours(rows, first, -1, sides.start, before.length).toReversed(), before) &&
+          reads(neighbours(rows, last, 1, sides.end, after.length), after);
+    if (around) found.push(first);
+  }
+  return found;
+};
+
+type Written = Pick<PendingComment, "anchor" | "snippet" | "context" | "commitSha">;
 
 /**
- * Where a comment written on one diff goes on `diff`, and whether a person has to decide.
- * Its rows and the rows around them must read the same: at its own numbers it is kept,
- * otherwise in exactly one place it moved there, otherwise it is outdated. A comment written
- * before prkit kept the rows around it is kept only on the head it was written on, where
- * its new-side numbers are the very lines the user picked.
+ * Where a comment written on one diff goes on the `rows` of its file at `headSha`, and
+ * whether a person has to decide. No rows means no text diff for its file. Its rows and the
+ * rows around them must read the same: at its own numbers it is kept, otherwise in exactly
+ * one place it moved there, otherwise it is outdated. A comment written before prkit kept
+ * the rows around it is kept only on the head it was written on, where its new-side numbers
+ * are the very lines the user picked.
  */
-export const place = (
-  written: Pick<PendingComment, "anchor" | "snippet" | "context" | "commitSha">,
-  diff: HeadDiff,
-): Placed => {
+export const place = (written: Written, rows: ReadonlyArray<DiffRow>, headSha: string): Placed => {
   const { anchor, snippet, context } = written;
-  const file = diff.files.find((candidate) => candidate.path === anchor.path);
-  const rows = file?.patch._tag === "text" ? diffRows(file.patch.patch) : [];
   if (rows.length === 0) return { _tag: "outdated", why: "file", suggestion: null };
   const own = snippet.split("\n");
   const sides = { start: anchor.start.side, end: anchor.end.side };
   const at = (first: number) =>
-    cut(rows, anchor.path, { first, last: first + own.length - 1, ...sides }, diff.headSha);
+    cut(rows, anchor.path, { first, last: first + own.length - 1, ...sides }, headSha);
   const only = (found: ReadonlyArray<number>) => {
     const [first] = found;
     return found.length === 1 && first !== undefined ? at(first) : null;
@@ -229,8 +230,8 @@ export const place = (
   });
   if (context === null) {
     // The base can move under the same head, so only new-side numbers name the same line.
-    const here = capture(rows, anchor, diff.headSha);
-    return written.commitSha === diff.headSha &&
+    const here = capture(rows, anchor, headSha);
+    return written.commitSha === headSha &&
       sides.start === "new" &&
       sides.end === "new" &&
       here?.snippet === snippet
@@ -247,6 +248,13 @@ export const place = (
   if (keptAt !== null) return { _tag: "kept", placement: keptAt };
   const movedTo = only(found);
   return movedTo === null ? outdated("lines") : { _tag: "moved", placement: movedTo };
+};
+
+/** `place` on GitHub's files for a PR, on the file at the comment's exact path. */
+export const placeOn = (written: Written, files: PullRequestFiles) => {
+  const file = files.files.find((candidate) => candidate.path === written.anchor.path);
+  const rows = file?.patch._tag === "text" ? diffRows(file.patch.patch) : [];
+  return place(written, rows, files.headSha);
 };
 
 type LineNote = NormalizedGuide["chapters"][number]["files"][number]["annotations"][number];
