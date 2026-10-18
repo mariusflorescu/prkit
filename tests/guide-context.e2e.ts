@@ -25,6 +25,7 @@ import { setUpFakeClaude } from "./fakeClaude.ts";
 import { startFakeGitHub, startFakeInstance, stopFakeInstance } from "./fakeGitHub.ts";
 import { AGENT_RUNS, AGENT_SKIP, readRows } from "./fixturePr.ts";
 import { setUpRealClaude } from "./realClaude.ts";
+import { savedScreenshots } from "./savedScreenshots.ts";
 
 const KEY = "github.com/budget/fixtures#9";
 const decodeFile = Schema.decodeUnknownSync(Schema.fromJsonString(ContextFile));
@@ -267,6 +268,49 @@ test(
   },
 );
 
+test(
+  "auto mode reads the context of the guide it starts in the background",
+  { timeout: 300_000 },
+  async ({ app, screen }) => {
+    const name = "guide-context-auto";
+    const claude = setUpFakeClaude(name);
+    const { fake, run } = await bringUp(name, claude.file);
+    try {
+      const account = { login: "budget-test" };
+      for (const pr of [1, 2, 3]) await fake.unrequest(pr, account);
+      await fake.requestReview(9, account);
+      await app.open(run.openUrl);
+      await expect(screen.getByRole("link", /#9 Keyboard fixture 9/)).toBeVisible({
+        timeout: 30_000,
+      });
+
+      await fake.remaining("core", CLICKS_ONLY);
+      await app.open(`${run.url}/settings/guides`);
+      await screen.getByRole("switch", "Write guides automatically for budget-test").tap();
+      await expect
+        .poll(() => reviewState(run.home), { timeout: 120_000 })
+        .toEqual([{ revision: 1, state: "watching" }]);
+      expect(row("SELECT origin FROM reviews WHERE pr_key = '{key}'")(run.home)).toEqual([
+        { origin: "auto" },
+      ]);
+      const [auto] = claude.prompts();
+      if (auto?.context == null) throw new Error("The auto mode attempt named no context file.");
+      const read = decodeFile(auto.context);
+      expect(read.checks).toEqual({ unread: expect.stringContaining("keeps the rest of") });
+      expect(read.threads).toMatchObject({ open: 1 });
+      expect(read.issues).toMatchObject({ linked: 1 });
+      expect(
+        notes(run.home).some((note) =>
+          note.startsWith("Couldn't read the checks, so the guide is written without them."),
+        ),
+      ).toBe(true);
+    } finally {
+      stopFakeInstance(name, { keepHome: false });
+      fake.stop();
+    }
+  },
+);
+
 const EVIDENCE = NodePath.join(repoRoot, ".e2e", "evidence", "guide-context");
 const LIMITS = "src/limits.ts";
 const decodeGuide = Schema.decodeUnknownSync(Schema.fromJsonString(NormalizedGuide));
@@ -284,18 +328,13 @@ const keepContext = (home: string, to: string) => {
 };
 
 /** Copies a screenshot `app.screenshot` named (relative to its attempt's folder) out of the results, which the next run clears. */
-const keepScreenshot = (relative: string, to: string) => {
-  const results = NodePath.join(repoRoot, ".e2e", "results");
-  const newest = NodeFS.readdirSync(results)
-    .flatMap((test) =>
-      NodeFS.readdirSync(NodePath.join(results, test))
-        .filter((entry) => entry.startsWith("attempt-"))
-        .map((attempt) => NodePath.join(results, test, attempt, relative)),
-    )
-    .filter((file) => NodeFS.existsSync(file))
-    .toSorted((a, b) => NodeFS.statSync(b).mtimeMs - NodeFS.statSync(a).mtimeMs)[0];
-  if (newest === undefined) throw new Error(`No screenshot ${relative} in the results.`);
-  NodeFS.copyFileSync(newest, to);
+const keepScreenshot = (relative: string, to: string, since: number) => {
+  const newest = savedScreenshots()
+    .filter((shot) => shot.relative === relative && shot.savedAt >= since)
+    .toSorted((a, b) => b.savedAt - a.savedAt)[0];
+  if (newest === undefined)
+    throw new Error(`No screenshot ${relative} from this run in .e2e/results or .e2e/proof.`);
+  NodeFS.copyFileSync(newest.path, to);
 };
 
 const prose = (guide: typeof NormalizedGuide.Type) => {
@@ -336,6 +375,7 @@ describe("a real Claude guide on the fake GitHub", { tags: ["agent"] }, () => {
     { timeout: 1_500_000 },
     async ({ app, screen }) => {
       test.skip(!AGENT_RUNS, AGENT_SKIP);
+      const started = Date.now();
       const name = "guide-context-agent";
       const claude = setUpRealClaude(name);
       const { fake, run } = await bringUp(name, claude.file);
@@ -368,8 +408,8 @@ describe("a real Claude guide on the fake GitHub", { tags: ["agent"] }, () => {
         const limits = screen.getByRole("region", LIMITS);
         await limits.scrollIntoView();
         const chapter = await app.screenshot("guide-context-limits-chapter");
-        keepScreenshot(overview, NodePath.join(EVIDENCE, "overview.png"));
-        keepScreenshot(chapter, NodePath.join(EVIDENCE, "limits-chapter.png"));
+        keepScreenshot(overview, NodePath.join(EVIDENCE, "overview.png"), started);
+        keepScreenshot(chapter, NodePath.join(EVIDENCE, "limits-chapter.png"), started);
 
         const guide = prose(decodeGuide(text));
         const everything = guide.all.join("\n");

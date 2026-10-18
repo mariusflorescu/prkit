@@ -18,28 +18,25 @@ import { readRows } from "./fixturePr.ts";
 import { cliIn, dismissToasts, scratchRoot, switchOn } from "./localGuideSession.ts";
 import { handbook, localRepoFixture } from "./localRepoFixture.ts";
 import { emulateOsColorScheme, screenshotLightAndDark } from "./osColorScheme.ts";
+import { savedScreenshots } from "./savedScreenshots.ts";
 
 const decodeGenerate = Schema.decodeSync(Schema.fromJsonString(GenerateLocalGuideResult));
 const TITLE = "widgets · feature/limits";
 const EVIDENCE = NodePath.join(repoRoot, ".e2e/evidence/local-guides-ui");
 
 /** This run's named frames (`003-local-ready-dark.png`), copied as `local-ready-dark.png`. */
-const keepEvidence = (log: ReadonlyArray<string>) => {
+const keepEvidence = (log: ReadonlyArray<string>, since: number) => {
   NodeFS.mkdirSync(EVIDENCE, { recursive: true });
   NodeFS.writeFileSync(NodePath.join(EVIDENCE, "cli-transcript.txt"), log.join("\n\n"));
-  const results = NodePath.join(repoRoot, ".e2e/results");
-  for (const test of NodeFS.readdirSync(results).filter((name) =>
-    name.startsWith("local-guides-ui-"),
-  ))
-    for (const attempt of NodeFS.readdirSync(NodePath.join(results, test))) {
-      const shots = NodePath.join(results, test, attempt, "screenshots");
-      if (!NodeFS.existsSync(shots)) continue;
-      for (const file of NodeFS.readdirSync(shots)) {
-        const name = file.replace(/^\d+-/, "");
-        if (name.startsWith("local-"))
-          NodeFS.copyFileSync(NodePath.join(shots, file), NodePath.join(EVIDENCE, name));
-      }
-    }
+  for (const shot of savedScreenshots()) {
+    const name = shot.file.replace(/^\d+-/, "");
+    if (
+      shot.test.startsWith("local-guides-ui-") &&
+      shot.savedAt >= since &&
+      name.startsWith("local-")
+    )
+      NodeFS.copyFileSync(shot.path, NodePath.join(EVIDENCE, name));
+  }
 };
 
 const pageText = async (screen: TestFixtures["screen"]) =>
@@ -49,6 +46,7 @@ test(
   "a local review has its own tab and page: progress, the guide, Run again, Stop, Remove and relaunch",
   { timeout: 420_000 },
   async ({ app, screen, browser }) => {
+    const started = Date.now();
     const name = "local-guides-ui";
     const fake: FakeGitHub = await startFakeGitHub(name);
     const claude = setUpFakeClaude(name);
@@ -269,7 +267,7 @@ test(
       stopFakeInstance(name, { keepHome: false });
       fake.stop();
       NodeFS.rmSync(root, { recursive: true, force: true });
-      keepEvidence(log);
+      keepEvidence(log, started);
     }
   },
 );

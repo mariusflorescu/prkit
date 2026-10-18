@@ -559,7 +559,7 @@ export const graphql = (
       cost: 6,
       data: {
         reviewRequested: search(
-          [1, 2, 3, 4, 5, 6].filter((number) => (pulls.get(number)?.requested.length ?? 0) > 0),
+          [1, 2, 3, 4, 5, 6, 9].filter((number) => (pulls.get(number)?.requested.length ?? 0) > 0),
         ),
         authored: search([4, 5, 6]),
         involved: search([]),
