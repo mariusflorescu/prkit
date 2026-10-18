@@ -199,6 +199,10 @@ const riskOf = (prompt, files) => {
   };
 };
 
+/** On the author's own pull request the guide owes a pre-flight; the stand-in has nothing to flag. */
+const preflightOf = (prompt) =>
+  prompt.includes("so the guide is for its own author") ? { preflight: {} } : {};
+
 class StandInAgent {
   constructor(agentId, options) {
     this.agentId = agentId;
@@ -327,6 +331,7 @@ class StandInAgent {
           summary: "A guide finishing while Cursor's own tool runs.",
           chapters: [{ title: "Every change", files, risk: risk.chapter }],
           risk: risk.guide,
+          ...preflightOf(message),
         };
         const callId = NodeCrypto.randomUUID();
         const toolCall = {
@@ -401,6 +406,7 @@ class StandInAgent {
         summary: "A guide written by the stand-in Cursor.",
         chapters: [{ title: "Every change", files, risk: risk.chapter }],
         risk: risk.guide,
+        ...preflightOf(message),
       });
       return { status: submitted.ok ? "finished" : "error" };
     };

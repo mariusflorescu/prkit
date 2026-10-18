@@ -41,6 +41,7 @@ const DESCRIPTION = "Raises the URL limit to 2048.\n\nAlso trims  whitespace fro
 const own: GuideCheckContext = {
   focusAreas: [],
   skipped: [],
+  signals: null,
   preflight: { description: DESCRIPTION },
 };
 const others: GuideCheckContext = { ...own, preflight: null };
