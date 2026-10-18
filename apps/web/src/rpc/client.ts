@@ -217,6 +217,10 @@ export const changeWorkspace = (command: WorkspaceCommand): Promise<Workspace> =
       return call((client) => client[WS_METHODS.workspaceActivate]({ key: command.key }));
     case "reorder":
       return call((client) => client[WS_METHODS.workspaceReorder]({ keys: command.keys }));
+    case "open-local":
+      return call((client) => client[WS_METHODS.workspaceOpenLocal]({ key: command.key }));
+    case "close-local":
+      return call((client) => client[WS_METHODS.workspaceCloseLocal]({ key: command.key }));
   }
 };
 export const getPullRequestDetail = (

@@ -128,6 +128,9 @@ const layerHandlers = WsRpcGroup.toLayer(
       [WS_METHODS.workspaceClose]: ({ key }) => workspace.command({ kind: "close", key }),
       [WS_METHODS.workspaceActivate]: ({ key }) => workspace.command({ kind: "activate", key }),
       [WS_METHODS.workspaceReorder]: ({ keys }) => workspace.command({ kind: "reorder", keys }),
+      [WS_METHODS.workspaceOpenLocal]: ({ key }) => workspace.command({ kind: "open-local", key }),
+      [WS_METHODS.workspaceCloseLocal]: ({ key }) =>
+        workspace.command({ kind: "close-local", key }),
       [WS_METHODS.workspaceSaveInboxFilters]: (filters) => workspace.saveInboxFilters(filters),
       [WS_METHODS.workspaceChanges]: () => workspace.changes(),
       [WS_METHODS.reviewedFilesGet]: ({ key, accountId }) =>

@@ -48,7 +48,7 @@ Every child process (agents, `gh`, `git`) gets an environment built from an allo
 
 `PRKIT_HOME` (default `~/.prkit`; in a git worktree, the worktree's gitignored `.prkit/`), which prkit creates with mode 0700, holds:
 
-- `prkit.sqlite` - settings, guide settings per scope, open PRs and the Inbox's filters, reviews, attempts and their files, guide revisions, the files the user marked reviewed, review activity, fix sessions with their turns and activity, fix settings per repository, the agent instances the user added or changed, and the outside agents' request ids.
+- `prkit.sqlite` - settings, guide settings per scope, open PR and local review tabs and the Inbox's filters, reviews, attempts and their files, guide revisions, the files the user marked reviewed, review activity, fix sessions with their turns and activity, fix settings per repository, the agent instances the user added or changed, and the outside agents' request ids.
 - `repos/<host>/<owner>/<repo>.git` - one bare, blobless repository cache per repo.
 - `local/<16 hex>.git` - one bare copy per local review, named after its key, holding only the objects prkit copied or hashed for that review's snapshots. Kept until the review is removed; startup removes a copy whose review is gone.
 - `worktrees/<reviewId>` - one detached checkout per pull request review that is not done, and per local review while one of its attempts runs.

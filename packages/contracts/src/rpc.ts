@@ -143,6 +143,8 @@ export const WS_METHODS = {
   workspaceClose: "workspace.close",
   workspaceActivate: "workspace.activate",
   workspaceReorder: "workspace.reorder",
+  workspaceOpenLocal: "workspace.openLocal",
+  workspaceCloseLocal: "workspace.closeLocal",
   workspaceSaveInboxFilters: "workspace.saveInboxFilters",
   workspaceChanges: "workspace.changes",
   reviewedFilesGet: "reviewedFiles.get",
@@ -373,6 +375,17 @@ export const WsRpcGroup = RpcGroup.make(
   }),
   Rpc.make(WS_METHODS.workspaceReorder, {
     payload: Schema.Struct({ keys: Schema.Array(PullRequestKey) }),
+    success: Workspace,
+    error: WorkspaceError,
+  }),
+  // A local review's tab: opening it never makes it the active tab.
+  Rpc.make(WS_METHODS.workspaceOpenLocal, {
+    payload: Schema.Struct({ key: LocalReviewKey }),
+    success: Workspace,
+    error: WorkspaceError,
+  }),
+  Rpc.make(WS_METHODS.workspaceCloseLocal, {
+    payload: Schema.Struct({ key: LocalReviewKey }),
     success: Workspace,
     error: WorkspaceError,
   }),

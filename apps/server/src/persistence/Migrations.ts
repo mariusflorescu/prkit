@@ -27,6 +27,7 @@ import Migration0018 from "./Migrations/018_GuideNoteComments.ts";
 import Migration0019 from "./Migrations/019_ReviewSubjects.ts";
 import Migration0020 from "./Migrations/020_ReviewedFiles.ts";
 import Migration0021 from "./Migrations/021_DraftContext.ts";
+import Migration0022 from "./Migrations/022_OpenLocalReviews.ts";
 
 export const migrationEntries = [
   [1, "Meta", Migration0001],
@@ -50,6 +51,7 @@ export const migrationEntries = [
   [19, "ReviewSubjects", Migration0019],
   [20, "ReviewedFiles", Migration0020],
   [21, "DraftContext", Migration0021],
+  [22, "OpenLocalReviews", Migration0022],
 ] as const;
 
 const loader = Migrator.fromRecord(
