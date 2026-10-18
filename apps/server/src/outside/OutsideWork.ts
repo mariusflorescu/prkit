@@ -34,6 +34,7 @@ import { Fixers } from "../fixers/Fixers.ts";
 import { GitHubApi } from "../github/GitHubApi.ts";
 import { PullRequests } from "../pullRequests/PullRequests.ts";
 import { ReviewComments } from "../reviewComments/ReviewComments.ts";
+import { ManualCheckTicks } from "../manualCheck/ManualCheckTicks.ts";
 import { Reviews } from "../reviews/Reviews.ts";
 import { Workspace } from "../workspace/Workspace.ts";
 import { StartedBy } from "./StartedBy.ts";
@@ -114,6 +115,7 @@ export const make = Effect.gen(function* () {
   const workspace = yield* Workspace;
   const reviews = yield* Reviews;
   const reviewComments = yield* ReviewComments;
+  const manualCheckTicks = yield* ManualCheckTicks;
   const fixers = yield* Fixers;
   const outsideAgents = yield* OutsideAgents;
   const crypto = yield* Crypto.Crypto;
@@ -474,6 +476,10 @@ export const make = Effect.gen(function* () {
                 headSha: revision.headSha,
                 createdAt: revision.createdAt,
                 content: revision.normalized,
+                manualCheckTicked: yield* manualCheckTicks.ticked(
+                  { _tag: "pull-request", key: target.key, accountId: target.accountId },
+                  revision.normalized,
+                ),
               },
       };
       return result;

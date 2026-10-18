@@ -94,6 +94,7 @@ const STARTS_WORK = [
   "mark_files_reviewed",
   "generate_local_guide",
   "stop_local_guide",
+  "tick_manual_check_steps",
 ];
 
 const Answer = Schema.Struct({

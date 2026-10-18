@@ -28,6 +28,7 @@ import * as Stream from "effect/Stream";
 import { makeKeyedGate } from "../github/keyedGate.ts";
 import { PullRequests } from "../pullRequests/PullRequests.ts";
 import { Reviews } from "../reviews/Reviews.ts";
+import { subjectKey } from "../reviews/reviewSubject.ts";
 
 const Row = Schema.Struct({
   path: Schema.String,
@@ -42,7 +43,8 @@ const decodeMarks = Schema.decodeUnknownEffect(ReviewedMarks);
 
 /** Whose decisions: the account that read the PR, so another account never sees them. */
 export type ReviewedTarget = { readonly key: PullRequestKey; readonly accountId: AccountId };
-const subjectOf = ({ key, accountId }: ReviewedTarget) => `pull-request ${accountId} ${key}`;
+const subjectOf = ({ key, accountId }: ReviewedTarget) =>
+  subjectKey({ _tag: "pull-request", key, accountId });
 
 const rowStates = (files: ReadonlyArray<ReviewableFile>, marks: ReviewedMarks) => {
   const index = indexMarks(marks);

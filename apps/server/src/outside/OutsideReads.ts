@@ -22,6 +22,7 @@ import { makeReadCache } from "../pullRequests/readCache.ts";
 import * as Schema from "effect/Schema";
 import { GuideConfigStore } from "../reviews/GuideConfigStore.ts";
 import { GuideSettingsStore } from "../reviews/GuideSettingsStore.ts";
+import { ManualCheckTicks } from "../manualCheck/ManualCheckTicks.ts";
 import { ReviewedFiles } from "../reviewedFiles/ReviewedFiles.ts";
 import { Reviews } from "../reviews/Reviews.ts";
 import { OutsideAgents } from "./OutsideAgents.ts";
@@ -64,6 +65,7 @@ export const makeOutsideReads = (
     const pulls = yield* PullRequests;
     const reviews = yield* Reviews;
     const reviewed = yield* ReviewedFiles;
+    const manualCheckTicks = yield* ManualCheckTicks;
     const fixes = yield* Fixers;
     const guideConfig = yield* GuideConfigStore;
     const guideSettings = yield* GuideSettingsStore;
@@ -368,6 +370,10 @@ export const makeOutsideReads = (
           createdAt: guide.createdAt,
           content: guide.normalized,
           config: guide.config,
+          manualCheckTicked: yield* manualCheckTicks.ticked(
+            { _tag: "pull-request", key: target.key, accountId: target.accountId },
+            guide.normalized,
+          ),
         };
       }).pipe(Effect.mapError(asFailure));
 
