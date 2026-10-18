@@ -221,6 +221,7 @@ describe("outside agents' MCP endpoint", () => {
               stop: () => Effect.die("unused"),
               remove: () => Effect.die("unused"),
               fileContents: () => Effect.die("unused"),
+              texts: () => Effect.die("unused"),
               list: () => Effect.die("unused"),
               watch: () => Stream.die("unused"),
               feed: () => Stream.die("unused"),

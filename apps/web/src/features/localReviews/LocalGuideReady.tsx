@@ -81,7 +81,7 @@ export function LocalGuideReady({
             attemptId={draft.attempt.id}
             version={draft.version}
             growing={draft.growing}
-            source={null}
+            source={{ _tag: "local", key: review.key, attemptId: draft.attempt.id }}
           />
         </div>
       ) : guide.isPending || manualCheckTicks.status === "pending" ? (
@@ -103,8 +103,7 @@ export function LocalGuideReady({
             snapshot={guide.data.snapshot}
             loadContents={loadContents}
             manualCheckTicks={manualCheckTicks}
-            // Scope lines read the new side through GitHub or a PR's cache; a snapshot has neither.
-            source={null}
+            source={{ _tag: "local", key: review.key, attemptId: revision.attemptId }}
           />
         </>
       )}

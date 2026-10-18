@@ -97,6 +97,10 @@ const layerHandlers = WsRpcGroup.toLayer(
           return fixers
             .texts(source.key, source.turnId, source.sha, paths)
             .pipe(Effect.mapError(textsError));
+        case "local":
+          return reviews.local
+            .texts(source.key, source.attemptId, paths)
+            .pipe(Effect.mapError(textsError));
       }
     };
     return WsRpcGroup.of({

@@ -1,13 +1,14 @@
 import * as Schema from "effect/Schema";
 
 import { FixerTurnId } from "./fixer.ts";
-import { AccountId, PullRequestKey } from "./ids.ts";
+import { AccountId, LocalReviewKey, PullRequestKey } from "./ids.ts";
 import { AttemptId } from "./review.ts";
 
 /**
  * The commit a diff's new side was read at, named by the diff's owner, so the server reads
  * that exact commit the way the owner may: a pull request's head through the account that
- * found it, a guide attempt's head and a fix turn's commit from prkit's local repository cache.
+ * found it, a guide attempt's head and a fix turn's commit from prkit's local repository cache,
+ * and a local review's snapshot from the copy prkit keeps of it, never the working tree.
  */
 export const DiffSource = Schema.Union([
   Schema.TaggedStruct("pullRequest", {
@@ -21,6 +22,7 @@ export const DiffSource = Schema.Union([
     turnId: FixerTurnId,
     sha: Schema.String,
   }),
+  Schema.TaggedStruct("local", { key: LocalReviewKey, attemptId: AttemptId }),
 ]);
 export type DiffSource = typeof DiffSource.Type;
 

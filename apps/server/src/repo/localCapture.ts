@@ -3,6 +3,7 @@ import * as NodeFs from "node:fs";
 
 import {
   type DiffSnapshot,
+  type DiffTexts,
   LocalHead,
   LocalLeftOut,
   LocalReviewKey,
@@ -154,6 +155,12 @@ export interface LocalCaptureDeps {
     headSha: string,
   ) => Effect.Effect<Since, RepoError>;
   readonly worktreePath: (reviewId: ReviewId) => string;
+  readonly readTexts: (
+    repo: string,
+    sha: string,
+    paths: ReadonlyArray<string>,
+    failure: string,
+  ) => Effect.Effect<DiffTexts, RepoError>;
 }
 
 /** prkit's commits in a copy: the same trees and parents always give the same ids. */
@@ -1098,6 +1105,15 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
       return shown.code === 0 ? shown.stdout : null;
     }).pipe(Effect.catchTag("PlatformError", () => Effect.succeed(null)));
 
+  /** The new side of each path at a commit of the review's copy, so never the working tree. */
+  const texts = (key: LocalReviewKey, sha: string, paths: ReadonlyArray<string>) =>
+    deps.readTexts(
+      copyOf(key),
+      sha,
+      paths,
+      "prkit couldn't read this snapshot from its copy of your changes.",
+    );
+
   /** Removes the review's copy. A missing copy is already the goal. */
   const forget = (key: LocalReviewKey) =>
     gated(key)(fs.remove(copyOf(key), { recursive: true, force: true })).pipe(
@@ -1125,7 +1141,7 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
       }
     });
 
-  return { copyOf, identify, capture, prepare, contents, forget, sweep };
+  return { copyOf, identify, capture, prepare, contents, texts, forget, sweep };
 };
 
 export type LocalCaptureService = ReturnType<typeof makeLocalCapture>;

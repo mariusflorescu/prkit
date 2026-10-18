@@ -362,6 +362,7 @@ const Git = Layer.unwrap(
         capture: () => Effect.die("unused"),
         prepare: () => Effect.die("unused"),
         contents: () => Effect.die("unused"),
+        texts: () => Effect.die("unused"),
         forget: () => Effect.die("unused"),
         sweep: () => Effect.void,
       },
