@@ -63,6 +63,17 @@ Fake GitHub and the stand-in Claude only, so no fixture lock: `pnpm e2e run test
 - **Snapshot, not the working tree:** after the guide is written, the journey renames `handle` in the working tree and reloads. The separator still names `async handle(req, res) {`.
 - **Evidence:** `local-scope-light`, `local-scope-dark`, `local-moved-light` and `local-moved-dark`.
 
+### The snapshot is the change git shows (`tests/local-capture.e2e.ts`)
+
+Fake GitHub and the stand-in Claude only, so no fixture lock: `pnpm e2e run tests/local-capture.e2e.ts`. Each repository is built in a scratch folder, guided once from the CLI, and its snapshot (`review_attempts.snapshot`) compared with what git shows the user: `git diff --name-status <merge base>` plus untracked files, read with optional locks off.
+
+- **Read only:** around every run, the user's `.git/index` byte for byte, every entry of `.git` by size, mtime and mode, and every working file with its contents read the same before and after.
+- **A plain branch:** a commit, then unstaged, staged, staged-then-edited, staged-then-undone, deleted, untracked, ignored and executable changes. The snapshot is git's list exactly, and the staged-then-edited file carries its newest content.
+- **Staged line endings:** CRLF files committed, then `.gitattributes` (`text=auto` and `text eol=lf`) and `git add --renormalize .`. The files on disk still hold HEAD's bytes; the snapshot has them modified, CRLF lines out and LF lines in. The same with `core.autocrlf=true` and no attributes.
+- **Executable bit with `core.fileMode` off:** `git update-index --chmod=+x` shows as `new mode 100755`.
+- **A clean filter:** `git add --renormalize .` through a filter that leaves a mark. Alone, `prkit local guide` exits 1 naming the file and the filter; with a readable change too, the snapshot has only that change, the file is left out as `filtered`, and the mark is never made.
+- **Evidence:** the CLI transcript at `.e2e/evidence/local-capture/cli-transcript.txt`.
+
 ## Gotchas
 
 - Build every local repository outside the prkit checkout and outside the instance's home: a folder inside the checkout is read as prkit's own repository, and one inside the home is refused as prkit's checkout.

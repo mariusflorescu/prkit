@@ -12,6 +12,27 @@ export const handbook = (changes: Readonly<Record<number, string>> = {}) =>
     .map((line) => `${line}\n`)
     .join("");
 
+/** git in a user's repository, with none of this machine's config; `root` is its HOME. */
+export const fixtureGit =
+  (root: string, repo: string) =>
+  (args: ReadonlyArray<string>, env: Readonly<Record<string, string>> = {}) =>
+    NodeChildProcess.execFileSync("git", ["-c", "core.hooksPath=/dev/null", ...args], {
+      cwd: repo,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        HOME: root,
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        GIT_CONFIG_GLOBAL: "/dev/null",
+        GIT_CONFIG_NOSYSTEM: "1",
+        GIT_AUTHOR_NAME: "Fixture",
+        GIT_AUTHOR_EMAIL: "fixture@example.invalid",
+        GIT_COMMITTER_NAME: "Fixture",
+        GIT_COMMITTER_EMAIL: "fixture@example.invalid",
+        ...env,
+      },
+    }).trim();
+
 /**
  * A user's own repository for local guide journeys: `main` with an `origin/main` it was
  * branched from, a feature branch with one commit, then uncommitted, deleted, untracked
@@ -31,22 +52,7 @@ export const localRepoFixture = (
   const repo = NodePath.join(root, name);
   const filterMark = NodePath.join(root, `${name}-filter-ran`);
   NodeFS.mkdirSync(repo, { recursive: true });
-  const git = (args: ReadonlyArray<string>) =>
-    NodeChildProcess.execFileSync("git", ["-c", "core.hooksPath=/dev/null", ...args], {
-      cwd: repo,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        HOME: root,
-        PATH: process.env.PATH ?? "/usr/bin:/bin",
-        GIT_CONFIG_GLOBAL: "/dev/null",
-        GIT_CONFIG_NOSYSTEM: "1",
-        GIT_AUTHOR_NAME: "Fixture",
-        GIT_AUTHOR_EMAIL: "fixture@example.invalid",
-        GIT_COMMITTER_NAME: "Fixture",
-        GIT_COMMITTER_EMAIL: "fixture@example.invalid",
-      },
-    }).trim();
+  const git = fixtureGit(root, repo);
   const write = (path: string, content: string | Buffer) => {
     const file = NodePath.join(repo, path);
     NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true });
