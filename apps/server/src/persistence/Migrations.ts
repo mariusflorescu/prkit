@@ -29,6 +29,7 @@ import Migration0020 from "./Migrations/020_ReviewedFiles.ts";
 import Migration0021 from "./Migrations/021_DraftContext.ts";
 import Migration0022 from "./Migrations/022_OpenLocalReviews.ts";
 import Migration0023 from "./Migrations/023_ManualCheckTicks.ts";
+import Migration0024 from "./Migrations/024_WorkspaceVersion.ts";
 
 export const migrationEntries = [
   [1, "Meta", Migration0001],
@@ -54,6 +55,7 @@ export const migrationEntries = [
   [21, "DraftContext", Migration0021],
   [22, "OpenLocalReviews", Migration0022],
   [23, "ManualCheckTicks", Migration0023],
+  [24, "WorkspaceVersion", Migration0024],
 ] as const;
 
 const loader = Migrator.fromRecord(

@@ -37,6 +37,7 @@ import { runMigrations } from "../persistence/Migrations.ts";
 import * as NodeSqliteClient from "../persistence/NodeSqliteClient.ts";
 import { PullRequests } from "../pullRequests/PullRequests.ts";
 import { RepoCache } from "../repo/RepoCache.ts";
+import * as Workspace from "../workspace/Workspace.ts";
 import * as GuideConfigStore from "./GuideConfigStore.ts";
 import * as GuideSettingsStore from "./GuideSettingsStore.ts";
 import * as Reviews from "./Reviews.ts";
@@ -393,6 +394,7 @@ const harness = (turns: Queue.Queue<Turn>) =>
       Layer.mergeAll(
         GuideConfigStore.layer,
         GuideSettingsStore.layer,
+        Workspace.layer,
         scriptedAgents(turns),
         Git,
         Layer.mock(HttpServer.HttpServer, {

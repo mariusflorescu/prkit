@@ -45,38 +45,45 @@ export const make = Effect.gen(function* () {
   const gate = yield* Semaphore.make(1);
   /** Changes made other than through a window's own RPC, which windows apply as they come. */
   const announced = yield* PubSub.unbounded<WorkspaceChange>();
+  // One transaction, so a review's removal can't land between reading its tab and the version.
   const read = () =>
-    Effect.gen(function* () {
-      const open =
-        yield* sql`SELECT key, account_id AS accountId, position FROM open_pull_requests ORDER BY position`;
-      const local = yield* sql`SELECT key, position FROM open_local_reviews ORDER BY position`;
-      const rows =
-        yield* sql`SELECT active_key AS activeKey, inbox_filters AS inboxFilters FROM workspace WHERE id = 1`.pipe(
-          Effect.flatMap(
-            Schema.decodeUnknownEffect(
-              Schema.Array(
-                Schema.Struct({
-                  activeKey: WorkspaceSchema.fields.activeKey,
-                  inboxFilters: Schema.NullOr(Schema.String),
-                }),
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const open =
+            yield* sql`SELECT key, account_id AS accountId, position FROM open_pull_requests ORDER BY position`;
+          const local = yield* sql`SELECT key, position FROM open_local_reviews ORDER BY position`;
+          const rows =
+            yield* sql`SELECT active_key AS activeKey, inbox_filters AS inboxFilters, version FROM workspace WHERE id = 1`.pipe(
+              Effect.flatMap(
+                Schema.decodeUnknownEffect(
+                  Schema.Array(
+                    Schema.Struct({
+                      activeKey: WorkspaceSchema.fields.activeKey,
+                      inboxFilters: Schema.NullOr(Schema.String),
+                      version: Schema.Int,
+                    }),
+                  ),
+                ),
               ),
-            ),
-          ),
-        );
-      return yield* Schema.decodeUnknownEffect(WorkspaceSchema)({
-        open,
-        local,
-        activeKey: rows[0]?.activeKey ?? null,
-        inboxFilters: decodeFilters(rows[0]?.inboxFilters ?? null),
-      });
-    }).pipe(
-      Effect.mapError(
-        () =>
-          new WorkspaceError({
-            message: "Couldn't read your open tabs. Retry or restart prkit.",
-          }),
-      ),
-    );
+            );
+          return yield* Schema.decodeUnknownEffect(WorkspaceSchema)({
+            open,
+            local,
+            activeKey: rows[0]?.activeKey ?? null,
+            inboxFilters: decodeFilters(rows[0]?.inboxFilters ?? null),
+            version: rows[0]?.version ?? 0,
+          });
+        }),
+      )
+      .pipe(
+        Effect.mapError(
+          () =>
+            new WorkspaceError({
+              message: "Couldn't read your open tabs. Retry or restart prkit.",
+            }),
+        ),
+      );
   /**
    * Applies one change to the open PRs or local reviews. A change no window asked for (an
    * outside agent's) is `announce`d, so every window shows it; `focus` asks them to show that
@@ -128,7 +135,7 @@ export const make = Effect.gen(function* () {
               for (const row of next.local)
                 yield* sql`INSERT INTO open_local_reviews (key, position) VALUES (${row.key}, ${row.position})`;
             }
-            return next;
+            return yield* read();
           }),
         )
         .pipe(
@@ -136,6 +143,7 @@ export const make = Effect.gen(function* () {
             if (announce === undefined) return Effect.void;
             const focused = next.open.find((row) => row.key === next.activeKey);
             return PubSub.publish(announced, {
+              _tag: "changed",
               workspace: next,
               focus:
                 announce.focus &&
@@ -161,14 +169,27 @@ export const make = Effect.gen(function* () {
       const saved = { ...filters, savedAt: DateTime.formatIso(yield* DateTime.now) };
       const stored = yield* Schema.encodeEffect(StoredFilters)(saved);
       yield* sql`UPDATE workspace SET inbox_filters = ${stored} WHERE id = 1`;
-      return saved;
+      return { filters: saved, workspace: yield* read() };
     }).pipe(
       gate.withPermits(1),
       Effect.mapError(
         () => new WorkspaceError({ message: "Couldn't save your Inbox filters. Try again." }),
       ),
     );
-  const changes = (): Stream.Stream<WorkspaceChange> => Stream.fromPubSub(announced);
+  /**
+   * Open while a window is: the tabs as they are, then each change made elsewhere. Commands
+   * announce under the gate, so nothing older than the first message follows it.
+   */
+  const changes = (): Stream.Stream<WorkspaceChange, WorkspaceError> =>
+    Stream.unwrap(
+      gate.withPermits(1)(
+        Effect.gen(function* () {
+          const subscription = yield* PubSub.subscribe(announced);
+          const current: WorkspaceChange = { _tag: "current", workspace: yield* read() };
+          return Stream.concat(Stream.succeed(current), Stream.fromSubscription(subscription));
+        }),
+      ),
+    );
   return { get: () => gate.withPermits(1)(read()), command, saveInboxFilters, changes };
 });
 

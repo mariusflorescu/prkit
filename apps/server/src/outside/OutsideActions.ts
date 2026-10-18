@@ -54,7 +54,10 @@ export const makeOutsideActions = (
         .command({ kind: "reorder", keys: input.keys }, { focus: false })
         .pipe(Effect.andThen(openPullRequests), Effect.mapError(asFailure));
     const saveInboxFilters = (input: typeof Inputs.SaveInboxFiltersInput.Type) =>
-      workspace.saveInboxFilters(input).pipe(Effect.mapError(asFailure));
+      workspace.saveInboxFilters(input).pipe(
+        Effect.map((saved) => saved.filters),
+        Effect.mapError(asFailure),
+      );
     const saveGuideSettings = (input: typeof Inputs.SaveGuideSettingsInput.Type) =>
       Effect.gen(function* () {
         const target = yield* resolve(input);

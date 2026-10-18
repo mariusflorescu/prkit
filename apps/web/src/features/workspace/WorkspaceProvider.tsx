@@ -5,7 +5,7 @@ import {
   refFromKey,
   type WorkspaceCommand,
 } from "@prkit/contracts";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, type ReactNode } from "react";
 
@@ -17,24 +17,36 @@ import { desktopBridge } from "~/lib/desktop";
 import { useWorkspaceSession } from "./sessionStore";
 import { useWorkspaceChanges } from "./useWorkspaceChanges";
 import { WorkspaceContext } from "./workspaceContext";
+import {
+  commandOf,
+  currentWorkspace,
+  shownPullRequest,
+  shownWorkspace,
+  workspaceMutationKey,
+} from "./workspaceView";
 
-const mutationKey = ["workspace-change"];
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const client = useQueryClient();
   const query = useQuery(workspaceQuery);
+  const pending = useMutationState({
+    filters: { mutationKey: workspaceMutationKey, status: "pending" },
+    select: commandOf,
+  }).flat();
+  const data = shownWorkspace(query.data, pending);
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const shownLocal = useParams({ strict: false }).key;
   const restore = useRef(pathname === "/");
+  // A change shows at once, as a pending command on the server's copy, until the server's saved
+  // tabs replace that copy, or it fails and drops out.
   const mutation = useMutation({
-    mutationKey,
+    mutationKey: workspaceMutationKey,
     scope: { id: "workspace" },
     mutationFn: changeWorkspace,
-    onError: (error, command) =>
-      useWorkspaceSession.setState({ failed: { command, message: error.message } }),
-    onSettled: () => {
-      if (client.isMutating({ mutationKey }) === 1)
-        return client.invalidateQueries({ queryKey: workspaceQuery.queryKey });
+    onSuccess: (saved) => client.setQueryData(workspaceQuery.queryKey, saved),
+    onError: (error, command) => {
+      useWorkspaceSession.setState({ failed: { command, message: error.message } });
+      return client.invalidateQueries({ queryKey: workspaceQuery.queryKey });
     },
   });
   const go = (row: OpenPullRequest | null) => {
@@ -51,12 +63,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       search: { account: row.accountId, tab },
     });
   };
-  useWorkspaceChanges(go);
   const send = (command: WorkspaceCommand) => {
-    void client.cancelQueries({ queryKey: workspaceQuery.queryKey });
-    const before = client.getQueryData(workspaceQuery.queryKey);
+    const before = currentWorkspace(client);
     if (before) {
-      client.setQueryData(workspaceQuery.queryKey, applyWorkspaceCommand(before, command));
       if (command.kind === "close") {
         const row = before.open.find((row) => row.key === command.key);
         if (row) useWorkspaceSession.getState().rememberClosed(row);
@@ -67,7 +76,24 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     useWorkspaceSession.setState({ failed: null });
     mutation.mutate(command);
   };
-  const current = () => client.getQueryData(workspaceQuery.queryKey);
+  useWorkspaceChanges({ show: go, send });
+  // The PR on screen left the strip, whatever took it (an outside agent, or this window's change
+  // settling after one): show the active one instead, else the Inbox. Its own close navigates.
+  const lastShown = useRef(data);
+  useEffect(() => {
+    const previous = lastShown.current;
+    lastShown.current = data;
+    if (previous === undefined || data === undefined) return;
+    const onScreen = shownPullRequest(previous, pathname);
+    if (
+      onScreen === undefined ||
+      data.open.some((row) => row.key === onScreen.key) ||
+      pending.some((command) => command.kind === "close" && command.key === onScreen.key)
+    )
+      return;
+    go(data.open.find((row) => row.key === data.activeKey) ?? null);
+  });
+  const current = () => currentWorkspace(client);
   const activate = (key: OpenPullRequest["key"]) => {
     const row = current()?.open.find((row) => row.key === key);
     if (!row) return;
@@ -118,8 +144,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       before,
     );
     for (const key of keys) send({ kind: "close", key });
-    if (!before.activeKey || !keys.includes(before.activeKey) || !pathname.startsWith("/pr/"))
-      return;
+    const onScreen = shownPullRequest(before, pathname);
+    if (onScreen === undefined || !keys.includes(onScreen.key)) return;
     const active = next.open.find((row) => row.key === next.activeKey);
     if (active) go(active);
     else void navigate({ to: "/" });
@@ -136,22 +162,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (!isSettingsPath(from))
       session.setSettingsTab({
         open: true,
-        returnKey: from.startsWith("/pr/")
-          ? (client.getQueryData(workspaceQuery.queryKey)?.activeKey ?? null)
-          : null,
+        returnKey: from.startsWith("/pr/") ? (currentWorkspace(client)?.activeKey ?? null) : null,
       });
     else if (!session.settingsTab.open) session.setSettingsTab({ open: true });
   }, [pathname, client]);
   useEffect(() => {
     if (query.isPending || !restore.current) return;
     restore.current = false;
-    const active = query.data?.open.find((row) => row.key === query.data?.activeKey);
+    const active = data?.open.find((row) => row.key === data.activeKey);
     if (pathname === "/" && active) go(active);
   });
   return (
     <WorkspaceContext
       value={{
-        data: query.data,
+        data,
         pending: query.isPending,
         error: query.error,
         retry: () => void query.refetch(),
