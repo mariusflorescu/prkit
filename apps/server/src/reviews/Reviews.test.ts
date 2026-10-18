@@ -318,7 +318,7 @@ const GitHub = Layer.mergeAll(
           presence,
           context: () =>
             Effect.succeed({
-              checks: { _tag: "read", value: [] },
+              checks: { _tag: "read", value: { failing: [], pending: [] } },
               threads: { _tag: "read", value: [] },
               issues: { _tag: "read", value: { total: 0, items: [] } },
             }),
