@@ -1,0 +1,413 @@
+{
+  "summary": [
+    "Before this PR, `gh stack init a b c` already reused branches that existed and created the missing ones from trunk, but the docs sent people to `--adopt` for existing branches. `--adopt` was stricter: every branch had to exist already, it couldn't be combined with `--prefix` or `--numbered`, and it printed different output. The interactive flow also opened with a \"Set a branch prefix?\" question that most first-time users didn't understand.",
+    "Now there's one way to do it. Any branch name you pass is adopted if it exists and created if it doesn't. Every name is checked before anything is created, and new branches start on top of the branch before them in the list. The prefix is worked out from the branch names (`feat/a feat/b` means prefix `feat`) instead of asked up front. `--adopt` still works but is hidden and just prints a deprecation warning. After init, a \"What's next\" block lists the commands that fit what just happened: a brand-new stack, or adopted branches that may already have PRs.",
+    "All of the logic is in `cmd/init.go`. The rest is tests and docs that stop mentioning `--adopt`."
+  ],
+  "background": [],
+  "steps": [
+    "`runInit` warns if `--adopt` was passed, and checks an explicit `--prefix` with `ValidateRefName`.",
+    "With branch names as arguments, `resolveArgBranches` validates every name first, then creates the missing ones, each on top of the branch before it in the list.",
+    "If no `--prefix` was given, `detectPrefix` uses the shared part before the last slash as the stack's prefix, without asking.",
+    "With no arguments, `runInteractiveInit` offers \"use current branch\" or \"create a new branch\", then asks Y/n before using a prefix it found in the name.",
+    "The stack is saved, `FindPRForBranch` looks up an open PR for each branch, and the top branch is checked out.",
+    "`printWhatsNext` prints the chain (`main → a → b`), how many PRs it found, and the next commands to run."
+  ],
+  "chapters": [
+    {
+      "id": "init-flow",
+      "title": "`init` adopts branches that exist and creates the rest",
+      "kind": "core",
+      "body": [
+        "`runInit` now has three paths: branch names as arguments, `--numbered`, and interactive. They all end the same way: build the stack, look up PRs, check out the top branch, and call `printWhatsNext`.",
+        "**Arguments.** `resolveArgBranches` works in two passes. The first pass adds an explicit `--prefix`, runs `ValidateRefName`, records whether the branch exists, and rejects names that are already in a stack. Only when every name passes does the second pass create the missing ones. So a bad third name no longer leaves the first two branches behind.",
+        "Missing branches are now created on top of the previous branch in the list, not from trunk. In a mixed call like `init existing1 new1`, `new1` starts with `existing1`'s commits, which is what a stack needs. Each branch's `Base` is still computed with `MergeBase` against the branch below it, so nothing changes there.",
+        "**Prefix.** The upfront prompt is gone. On the args path, `detectPrefix` splits each name at its last slash. If they all match (`feat/a feat/b` gives `feat`, `sameen/feat/x` gives `sameen/feat`), that becomes the stack prefix with no prompt. The interactive path finds the same kind of prefix in the one branch name and asks Y/n first. An explicit `--prefix` always wins. One side effect: explicit `--prefix` is now validated before the `--numbered` prompt runs, so a prefix typed *at* that prompt skips `ValidateRefName`. A bad one now fails later with git's raw error from `CreateBranch`.",
+        "**Interactive.** `runInteractiveInit` prints a tip about passing several branches. On a feature branch it shows a Select: \"Use current branch\" or \"Create a new branch\". On trunk it goes straight to `promptBranchName`. A branch that already existed counts as adopted, so the output says \"Adopted\" there too. That was a Copilot review point, fixed in the PR.",
+        "**`--adopt` and `--numbered`.** `--adopt` is hidden and only prints a warning. Two behaviors flip for anyone scripting it: a missing branch is now created instead of being an error, and `--adopt --prefix` is no longer rejected. `--numbered` gets its own path, and `gh stack init -p feat -n` now works without a terminal. Before, it failed with \"interactive input required\", so the \"(unchanged)\" comment on that block isn't quite true."
+      ],
+      "pseudocode": "runInit(opts):\n  if --adopt:   warn \"deprecated\", carry on\n  if --prefix:  ValidateRefName(prefix)\n\n  if args:          branches = resolveArgBranches()   # validate all, then create missing\n                    prefix   = --prefix or detectPrefix(branches)\n  elif --numbered:  branches = [NextNumberedName(prefix)]\n  else:             branches = runInteractiveInit()   # select / prompt, Y/n on prefix\n\n  AddStack(prefix, trunk, branches)\n  for b in branches: PR = FindPRForBranch(b)          # open PRs only\n  Save, checkout top branch\n  printWhatsNext(adopted?, prCount)",
+      "callouts": [
+        {
+          "tone": "note",
+          "text": "PR lookup changed too. A fresh (non-adopt) init used to go through `syncStackPRs`, which ran up to 6 lookups in parallel and recorded merge-queue state. Now every init calls `FindPRForBranch` one branch at a time and doesn't set `Queued`. That's harmless for new branches, but a long adopted stack makes N requests one after another."
+        }
+      ],
+      "files": [
+        {
+          "path": "cmd/init.go",
+          "note": null,
+          "collapsed": false,
+          "annotations": [
+            {
+              "line": 155,
+              "side": "additions",
+              "tone": "question",
+              "text": "The detected prefix is saved silently, and `gh stack add` always adds it to the front. So after `init feat/a feat/b`, typing `gh stack add feat/c` creates `feat/feat/c`. Should the args path print the prefix it picked?"
+            },
+            {
+              "line": 319,
+              "side": "additions",
+              "tone": "note",
+              "text": "Behavior change: missing branches used to start from trunk. Now each one starts from the branch before it, so a new branch after an adopted one keeps that branch's commits."
+            },
+            {
+              "line": 496,
+              "side": "additions",
+              "tone": "question",
+              "text": "`hasAdopted` is true if *any* branch existed, so `init existing new1 new2` prints \"Adopted 3 branches\" even though two were just created. Worth saying \"Adopted 1, created 2\"?"
+            }
+          ]
+        }
+      ],
+      "risk": {
+        "level": "high",
+        "reasons": [
+          {
+            "text": "Every name is checked before any branch is created. Read what happens when one fails halfway.",
+            "file": "cmd/init.go",
+            "line": 282
+          },
+          {
+            "text": "The prefix is now worked out from the names, which changes what a later `add` creates.",
+            "file": "cmd/init.go",
+            "line": 154
+          }
+        ]
+      }
+    },
+    {
+      "id": "docs",
+      "title": "Docs and the agent skill stop mentioning `--adopt`",
+      "kind": "docs",
+      "body": [
+        "README, CLI reference, FAQ and the agent skill swap every `init --adopt a b` for plain `init a b` and drop the flag from the tables. The workflows guide gets a new \"Existing Branches into a Stack\" section that shows mixing existing and new branches in one command.",
+        "Two places outside this diff still say `--adopt`: the root help example added in #88 (`cmd/root.go`) and the recovery hint printed by `gh stack modify --abort` (`cmd/modify.go`). Both now point users at a flag that prints a deprecation warning."
+      ],
+      "pseudocode": null,
+      "callouts": [],
+      "files": [
+        {
+          "path": "skills/gh-stack/SKILL.md",
+          "note": null,
+          "collapsed": false,
+          "annotations": [
+            {
+              "line": 434,
+              "side": "additions",
+              "tone": "note",
+              "text": "Not accurate anymore: each missing branch is created from the previous branch in the list, not from trunk. Line 433 above has the same old wording. Agents read this file, so it's worth fixing."
+            }
+          ]
+        },
+        {
+          "path": "README.md",
+          "note": null,
+          "collapsed": false,
+          "annotations": []
+        },
+        {
+          "path": "docs/src/content/docs/reference/cli.md",
+          "note": null,
+          "collapsed": false,
+          "annotations": []
+        },
+        {
+          "path": "docs/src/content/docs/guides/workflows.md",
+          "note": null,
+          "collapsed": false,
+          "annotations": []
+        },
+        {
+          "path": "docs/src/content/docs/faq.md",
+          "note": null,
+          "collapsed": false,
+          "annotations": []
+        }
+      ],
+      "risk": {
+        "level": "low",
+        "reasons": [
+          {
+            "text": "Wording only: the docs stop sending people to `--adopt`.",
+            "file": "README.md",
+            "line": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "tests",
+      "title": "Tests for each init scenario",
+      "kind": "tests",
+      "body": [
+        "Start with the old tests that changed what they expect, since those are the intended behavior changes. The two tests that expected `--adopt` with `--prefix`/`--numbered` to fail are replaced by one that only expects a warning. `TestInit_AdoptNonexistentBranch` now expects the branch to be created.",
+        "The new tests follow the numbered scenarios from the author's spec: all-existing, all-missing and mixed arguments, prefix detection (common, mixed, nested, none, explicit wins), each variant of the \"What's next\" output, and two-pass validation (a duplicate or an invalid ref in third position creates nothing). `TestDetectPrefix` covers the edge cases in a table."
+      ],
+      "pseudocode": null,
+      "callouts": [],
+      "files": [
+        {
+          "path": "cmd/init_test.go",
+          "note": null,
+          "collapsed": false,
+          "annotations": [
+            {
+              "line": 169,
+              "side": "additions",
+              "tone": "note",
+              "text": "Replaces `TestInit_AdoptRejectsPrefix` and `TestInit_AdoptRejectsNumbered`. Those combinations used to fail, and now they only warn."
+            },
+            {
+              "line": 434,
+              "side": "additions",
+              "tone": "note",
+              "text": "Only checks names. No test looks at the `base` passed to `CreateBranch`, so nothing pins down the new rule that each branch starts from the previous one."
+            },
+            {
+              "line": 680,
+              "side": "additions",
+              "tone": "question",
+              "text": "Despite the name, this only covers the non-interactive error. The on-trunk prompt path (`promptBranchName`) has no test. Rename it, or add a `SelectFn`-style hook for `Input`?"
+            }
+          ]
+        },
+        {
+          "path": "internal/git/mock_ops.go",
+          "note": "Whitespace only: gofmt realigned the struct fields.",
+          "collapsed": false,
+          "annotations": []
+        }
+      ],
+      "risk": {
+        "level": "medium",
+        "reasons": [
+          {
+            "text": "Most of the init tests are new or rewritten with the code.",
+            "file": "cmd/init_test.go",
+            "line": null
+          }
+        ]
+      }
+    }
+  ],
+  "risk": {
+    "level": "high",
+    "reasons": [
+      {
+        "text": "Scripts that pass `--adopt` now create missing branches instead of failing, and `--adopt --prefix` is accepted.",
+        "chapter": "init-flow",
+        "at": {
+          "path": "cmd/init.go",
+          "line": 120
+        }
+      },
+      {
+        "text": "Each new branch now starts on the branch before it, so a wrong order builds the wrong history.",
+        "chapter": "init-flow",
+        "at": {
+          "path": "cmd/init.go",
+          "line": 317
+        }
+      },
+      {
+        "text": "Most init tests are rewritten along with the code, so they show the new behavior, not what changed.",
+        "chapter": "tests",
+        "at": null
+      }
+    ]
+  },
+  "signals": [
+    {
+      "_tag": "sensitive",
+      "files": [
+        {
+          "path": "cmd/init.go",
+          "pattern": "cmd/",
+          "scope": "repository"
+        },
+        {
+          "path": "cmd/init_test.go",
+          "pattern": "cmd/",
+          "scope": "repository"
+        }
+      ]
+    },
+    {
+      "_tag": "large",
+      "lines": 1193,
+      "fileCount": 8
+    }
+  ],
+  "flow": {
+    "_tag": "graph",
+    "title": "How `gh stack init` turns arguments or prompts into a saved stack",
+    "subtitle": "Before: a prefix prompt, then one of three hard-coded branches. After: an args path and an interactive path that meet at the same output.",
+    "direction": "auto",
+    "nodes": [
+      {
+        "id": "init",
+        "label": "gh stack init",
+        "status": "unchanged",
+        "chapter": null,
+        "detail": "Entry point: `runInit` in cmd/init.go."
+      },
+      {
+        "id": "prefixPrompt",
+        "label": "\"Set a branch prefix?\"",
+        "status": "removed",
+        "chapter": "init-flow",
+        "detail": "Before: asked in every interactive run, before the user had even named a branch."
+      },
+      {
+        "id": "oldBranches",
+        "label": "--adopt or create from trunk",
+        "status": "removed",
+        "chapter": "init-flow",
+        "detail": "Before: with --adopt every branch had to exist already. Without it, existing branches were reused and missing ones were created off trunk."
+      },
+      {
+        "id": "resolve",
+        "label": "resolveArgBranches()",
+        "status": "added",
+        "chapter": "init-flow",
+        "detail": "Validate every name first, then create only the missing ones."
+      },
+      {
+        "id": "detect",
+        "label": "detectPrefix()",
+        "status": "added",
+        "chapter": "init-flow",
+        "detail": "Shared part before the last slash becomes the stack prefix. Set silently on this path."
+      },
+      {
+        "id": "interactive",
+        "label": "runInteractiveInit()",
+        "status": "added",
+        "chapter": "init-flow",
+        "detail": "Use the current branch or name a new one, then confirm a detected prefix with Y/n."
+      },
+      {
+        "id": "addStack",
+        "label": "sf.AddStack()",
+        "status": "unchanged",
+        "chapter": null,
+        "detail": "Builds the stack record (prefix, trunk, branch bases). Unchanged."
+      },
+      {
+        "id": "syncPRs",
+        "label": "syncStackPRs()",
+        "status": "removed",
+        "chapter": "init-flow",
+        "detail": "Before: used for non-adopt inits. Parallel lookups, also recorded merge-queue state."
+      },
+      {
+        "id": "findPR",
+        "label": "FindPRForBranch()",
+        "status": "changed",
+        "chapter": "init-flow",
+        "detail": "Now used for every init, one branch at a time. Open PRs only."
+      },
+      {
+        "id": "whatsNext",
+        "label": "printWhatsNext()",
+        "status": "added",
+        "chapter": "init-flow",
+        "detail": "Different tips for a new stack vs. adopted branches, plus a PR count."
+      }
+    ],
+    "edges": [
+      {
+        "from": "init",
+        "to": "prefixPrompt",
+        "label": null,
+        "status": "removed"
+      },
+      {
+        "from": "prefixPrompt",
+        "to": "oldBranches",
+        "label": null,
+        "status": "removed"
+      },
+      {
+        "from": "oldBranches",
+        "to": "addStack",
+        "label": null,
+        "status": "removed"
+      },
+      {
+        "from": "init",
+        "to": "resolve",
+        "label": "args",
+        "status": "added"
+      },
+      {
+        "from": "resolve",
+        "to": "detect",
+        "label": null,
+        "status": "added"
+      },
+      {
+        "from": "detect",
+        "to": "addStack",
+        "label": null,
+        "status": "added"
+      },
+      {
+        "from": "init",
+        "to": "interactive",
+        "label": "no args",
+        "status": "added"
+      },
+      {
+        "from": "interactive",
+        "to": "addStack",
+        "label": null,
+        "status": "added"
+      },
+      {
+        "from": "addStack",
+        "to": "syncPRs",
+        "label": "not --adopt",
+        "status": "removed"
+      },
+      {
+        "from": "addStack",
+        "to": "findPR",
+        "label": null,
+        "status": "unchanged"
+      },
+      {
+        "from": "findPR",
+        "to": "whatsNext",
+        "label": null,
+        "status": "added"
+      }
+    ]
+  },
+  "focus": [
+    {
+      "tone": "question",
+      "text": "The args path sets the prefix silently, so `gh stack add feat/c` after `init feat/a feat/b` creates `feat/feat/c`.",
+      "chapter": "init-flow"
+    },
+    {
+      "tone": "note",
+      "text": "Scripts using `--adopt` behave differently: missing branches get created instead of failing, and `--adopt --prefix` is accepted.",
+      "chapter": "init-flow"
+    },
+    {
+      "tone": "note",
+      "text": "The root help example (from #88) and the `modify --abort` hint still suggest `gh stack init --adopt`.",
+      "chapter": "docs"
+    },
+    {
+      "tone": "note",
+      "text": "The agent skill file still says missing branches are created from trunk.",
+      "chapter": "docs"
+    }
+  ],
+  "focusAreas": [],
+  "guidanceNote": null,
+  "preflight": null
+}

@@ -1,7 +1,12 @@
-import { type Browser, test } from "@e2e-dev/web";
-import { expect, type Screen } from "e2e";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 
-import { runForUrl } from "../scripts/verify-run.ts";
+import { type Browser, test } from "@e2e-dev/web";
+import { expect, type Locator } from "e2e";
+import * as Schema from "effect/Schema";
+
+import { NormalizedGuide } from "../packages/contracts/src/guide.ts";
+import { repoRoot, runForUrl } from "../scripts/verify-run.ts";
 import { lineOpener } from "./guideLines.ts";
 import { emulateOsColorScheme, screenshotLightAndDark } from "./osColorScheme.ts";
 import { choose } from "./pickers.ts";
@@ -341,5 +346,161 @@ test("the DEV guide says how carefully to read, and every reason opens its evide
     await expect(browser.locator("[data-roadmap-risk]")).toHaveCount(0);
   }
   await app.screenshot("risk-stored-none");
+  expect(await unexpectedErrors()).toEqual([]);
+});
+
+const storedInitFlowPseudocode = () => {
+  const guide = Schema.decodeUnknownSync(Schema.fromJsonString(NormalizedGuide))(
+    NodeFS.readFileSync(
+      NodePath.join(repoRoot, "packages/contracts/test/fixtures/github-gh-stack-91/stored.json"),
+      "utf8",
+    ),
+  );
+  const pseudocode = guide.chapters.find((chapter) => chapter.id === "init-flow")?.pseudocode;
+  if (typeof pseudocode !== "string")
+    throw new Error("The stored fixture's init-flow chapter has no plain pseudocode.");
+  return pseudocode;
+};
+
+const boxOf = async (locator: Locator) => {
+  const box = await locator.boundingBox();
+  if (box === null) throw new Error("Expected the element to be on the page.");
+  return box;
+};
+
+test("the DEV guide shows a chapter's before and after, side by side when there is room", async ({
+  app,
+  screen,
+  browser,
+}) => {
+  const devUrl = process.env.PRKIT_GUIDE_URL;
+  if (!devUrl) {
+    test.skip(
+      "Set PRKIT_GUIDE_URL to the isolated Vite preview URL; production excludes this route.",
+    );
+    return;
+  }
+  await emulateOsColorScheme(browser, "light");
+  const unexpectedErrors = await watchErrors(browser);
+
+  await browser.setViewport({ width: 1440, height: 900 });
+  const url = new URL("/dev/guide/github-gh-stack-91-pairs", devUrl);
+  url.search = new URL(devUrl).search;
+  await app.open(url.href);
+  await expect(screen.getByRole("heading", "Overview")).toBeVisible();
+
+  const initFlow = '[data-chapter-id="init-flow"]';
+  const chapter = browser.locator(initFlow);
+  const before = chapter.getByRole("group", "Before");
+  const after = chapter.getByRole("group", "After");
+  const lines = (side: "before" | "after", status: "removed" | "added" | "unchanged") =>
+    browser.locator(
+      `${initFlow} [data-pseudocode-side="${side}"] [data-pseudocode-line][data-status="${status}"]`,
+    );
+  const filler = browser.locator(`${initFlow} [data-pseudocode-filler]`);
+
+  await expect(before).toBeVisible();
+  await expect(after).toBeVisible();
+  await expect(browser.locator("[data-pseudocode-pair]")).toHaveCount(1);
+  await expect(lines("before", "removed")).toHaveCount(5);
+  await expect(lines("before", "added")).toHaveCount(0);
+  await expect(lines("before", "unchanged")).toHaveCount(5);
+  await expect(lines("after", "added")).toHaveCount(4);
+  await expect(lines("after", "removed")).toHaveCount(0);
+  await expect(lines("after", "unchanged")).toHaveCount(5);
+  await expect(filler).toHaveCount(1);
+  await expect(
+    before.getByText("--adopt with --prefix or --numbered: error", { exact: false }),
+  ).toBeVisible();
+  await expect(after.getByText('--adopt: warn "deprecated"', { exact: false })).toBeVisible();
+
+  for (const id of ["docs", "tests"]) {
+    await expect(
+      browser.locator(`[data-chapter-id="${id}"] [data-chapter-toggle]`),
+    ).toHaveAttribute("aria-expanded", "true");
+    await expect(
+      browser.locator(
+        `[data-chapter-id="${id}"] :is([data-pseudocode-pair], [data-guide-pseudocode])`,
+      ),
+    ).toHaveCount(0);
+  }
+  await expect(browser.locator(`${initFlow} [data-guide-pseudocode]`)).toHaveCount(0);
+
+  const arrangement = async () => {
+    const [first, second] = await Promise.all([boxOf(before), boxOf(after)]);
+    if (second.y >= first.y + first.height - 1) return "stacked";
+    if (second.x >= first.x + first.width - 1) return "side by side";
+    return "overlapping";
+  };
+  const tops = async (rows: Locator) =>
+    Promise.all((await rows.all()).map(async (row) => (await boxOf(row)).y));
+  const sharedLinesAlign = async () => {
+    const [kept, now] = await Promise.all([
+      tops(lines("before", "unchanged")),
+      tops(lines("after", "unchanged")),
+    ]);
+    const [shared, fresh] = await Promise.all([
+      boxOf(before.getByText("ValidateRefName(prefix)")),
+      boxOf(after.getByText("ValidateRefName(prefix)")),
+    ]);
+    return (
+      kept.length === 5 && kept.every((top, index) => top === now[index]) && shared.y === fresh.y
+    );
+  };
+  const fillerTakesItsRow = async () => {
+    const [gap, partner] = await Promise.all([
+      boxOf(filler),
+      boxOf(before.getByText("no prefix given: prompt for one", { exact: false })),
+    ]);
+    return gap.height > 0 && gap.y === partner.y;
+  };
+
+  const widths = [
+    { width: 1440, expected: "stacked", themes: true },
+    { width: 1000, expected: "side by side", themes: true },
+    { width: 760, expected: "stacked", themes: false },
+    { width: 640, expected: "stacked", themes: false },
+  ] as const;
+  for (const { width, expected, themes } of widths) {
+    await browser.setViewport({ width, height: 900 });
+    await expect.poll(arrangement).toBe(expected);
+    if (expected === "side by side") {
+      await expect.poll(sharedLinesAlign).toBe(true);
+      await expect.poll(fillerTakesItsRow).toBe(true);
+    } else {
+      await expect(filler).toBeHidden();
+    }
+    const heights = await Promise.all(
+      (await browser.locator(`${initFlow} [data-pseudocode-line]`).all()).map(
+        async (line) => (await boxOf(line)).height,
+      ),
+    );
+    expect(heights.filter((height) => height < 12)).toEqual([]);
+    await browser.locator(`${initFlow} [data-pseudocode-pair]`).scrollIntoView();
+    if (themes) await screenshotLightAndDark(app, browser, `chapter-pair-${width}`);
+    else await app.screenshot(`chapter-pair-${width}`);
+    expect(await unexpectedErrors()).toEqual([]);
+  }
+
+  await browser.setViewport({ width: 1440, height: 900 });
+  await choose(
+    screen,
+    screen.getByRole("combobox", "Guide fixture"),
+    "gh-stack #91, stored before chapter pairs",
+  );
+  const plain = browser.locator(`${initFlow} [data-guide-pseudocode]`);
+  await expect(plain).toBeVisible();
+  expect(
+    await browser.evaluate(
+      () =>
+        document.querySelector('[data-chapter-id="init-flow"] [data-guide-pseudocode]')
+          ?.textContent ?? null,
+    ),
+  ).toBe(storedInitFlowPseudocode());
+  await expect(browser.locator("[data-pseudocode-pair]")).toHaveCount(0);
+  await expect(chapter.getByRole("group", "Before")).toHaveCount(0);
+  await expect(chapter.getByRole("group", "After")).toHaveCount(0);
+  await plain.scrollIntoView();
+  await app.screenshot("chapter-pair-stored");
   expect(await unexpectedErrors()).toEqual([]);
 });

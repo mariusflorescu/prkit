@@ -86,12 +86,22 @@ const ChapterRisk = Schema.Struct({
   ),
 });
 
+/**
+ * How a chapter's logic worked before this change and how it works now. Both keys are
+ * optional so that a half pair gets a plain-word error from `normalize`.
+ */
+const PseudocodePair = Schema.Struct({
+  before: Schema.optionalKey(Schema.String),
+  after: Schema.optionalKey(Schema.String),
+});
+
 const chapterFields = {
   id: Schema.optionalKey(Schema.String),
   title: Schema.String,
   kind: Schema.optionalKey(GuideKind),
   body: Schema.optionalKey(Paragraphs),
-  pseudocode: Schema.optionalKey(Schema.String),
+  /** One block, or a pair when the chapter's logic changed shape. */
+  pseudocode: Schema.optionalKey(Schema.Union([Schema.String, PseudocodePair])),
   callouts: Schema.optionalKey(Schema.Array(Callout)),
   risk: Schema.optionalKey(ChapterRisk),
 };
@@ -273,6 +283,12 @@ export const GuidePatch = Schema.Struct({
 export type GuidePatch = typeof GuidePatch.Type;
 
 const NormalizedCallout = Schema.Struct({ tone: GuideTone, text: Schema.String });
+/** Plain text, `\n` between lines, with no blank line at either end. */
+export const NormalizedPseudocodePair = Schema.Struct({
+  before: Schema.String,
+  after: Schema.String,
+});
+export type NormalizedPseudocodePair = typeof NormalizedPseudocodePair.Type;
 const PreflightPlace = { chapter: Schema.String, at: Schema.NullOr(DiffLineRef) };
 export const NormalizedPreflight = Schema.Struct({
   questions: Schema.Array(Schema.Struct({ text: Schema.String, ...PreflightPlace })),
@@ -367,7 +383,8 @@ export const NormalizedGuide = Schema.Struct({
       title: Schema.String,
       kind: GuideKind,
       body: Schema.Array(Schema.String),
-      pseudocode: Schema.NullOr(Schema.String),
+      /** Revisions written before pairs hold a string or null. */
+      pseudocode: Schema.NullOr(Schema.Union([Schema.String, NormalizedPseudocodePair])),
       callouts: Schema.Array(NormalizedCallout),
       files: Schema.Array(
         Schema.Struct({

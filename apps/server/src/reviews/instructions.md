@@ -71,7 +71,46 @@ One tests chapter is usually right. When existing tests changed what they expect
 
 - **Title.** What happens, as a short verb phrase: "Mobile opens the Thread screen". Titles are plain text, so no backticks.
 - **Body.** Short paragraphs, as many as the idea needs. Start with what this group of files does and why. If there's a subtle part (an ordering that matters, an edge case, something that must always stay true, a place that knowingly works differently from similar code), give it its own paragraph. That's the part a reviewer would miss.
-- **`pseudocode`.** For a long but mechanically simple file (150 lines of retry logic that really mean "fetch with exponential backoff"), write the algorithm in a few lines.
+- **`pseudocode`.** For a long but mechanically simple file (150 lines of retry logic that really mean "fetch with exponential backoff"), write the algorithm in a few lines as one string. When the chapter changes how logic that already existed works, send a before and after pair instead. See "Before and after in a chapter".
+
+## Before and after in a chapter
+
+When a chapter changes how logic that already existed works, `pseudocode` is a pair: `{ "before": "...", "after": "..." }`. `before` is how the code worked before this change, and `after` is how it works now. Think of a new step in the middle, a check that moves earlier, a loop that becomes a lookup, an order that flips, a rule that changes. prkit compares the two sides line by line and marks what changed like a diff: removed lines on the before side, added lines on the after side, and the rest as context, side by side when there's room. The reader sees the change in a few lines before they read the diff.
+
+Most chapters don't need one: a guide usually has one or two, on the core chapters that change how something works. Leave the pair out for:
+
+- tests, docs and generated chapters
+- code the PR only adds. There is no before, so a single `pseudocode` string, or nothing, is right.
+- a rename, a moved file, or a parameter passed through
+
+Never send both a string and a pair.
+
+To write one:
+
+- Use 3-8 lines a side, and never more than 10.
+- Keep lines short, under about 60 characters, in the code's own names.
+- Write one step per line, the way you'd sketch it on a whiteboard. Don't copy the code again.
+- Write the lines that work the same word for word, with the same indentation, on both sides. Then only the change stands out.
+- Use plain text, with no backticks or markdown.
+
+For a PR that makes password reset links expire after an hour, the chapter that adds the expiry could show `verifyToken()` like this:
+
+```json
+{
+  "id": "reset-links-expire",
+  "pseudocode": {
+    "before": "verifyToken(token)\n  row = find the token row\n  if no row: 404\n  return row.user",
+    "after": "verifyToken(token)\n  row = find the token row\n  if no row: 404\n  if row.expiresAt is past: 410\n  return row.user"
+  }
+}
+```
+
+prkit checks:
+
+- Both sides are written, and they are different.
+- Each side has at most 10 lines.
+- A tests, docs or generated chapter has no pair.
+- A chapter whose files are all new has no pair.
 
 ## Where a point goes
 
@@ -302,7 +341,7 @@ Top level:
 - `manualCheck` (object, required): how to see the change working by hand, written after `risk`. `{ "setup", "steps": [{ "action", "expect", "watchFor", "chapter" }] }` with up to 5 steps, or `{ "steps": [], "reason" }` when there is nothing to check by hand. See "How to check it".
 - `preflight` (object, only when the prompt says the account reading the guide opened the pull request): `{ "questions": [{ "text", "chapter", "at" }], "description": [{ "kind", "text", "quote", "chapter", "at" }], "tests": [{ "text", "path", "line" }] }`, every list optional. See "The author's pre-flight".
 
-**Markdown.** These fields take inline markdown (`` `code` ``, `**bold**`, `[label](https://...)`): `summary`, `background`, `steps`, chapter `body`, callouts, line notes, file `note`, `focus`, `flow.subtitle`, flow row `text`, risk reason `text`, and the `manualCheck` texts. Everything else is plain text, so don't put backticks in titles, labels, `detail` or `pseudocode`.
+**Markdown.** These fields take inline markdown (`` `code` ``, `**bold**`, `[label](https://...)`): `summary`, `background`, `steps`, chapter `body`, callouts, line notes, file `note`, `focus`, `flow.subtitle`, flow row `text`, risk reason `text`, and the `manualCheck` texts. Everything else is plain text, so don't put backticks in titles, labels, `detail` or `pseudocode` (either form).
 
 A chapter:
 
@@ -310,7 +349,7 @@ A chapter:
 - `title` (required): a short verb phrase, plain text.
 - `kind`: `core`, `supporting`, `data`, `tests`, `config`, `docs` or `generated`. Defaults to `supporting`. `generated` chapters start collapsed.
 - `body` (string[]): paragraphs of chapter text, one string per paragraph.
-- `pseudocode` (optional): plain text in a monospace block under the body.
+- `pseudocode` (optional): plain text in a monospace block under the body. Either one string, or `{ "before", "after" }` for logic that changed shape. See "Before and after in a chapter".
 - `callouts` (optional): `{ "tone": "note" | "question" | "risk", "text": "..." }`.
 - `risk` (object, required): how carefully to read this chapter. `{ "level": "low" | "medium" | "high", "reasons": [{ "text", "file", "line" }] }`: 1-3 reasons, each with a `file` of this chapter and optionally a `line` of it.
 - `files` (required): paths exactly as the diff lists them, or globs (`*`, `?`, `[...]`). An entry is a path string or `{ "path", "note", "annotations", "collapsed" }`, where an annotation is `{ "line": 42, "side": "additions" | "deletions", "tone": "note" | "question" | "risk", "text": "..." }` (`side` defaults to `additions`, `tone` to `note`).

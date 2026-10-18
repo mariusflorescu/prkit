@@ -24,6 +24,7 @@ import { AGENT_RUNS, AGENT_SKIP, readRows } from "./fixturePr.ts";
 import { setUpRealClaude } from "./realClaude.ts";
 import { cliIn, outsideAccess, scratchRoot, switchOn } from "./localGuideSession.ts";
 import { localRepoFixture } from "./localRepoFixture.ts";
+import { emulateOsColorScheme, screenshotLightAndDark } from "./osColorScheme.ts";
 
 const decodeGenerate = Schema.decodeSync(Schema.fromJsonString(GenerateLocalGuideResult));
 const decodeRead = Schema.decodeSync(Schema.fromJsonString(LocalGuideResult));
@@ -342,6 +343,7 @@ describe("a guide of local changes with the user's Claude", { tags: ["agent"] },
           claude.file,
         ]);
         const cli = cliIn(NodePath.join(run.home, "bin/prkit"), fake.home, log);
+        await emulateOsColorScheme(browser, "light");
         await switchOn({ app, screen, browser }, run.openUrl);
         const started = cli(shop.repo, [
           "local",
@@ -369,6 +371,19 @@ describe("a guide of local changes with the user's Claude", { tags: ["agent"] },
           "test/cart.test.js",
         ]);
         expect(read.guide?.content.summary.join(" ").length).toBeGreaterThan(40);
+        const pairs = (read.guide?.content.chapters ?? []).flatMap((chapter) =>
+          chapter.pseudocode === null || typeof chapter.pseudocode === "string" ? [] : [chapter.id],
+        );
+        console.info(`chapter before/after: ${pairs.join(", ") || "none"}`);
+        await app.open(`${run.url}/local/${decodeGenerate(started.stdout).status.key}`);
+        await expect(screen.getByRole("heading", "Overview")).toBeVisible({ timeout: 30_000 });
+        await expect(browser.locator("[data-pseudocode-pair]")).toHaveCount(pairs.length);
+        if (pairs[0] !== undefined) {
+          await browser
+            .locator(`[data-chapter-id="${pairs[0]}"] [data-pseudocode-pair]`)
+            .scrollIntoView();
+          await screenshotLightAndDark(app, browser, "local-guide-chapter-before-after");
+        }
         writeTranscript("agent-guide", [...log, JSON.stringify(read.guide, null, 2)]);
         expect(
           NodeChildProcess.execFileSync("git", ["status", "--porcelain=v2"], {

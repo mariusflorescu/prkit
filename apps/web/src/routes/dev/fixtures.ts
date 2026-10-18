@@ -42,6 +42,23 @@ export const fixtures: ReadonlyArray<{
     stored: false,
   },
   {
+    name: "github-gh-stack-91-pairs",
+    label: "gh-stack #91, before and after in a chapter",
+    prUrl: "https://github.com/github/gh-stack/pull/91",
+    dir: "github-gh-stack-91",
+    file: "pairs.json",
+    stored: false,
+    sensitive: [{ pattern: "cmd/", scope: "repository" }],
+  },
+  {
+    name: "github-gh-stack-91-stored",
+    label: "gh-stack #91, stored before chapter pairs",
+    prUrl: "https://github.com/github/gh-stack/pull/91",
+    dir: "github-gh-stack-91",
+    file: "stored.json",
+    stored: true,
+  },
+  {
     name: "pingdotgg-t3code-16353",
     label: "T3 Code #16353",
     prUrl: "https://github.com/pingdotgg/t3code/pull/16353",

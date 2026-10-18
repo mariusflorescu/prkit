@@ -9,6 +9,7 @@ import { expect } from "e2e";
 
 import { childEnv } from "../packages/contracts/src/childEnv.ts";
 import { NormalizedGuide } from "../packages/contracts/src/guide.ts";
+import { pseudocodeRows } from "../packages/contracts/src/guidePseudocode.ts";
 import { runForUrl } from "../scripts/verify-run.ts";
 import { setUpFakeClaude } from "./fakeClaude.ts";
 import { startInstance, stopFakeInstance } from "./fakeGitHub.ts";
@@ -375,6 +376,7 @@ describe("guide generation with the user's agent", { tags: ["agent"], skip: NEED
     async ({ app, screen, browser }) => {
       test.skip(!AGENT_RUNS, AGENT_SKIP);
       const run = runForUrl(app.baseUrl);
+      await emulateOsColorScheme(browser, "light");
       await openFixtureGuide({ app, screen });
       await screen.getByRole("button", "Add a focus").tap({ timeout: 30_000 });
       await screen
@@ -429,7 +431,7 @@ describe("guide generation with the user's agent", { tags: ["agent"], skip: NEED
       const [accepted] = readRows(run.home, "SELECT guide FROM review_revisions");
       if (typeof accepted?.guide !== "string")
         throw new Error("The accepted revision has no stored guide.");
-      const { flow } = decodeStoredGuide(accepted.guide);
+      const { flow, chapters } = decodeStoredGuide(accepted.guide);
       console.info(
         flow === null
           ? "before/after: none"
@@ -458,6 +460,31 @@ describe("guide generation with the user's agent", { tags: ["agent"], skip: NEED
             .toBe(true);
           if (index === 0) await app.screenshot("guide-before-after-line");
         }
+
+      const pairs = chapters.flatMap((chapter) =>
+        chapter.pseudocode === null || typeof chapter.pseudocode === "string"
+          ? []
+          : [{ id: chapter.id, kind: chapter.kind, rows: pseudocodeRows(chapter.pseudocode) }],
+      );
+      console.info(
+        `chapter before/after: ${pairs.map((pair) => `${pair.id} (${pair.kind}, ${pair.rows.length} rows)`).join(", ") || "none"}`,
+      );
+      await expect(browser.locator("[data-pseudocode-pair]")).toHaveCount(pairs.length);
+      for (const [index, pair] of pairs.entries()) {
+        expect(["tests", "docs", "generated"]).not.toContain(pair.kind);
+        const side = (name: string) =>
+          `[data-chapter-id="${pair.id}"] [data-pseudocode-side="${name}"] [data-pseudocode-line]`;
+        await browser
+          .locator(`[data-chapter-id="${pair.id}"] [data-pseudocode-pair]`)
+          .scrollIntoView();
+        await expect(browser.locator(`${side("before")}[data-status="removed"]`)).toHaveCount(
+          pair.rows.filter((row) => row.before?.status === "removed").length,
+        );
+        await expect(browser.locator(`${side("after")}[data-status="added"]`)).toHaveCount(
+          pair.rows.filter((row) => row.after?.status === "added").length,
+        );
+        if (index === 0) await screenshotLightAndDark(app, browser, "guide-chapter-before-after");
+      }
 
       await screen.getByRole("button", "Stop watching").tap();
       await expect(screen.getByRole("status", "Guide status")).toContainText(
