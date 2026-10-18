@@ -335,11 +335,8 @@ export const makeOutsideReads = (
 
     const listReviews = (input: typeof Inputs.ListInput.Type) =>
       Effect.gen(function* () {
-        const opening = yield* reviews.feed().pipe(Stream.runHead);
-        const rows =
-          Option.isSome(opening) && opening.value._tag === "index" ? opening.value.reviews : [];
         return yield* page(
-          rows
+          (yield* reviews.index())
             .filter((entry) => input.accountId === undefined || entry.accountId === input.accountId)
             .toSorted((a, b) => a.key.localeCompare(b.key)),
           input,

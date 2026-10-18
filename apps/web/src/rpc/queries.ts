@@ -269,11 +269,16 @@ export const typicalDurationQuery = (instance: AgentInstanceId | null, lines: nu
     staleTime: 5 * 60_000,
     retry: false,
   });
-/** Every review by PR key, kept current by `reviews.feed`; see `useReviewFeed`. */
+/**
+ * Every review by PR key, kept current by `reviews.feed`; see `GuideNotifications`. Undefined
+ * until the feed's first index, or empty when the feed failed before one. Nothing can fetch it
+ * again, so it is never collected.
+ */
 export const reviewFeedQuery = queryOptions<ReadonlyMap<PullRequestKey, ReviewFeedEntry>>({
   queryKey: ["reviewFeed"],
-  queryFn: () => new Map(),
+  queryFn: skipToken,
   staleTime: Infinity,
+  gcTime: Infinity,
 });
 
 export const pullRequestFilesQuery = (

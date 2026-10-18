@@ -1,9 +1,12 @@
+import * as NodeChildProcess from "node:child_process";
 import * as NodePath from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { type Browser, test } from "@e2e-dev/web";
 import { expect, type TestFixtures } from "e2e";
+import * as Schema from "effect/Schema";
 
+import { setUpFakeClaude } from "./fakeClaude.ts";
 import {
   type FakeGitHub,
   startFakeGitHub,
@@ -13,6 +16,7 @@ import {
 import { readRows } from "./fixturePr.ts";
 import { inboxOrder, readInboxRows } from "./inboxRows.ts";
 import { emulateOsColorScheme, setOsColorScheme } from "./osColorScheme.ts";
+import { outsideGit } from "./outsideGit.ts";
 import { choose } from "./pickers.ts";
 
 const REVIEW = "Needs your review";
@@ -425,6 +429,303 @@ test(
       await app.screenshot("triage-old-state");
     } finally {
       stopFakeInstance("inbox-triage-old", { keepHome: false });
+      fake.stop();
+    }
+  },
+);
+
+const keyOf = (number: number) => `github.com/budget/fixtures#${number}`;
+const numberOf = (key: string) => Number(key.slice(key.lastIndexOf("#") + 1));
+/** A toast lasts five seconds unless the pointer rests on it, and it covers the rows' actions and screenshots. */
+const toastsGone = async (screen: Fixtures["screen"]) => {
+  await sortTrigger(screen).hover();
+  await expect(screen.getByRole("dialog", /.*/)).toHaveCount(0, { timeout: 15_000 });
+};
+const reviewState = (home: string, number: number) =>
+  readRows(
+    home,
+    `SELECT latest_revision AS revision, json_extract(status, '$._tag') AS state FROM reviews WHERE pr_key = '${keyOf(number)}'`,
+  );
+/** A guide from before risk: its latest revision with the level taken out. */
+const stripRisk = (home: string, number: number) => {
+  const db = new DatabaseSync(NodePath.join(home, "prkit.sqlite"));
+  try {
+    db.prepare(
+      `UPDATE review_revisions SET guide = json_remove(guide, '$.risk')
+       WHERE review_id = (SELECT id FROM reviews WHERE pr_key = ?)
+         AND revision = (SELECT latest_revision FROM reviews WHERE pr_key = ?)`,
+    ).run(keyOf(number), keyOf(number));
+  } finally {
+    db.close();
+  }
+};
+/** Every different order the page shows its groups in, from the page's first script on. */
+const ORDER_TRACE = `(() => {
+  const seen = [];
+  window.__inboxOrders = seen;
+  const read = () => {
+    const groups = [...document.querySelectorAll("main section[aria-label]")].map((section) => [
+      section.getAttribute("aria-label"),
+      [...section.querySelectorAll("a[data-pr-number]")].map((link) => Number(link.getAttribute("data-pr-number"))),
+    ]);
+    return groups.some(([, rows]) => rows.length > 0) ? JSON.stringify(Object.fromEntries(groups)) : null;
+  };
+  new MutationObserver(() => {
+    const now = read();
+    if (now !== null && now !== seen[seen.length - 1]) seen.push(now);
+  }).observe(document, { childList: true, subtree: true, attributes: true });
+})()`;
+const Rows = Schema.Struct({ key: Schema.String, risk: Schema.NullOr(Schema.String) });
+const decodeInbox = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      accounts: Schema.Array(
+        Schema.Struct({
+          sections: Schema.Array(
+            Schema.Struct({ reason: Schema.String, pullRequests: Schema.Array(Rows) }),
+          ),
+        }),
+      ),
+    }),
+  ),
+);
+const decodeGuides = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ items: Schema.Array(Rows) })),
+);
+const prkit = (home: string, fake: FakeGitHub, args: ReadonlyArray<string>) => {
+  const done = NodeChildProcess.spawnSync(NodePath.join(home, "bin/prkit"), args, {
+    encoding: "utf8",
+    env: { HOME: fake.home, PATH: process.env.PATH ?? "/usr/bin:/bin", NO_COLOR: "1" },
+  });
+  expect(done.status, done.stderr).toBe(0);
+  return done.stdout;
+};
+
+/** Reads in the fake's request log that one inbox row never causes: the watcher's batched head read of watched reviews. */
+const WATCHER_KINDS = new Set(["graphql:fingerprint"]);
+
+test(
+  "a guide's risk shows on its inbox row, Riskiest first orders by it with the longest wait first inside a level, nothing reads GitHub per row, an old guide drops to the end after a relaunch, and a new revision moves the row live",
+  { timeout: 480_000 },
+  async ({ app, screen, browser }) => {
+    const name = "inbox-risk";
+    const claude = setUpFakeClaude(name);
+    const fake = await startFakeGitHub(name);
+    const git = outsideGit(name);
+    const launch = () => git.start(() => startFakeInstance(name, fake, ["--claude", claude.file]));
+    try {
+      await seed(fake);
+      await fake.requestReview(9, { login: "budget-test" }, 15);
+      for (const number of [1, 2, 4, 6, 9]) await fake.gitHead(number, git.head(number));
+      await fake.comment(9);
+      let run = launch();
+      await browser.addInitScript(ORDER_TRACE);
+
+      await emulateOsColorScheme(browser, "light");
+      await app.open(run.openUrl);
+      await expect(screen.getByRole("link", /#9 Keyboard fixture 9/)).toBeVisible({
+        timeout: 20_000,
+      });
+      const rowsNow = async () => (await readInboxRows(browser)).flatMap((group) => group.rows);
+      expect((await rowsNow()).map((row) => row.risk)).toEqual(Array(7).fill(""));
+      const unrated = await inboxOrder(browser);
+      const recent = unrated[REVIEW] ?? [];
+      expect(recent.toSorted()).toEqual([1, 2, 3, 4, 9]);
+      expect(recent.indexOf(9)).toBeLessThan(recent.indexOf(4));
+      const before = new Map((await rowsNow()).map((row) => [row.number, row]));
+
+      const levels = { 4: "high", 9: "high", 1: "medium", 6: "low" } as const;
+      for (const [number, level] of [
+        [4, levels[4]],
+        [9, levels[9]],
+        [1, levels[1]],
+        [6, levels[6]],
+      ] as const) {
+        claude.chapters([
+          {
+            title: `Change ${number}`,
+            files: [number === 9 ? "src/limits.ts" : "src/change-0.ts"],
+            risk: level,
+          },
+        ]);
+        await screen.getByRole("link", new RegExp(`#${number} `)).hover();
+        await screen.getByRole("button", `Generate guide for budget/fixtures #${number}`).tap();
+        await expect
+          .poll(async () => (await rowOf(browser, number)).risk, { timeout: 120_000 })
+          .toBe(level);
+        expect(reviewState(run.home, number)).toEqual([{ revision: 1, state: "watching" }]);
+        await toastsGone(screen);
+      }
+      claude.chapters([]);
+
+      const word = { high: "Risk: High", medium: "Risk: Medium", low: "Risk: Low" } as const;
+      for (const [number, level] of Object.entries(levels)) {
+        const row = await rowOf(browser, Number(number));
+        const first = before.get(Number(number));
+        expect({ number, guide: row.guide, text: row.riskText, inside: row.riskInside }).toEqual({
+          number,
+          guide: "ready",
+          text: word[level],
+          inside: true,
+        });
+        expect({ height: row.height, left: row.left }).toEqual({
+          height: first?.height,
+          left: first?.left,
+        });
+      }
+      const bare = await rowOf(browser, 3);
+      expect({ guide: bare.guide, risk: bare.risk, riskText: bare.riskText }).toEqual({
+        guide: "",
+        risk: "",
+        riskText: "",
+      });
+      expect(
+        (await rowsNow())
+          .filter((row) => row.risk !== "")
+          .map((row) => row.number)
+          .toSorted(),
+      ).toEqual([1, 4, 6, 9]);
+      await toastsGone(screen);
+      await app.screenshot("risk-inbox-light");
+
+      await setOsColorScheme(browser, "dark");
+      await app.screenshot("risk-inbox-dark");
+      await setOsColorScheme(browser, "light");
+
+      await browser.setViewport({ width: 600, height: 720 });
+      await expect(sortTrigger(screen)).toBeVisible();
+      const plain = await rowOf(browser, 3);
+      for (const row of (await rowsNow()).filter((r) => r.risk !== "")) {
+        expect({ number: row.number, inside: row.riskInside }).toEqual({
+          number: row.number,
+          inside: true,
+        });
+        expect(row.height).toBe(plain.height);
+        expect(row.titleWidth).toBeGreaterThanOrEqual(60);
+      }
+      expect(
+        await browser.evaluate(
+          () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        ),
+      ).toBe(false);
+      await app.screenshot("risk-inbox-narrow");
+      await browser.setViewport({ width: 1280, height: 720 });
+
+      await app.open(`${run.url}/settings/outside-agents`);
+      await screen.getByRole("switch", "Let my coding agents use prkit").tap();
+      await expect(screen.getByText("Outside agents can read", { exact: true })).toBeVisible();
+      await app.open(run.url);
+      await expect(screen.getByRole("link", /#9 Keyboard fixture 9/)).toBeVisible({
+        timeout: 20_000,
+      });
+      await expect.poll(async () => (await rowOf(browser, 9)).risk).toBe("high");
+      await toastsGone(screen);
+      const settled = (await fake.stats()).byKind;
+
+      await choose(screen, sortTrigger(screen), "Riskiest first");
+      await expect(sortTrigger(screen)).toContainText("Riskiest first");
+      // #1 and #2 are one stack: it sits where its best layer ranks (#1, medium) with #2 behind it.
+      const ranked = { [REVIEW]: [4, 9, 1, 2, 3], [YOURS]: [6, 5], Involved: [] };
+      expect(await inboxOrder(browser)).toEqual(ranked);
+      expect((await rowOf(browser, 4)).label).toMatch(/^waiting (20|21) minutes$/);
+      expect((await rowOf(browser, 5)).label).toBe("opened 5 days ago");
+      await app.screenshot("risk-inbox-sorted");
+      await expect.poll(() => storedFilters(run.home)).toContain('"sort":"risk"');
+      await browser.reload();
+      await expect(sortTrigger(screen)).toContainText("Riskiest first", { timeout: 20_000 });
+      await expect.poll(() => inboxOrder(browser)).toEqual(ranked);
+
+      const cli = decodeInbox(
+        prkit(run.home, fake, [
+          "inbox",
+          "--reason",
+          "review-requested",
+          "--sort",
+          "risk",
+          "--json",
+        ]),
+      )
+        .accounts.flatMap((account) => account.sections)
+        .flatMap((section) => section.pullRequests);
+      expect(cli.map((row) => [numberOf(row.key), row.risk])).toEqual([
+        [4, "high"],
+        [9, "high"],
+        [1, "medium"],
+        [2, null],
+        [3, null],
+      ]);
+      const listed = decodeGuides(prkit(run.home, fake, ["guide", "list", "--json"])).items;
+      expect(listed.map((row) => [numberOf(row.key), row.risk])).toEqual([
+        [1, "medium"],
+        [4, "high"],
+        [6, "low"],
+        [9, "high"],
+      ]);
+
+      const after = (await fake.stats()).byKind;
+      const grew = Object.keys(after).filter(
+        (kind) => (after[kind] ?? 0) > (settled[kind] ?? 0) && !WATCHER_KINDS.has(kind),
+      );
+      expect(grew).toEqual([]);
+
+      stopFakeInstance(name, { keepHome: true });
+      stripRisk(run.home, 1);
+      run = launch();
+      await app.open(run.openUrl);
+      await expect(screen.getByRole("link", /#9 Keyboard fixture 9/)).toBeVisible({
+        timeout: 20_000,
+      });
+      const relaunched = { [REVIEW]: [4, 9, 3, 1, 2], [YOURS]: [6, 5], Involved: [] };
+      const traced = async () =>
+        Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))(
+          await browser.evaluate(() => JSON.stringify(Reflect.get(window, "__inboxOrders") ?? [])),
+        );
+      await expect(sortTrigger(screen)).toContainText("Riskiest first");
+      await expect.poll(() => inboxOrder(browser)).toEqual(relaunched);
+      const orders = await traced();
+      expect(orders.length).toBeGreaterThan(0);
+      expect(orders).toEqual([JSON.stringify(relaunched)]);
+      const old = await rowOf(browser, 1);
+      expect({ guide: old.guide, risk: old.risk }).toEqual({ guide: "ready", risk: "" });
+      expect((await rowOf(browser, 4)).risk).toBe("high");
+      await toastsGone(screen);
+      await app.screenshot("risk-inbox-relaunch");
+
+      claude.chapters([{ title: "Change 4", files: ["src/change-0.ts"], risk: "low" }]);
+      await app.open(
+        `${run.url}/pr/github.com/budget/fixtures/4?account=${encodeURIComponent("github.com/budget-test")}&tab=guide`,
+      );
+      claude.hold();
+      await screen.getByRole("button", "Generate again").tap({ timeout: 30_000 });
+      await expect(browser.locator('[data-review-status="writing"]')).toBeVisible({
+        timeout: 30_000,
+      });
+      await screen.getByRole("link", "Inbox").tap();
+      await expect(sortTrigger(screen)).toContainText("Riskiest first");
+      await expect(
+        screen.getByRole("region", REVIEW).getByRole("link", /#4 Budget fixture 4/),
+      ).toBeVisible();
+      const origin = await browser.evaluate(() => performance.timeOrigin);
+      expect((await rowOf(browser, 4)).risk).toBe("high");
+      expect((await inboxOrder(browser))[REVIEW]).toEqual([4, 9, 3, 1, 2]);
+
+      claude.release();
+      await expect
+        .poll(async () => (await rowOf(browser, 4)).risk, { timeout: 120_000 })
+        .toBe("low");
+      expect(await browser.evaluate(() => performance.timeOrigin)).toBe(origin);
+      expect(reviewState(run.home, 4)).toEqual([{ revision: 2, state: "watching" }]);
+      expect((await rowOf(browser, 4)).riskText).toBe("Risk: Low");
+      expect(await inboxOrder(browser)).toEqual({
+        [REVIEW]: [9, 4, 3, 1, 2],
+        [YOURS]: [6, 5],
+        Involved: [],
+      });
+      await expect(screen.getByRole("dialog", "Guide updated")).toBeVisible();
+      await toastsGone(screen);
+      await app.screenshot("risk-inbox-live-update");
+    } finally {
+      stopFakeInstance(name, { keepHome: false });
       fake.stop();
     }
   },

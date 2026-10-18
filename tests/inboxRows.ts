@@ -10,6 +10,15 @@ export interface InboxRowFacts {
   at: string;
   left: number;
   stacked: boolean;
+  height: number;
+  /** The row's guide mark, `ready` or `writing`, empty when it has none. */
+  guide: string;
+  /** The row's risk chip level, empty when it has none. */
+  risk: string;
+  riskText: string;
+  /** Whether the chip sits inside the row's box. */
+  riskInside: boolean;
+  titleWidth: number;
 }
 
 export const readInboxRows = (browser: Browser) =>
@@ -20,6 +29,9 @@ export const readInboxRows = (browser: Browser) =>
         const mark = link.querySelector("[data-size]");
         const clock = link.querySelector("[data-clock]");
         const reading = mark?.lastElementChild;
+        const risk = link.querySelector("[data-risk-tag]");
+        const box = link.getBoundingClientRect();
+        const riskBox = risk?.getBoundingClientRect();
         return {
           number: Number(link.getAttribute("data-pr-number")),
           chip: mark?.getAttribute("data-size") ?? "",
@@ -31,6 +43,13 @@ export const readInboxRows = (browser: Browser) =>
           at: clock?.getAttribute("datetime") ?? "",
           left: clock?.parentElement?.getBoundingClientRect().left ?? -1,
           stacked: /Stack \d+\/\d+/.test(link.textContent ?? ""),
+          height: box.height,
+          guide: link.querySelector("[data-guide-mark]")?.getAttribute("data-guide-mark") ?? "",
+          risk: risk?.getAttribute("data-risk") ?? "",
+          riskText: risk?.textContent ?? "",
+          riskInside:
+            riskBox !== undefined && riskBox.left >= box.left && riskBox.right <= box.right,
+          titleWidth: link.querySelector(".truncate")?.getBoundingClientRect().width ?? 0,
         };
       }),
     })),

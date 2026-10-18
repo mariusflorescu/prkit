@@ -21,7 +21,7 @@ import { useInboxStore } from "~/features/inbox/inboxStore";
 import { useSavedInboxFilters } from "~/features/inbox/useSavedInboxFilters";
 import { useCollapsingHeader } from "~/hooks/useCollapsingHeader";
 import { listInbox, refreshAccounts } from "~/rpc/client";
-import { accountsQuery, inboxQuery } from "~/rpc/queries";
+import { accountsQuery, inboxQuery, reviewFeedQuery } from "~/rpc/queries";
 import "~/features/inbox/inbox.css";
 
 export function InboxPage() {
@@ -33,7 +33,9 @@ export function InboxPage() {
   const repository = useInboxStore((state) => state.repository);
   const sort = useInboxStore((state) => state.sort);
   const clear = useInboxStore((state) => state.clear);
-  useSavedInboxFilters(inbox.data?.entries);
+  const sortRestored = useSavedInboxFilters(inbox.data?.entries);
+  // Riskiest first orders by the review feed, so its rows wait for the feed's first index.
+  const reviewsRead = useQuery({ ...reviewFeedQuery, select: () => true }).data === true;
   // With one account, its filter and each row's account say nothing, so neither shows.
   const manyAccounts = (accounts.data?.accounts.length ?? 0) > 1;
   const account = manyAccounts ? chosenAccount : null;
@@ -105,7 +107,7 @@ export function InboxPage() {
           {error && (
             <ListError title="Couldn't refresh your inbox" message={error.message} retry={retry} />
           )}
-          {inbox.isPending ? (
+          {inbox.isPending || !sortRestored || (sort === "risk" && !reviewsRead) ? (
             <ListSkeleton label="Loading pull requests" />
           ) : (
             inbox.data && (

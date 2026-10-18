@@ -27,6 +27,7 @@ import {
   QuestionId,
   ReviewCommentId,
   ReviewWait,
+  RiskLevel,
 } from "@prkit/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -173,6 +174,12 @@ export const InboxPullRequest = Schema.Struct({
   reasons: Schema.Array(InboxReason),
   stack: Schema.NullOr(Schema.String),
   guide: Schema.NullOr(Schema.String),
+  risk: Schema.NullOr(
+    describe(
+      RiskLevel,
+      "How carefully to read the latest guide's pull request, never whether it is safe to merge. Null with no guide or one from before risk.",
+    ),
+  ),
 });
 export const InboxListResult = Schema.Struct({
   ...PageInfo,

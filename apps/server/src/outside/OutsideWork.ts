@@ -245,6 +245,7 @@ export const make = Effect.gen(function* () {
       );
       const { cursor: _cursor, limit: _limit, refresh: _refresh, ...filters } = input;
       const filterKey = yield* Schema.encodeEffect(Schema.fromJsonString(InboxInput))(filters);
+      const reviewed = new Map((yield* reviews.index()).map((review) => [review.key, review]));
       const filtered = orderInbox(
         result.entries.filter((entry) =>
           matchesInboxFilter(
@@ -256,18 +257,13 @@ export const make = Effect.gen(function* () {
           ),
         ),
         input.sort,
+        (entry) => reviewed.get(pullRequestKey(entry.ref))?.risk ?? null,
       );
       const paged = yield* page(
         filtered,
         input,
         `inbox:${filterKey}:${filtered.map((entry) => `${pullRequestKey(entry.ref)}:${entry.updatedAt}`).join(",")}`,
       );
-      const feed = new Map<string, string>();
-      for (const entry of paged.items) {
-        const key = pullRequestKey(entry.ref);
-        const guide = (yield* reviews.get(key)).review?.status._tag;
-        if (guide !== undefined) feed.set(key, guide);
-      }
       const listed: InboxListResult = {
         githubTruncated: result.truncated.filter(
           (entry) =>
@@ -294,6 +290,7 @@ export const make = Effect.gen(function* () {
                     .filter((entry) => primaryInboxReason(entry.reasons) === reason)
                     .map((entry) => {
                       const key = pullRequestKey(entry.ref);
+                      const review = reviewed.get(key);
                       return {
                         key,
                         url: entry.url,
@@ -312,7 +309,8 @@ export const make = Effect.gen(function* () {
                           entry.stack === null
                             ? null
                             : `Stack ${entry.stack.position}/${entry.stack.size}`,
-                        guide: feed.get(key) ?? null,
+                        guide: review?.status ?? null,
+                        risk: review?.risk ?? null,
                       };
                     }),
                 }))
