@@ -191,6 +191,16 @@ const ReadPullRequestFiles = read(
   "Read files and diff",
 );
 
+const ReadReviewedFiles = read(
+  Tool.make("read_reviewed_files", {
+    description: `Which changed files the owner marked reviewed in prkit, and how far along they are. A file is reviewed, changed (reviewed before, then it changed: it needs another look), unreviewed, or unknown (it can't be marked and isn't counted). Without revision it reads the current files; with a guide revision it reads that guide's saved diff and adds its chapters. githubTruncated reports files GitHub omitted. The marks stay in prkit and never reach GitHub.${TARGET_HINT}`,
+    parameters: Parity.ReviewedFilesInput,
+    success: limited(Parity.ReviewedFilesResult),
+    failure: OutsideToolFailure,
+  }),
+  "Read reviewed files",
+);
+
 const ReadFileContents = read(
   Tool.make("read_file_contents", {
     description:
@@ -638,6 +648,17 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
     true,
   );
 
+  const MarkFilesReviewed = work(
+    Tool.make("mark_files_reviewed", {
+      description: `Marks changed files of a pull request's current diff reviewed, or not reviewed with reviewed: false, as the owner's checkbox does in prkit. Pass the headSha read_reviewed_files returned. If the pull request moved since, nothing is marked and it answers conflict. It sets, never toggles, so repeating a call changes nothing. The marks stay in prkit and never reach GitHub.${TARGET_HINT}`,
+      parameters: Parity.MarkFilesReviewedInput,
+      success: limited(Parity.MarkedFilesResult),
+      failure: OutsideToolFailure,
+    }),
+    "Mark files reviewed",
+    true,
+  );
+
   return Toolkit.make(
     PrkitStatus,
     ListInbox,
@@ -652,6 +673,7 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
     ListRepositoryPullRequests,
     ListAgents,
     ReadPullRequestFiles,
+    ReadReviewedFiles,
     ReadFileContents,
     ReadTimeline,
     ReadThreads,
@@ -691,6 +713,7 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
     SavePullRequestGuideSettings,
     EditReviewComment,
     MoveReviewComment,
+    MarkFilesReviewed,
   );
 };
 

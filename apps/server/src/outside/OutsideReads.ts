@@ -21,6 +21,7 @@ import { makeReadCache } from "../pullRequests/readCache.ts";
 import * as Schema from "effect/Schema";
 import { GuideConfigStore } from "../reviews/GuideConfigStore.ts";
 import { GuideSettingsStore } from "../reviews/GuideSettingsStore.ts";
+import { ReviewedFiles } from "../reviewedFiles/ReviewedFiles.ts";
 import { Reviews } from "../reviews/Reviews.ts";
 import { OutsideAgents } from "./OutsideAgents.ts";
 import { asFailure, fail } from "./errors.ts";
@@ -61,6 +62,7 @@ export const makeOutsideReads = (
     const agents = yield* Agents;
     const pulls = yield* PullRequests;
     const reviews = yield* Reviews;
+    const reviewed = yield* ReviewedFiles;
     const fixes = yield* Fixers;
     const guideConfig = yield* GuideConfigStore;
     const guideSettings = yield* GuideSettingsStore;
@@ -201,6 +203,25 @@ export const makeOutsideReads = (
           baseSha: result.baseSha,
           changedFiles: result.changedFiles,
           githubTruncated: result.files.length < result.changedFiles,
+        };
+      }).pipe(Effect.mapError(asFailure));
+
+    const reviewedFiles = (input: typeof Inputs.ReviewedFilesInput.Type) =>
+      Effect.gen(function* () {
+        const target = yield* refreshedTarget(input);
+        const result = yield* reviewed.report(target, input.revision);
+        return {
+          ...(yield* page(
+            result.files,
+            input,
+            `reviewed-files:${target.accountId}:${target.key}:${result.revision ?? "live"}:${result.headSha}`,
+          )),
+          headSha: result.headSha,
+          revision: result.revision,
+          changedFiles: result.changedFiles,
+          githubTruncated: result.githubTruncated,
+          progress: result.progress,
+          chapters: result.chapters,
         };
       }).pipe(Effect.mapError(asFailure));
 
@@ -543,6 +564,7 @@ export const makeOutsideReads = (
       repositoryPullRequests,
       catalog,
       files,
+      reviewedFiles,
       fileContents,
       timeline,
       threads,

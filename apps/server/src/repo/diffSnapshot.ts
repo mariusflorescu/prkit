@@ -1,4 +1,4 @@
-import type { DiffFile, DiffSnapshot } from "@prkit/contracts";
+import { BlobId, type DiffFile, type DiffSnapshot } from "@prkit/contracts";
 
 /**
  * A file whose patch passes either limit is stored as `too-large`: it keeps its
@@ -14,6 +14,7 @@ type RawEntry = {
   readonly status: DiffFile["status"];
   readonly path: string;
   readonly previousPath: string | null;
+  readonly blob: BlobId | null;
 };
 type NumstatEntry = {
   readonly additions: number;
@@ -39,7 +40,10 @@ const statusOf = (letter: string): DiffFile["status"] | null => {
   }
 };
 
-/** `git diff -z --raw`: `:<modes> <shas> <status>\0<path>\0` with a second path for renames. */
+/**
+ * `git diff -z --raw --no-abbrev`: `:<modes> <old blob> <new blob> <status>\0<path>\0` with a
+ * second path for renames. The new blob is all zeros for a deleted file.
+ */
 const parseRaw = (output: string): ReadonlyArray<RawEntry> | string => {
   const tokens = output.split("\0");
   const entries: Array<RawEntry> = [];
@@ -49,16 +53,24 @@ const parseRaw = (output: string): ReadonlyArray<RawEntry> | string => {
       index++;
       continue;
     }
-    const letter = meta.split(" ").at(-1)?.charAt(0) ?? "";
+    const fields = meta.split(" ");
+    const letter = fields.at(-1)?.charAt(0) ?? "";
     const status = statusOf(letter);
     if (!meta.startsWith(":") || status === null) return `unexpected raw diff entry ${meta}`;
+    const sha = fields.at(-2) ?? "";
+    const blob = status === "removed" || /^0*$/.test(sha) ? null : BlobId.make(sha);
     const first = tokens[index + 1] ?? "";
     if (letter === "R" || letter === "C") {
       const second = tokens[index + 2] ?? "";
-      entries.push({ status, path: second, previousPath: status === "renamed" ? first : null });
+      entries.push({
+        status,
+        path: second,
+        previousPath: status === "renamed" ? first : null,
+        blob,
+      });
       index += 3;
     } else {
-      entries.push({ status, path: first, previousPath: null });
+      entries.push({ status, path: first, previousPath: null, blob });
       index += 2;
     }
   }
@@ -143,6 +155,7 @@ export const buildDiffSnapshot = (input: {
         : lines > MAX_PATCH_LINES || patch.length > MAX_PATCH_BYTES
           ? { _tag: "too-large", lines: stat.additions + stat.deletions }
           : { _tag: "text", patch },
+      ...(entry.blob === null ? {} : { blob: entry.blob }),
     });
   }
   return { _tag: "ok", snapshot: { files } };

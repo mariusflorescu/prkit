@@ -1,0 +1,49 @@
+# Reviewed files
+
+A Reviewed checkbox on every changed file, on the Files tab and in a guide's chapters, and one on each guide chapter, like GitHub's Viewed. A ticked file folds. The tab row counts `3 / 7 reviewed`, then `All 7 reviewed`. A mark belongs to one version of a file's change, so a file whose change reads differently after a push comes back unticked and open with `Changed since you reviewed`, while a file a merged base only moved stays reviewed. Marks stay in prkit, per PR and per account, and never reach GitHub. Outside agents and the CLI read and set them, and an open window shows their changes without a reload.
+
+## Sub-features
+
+- `reviewed-file` is `checkbox "Reviewed <path>"` at the end of each file header. Ticking it saves, then folds the file; unticking opens it. The box changes only once the server saved. The card carries `data-reviewed` (`reviewed`, `changed`, `unreviewed`, `unknown`) and `data-open`.
+- `reviewed-fold` starts reviewed files folded. Opening one through its header keeps the tick. Marks that arrive from elsewhere change the box only, never what is open.
+- `reviewed-changed` shows `Changed since you reviewed` before an unticked box when the newest mark for the path (or the path it was renamed from) is for another version. A file whose change is new mounts afresh, so it opens.
+- `reviewed-count` is `[data-reviewed-count]` in `navigation "Pull request tabs"`, before the diff toggles, on Files and on Guide: `N / M reviewed`, `All M reviewed` with a check, a `title` of `K changed since you reviewed` when some changed, nothing when nothing can be marked.
+- `reviewed-chapter` is `checkbox "Reviewed chapter <title>"` in a chapter's meta row, `aria-checked="mixed"` when some of its files are reviewed. Ticking it marks every file and folds the chapter; ticking a reviewed chapter unmarks them all and opens it. Fully reviewed chapters start folded. Chapters are worked out from their files, never stored.
+- `reviewed-key` is `r`: the file or chapter holding focus, else the file at the top of Files, else the current chapter of the Guide. It clicks the same checkbox as the mouse. The Guide toolbar hint reads `j / k to move between chapters · r to mark reviewed`.
+- `reviewed-revisions` applies the marks to every accepted guide revision, since a mark is a file version both diffs can compute. A draft guide has no checkboxes.
+- `reviewed-account` stores rows in `reviewed_files` with the subject `pull-request <accountId> <prKey>`, so another account opening the same PR sees nothing ticked. Repeating a decision adds no row.
+- `reviewed-outside` is `read_reviewed_files` (Read) and `mark_files_reviewed` (Read and start work), the CLI's `prkit pr reviewed <pr>` and `prkit pr reviewed set <pr> --paths <p> [--paths <p>] [--no-reviewed]`. Setting, never toggling.
+- `reviewed-errors` shows `Reviewed files unavailable` with `button "Retry"` in the tab row when the marks can't be read (the files still render, without boxes), and a toast `Couldn't save reviewed files` with the server's words when a save fails, leaving the box as it was.
+
+## How to get to it (user POV)
+
+- Open a PR, choose Files, and tick a file's Reviewed box or press `r`.
+- Choose Guide on a PR with an accepted guide and tick a file or a chapter.
+- From a terminal or an outside agent, with Settings > Outside agents on: `prkit pr reviewed <pr>` and `prkit pr reviewed set <pr> --paths <path>`.
+
+## Driving it with e2e
+
+Preconditions:
+
+- `pnpm build` ran after the last change. `tests/reviewed-files.e2e.ts` and the first test of `tests/reviewed-guide.e2e.ts` read only the fake GitHub; the second test of `tests/reviewed-guide.e2e.ts` reads `<fixture>#1` and skips without `.e2e/local.json`.
+
+- **Tick and fold.** `tests/reviewed-files.e2e.ts` gives the fake's PR 1 four files (`fake.push(1)` three times) and opens `/pr/github.com/budget/fixtures/1?account=github.com%2Fbudget-test&tab=files`. The count reads `0 / 4 reviewed`. Tap `checkbox "Reviewed src/change-1.ts"`: `aria-checked="true"`, the card's `data-open="false"`, `1 / 4 reviewed`.
+- **Key.** Blur the page and press `r`: the first card, `src/change-0.ts`, is ticked and folds. With focus inside a card, `r` marks that card.
+- **Reopen.** Tap `button "src/change-1.ts"` (the header): `data-open="true"` and the box stays ticked.
+- **Push.** `fake.pushEdit(1, 0)` rewrites `src/change-0.ts`; `fake.pushShift(1, 2)` only moves `src/change-2.ts`'s hunk. Tap the tab row's `button "Refresh"`. `src/change-0.ts` is unticked, open, `data-reviewed="changed"`, with `Changed since you reviewed`; `src/change-2.ts` stays reviewed and folded; the two new files are unreviewed; `2 / 6 reviewed`, `title="1 changed since you reviewed"`. Unticking `src/change-2.ts` opens it with no changed mark.
+- **Relaunch.** Clear local and session storage, `stopFakeInstance(name, {keepHome: true})`, start again on the same name. The same states and count show. `readRows(home, "SELECT subject, path, reviewed FROM reviewed_files ...")` (`tests/fixturePr.ts`) returns one row per decided version, each with the subject `pull-request github.com/budget-test github.com/budget/fixtures#1`.
+- **CLI live.** Turn on Settings > Outside agents and `radio "Read and start work"`, go back to the PR's Files. `prkit pr reviewed set budget/fixtures#1 --paths src/change-3.ts --account github.com/budget-test --json` ticks the box in the open window and moves the count, and the file stays open. Running it again answers the same and adds no row. `prkit pr reviewed budget/fixtures#1 --account github.com/budget-test --json` lists every file's state and the progress.
+- **Second account.** Close the tab and open the same URL with `account=github.com%2Fbudget-second` (the fake's `--second-account`): `[data-reading-account]` names it and the count reads `0 / 6 reviewed`.
+- **Errors.** A `BEFORE INSERT` trigger that raises on `reviewed_files` makes the next tick show the toast `Couldn't save reviewed files` with `prkit couldn't save your reviewed files. Try again.`, the box unticked and the file open. Renaming the table away while stopped makes the next start show `Reviewed files unavailable` and `button "Retry"`, with no boxes; renaming it back and tapping Retry brings the count back.
+- **Chapters.** The first test of `tests/reviewed-guide.e2e.ts` runs the stand-in agent (`tests/fakeClaude.ts`) on the fake's PR 9 with the local git fixture (`tests/outsideGit.ts`): one chapter, `Every change`, with `src/change-0.ts` and `src/limits.ts`. Ticking `src/limits.ts` makes `checkbox "Reviewed chapter Every change"` `aria-checked="mixed"` and the count `1 / 2 reviewed`. Ticking the chapter makes it `All 2 reviewed` and folds the chapter (`button "Every change"` `aria-expanded="false"`); reopened, both files are reviewed and folded. Tapping the chapter's `01 / 01` focuses the chapter without opening it; `r` then unticks everything and every file opens. A reload keeps a partial chapter.
+- **Revisions.** `claude.split(true)` makes the stand-in give each file its own chapter. `button "Generate again"` writes r2: `Change in src/limits.ts` is ticked and starts folded, and the count still reads `1 / 2 reviewed`. Choosing `r1 · ...` in `combobox "Guide revision"` shows the same marks.
+- **Across diffs.** The second test generates a stand-in guide for `<fixture>#1`, taps `checkbox "Reviewed chapter Every change"` (`All 5 reviewed`), switches to Files, and finds every file's box ticked and `All 5 reviewed`. Its screenshots show private names; keep them under `.e2e/evidence/` only.
+- **Screens.** `screenshotLightAndDark` (`tests/osColorScheme.ts`) of Files with a reviewed, an unreviewed and a changed file, and of a partial chapter; one at 900px wide where the tab row and the file header don't overflow.
+
+## Gotchas
+
+- With two accounts on one PR, the CLI and outside tools ask which: pass `--account`.
+- On the fake's PR 9 the Files tab reads only `src/limits.ts` from the fake while the guide reads the local git diff, whose `src/change-0.ts` patch has no match there. Don't compare Files and Guide on that PR; the fixture test does it on real data.
+- The fake's files are one line each, so nothing scrolls on PR 1: `r` with nothing focused ticks the first card.
+- Clearing session storage before a relaunch also clears the PR's remembered inner tab; open Files by its link or URL.
+- `j` and `k` in the PR view measure chapters from `[data-guide-scroll]`, which does not scroll there: `j` goes to the first chapter and `k` does nothing. `tests/reviewed-guide.e2e.ts` records each press in `.e2e/evidence/reviewed-progress/chapter-keys.json` without failing.

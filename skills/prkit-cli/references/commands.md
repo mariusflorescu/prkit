@@ -24,18 +24,21 @@ Inbox flags are `--reason review-requested|authored|involved`, `--repo owner/rep
 
 ## PR reads
 
-| Command                                                | What it returns                                                                                      |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| `prkit pr read <pr> --json`                            | Title, description, branches, checks summary, reviewers, labels, files and stack summary.            |
-| `prkit pr files <pr> --json`                           | Current changed files and patch fragments. Join each path's patches by `offset` until `complete`.    |
-| `prkit pr file <pr> --path src/a.ts --side new --json` | Old or new file contents as text pages; join by `offset`.                                            |
-| `prkit pr timeline <pr> --json`                        | Paged timeline events.                                                                               |
-| `prkit pr threads <pr> --json`                         | Paged GitHub threads, anchors and permissions. No reply or resolution.                               |
-| `prkit pr checks <pr> --json`                          | Paged check names, states, links and GitHub's short summaries.                                       |
-| `prkit pr conversation <pr> --json`                    | Paged issue comments, reviews and review comments.                                                   |
-| `prkit pr stack <pr> --json`                           | Paged stack layers from bottom to top; a non-stacked PR has a null stack.                            |
-| `prkit pr candidates <pr> --json`                      | Paged reviewer, team and label choices. Reading them doesn't apply them.                             |
-| `prkit pr diff <pr> --attempt-id <attempt-id> --json`  | The immutable diff a guide attempt read, with file-fragment paging. Get the id from guide revisions. |
+| Command                                                | What it returns                                                                                                           |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `prkit pr read <pr> --json`                            | Title, description, branches, checks summary, reviewers, labels, files and stack summary.                                 |
+| `prkit pr files <pr> --json`                           | Current changed files and patch fragments. Join each path's patches by `offset` until `complete`.                         |
+| `prkit pr file <pr> --path src/a.ts --side new --json` | Old or new file contents as text pages; join by `offset`.                                                                 |
+| `prkit pr timeline <pr> --json`                        | Paged timeline events.                                                                                                    |
+| `prkit pr threads <pr> --json`                         | Paged GitHub threads, anchors and permissions. No reply or resolution.                                                    |
+| `prkit pr checks <pr> --json`                          | Paged check names, states, links and GitHub's short summaries.                                                            |
+| `prkit pr conversation <pr> --json`                    | Paged issue comments, reviews and review comments.                                                                        |
+| `prkit pr stack <pr> --json`                           | Paged stack layers from bottom to top; a non-stacked PR has a null stack.                                                 |
+| `prkit pr candidates <pr> --json`                      | Paged reviewer, team and label choices. Reading them doesn't apply them.                                                  |
+| `prkit pr diff <pr> --attempt-id <attempt-id> --json`  | The immutable diff a guide attempt read, with file-fragment paging. Get the id from guide revisions.                      |
+| `prkit pr reviewed <pr> --json`                        | Which changed files the user marked reviewed, with progress. `--revision <n>` reads a guide revision's diff and chapters. |
+
+Each file in `prkit pr reviewed` is `reviewed`, `changed` (reviewed before, then it changed), `unreviewed` or `unknown` (prkit can't tell it apart, so it can't be marked and isn't counted). `progress` counts all files, and a chapter's `state` is null when none of its files can be marked. These marks are the user's own checkboxes in prkit; they never reach GitHub.
 
 `githubTruncated` reports upstream omissions even if the local pages are finished. Binary or too-large patches aren't text. Use file contents where available and tell the user about any gap instead of claiming a complete review.
 
@@ -100,6 +103,15 @@ Scope reads accept `{"_tag":"repository","repositoryId":"<id>"}` or `{"_tag":"pu
 For a move, `placement` is an object containing `anchor`, `snippet` and `commitSha`. The anchor contains `path`, `start` and `end`; each endpoint has `side` (`old` or `new`) and a positive `line`. Use the exact diff rows for `snippet` and the diff's head SHA. Read the PR files and current draft placement before moving a comment.
 
 Only comments add, fix send and fix change take `--request-id`. Reuse it after an uncertain response to avoid starting the same action twice. Other work commands aren't automatically replayed; read their current state before retrying. Fix commits started here wait for Push in the app.
+
+## Reviewed files
+
+| Command                                                                             | What it changes                                                                         |
+| ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `prkit pr reviewed set <pr> --head-sha <headSha> --paths src/a.ts --paths src/b.ts` | Marks those changed files of the current diff reviewed. Every path must be one of them. |
+| `prkit pr reviewed set <pr> --head-sha <headSha> --paths src/a.ts --no-reviewed`    | Marks them not reviewed. Repeating either command changes nothing.                      |
+
+Read `prkit pr reviewed <pr> --json` first for the paths and its `headSha`. If the PR moved since that read, nothing is marked and the command fails with `conflict`. Read it again. Mark files only when the user asks: it records their judgment, in prkit, and an open window shows it at once.
 
 ## Local tabs
 

@@ -3,6 +3,7 @@ import { type ReviewSnapshot } from "@prkit/contracts";
 
 import { Agents } from "../agents/Agents.ts";
 import { ReviewComments } from "../reviewComments/ReviewComments.ts";
+import { ReviewedFiles } from "../reviewedFiles/ReviewedFiles.ts";
 import { GuideConfigStore } from "../reviews/GuideConfigStore.ts";
 import { Reviews } from "../reviews/Reviews.ts";
 import { PullRequests } from "../pullRequests/PullRequests.ts";
@@ -31,6 +32,7 @@ export const makeOutsideActions = (
     const pulls = yield* PullRequests;
     const guideConfig = yield* GuideConfigStore;
     const comments = yield* ReviewComments;
+    const reviewed = yield* ReviewedFiles;
 
     const close = (input: TargetInput) =>
       Effect.gen(function* () {
@@ -59,6 +61,26 @@ export const makeOutsideActions = (
           edit: input.edit,
         });
       }).pipe(Effect.mapError(asFailure));
+
+    const markFilesReviewed = (input: typeof Inputs.MarkFilesReviewedInput.Type) =>
+      Effect.gen(function* () {
+        const target = yield* resolve(input);
+        return yield* reviewed.decidePaths(
+          target,
+          input.headSha,
+          input.paths,
+          input.reviewed ?? true,
+        );
+      }).pipe(
+        Effect.catchTag("ReviewedFilesError", (error) =>
+          error.reason === "not-a-changed-file"
+            ? fail("invalid", error.message)
+            : error.reason === "moved"
+              ? fail("conflict", error.message)
+              : Effect.fail(asFailure(error)),
+        ),
+        Effect.mapError(asFailure),
+      );
 
     const generateGuide = (input: typeof GenerateGuideInput.Type) =>
       Effect.gen(function* () {
@@ -148,5 +170,6 @@ export const makeOutsideActions = (
       generateGuide,
       editComment,
       moveComment,
+      markFilesReviewed,
     };
   });

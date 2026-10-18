@@ -26,8 +26,10 @@ export * from "./pullRequestTimeline.ts";
 export * from "./repositories.ts";
 export * from "./reviewComments.ts";
 export * from "./stack.ts";
+export * from "./textHash.ts";
 export * from "./workspace.ts";
 export * from "./review.ts";
+export * from "./reviewedFiles.ts";
 export * from "./rpc.ts";
 export * from "./server.ts";
 

@@ -23,6 +23,7 @@ import { GuideConfigStore } from "./reviews/GuideConfigStore.ts";
 import { GuideSettingsStore } from "./reviews/GuideSettingsStore.ts";
 import { Reviews } from "./reviews/Reviews.ts";
 import { ReviewComments } from "./reviewComments/ReviewComments.ts";
+import { ReviewedFiles } from "./reviewedFiles/ReviewedFiles.ts";
 import { Fixers } from "./fixers/Fixers.ts";
 import { FixerSettingsStore } from "./fixers/FixerSettingsStore.ts";
 import { boundPort } from "./listenAddress.ts";
@@ -69,6 +70,7 @@ const layerHandlers = WsRpcGroup.toLayer(
     const agents = yield* Agents;
     const cursorSdk = yield* CursorSdk;
     const reviewComments = yield* ReviewComments;
+    const reviewedFiles = yield* ReviewedFiles;
     const guideSettings = yield* GuideSettingsStore;
     const fixers = yield* Fixers;
     const fixerSettings = yield* FixerSettingsStore;
@@ -108,6 +110,11 @@ const layerHandlers = WsRpcGroup.toLayer(
       [WS_METHODS.workspaceReorder]: ({ keys }) => workspace.command({ kind: "reorder", keys }),
       [WS_METHODS.workspaceSaveInboxFilters]: (filters) => workspace.saveInboxFilters(filters),
       [WS_METHODS.workspaceChanges]: () => workspace.changes(),
+      [WS_METHODS.reviewedFilesGet]: ({ key, accountId }) =>
+        reviewedFiles.marks({ key, accountId }),
+      [WS_METHODS.reviewedFilesSet]: ({ key, accountId, decision }) =>
+        reviewedFiles.decide({ key, accountId }, decision),
+      [WS_METHODS.reviewedFilesChanges]: () => reviewedFiles.changes(),
       // Reviews, guides and agents.
       [WS_METHODS.reviewsGet]: ({ key }) => reviews.get(key),
       [WS_METHODS.reviewsGenerate]: ({ key, accountId, agent, guidance }) =>

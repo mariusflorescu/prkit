@@ -51,6 +51,9 @@ import {
   type ReviewSnapshot,
   type StackGuidesResult,
   type ReviewWatchEvent,
+  type ReviewedDecision,
+  type ReviewedFilesChange,
+  type ReviewedMarks,
   type CommentPlacement,
   type NoteRef,
   type PendingComments,
@@ -246,6 +249,36 @@ export const getPullRequestTimeline = (
   accountId: AccountId,
 ): Promise<PullRequestTimeline> =>
   call((client) => client[WS_METHODS.pullRequestsTimeline]({ key, accountId }));
+
+// The files the user marked reviewed.
+export const getReviewedFiles = (
+  key: PullRequestKey,
+  accountId: AccountId,
+): Promise<ReviewedMarks> =>
+  call((client) => client[WS_METHODS.reviewedFilesGet]({ key, accountId }));
+export const setReviewedFiles = (
+  key: PullRequestKey,
+  accountId: AccountId,
+  decision: ReviewedDecision,
+): Promise<ReviewedMarks> =>
+  call((client) => client[WS_METHODS.reviewedFilesSet]({ key, accountId, decision }));
+/** Hears reviewed files saved anywhere, an outside agent included, until the returned function is called. */
+export const watchReviewedFiles = (
+  onChange: (change: ReviewedFilesChange) => void,
+): (() => void) => {
+  const current = getRuntime();
+  if (current === null) return () => {};
+  const fiber = current.runFork(
+    WsClient.use((client) =>
+      client[WS_METHODS.reviewedFilesChanges]({}).pipe(
+        Stream.runForEach((change) => Effect.sync(() => onChange(change))),
+      ),
+    ).pipe(Effect.ignore, Effect.andThen(Effect.sleep("2 seconds")), Effect.forever),
+  );
+  return () => {
+    current.runFork(Fiber.interrupt(fiber));
+  };
+};
 
 // Reviews, guides and agents.
 export const getReview = (key: PullRequestKey): Promise<ReviewSnapshot> =>

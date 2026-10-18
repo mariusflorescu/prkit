@@ -12,6 +12,8 @@ import type { LoadContents } from "~/components/diff";
 import { GuideView } from "~/components/guide";
 import { useReviewCommentsStore } from "~/features/reviewComments/reviewCommentsStore";
 import { useDiffComments } from "~/features/reviewComments/useDiffComments";
+import { ReviewedCount } from "~/features/reviewedFiles/ReviewedCount";
+import { useReviewedFiles } from "~/features/reviewedFiles/useReviewedFiles";
 import { getFileContents } from "~/rpc/client";
 import { guideQuery, pendingCommentsQuery } from "~/rpc/queries";
 
@@ -73,6 +75,7 @@ export function GuideReady({
   // Notes show what became of their drafts with the first paint, not a moment later.
   const drafts = useQuery(pendingCommentsQuery(detail.key, detail.accountId));
   const { retry } = useReviewActions(detail.key);
+  const reviewed = useReviewedFiles(detail.key, detail.accountId);
   const loadContents = useCallback<LoadContents>(
     async (file) => {
       const read = (path: string, side: "old" | "new") =>
@@ -129,7 +132,7 @@ export function GuideReady({
             growing={draft.growing}
           />
         </div>
-      ) : guide.isPending || drafts.isPending ? (
+      ) : guide.isPending || drafts.isPending || reviewed.status === "pending" ? (
         <GuideSkeleton />
       ) : guide.isError ? (
         <ReviewAlert
@@ -157,6 +160,8 @@ export function GuideReady({
             prDescription={detail.body}
             comments={comments}
             {...(current ? { loadContents } : {})}
+            reviewed={reviewed.status === "ready" ? reviewed : undefined}
+            count={<ReviewedCount reviewed={reviewed} files={guide.data.snapshot.files} />}
           />
         </>
       )}

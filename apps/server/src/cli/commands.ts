@@ -32,6 +32,7 @@ export const commandMap = {
   list_repository_pull_requests: { path: ["repos", "prs"], target: "repository" },
   list_agents: { path: ["agents"] },
   read_pull_request_files: { path: ["pr", "files"], target: "pr" },
+  read_reviewed_files: { path: ["pr", "reviewed"], target: "pr" },
   read_file_contents: { path: ["pr", "file"], target: "pr" },
   read_timeline: { path: ["pr", "timeline"], target: "pr" },
   read_threads: { path: ["pr", "threads"], target: "pr" },
@@ -62,6 +63,7 @@ export const commandMap = {
   save_pull_request_guide_settings: { path: ["guide", "settings", "save"], target: "pr" },
   edit_review_comment: { path: ["comments", "edit"], target: "pr" },
   move_review_comment: { path: ["comments", "move"], target: "pr" },
+  mark_files_reviewed: { path: ["pr", "reviewed", "set"], target: "pr" },
 } satisfies Record<ToolName, CommandMapping>;
 
 export const flagName = (key: string) =>

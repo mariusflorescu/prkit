@@ -487,7 +487,8 @@ export const make = Effect.gen(function* () {
       const failure = "Couldn't read the pull request's diff.";
       const [raw, numstat, patch] = yield* Effect.all(
         [
-          git([...DIFF, "-z", "--raw", ...range], { target, failure }),
+          // Full blob ids: a stored version has to match what GitHub's files API calls `sha`.
+          git([...DIFF, "-z", "--raw", "--no-abbrev", ...range], { target, failure }),
           git([...DIFF, "-z", "--numstat", ...range], { target, failure }),
           git([...DIFF, "--patch", ...range], { target, failure }),
         ],

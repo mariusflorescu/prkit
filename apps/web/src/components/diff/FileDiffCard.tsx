@@ -1,12 +1,21 @@
 import type { DiffFile } from "@prkit/contracts";
 import { ChevronDown, ChevronRight, FileCode2 } from "lucide-react";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 
 import { DiffStat } from "./DiffStat";
 import { InlineMarkdown } from "./InlineMarkdown";
 import { LazyDiffBody } from "./LazyDiffBody";
+import { alignIfAbove } from "./readingLine";
 import { RenderBoundary } from "./RenderBoundary";
-import type { DiffAnnotation, DiffComments, LoadContents, RevealLine } from "./types";
+import { ReviewedToggle } from "./ReviewedToggle";
+import type {
+  DiffAnnotation,
+  DiffComments,
+  LoadContents,
+  RevealLine,
+  ReviewedControl,
+} from "./types";
 import "./diff.css";
 
 const noAnnotations: ReadonlyArray<DiffAnnotation> = [];
@@ -23,6 +32,8 @@ export type FileDiffCardProps = {
   prUrl?: string | undefined;
   trailingLines?: number | undefined;
   reveal?: RevealLine | null | undefined;
+  /** The Reviewed checkbox; a reviewed file starts closed. */
+  reviewed?: ReviewedControl | undefined;
 };
 
 export function FileDiffCard({
@@ -36,22 +47,28 @@ export function FileDiffCard({
   prUrl,
   trailingLines,
   reveal = null,
+  reviewed,
 }: FileDiffCardProps) {
-  const [open, setOpen] = useState(!defaultCollapsed || reveal !== null);
+  const [open, setOpen] = useState(
+    (!defaultCollapsed && reviewed?.state !== "reviewed") || reveal !== null,
+  );
   const [revealed, setRevealed] = useState(reveal);
   if (reveal !== revealed) {
     setRevealed(reveal);
     if (reveal !== null) setOpen(true);
   }
+  const ref = useRef<HTMLElement>(null);
   const bodyId = useId();
   const risks = annotations.filter((annotation) => annotation.tone === "risk").length;
   const questions = annotations.filter((annotation) => annotation.tone === "question").length;
   return (
     <section
+      ref={ref}
       data-file-diff-card=""
       id={id}
       data-path={file.path}
       data-open={open}
+      data-reviewed={reviewed?.state}
       aria-label={file.path}
       tabIndex={-1}
     >
@@ -87,6 +104,20 @@ export function FileDiffCard({
             <span>{file.status === "removed" ? "deleted" : file.status}</span>
           )}
           <DiffStat additions={file.additions} deletions={file.deletions} />
+          {reviewed !== undefined && (
+            <ReviewedToggle
+              name={file.path}
+              state={reviewed.state}
+              onChange={async (next) => {
+                const saved = await reviewed.onChange(next);
+                if (!saved) return false;
+                // Only the user's own tick folds the file; marks arriving from elsewhere leave it.
+                flushSync(() => setOpen(!next));
+                if (next && ref.current) alignIfAbove(ref.current);
+                return true;
+              }}
+            />
+          )}
         </div>
       </header>
       {open && (

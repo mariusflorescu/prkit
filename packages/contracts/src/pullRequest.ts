@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 
+import { BlobId } from "./diffSnapshot.ts";
 import { Freshness } from "./github.ts";
 import { AccountId, PullRequestKey } from "./ids.ts";
 import { InboxEntry, PullRequestAuthor, PullRequestRef } from "./inbox.ts";
@@ -90,6 +91,8 @@ export const PullRequestFile = Schema.Struct({
     Schema.TaggedStruct("binary", {}),
     Schema.TaggedStruct("too-large", { lines: Schema.Int }),
   ]),
+  /** GitHub's `sha`, the head's blob. Absent for a removed file and in reads cached before prkit kept it. */
+  blob: Schema.optionalKey(BlobId),
 });
 export const PullRequestFiles = Schema.Struct({
   headSha: Schema.String,

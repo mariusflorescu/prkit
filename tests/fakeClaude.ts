@@ -28,8 +28,8 @@ const Prompt = Schema.fromJsonString(
  * The stand-in Claude Code of scripts/fake-claude.ts, in a folder of its own: pass `file` to
  * `verify-app start --claude`. `hold` keeps its next turns writing until `release`,
  * `failing` makes them end with an error instead of a guide, `notes` gives its guides line
- * notes, and `plant` has its next fixes and resolutions leave something behind
- * (scripts/fake-claude.ts lists what).
+ * notes, `split` gives each file of their guides a chapter of its own, and `plant` has its
+ * next fixes and resolutions leave something behind (scripts/fake-claude.ts lists what).
  */
 export const setUpFakeClaude = (name: string) => {
   const dir = NodePath.join(repoRoot, ".e2e", "fake", `${name}-claude`);
@@ -42,7 +42,7 @@ export const setUpFakeClaude = (name: string) => {
     `#!/bin/sh\nFAKE_CLAUDE_DIR='${dir}' exec '${process.execPath}' '${script}' "$@"\n`,
     { mode: 0o755 },
   );
-  const flag = (name: "hold" | "fail", on: boolean) =>
+  const flag = (name: "hold" | "fail" | "split", on: boolean) =>
     on
       ? NodeFS.writeFileSync(NodePath.join(dir, name), "")
       : NodeFS.rmSync(NodePath.join(dir, name), { force: true });
@@ -53,6 +53,7 @@ export const setUpFakeClaude = (name: string) => {
     failing: (on: boolean) => flag("fail", on),
     notes: (notes: Record<string, ReadonlyArray<FakeNote>>) =>
       NodeFS.writeFileSync(NodePath.join(dir, "notes"), JSON.stringify(notes)),
+    split: (on: boolean) => flag("split", on),
     /** `nested` takes the path for the repository; `null` stops planting it. */
     plant: (what: "nested" | "todo" | "linger", value: string | null) =>
       value === null

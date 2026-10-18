@@ -40,6 +40,7 @@ const READS = [
   "list_repository_pull_requests",
   "list_agents",
   "read_pull_request_files",
+  "read_reviewed_files",
   "read_file_contents",
   "read_timeline",
   "read_threads",
@@ -82,6 +83,7 @@ const ALL = [
   "save_pull_request_guide_settings",
   "edit_review_comment",
   "move_review_comment",
+  "mark_files_reviewed",
 ].sort();
 const NOT_OPEN = "prkit isn't open. Open it, then try again.";
 const OFF = "Outside agents are off. Turn them on in prkit > Settings > Outside agents.";

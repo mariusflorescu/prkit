@@ -8,12 +8,14 @@ import { WorkspaceShortcuts } from "~/features/workspace/WorkspaceShortcuts";
 import { WorkspaceMutationError } from "~/features/workspace/WorkspaceMutationError";
 import { CommandPalette } from "~/features/workspace/CommandPalette";
 import { useGitHubEvents } from "~/features/github/useGitHubEvents";
+import { useReviewedFilesChanges } from "~/features/reviewedFiles/useReviewedFilesChanges";
 import { FixerNotifications } from "~/features/fixes/FixerNotifications";
 import { UpdateNotifications } from "~/features/updates/UpdateNotifications";
 import { updatesBridge } from "~/lib/desktop";
 
 export function AppShell() {
   useGitHubEvents();
+  useReviewedFilesChanges();
   return (
     <ToastProvider>
       <WorkspaceProvider>

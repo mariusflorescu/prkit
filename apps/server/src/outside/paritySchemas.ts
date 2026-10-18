@@ -6,8 +6,10 @@ import {
   AttemptConfig,
   AttemptId,
   AttemptSummary,
+  ChapterReview,
   CommentPlacement,
   DraftGuideResult,
+  FileReviewState,
   FileSide,
   FixerActivity,
   FixerFeedEntry,
@@ -40,6 +42,7 @@ import {
   ReviewActivity,
   ReviewCommentId,
   ReviewFeedEntry,
+  ReviewProgress,
   SavedInboxFilters,
   ScopeConfig,
   ScriptAccess,
@@ -115,6 +118,58 @@ export const FilesResult = Schema.Struct({
   baseSha: Schema.NullOr(Schema.String),
   changedFiles: Schema.Int,
   githubTruncated: Schema.Boolean,
+});
+export const ReviewedFilesInput = Schema.Struct({
+  ...PagedTargetInput.fields,
+  revision: Schema.optionalKey(
+    Schema.Int.check(Schema.isGreaterThan(0)).annotate({
+      description:
+        "A guide revision from list_guide_revisions: its saved diff and chapters instead of the current files.",
+    }),
+  ),
+});
+export const ReviewedFile = Schema.Struct({
+  path: Schema.String,
+  previousPath: Schema.NullOr(Schema.String),
+  state: FileReviewState,
+});
+export const ReviewedFilesResult = Schema.Struct({
+  ...pageSchema(ReviewedFile).fields,
+  headSha: Schema.String,
+  revision: Schema.NullOr(Schema.Int),
+  changedFiles: Schema.Int,
+  githubTruncated: Schema.Boolean,
+  progress: ReviewProgress,
+  chapters: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      title: Schema.String,
+      state: Schema.NullOr(ChapterReview.fields.state),
+      progress: ReviewProgress,
+    }),
+  ),
+});
+export const MarkFilesReviewedInput = Schema.Struct({
+  ...TargetFields,
+  headSha: Schema.NonEmptyString.annotate({
+    description:
+      "The headSha read_reviewed_files returned. If the pull request moved since, nothing is marked.",
+  }),
+  paths: Schema.NonEmptyArray(Schema.NonEmptyString).annotate({
+    description: "Changed files of the current diff, by the paths read_reviewed_files lists.",
+  }),
+  reviewed: Schema.optionalKey(
+    Schema.Boolean.annotate({
+      description: "true marks the files reviewed (when omitted); false marks them not reviewed.",
+    }),
+  ),
+});
+export const MarkedFilesResult = Schema.Struct({
+  headSha: Schema.String,
+  changedFiles: Schema.Int,
+  githubTruncated: Schema.Boolean,
+  files: Schema.Array(ReviewedFile),
+  progress: ReviewProgress,
 });
 export const FileInput = Schema.Struct({
   ...PagedTargetInput.fields,

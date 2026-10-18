@@ -31,6 +31,7 @@ import * as GuideConfigStore from "./reviews/GuideConfigStore.ts";
 import * as GuideSettingsStore from "./reviews/GuideSettingsStore.ts";
 import * as Reviews from "./reviews/Reviews.ts";
 import * as ReviewComments from "./reviewComments/ReviewComments.ts";
+import * as ReviewedFiles from "./reviewedFiles/ReviewedFiles.ts";
 import * as Fixers from "./fixers/Fixers.ts";
 import * as FixerSettingsStore from "./fixers/FixerSettingsStore.ts";
 import * as FixerWatcher from "./fixers/FixerWatcher.ts";
@@ -138,7 +139,9 @@ const layerServer = Layer.mergeAll(layerReadyLine, layerOutsideDiscovery).pipe(
   Layer.provideMerge(OutsideWork.layer),
   Layer.provideMerge(CliInstall.layer),
   Layer.provideMerge(OutsideAgents.layer),
-  Layer.provideMerge(Layer.mergeAll(ReviewComments.layer, AppearanceStore.layer)),
+  Layer.provideMerge(
+    Layer.mergeAll(ReviewComments.layer, ReviewedFiles.layer, AppearanceStore.layer),
+  ),
   Layer.provideMerge(layerFixers),
   Layer.provide(SqlitePersistence.layer),
   Layer.provideMerge(layerHttpServer),

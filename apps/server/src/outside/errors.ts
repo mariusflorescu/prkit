@@ -13,6 +13,7 @@ const PLAIN_ERRORS: Record<string, OutsideToolFailure["code"]> = {
   AccountsError: "failed",
   WorkspaceError: "conflict",
   ReviewCommentsError: "failed",
+  ReviewedFilesError: "failed",
   FixerError: "failed",
   FixerStateError: "conflict",
   FixerWorkRefused: "not-allowed",

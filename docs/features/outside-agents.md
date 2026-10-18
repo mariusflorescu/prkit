@@ -30,6 +30,7 @@ The inventory covers every WebSocket RPC and the app's local presentation action
 | PR detail and refresh | pullRequests.detail, pullRequests.refresh | `read_pull_request`; refresh on paged PR reads | Read |
 | Changed files and diff | pullRequests.files | `read_pull_request_files` | Read |
 | Expand file contents | pullRequests.fileContents | `read_file_contents` | Read |
+| Files marked reviewed, and their progress | reviewedFiles.get, reviewedFiles.set | `read_reviewed_files` (current files, or one guide revision with its chapters), `mark_files_reviewed` (sets or clears the mark on files of the current diff; local, never reaches GitHub) | Read / Work |
 | Conversation comments/reviews, checks, timeline | pullRequests.timeline | `read_conversation`, `read_checks`, `read_timeline` | Read |
 | Stack strip and layers | pullRequests.stack | `read_stack` | Read |
 | Available reviewers, teams and labels | pullRequests.candidates | `read_pull_request_action_candidates` | Read |
@@ -71,7 +72,7 @@ The inventory covers every WebSocket RPC and the app's local presentation action
 | Appearance | appearance.get, appearance.update | `read_settings`; changes excluded B | Read / Excluded |
 | Outside agents state/access/reset | outsideAgents.get, outsideAgents.update, outsideAgents.reset | `read_settings`; enabling/disabling, access changes and Reset access excluded B | Read / Excluded |
 | CLI setup and skill installer | cliInstall.get, cliInstall.install, cliInstall.uninstall, cliInstall.skill | Setup status is presentation; installing/removing the launcher and opening the skill installer are excluded B: machine setup | Presentation / Excluded |
-| Live updates and waiting | github.events, workspace.changes, reviews.watch, fixers.watch | Finite snapshot reads above plus `wait_for`; no outside background subscriptions or polling loop | Read |
+| Live updates and waiting | github.events, workspace.changes, reviewedFiles.changes, reviews.watch, fixers.watch | Finite snapshot reads above plus `wait_for`; no outside background subscriptions or polling loop | Read |
 | Desktop updater: channel/automatic checks, check/download/install/restart | Electron update bridge | Changes excluded B (installation and trust). Native updater status has no server service and is outside this unit’s server-only build scope; release notes and What’s new are presentation. | Excluded / Presentation |
 | Navigation, inner tabs, scrolling, collapses, keyboard shortcuts, text selection, copy/open links | Presentation only | Read the corresponding data or use the workspace tool; these have no separate domain operation | Presentation |
 
@@ -90,6 +91,7 @@ When a complete result is too large, the success value is a typed `_tag: "respon
 | `list_repository_pull_requests` | Read | `RepositoryInput` schema (no PR target) |
 | `list_agents` | Read | `AgentsInput` schema (no PR target) |
 | `read_pull_request_files` | Read | `PagedTargetInput` schema |
+| `read_reviewed_files` | Read | `ReviewedFilesInput` schema: `revision` reads a guide revision's saved diff and chapters |
 | `read_file_contents` | Read | `FileInput` schema |
 | `read_timeline` | Read | `PagedTargetInput` schema |
 | `read_threads` | Read | `PagedTargetInput` schema |
@@ -120,12 +122,15 @@ When a complete result is too large, the success value is a typed `_tag: "respon
 | `save_pull_request_guide_settings` | Work | `SaveGuideSettingsInput` schema |
 | `edit_review_comment` | Work | `EditCommentInput` schema |
 | `move_review_comment` | Work | `MoveCommentInput` schema |
+| `mark_files_reviewed` | Work | `MarkFilesReviewedInput` schema: `headSha` (the one `read_reviewed_files` returned), `paths` and `reviewed` (true when omitted) |
 
 `generate_guide` adds `instance`, `model`, `options: [{id, value}]`, `guidance: {expectedVersion, text, mode}`, `focus: {expectedVersion, areas: [{id, label, question}], overrides}`, `stack` (`this-pr`, `whole-stack`, `chosen-layers`), `layers` and `regenerate`. New focus-area ids are null. The catalog's `selectionProblem` validates the choice; partial selections, unknown or repeated option ids are refused before work starts. Guidance and focus use the same per-section compare-and-set versions as the app. Stack generation uses `reviews.generateStack`, preserving its bottom-to-top order and skip reasons.
 
+`read_reviewed_files` gives each changed file's state (`reviewed`, `changed` since it was reviewed, `unreviewed`, or `unknown` for a file prkit can't tell apart and doesn't count), the progress over all of them, and with `revision` the saved diff of that guide revision and its chapters. `changedFiles` and `githubTruncated` mean what they mean in `read_pull_request_files`, so a PR past GitHub's 3,000-file cap says so; a revision reads its saved diff whole. A revision whose guide was written through another account is refused. `mark_files_reviewed` names files of the current diff by path, with the `headSha` that read returned, sets them reviewed or, with `reviewed: false`, not reviewed, and answers with their new states. Repeating a call changes nothing. A path that isn't a changed file fails the whole call, and so does a `headSha` the pull request has moved past (`conflict`), so an agent never marks a version it didn't read. The marks are the owner's, kept in prkit like the checkboxes in the app; they are never sent to GitHub or to an agent, and open windows show a change at once.
+
 `list_open_pull_requests` continues to mean open **app tabs**. `list_repository_pull_requests` lists a repository's open PRs. `read_guide_revision` returns the guide and frozen settings; use the revision's `attemptId` from `list_guide_revisions` with `read_review_diff` for its exact saved diff. `read_fix_turn` returns the full per-comment/per-file report and script decision. Neither read starts an agent.
 
-The CLI uses one command map in `apps/server/src/cli/commands.ts`. Its parity check compares the map with all 52 tools exactly, and its flags come from the same parameter schemas. The public skill and CLI documentation are checked against that map too.
+The CLI uses one command map in `apps/server/src/cli/commands.ts`. Its parity check compares the map with all 54 tools exactly, and its flags come from the same parameter schemas. The public skill and CLI documentation are checked against that map too.
 
 Each tool is declared once with its level (`apps/server/src/mcp/outside/tools.ts`): `reads` or `startsWork` wraps the handler, and the server refuses to start when a handler's level differs from its tool's. A tool above the client's level is hidden from `tools/list` and unknown to `tools/call`, checked again on every call, so lowering the level takes effect at once. Other failures come back as tool errors with a code (`invalid`, `not-found`, `account-needed`, `not-allowed`, `not-ready`, `conflict`, `github`, `failed`) and a plain message.
 

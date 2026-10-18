@@ -1,4 +1,4 @@
-import type { DiffFile, LinePoint, NormalizedGuide } from "@prkit/contracts";
+import type { DiffFile, FileReviewState, LinePoint, NormalizedGuide } from "@prkit/contracts";
 import type { ReactNode } from "react";
 
 export type DiffAnnotation =
@@ -32,4 +32,10 @@ export type DiffComments = {
   /** Shown under a guide note's text, by the note's place among the file's notes. */
   noteFooter?: ((note: DiffAnnotation, index: number) => ReactNode) | undefined;
   count: number;
+};
+
+/** A file's Reviewed checkbox, opted into by the caller. `onChange` resolves true once saved. */
+export type ReviewedControl = {
+  state: FileReviewState;
+  onChange: (reviewed: boolean) => Promise<boolean>;
 };
