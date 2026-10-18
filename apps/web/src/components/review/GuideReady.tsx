@@ -131,6 +131,13 @@ export function GuideReady({
         />
       ) : (
         <>
+          {drafts.isError && (
+            <ReviewAlert
+              title="Couldn't load your pending comments"
+              message={drafts.error.message}
+              retry={() => void drafts.refetch()}
+            />
+          )}
           {guide.data.normalized.guidanceNote !== null && (
             <GuidanceNoteLine note={guide.data.normalized.guidanceNote} />
           )}

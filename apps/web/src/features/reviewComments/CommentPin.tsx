@@ -32,7 +32,18 @@ export function CommentPin({
         <PendingCommentCard key={comment.id} comment={comment} pr={pr} />
       ))}
       {composer && (
-        <NewCommentComposer pr={pr} placement={composer.placement} note={composer.note} />
+        <NewCommentComposer
+          // Pierre keys its annotation slots by position, so one note's words would stay
+          // in the field when the composer moves to another note.
+          key={
+            composer.note === null
+              ? "lines"
+              : `${composer.note.ref.revision}:${composer.note.ref.path}:${composer.note.ref.index}`
+          }
+          pr={pr}
+          placement={composer.placement}
+          note={composer.note}
+        />
       )}
     </div>
   );

@@ -1,11 +1,17 @@
-import { type DiffRow, notePoint, placeNote, type PullRequestDetail } from "@prkit/contracts";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  type AccountId,
+  type DiffRow,
+  notePoint,
+  placeNote,
+  type PullRequestKey,
+} from "@prkit/contracts";
+import { useMutation } from "@tanstack/react-query";
 import { MessageSquarePlusIcon } from "lucide-react";
 
 import type { DiffAnnotation } from "~/components/diff";
 import { Button } from "~/components/ui/button";
 import { toastManager } from "~/components/ui/toast";
-import { pullRequestFilesQuery } from "~/rpc/queries";
+import { getPullRequestFiles } from "~/rpc/client";
 import { rangeLabel } from "./reviewCommentPresentation";
 import { useReviewCommentsStore } from "./reviewCommentsStore";
 
@@ -28,7 +34,7 @@ export function NoteCommentButton({
   index,
   composing,
 }: {
-  pr: Pick<PullRequestDetail, "key" | "accountId" | "headSha" | "baseSha">;
+  pr: { key: PullRequestKey; accountId: AccountId };
   path: string;
   /** The rows of the revision's diff of this file, which the note is written on. */
   rows: ReadonlyArray<DiffRow>;
@@ -37,12 +43,11 @@ export function NoteCommentButton({
   index: number;
   composing: boolean;
 }) {
-  const client = useQueryClient();
   const compose = useReviewCommentsStore((state) => state.compose);
   const point = notePoint(note);
   const start = useMutation({
-    mutationFn: () =>
-      client.fetchQuery(pullRequestFilesQuery(pr.key, pr.accountId, pr.headSha, pr.baseSha)),
+    // Read again on every click: the Files tab's copy never goes stale on its own.
+    mutationFn: () => getPullRequestFiles(pr.key, pr.accountId),
     onSuccess: (files) => {
       const placed = placeNote({ path, point, writtenRows: rows, files });
       if (placed._tag === "lost")

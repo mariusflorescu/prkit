@@ -177,6 +177,12 @@ test(
       await slugField.scrollIntoView();
       await screenshotLightAndDark(app, browser, "prefilled-composer-narrow");
       await browser.setViewport(size);
+      await slugField.fill("Words that belong to the slug note");
+      await url.getByRole("button", "Add as comment, risk on old line 2").tap();
+      await expect(screen.getByRole("textbox", "Comment on old line 2")).toHaveValue(URL_RISK);
+      await expect(slugField).toBeHidden();
+      await addSlug.tap();
+      await expect(slugField).toHaveValue(SLUG);
       await slugField.fill("Could the slug limit live in the shared config instead?");
       await screen.getByRole("button", "Add review comment").tap();
       await expect(

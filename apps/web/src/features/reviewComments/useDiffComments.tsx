@@ -1,4 +1,5 @@
 import {
+  type AccountId,
   anchorHolds,
   type CommentPlacement,
   type DiffFile,
@@ -9,7 +10,7 @@ import {
   noteKey,
   notePoint,
   type PendingComment,
-  type PullRequestDetail,
+  type PullRequestKey,
   rangeRows,
   type ReviewCommentId,
   type ReviewThread,
@@ -68,11 +69,11 @@ const locate = (
  * layer. Drafts sit where their lines still read the same; others are outdated.
  */
 export function useDiffComments(
-  pr: Pick<PullRequestDetail, "key" | "accountId" | "headSha" | "baseSha">,
+  pr: { key: PullRequestKey; accountId: AccountId },
   files: ReadonlyArray<DiffFile>,
   scope: CommentScope,
 ) {
-  const { key, accountId, headSha, baseSha } = pr;
+  const { key, accountId } = pr;
   const client = useQueryClient();
   const pending = useQuery(pendingCommentsQuery(key, accountId));
   const threads = useQuery({ ...reviewThreadsQuery(key, accountId), enabled: scope.threads });
@@ -213,7 +214,7 @@ export function useDiffComments(
                 if (comment === undefined)
                   return (
                     <NoteCommentButton
-                      pr={{ key, accountId, headSha, baseSha }}
+                      pr={owner}
                       path={file.path}
                       rows={rows}
                       revision={guideRevision}
@@ -245,8 +246,6 @@ export function useDiffComments(
   }, [
     key,
     accountId,
-    headSha,
-    baseSha,
     files,
     drafts,
     fromNotes,
