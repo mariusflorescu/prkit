@@ -23,7 +23,6 @@ export const InlineMarkdown = memo(function InlineMarkdown({
         components={components}
         allowedElements={elements}
         unwrapDisallowed
-        skipHtml
         remarkPlugins={[[remarkPrReferences, { prUrl }]]}
       >
         {text}

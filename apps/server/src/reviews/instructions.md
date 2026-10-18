@@ -167,7 +167,7 @@ People who click around before they merge (testers, product people, the author) 
 Work the steps out from what the code does and how the repository runs. Read the README, the package scripts (`package.json`, a `Makefile`, a `justfile`) and the docs in the checkout to learn how to start the project and where it listens. Then pick the few things a person can do that show the change working:
 
 - **Up to 5 steps**, the most telling first. Two or three is usually right.
-- **`action`**: one sentence saying what to do, with the real values to type, the URL, the command or the button: "Shorten `https://example.com`, then open the short link."
+- **`action`**: one sentence saying what to do, with the real values to type, the URL, the command or the button, in backticks: "Shorten `https://example.com`, then open the short link."
 - **`expect`**: what they should see when it works: a page, a status code, a number, a message. "It redirects to example.com, and `/stats/<code>` shows `1`."
 - **`watchFor`** (optional): what is most likely to go wrong in this step, in a few words: "A second visit counting twice." At least one step has one, on the step where you'd look hardest.
 - **`chapter`** (optional): the chapter whose code the step exercises, by id or number.
