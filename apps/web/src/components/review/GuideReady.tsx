@@ -1,12 +1,14 @@
-import type {
-  AttemptSummary,
-  DiffFile,
-  PullRequestDetail,
-  Review,
-  RevisionSummary,
+import {
+  type AttemptConfig,
+  type AttemptSummary,
+  type DiffFile,
+  forReader,
+  type PullRequestDetail,
+  type Review,
+  type RevisionSummary,
 } from "@prkit/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import type { LoadContents } from "~/components/diff";
 import { GuideView } from "~/components/guide";
@@ -19,6 +21,7 @@ import { getFileContents } from "~/rpc/client";
 import { guideQuery, pendingCommentsQuery } from "~/rpc/queries";
 
 import { GuidanceNoteLine } from "./config/GuidanceNoteLine";
+import { DescriptionFromGuide } from "./description/DescriptionFromGuide";
 import { DraftView } from "./DraftView";
 import { GuideSkeleton } from "./GuideSkeleton";
 import { GuideStatusBar } from "./GuideStatusBar";
@@ -28,6 +31,14 @@ import type { GuideChoice } from "./RevisionSwitcher";
 import { useReviewActions } from "./useReviewActions";
 
 const noFiles: ReadonlyArray<DiffFile> = [];
+
+/** What the pre-flight says about the description itself, if anything. */
+const descriptionNote = (detail: PullRequestDetail, config: AttemptConfig) =>
+  detail.body.trim() === ""
+    ? "Your pull request has no description yet."
+    : config.preflight !== null && config.preflight.description !== detail.body.trim()
+      ? "You changed the description after this guide was written, so what it says about the description may be out of date."
+      : null;
 
 /**
  * A review with at least one accepted revision. The guide stays readable whatever
@@ -57,11 +68,21 @@ export function GuideReady({
       : null;
   const composingRevision = useNoteComposerHold(detail.key, "guide");
   const closeComposer = useReviewCommentsStore((state) => state.closeComposer);
+  // Nor a description being edited from the guide: the revision it drafts from holds until it closes.
+  const [describing, setDescribing] = useState<number | null>(null);
   const revision =
     revisions.find((entry) => entry.revision === picked) ??
     revisions.find((entry) => entry.revision === composingRevision) ??
+    revisions.find((entry) => entry.revision === describing) ??
     latest;
   const guide = useQuery(guideQuery(detail.key, revision.revision));
+  const shown = useMemo(
+    () =>
+      guide.data === undefined
+        ? undefined
+        : forReader(guide.data, review.accountId, detail.accountId),
+    [guide.data, review.accountId, detail.accountId],
+  );
   // Notes show what became of their drafts with the first paint, not a moment later.
   const drafts = useQuery(pendingCommentsQuery(detail.key, detail.accountId));
   const { retry } = useReviewActions(detail.key);
@@ -96,6 +117,7 @@ export function GuideReady({
         selected={picked === "draft" && draft !== null ? "draft" : revision.revision}
         onSelect={(next) => {
           if (composingRevision !== null && next !== composingRevision) closeComposer();
+          if (describing !== null && next !== describing) setDescribing(null);
           setPicked(next === latest.revision ? null : next);
         }}
         shown={
@@ -153,6 +175,21 @@ export function GuideReady({
             {...(current ? { loadContents } : {})}
             reviewed={reviewed.status === "ready" ? reviewed : undefined}
             count={<ReviewedCount reviewed={reviewed} files={guide.data.snapshot.files} />}
+            preflight={
+              shown === undefined || shown.normalized.preflight === null
+                ? undefined
+                : {
+                    note: descriptionNote(detail, shown.config),
+                    action: (
+                      <DescriptionFromGuide
+                        detail={detail}
+                        guide={shown.normalized}
+                        open={describing !== null}
+                        onOpenChange={(open) => setDescribing(open ? revision.revision : null)}
+                      />
+                    ),
+                  }
+            }
           />
         </>
       )}

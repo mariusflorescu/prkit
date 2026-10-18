@@ -77,6 +77,9 @@ const CODE =
 const GENERATED =
   /(^|\/)(generated|__generated__|dist|build|vendor|node_modules)\/|\.(gen|generated|min)\.[a-z]+$|\.pb\.go$|_pb2\.py$|\.d\.ts$/iu;
 const isCode = (path: string) => CODE.test(path) && !GENERATED.test(path);
+/** A code file this diff changes: not a test, not generated, and more than a rename. */
+export const isChangedSource = (file: DiffFile) =>
+  isCode(file.path) && !isTest(file.path) && file.additions + file.deletions > 0;
 
 const MIGRATION_FOLDERS = new Set(["migrations", "migration", "migrate", "post_migrate"]);
 // Alembic keeps its migrations in `versions/` below its own folder; elsewhere `versions/` is docs.
@@ -267,9 +270,7 @@ const untested = (
   files: ReadonlyArray<DiffFile>,
   skipped: ReadonlyArray<SkippedFile>,
 ): RiskSignal | null => {
-  const code = files.filter(
-    (file) => isCode(file.path) && !isTest(file.path) && file.additions + file.deletions > 0,
-  );
+  const code = files.filter(isChangedSource);
   if (code.length === 0) return null;
   if ([...files, ...skipped].some((file) => isTest(file.path))) return null;
   // A change next to inline tests may be a test change, so absence can't be claimed there.

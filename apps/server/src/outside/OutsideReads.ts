@@ -1,5 +1,6 @@
 import {
   type DiffSnapshot,
+  forReader,
   PullRequestFile,
   PullRequestCandidates,
   type ReviewSnapshot,
@@ -357,7 +358,10 @@ export const makeOutsideReads = (
     const revision = (input: typeof Inputs.RevisionInput.Type) =>
       Effect.gen(function* () {
         const target = yield* resolve(input);
-        const guide = yield* reviews.guide(target.key, input.revision);
+        const stored = yield* reviews.guide(target.key, input.revision);
+        const { review } = yield* reviews.get(target.key);
+        const guide =
+          review === null ? stored : forReader(stored, review.accountId, target.accountId);
         return {
           revision: guide.revision,
           headSha: guide.headSha,

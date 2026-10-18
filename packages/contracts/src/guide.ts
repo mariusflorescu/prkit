@@ -147,6 +147,49 @@ const FocusAreaAnswers = Schema.Array(
   }),
 );
 
+/**
+ * Where the description and the code disagree: the code does something the description
+ * doesn't mention, the description claims something nothing in the diff does, or the two
+ * say different things.
+ */
+export const PreflightClaimKind = Schema.Literals([
+  "missing-from-description",
+  "missing-from-code",
+  "differs",
+]);
+export type PreflightClaimKind = typeof PreflightClaimKind.Type;
+const PreflightPointer = {
+  chapter: Schema.optionalKey(ChapterReference),
+  at: Schema.optionalKey(DiffLineRef),
+};
+/** Only on the author's own pull request. Every list may be empty: nothing to flag. */
+const Preflight = Schema.Struct({
+  questions: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ text: Schema.String, ...PreflightPointer })),
+  ),
+  description: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        kind: PreflightClaimKind,
+        text: Schema.String,
+        /** The description's own words, for a claim it makes. */
+        quote: Schema.optionalKey(Schema.String),
+        ...PreflightPointer,
+      }),
+    ),
+  ),
+  tests: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        text: Schema.String,
+        /** A changed source file that no test covers. */
+        path: Schema.String,
+        line: Schema.optionalKey(Schema.Int),
+      }),
+    ),
+  ),
+});
+
 const GuideChapter = Schema.Struct({ ...chapterFields, files: Schema.Array(FileEntry) });
 
 export const Guide = Schema.Struct({
@@ -161,6 +204,7 @@ export const Guide = Schema.Struct({
   focusAreas: Schema.optionalKey(FocusAreaAnswers),
   /** One advisory sentence on how conflicting guidance was resolved. Never treated as proof. */
   guidanceNote: Schema.optionalKey(Schema.String),
+  preflight: Schema.optionalKey(Preflight),
 });
 export type Guide = typeof Guide.Type;
 
@@ -198,10 +242,39 @@ export const GuidePatch = Schema.Struct({
   focus: Schema.optionalKey(Focus),
   focusAreas: Schema.optionalKey(FocusAreaAnswers),
   guidanceNote: Schema.optionalKey(Schema.String),
+  preflight: Schema.optionalKey(Preflight),
 });
 export type GuidePatch = typeof GuidePatch.Type;
 
 const NormalizedCallout = Schema.Struct({ tone: GuideTone, text: Schema.String });
+const PreflightPlace = { chapter: Schema.String, at: Schema.NullOr(DiffLineRef) };
+export const NormalizedPreflight = Schema.Struct({
+  questions: Schema.Array(Schema.Struct({ text: Schema.String, ...PreflightPlace })),
+  description: Schema.Array(
+    Schema.Union([
+      Schema.Struct({
+        kind: Schema.Literal("missing-from-description"),
+        text: Schema.String,
+        ...PreflightPlace,
+      }),
+      Schema.Struct({
+        kind: Schema.Literal("missing-from-code"),
+        text: Schema.String,
+        quote: Schema.String,
+      }),
+      Schema.Struct({
+        kind: Schema.Literal("differs"),
+        text: Schema.String,
+        quote: Schema.String,
+        ...PreflightPlace,
+      }),
+    ]),
+  ),
+  tests: Schema.Array(
+    Schema.Struct({ text: Schema.String, path: Schema.String, line: Schema.NullOr(Schema.Int) }),
+  ),
+});
+export type NormalizedPreflight = typeof NormalizedPreflight.Type;
 const NormalizedFlowGraph = Schema.Struct({
   _tag: Schema.Literal("graph").pipe(Schema.withDecodingDefaultKey(Effect.succeed("graph"))),
   title: Schema.String,
@@ -319,6 +392,10 @@ export const NormalizedGuide = Schema.Struct({
     }),
   ).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   guidanceNote: Schema.NullOr(Schema.String).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+  ),
+  /** Only on a guide the author asked for. Revisions written before pre-flights decode with none. */
+  preflight: Schema.NullOr(NormalizedPreflight).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(null)),
   ),
 });

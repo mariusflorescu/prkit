@@ -256,6 +256,13 @@ export const AttemptConfig = Schema.Struct({
   signals: Schema.NullOr(Schema.Array(RiskSignal)).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(null)),
   ),
+  /**
+   * The reading account wrote the change, so the guide has a pre-flight, checked against
+   * the description the prompt quoted ("" when there is none). Null otherwise.
+   */
+  preflight: Schema.NullOr(Schema.Struct({ description: Schema.String })).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+  ),
 });
 export type AttemptConfig = typeof AttemptConfig.Type;
 

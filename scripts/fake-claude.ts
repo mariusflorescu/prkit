@@ -20,9 +20,11 @@
  * read when the guide is submitted; without it the guide has none. A `file-notes` file,
  * `{ [path]: note }`, gives those files a file note. A `chapters` file, JSON of
  * `[{ title, files: [path], kind?, risk? }]`, splits the guide into those chapters, in that
- * order and with that kind and level, with every file they leave out in a last one. An `edits` file, JSON of `{ [path]: content }`, has the next fixes write
- * those files besides `stand-in.md`. Before a fix or resolution reports, it also plants what
- * these files ask for, as something outside prkit's sandboxes could:
+ * order and with that kind and level, with every file they leave out in a last one. When the
+ * prompt asks for the author's pre-flight, the guide sends the JSON a `preflight` file holds as
+ * it is, or `{}` (nothing to flag) without one. An `edits` file, JSON of `{ [path]: content }`,
+ * has the next fixes write those files besides `stand-in.md`. Before a fix or resolution reports,
+ * it also plants what these files ask for, as something outside prkit's sandboxes could:
  *
  *   nested    an empty git repository at the path the file holds, inside the checkout
  *   todo      the rest of the stopped rebase's todo, in reverse
@@ -458,6 +460,15 @@ const turn = async (prompt: string) => {
     };
     return kind === undefined ? chapter : { ...chapter, kind };
   };
+  const preflight = prompt.includes("so the guide is for its own author")
+    ? {
+        preflight: flagged("preflight")
+          ? Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(
+              NodeFS.readFileSync(NodePath.join(control, "preflight"), "utf8"),
+            )
+          : {},
+      }
+    : {};
   const submitted = await mcp("tools/call", {
     name: "submit_guide",
     arguments: {
@@ -468,6 +479,7 @@ const turn = async (prompt: string) => {
         id: match[1] ?? "",
         verdict: "nothing-notable",
       })),
+      ...preflight,
     },
   });
   return finish(submitted.ok ? null : `submit_guide was refused: ${submitted.text.slice(0, 300)}`);

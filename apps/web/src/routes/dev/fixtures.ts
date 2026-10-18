@@ -117,6 +117,7 @@ export async function loadFixture(name: string) {
           focusAreas: [],
           skipped,
           signals: riskSignals({ reviewed, skipped, sensitive: effectiveRules(fixture.sensitive) }),
+          preflight: null,
         };
   const result = normalizeGuide(guide, reviewed, context);
   if (!result.normalized) throw new Error(result.errors.join("\n"));

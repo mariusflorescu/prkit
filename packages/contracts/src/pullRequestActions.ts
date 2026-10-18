@@ -65,8 +65,11 @@ export const PullRequestCommand = Schema.Union([
   }),
   Schema.Struct({
     kind: Schema.Literal("edit"),
-    title: Schema.NonEmptyString.check(Schema.isMaxLength(256)),
+    /** Left out, the title stays as it is. */
+    title: Schema.optionalKey(Schema.NonEmptyString.check(Schema.isMaxLength(256))),
     body: Schema.String,
+    /** The description the edit was written against: GitHub's must still be it. */
+    expectedBody: Schema.optionalKey(Schema.String),
   }),
   Schema.Struct({ kind: Schema.Literal("labels"), labels: Schema.Array(Schema.NonEmptyString) }),
   Schema.Struct({

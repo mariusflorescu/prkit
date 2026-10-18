@@ -157,9 +157,15 @@ export const startFakeGitHub = async (
       post(`request-review?pr=${pr}&${reviewerQuery(who)}&minutes=${minutesAgo}`),
     unrequest: (pr: number, who: Reviewer) => post(`unrequest?pr=${pr}&${reviewerQuery(who)}`),
     unreadable: (pr: number) => post(`unreadable?pr=${pr}`),
-    fail: (kind: string, times: number, status = 502) =>
-      post(`fail?kind=${encodeURIComponent(kind)}&status=${status}&times=${times}`),
+    /** `message` is what GitHub says about the refusal; without one the answer is `{}`. */
+    fail: (kind: string, times: number, status = 502, message?: string) =>
+      post(
+        `fail?kind=${encodeURIComponent(kind)}&status=${status}&times=${times}${message === undefined ? "" : `&message=${encodeURIComponent(message)}`}`,
+      ),
     behind: (pr: number, by: number) => post(`behind?pr=${pr}&by=${by}`),
+    /** Who opened the PR and its description, either one. */
+    describe: (pr: number, given: { author?: string; body?: string }) =>
+      fetch(`${url}/__fake/describe?pr=${pr}`, { method: "POST", body: JSON.stringify(given) }),
     checks: (pr: number, status: "queued" | "in_progress" | "completed") =>
       post(`checks?pr=${pr}&status=${status}`),
     stop: () => {

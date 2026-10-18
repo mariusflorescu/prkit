@@ -11,6 +11,7 @@ import {
 import type { PullRequestContext } from "../pullRequests/pullRequestContext.ts";
 import type { LocalCapture } from "../repo/localCapture.ts";
 import { contextLines, contextSection } from "./contextFile.ts";
+import { preflightLines } from "./preflightPrompt.ts";
 import { riskSignalLines } from "./riskPrompt.ts";
 import type { ReviewTarget } from "./reviewTarget.ts";
 
@@ -23,6 +24,8 @@ export type PromptSubject =
       readonly stack: PullRequestStack | null;
       /** What GitHub says about the PR besides its diff, as a file the agent reads. */
       readonly context: { readonly file: string; readonly read: PullRequestContext };
+      /** The reading account opened the PR, so the guide gets the author's pre-flight. */
+      readonly authored: boolean;
     }
   | {
       readonly _tag: "local";
@@ -207,11 +210,13 @@ export const buildPrompt = (input: PromptInput) => {
   const body = target.body.trim();
   const stack = stackContext(input.subject.stack, target.ref.number, target.baseRef);
   const risk = riskSignalLines(input.signals);
+  const preflight = input.subject.authored ? preflightLines(body) : null;
   const sections = [
     `task:${input.previous?._tag ?? "first"}`,
     `files:${snapshot.files.length}`,
     `hand-over:${input.streamsGuideInput ? "streamed" : "drafts"}`,
     ...contextSection(input.subject.context.read),
+    ...(preflight === null ? [] : [preflight.label]),
     ...(stack === null ? [] : [stack.label]),
     ...(settings.skipped > 0 ? [`skipped:${settings.skipped}`] : []),
     ...settings.guidance.map((block) => `guidance:${block.scope}`),
@@ -247,6 +252,7 @@ export const buildPrompt = (input: PromptInput) => {
     body === "" ? "(no description)" : body,
     "</description>",
     "",
+    ...(preflight?.lines ?? []),
     ...contextLines(input.subject.context),
     ...(stack?.lines ?? []),
     ...guidanceLines(settings.guidance),

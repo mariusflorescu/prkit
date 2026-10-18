@@ -25,6 +25,7 @@ import {
   type GuidePatch,
   type GuideRepository,
   type GuideRevision,
+  isAccountLogin,
   isLocalReviewKey,
   LocalReviewKey,
   LocalSource,
@@ -1346,6 +1347,7 @@ export const make = Effect.gen(function* () {
           target: { ...target, headSha: code.headSha },
           stack,
           context: { file: contextFile, read: context.read },
+          authored: isAccountLogin(review.accountId, target.author),
         },
         title: target.title,
         cache: { _tag: "pull-request", ref },
@@ -1440,6 +1442,11 @@ export const make = Effect.gen(function* () {
         repository: plan.repository,
         skipped,
         signals,
+        // A local review is its author's own too, but it gets no pre-flight yet.
+        preflight:
+          plan.prompt._tag === "pull-request" && plan.prompt.authored
+            ? { description: plan.prompt.target.body.trim() }
+            : null,
       };
       // A guide written under other settings is written again from scratch, not updated on top.
       const changedSince =

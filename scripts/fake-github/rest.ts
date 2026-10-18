@@ -1,4 +1,6 @@
 // The fake GitHub's REST answers: pulls, files, reviews, comments, checks and workflow runs.
+// A write's `commit` changes the fake's state, and runs only if the fake answers the write,
+// not when a `fail` control refuses it.
 import * as Schema from "effect/Schema";
 
 import { seededCheckRuns, seeds } from "./context.ts";
@@ -46,7 +48,7 @@ const LIMITS_FILE = {
 const REPOSITORY = { id: 4242, name: REPO, full_name: `${OWNER}/${REPO}`, owner: { login: OWNER } };
 const restPull = (pull: Pull) => ({
   title: pull.title,
-  body: `Body of fixture ${pull.number}`,
+  body: pull.body ?? `Body of fixture ${pull.number}`,
   state: pull.state === "OPEN" ? "open" : "closed",
   draft: pull.draft,
   merged: pull.state === "MERGED",
@@ -134,6 +136,21 @@ export const rest = (
   const page = Number(url.searchParams.get("page") ?? "1");
   const pull = pulls.get(Number(id));
   if (area === "pulls" && pull !== undefined) {
+    if (tail === undefined && method === "PATCH") {
+      const input = decodeBody(text || "{}");
+      const title = typeof input["title"] === "string" ? input["title"] : pull.title;
+      const body = typeof input["body"] === "string" ? input["body"] : pull.body;
+      return {
+        kind: "rest:pull-edit",
+        status: 200,
+        body: restPull({ ...pull, title, body }),
+        commit: () => {
+          pull.title = title;
+          pull.body = body;
+          pull.updatedAt = Date.now();
+        },
+      };
+    }
     if (tail === undefined) return { kind: "rest:pull", status: 200, body: restPull(pull) };
     if (tail === "files")
       return {
@@ -176,14 +193,16 @@ export const rest = (
         body: String(input["body"] ?? ""),
         at: Date.now(),
       };
-      pull.reviews.push(review);
-      pull.updatedAt = Date.now();
       return {
         kind: "rest:review",
         status: 200,
         body: {
           id: review.id,
           html_url: `https://github.com/${OWNER}/${REPO}/pull/${pull.number}#pullrequestreview-${review.id}`,
+        },
+        commit: () => {
+          pull.reviews.push(review);
+          pull.updatedAt = Date.now();
         },
       };
     }
@@ -235,9 +254,15 @@ export const rest = (
           status: 403,
           body: { message: "This run is not from a fork pull request" },
         };
-      run.status = "queued";
-      run.conclusion = null;
-      return { kind: "rest:run-approve", status: 201, body: {} };
+      return {
+        kind: "rest:run-approve",
+        status: 201,
+        body: {},
+        commit: () => {
+          run.status = "queued";
+          run.conclusion = null;
+        },
+      };
     }
     return { kind: "rest:run", status: 200, body: runOf(owner, run) };
   }

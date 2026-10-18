@@ -27,7 +27,7 @@ import { railTicks } from "./railTicks";
 import { ChapterSection } from "./ChapterSection";
 import { GuideOverview } from "./GuideOverview";
 import { PendingChapter } from "./PendingChapter";
-import type { GuideChapter, ReviewedBinding } from "./types";
+import type { GuideChapter, PreflightView, ReviewedBinding } from "./types";
 import { useChapterKeyboard } from "./useChapterKeyboard";
 import { useReadingPin } from "./useReadingPin";
 import "./guide.css";
@@ -53,6 +53,8 @@ export type GuideViewProps = {
   reviewed?: ReviewedBinding | undefined;
   /** Shown before the diff controls, such as how many files are reviewed. */
   count?: ReactNode;
+  /** The author's pre-flight; without it the guide shows none. */
+  preflight?: PreflightView | undefined;
 };
 
 const noPending: ReadonlySet<string> = new Set();
@@ -76,6 +78,7 @@ export function GuideView({
   draft,
   reviewed,
   count,
+  preflight,
 }: GuideViewProps) {
   const prefix = useId();
   const inTabRow = useHasTabActions();
@@ -225,6 +228,7 @@ export function GuideView({
                 prUrl={prUrl}
                 prDescription={prDescription}
                 pendingChapterIds={pendingChapterIds}
+                preflight={preflight}
               />
             </RenderBoundary>
             {guide.chapters.map((chapter, index) => {

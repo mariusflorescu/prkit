@@ -23,6 +23,8 @@ export interface GuideCheckContext {
   readonly skipped: ReadonlyArray<SkippedFile>;
   /** What prkit found in the reviewed files. Null when the guide doesn't have to rate `risk`. */
   readonly signals: ReadonlyArray<RiskSignal> | null;
+  /** The author's own change needs a pre-flight; null forbids one. */
+  readonly preflight: { readonly description: string } | null;
 }
 
 export const slugify = (text: string) =>
