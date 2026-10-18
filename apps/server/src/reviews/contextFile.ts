@@ -195,7 +195,7 @@ export const contextLines = (
       ? `It holds ${sentence(holds)}.${missing} Read it before you write the guide.`
       : unread.length === 0
         ? "It lists no failing or pending check, no open review thread and no linked issue."
-        : `It has nothing to report.${missing}`;
+        : `It lists nothing.${missing}`;
   return [
     "What GitHub reports about this pull request besides its diff is in this JSON file:",
     context.file,
