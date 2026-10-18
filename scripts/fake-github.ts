@@ -49,6 +49,7 @@
  *                                       to other line numbers (same text, new sha), like a merged base
  *   POST git-head?pr=<n>&sha=<sha>      a local commit is its one head (bumps updatedAt)
  *   POST files?pr=<n>                   its files answer from then on: the JSON list of files in the body
+ *   POST texts?pr=<n>                   its head's file texts from then on: JSON `{ [path]: text }` in the body
  *   POST checks?pr=<n>&status=<s>       check run status: queued, in_progress or completed
  *   POST conflict?pr=<n>                the base moved under it: mergeable false, DIRTY
  *   POST checking?pr=<n>                GitHub is still working out mergeability: mergeable null, UNKNOWN
@@ -104,6 +105,7 @@ import {
   SECOND_LOGIN,
   sameReviewer,
   servedFiles,
+  servedTexts,
   sha,
   stats,
   unreadable,
@@ -126,6 +128,9 @@ const decodeFiles = Schema.decodeUnknownSync(
       }),
     ),
   ),
+);
+const decodeTexts = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.String)),
 );
 let nextComment = 10_000;
 /** Rate limit state per resource, like GitHub's own windows. */
@@ -236,6 +241,10 @@ const control = (url: URL, method: string, text: string, response: NodeHttp.Serv
   }
   if (name === "files" && method === "POST" && pull !== undefined) {
     servedFiles.set(pull.number, decodeFiles(text));
+    return answer({ ok: true });
+  }
+  if (name === "texts" && method === "POST" && pull !== undefined) {
+    servedTexts.set(pull.number, new Map(Object.entries(decodeTexts(text))));
     return answer({ ok: true });
   }
   if (name === "comment" && pull !== undefined) {

@@ -1,4 +1,4 @@
-// The fake GitHub's GraphQL answers: inbox searches, fingerprints, timelines, stacks and auto-merge.
+// The fake GitHub's GraphQL answers: inbox searches, fingerprints, file texts, timelines, stacks and auto-merge.
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
@@ -17,6 +17,7 @@ import {
   type Pull,
   pulls,
   pullDefaults,
+  servedTexts,
   REPO,
   type Reviewer,
   rollup,
@@ -74,6 +75,7 @@ const fingerprint = (pull: Pull) => ({
   comments: { totalCount: pull.comments.length },
   reviews: { totalCount: pull.reviews.length },
 });
+const FILE_BLOB = { text: "export {};\n", isTruncated: false, isBinary: false, byteSize: 11 };
 /** GitHub's search trails a merge: `is:open` still finds the PR, whose node says MERGED. */
 const SEARCH_LAG_MS = 15_000;
 const search = (numbers: ReadonlyArray<number>) => {
@@ -563,6 +565,35 @@ export const graphql = (
         involved: search([]),
       },
     };
+  if (query.includes("PrkitTexts")) {
+    // A PR's head has the texts `texts` seeded for it, and every other path is the one-line
+    // file REST contents answers.
+    const byHead = new Map([...pulls.values()].map((pull) => [head(pull), pull.number]));
+    const blobs: Record<string, typeof FILE_BLOB | null> = {};
+    for (const match of query.matchAll(/(f\d+): object\(expression: \$(e\d+)\)/g)) {
+      const [, alias = "", variable = ""] = match;
+      const expression = String(variables[variable] ?? "");
+      const split = expression.indexOf(":");
+      const number = byHead.get(expression.slice(0, split));
+      const seeded =
+        number === undefined
+          ? undefined
+          : servedTexts.get(number)?.get(expression.slice(split + 1));
+      blobs[alias] =
+        number === undefined
+          ? null
+          : seeded === undefined
+            ? FILE_BLOB
+            : {
+                text: seeded,
+                isTruncated: false,
+                isBinary: false,
+                byteSize: Buffer.byteLength(seeded),
+              };
+    }
+    const known = variables["owner"] === OWNER && variables["name"] === REPO;
+    return { kind: "graphql:texts", cost: 1, data: { repository: known ? blobs : null } };
+  }
   if (query.includes("PrkitWatch")) {
     const data: Record<string, { pullRequest: ReturnType<typeof fingerprint> | null } | null> = {};
     for (const match of query.matchAll(/(p\d+): repository/g)) {

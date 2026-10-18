@@ -80,6 +80,8 @@ export const servedFiles = new Map<
  * `edits` rewrote its text, `shifts` moved its hunk to other line numbers like a merged base.
  */
 export const fileChanges = new Map<string, { edits: number; shifts: number }>();
+/** File text at a PR's head, by path, for the diff viewer's text reads. */
+export const servedTexts = new Map<number, ReadonlyMap<string, string>>();
 for (let number = 1; number <= 6; number++)
   pulls.set(number, {
     number,

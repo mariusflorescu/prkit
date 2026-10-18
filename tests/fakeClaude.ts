@@ -28,8 +28,9 @@ const Prompt = Schema.fromJsonString(
  * The stand-in Claude Code of scripts/fake-claude.ts, in a folder of its own: pass `file` to
  * `verify-app start --claude`. `hold` keeps its next turns writing until `release`,
  * `failing` makes them end with an error instead of a guide, `notes` gives its guides line
- * notes, `split` gives each file of their guides a chapter of its own, and `plant` has its
- * next fixes and resolutions leave something behind (scripts/fake-claude.ts lists what).
+ * notes, `split` gives each file of their guides a chapter of its own, `chapters` splits them
+ * into named chapters, `edits` has its next fixes write files, and `plant` has its next fixes
+ * and resolutions leave something behind (scripts/fake-claude.ts lists what).
  */
 export const setUpFakeClaude = (name: string) => {
   const dir = NodePath.join(repoRoot, ".e2e", "fake", `${name}-claude`);
@@ -54,6 +55,11 @@ export const setUpFakeClaude = (name: string) => {
     notes: (notes: Record<string, ReadonlyArray<FakeNote>>) =>
       NodeFS.writeFileSync(NodePath.join(dir, "notes"), JSON.stringify(notes)),
     split: (on: boolean) => flag("split", on),
+    chapters: (chapters: ReadonlyArray<{ title: string; files: ReadonlyArray<string> }>) =>
+      NodeFS.writeFileSync(NodePath.join(dir, "chapters"), JSON.stringify(chapters)),
+    /** Whole files, by path in the checkout, that the next fixes write. */
+    edits: (files: Record<string, string>) =>
+      NodeFS.writeFileSync(NodePath.join(dir, "edits"), JSON.stringify(files)),
     /** `nested` takes the path for the repository; `null` stops planting it. */
     plant: (what: "nested" | "todo" | "linger", value: string | null) =>
       value === null

@@ -17,9 +17,11 @@
  * `fail` file ends the turn with an error instead of a guide, and a `split` file gives every
  * file a chapter of its own, titled after the file. A `notes` file, JSON of
  * `{ [path]: [{ line, side, tone, text }] }`, gives those files line notes in the guide,
- * read when the guide is submitted; without it the guide has none. Before a fix or resolution
- * reports, it also plants what these files ask for, as something outside prkit's sandboxes
- * could:
+ * read when the guide is submitted; without it the guide has none. A `chapters` file, JSON of
+ * `[{ title, files: [path] }]`, splits the guide into those chapters, with every file they leave
+ * out in a last one. An `edits` file, JSON of `{ [path]: content }`, has the next fixes write
+ * those files besides `stand-in.md`. Before a fix or resolution reports, it also plants what
+ * these files ask for, as something outside prkit's sandboxes could:
  *
  *   nested    an empty git repository at the path the file holds, inside the checkout
  *   todo      the rest of the stopped rebase's todo, in reverse
@@ -123,6 +125,10 @@ const Notes = Schema.fromJsonString(
     ),
   ),
 );
+const Chapters = Schema.fromJsonString(
+  Schema.Array(Schema.Struct({ title: Schema.String, files: Schema.Array(Schema.String) })),
+);
+const Edits = Schema.fromJsonString(Schema.Record(Schema.String, Schema.String));
 const McpReply = Schema.fromJsonString(
   Schema.Struct({
     result: Schema.optionalKey(Schema.Struct({ isError: Schema.optionalKey(Schema.Boolean) })),
@@ -268,6 +274,11 @@ const fix = async (prompt: string) => {
   if (prompt.includes("Then call `finish_fixes` again"))
     NodeFS.appendFileSync("stand-in.md", "Revised by the stand-in agent.\n");
   else NodeFS.writeFileSync("stand-in.md", "Written by the stand-in agent.\n");
+  if (flagged("edits"))
+    for (const [path, content] of Object.entries(
+      Schema.decodeSync(Edits)(NodeFS.readFileSync(NodePath.join(control, "edits"), "utf8")),
+    ))
+      NodeFS.writeFileSync(path, content);
   await plant();
   const reported = await mcp("tools/call", {
     name: "finish_fixes",
@@ -381,17 +392,32 @@ const turn = async (prompt: string) => {
     const annotations = notes[path];
     return annotations === undefined ? path : { path, annotations };
   };
+  const groups = flagged("split")
+    ? files.map((path) => ({ title: `Change in ${path}`, files: [path] }))
+    : flagged("chapters")
+      ? Schema.decodeSync(Chapters)(
+          NodeFS.readFileSync(NodePath.join(control, "chapters"), "utf8"),
+        ).map(({ title, files: paths }) => ({
+          title,
+          files: paths.filter((path) => files.includes(path)),
+        }))
+      : [];
+  const placed = new Set(groups.flatMap((chapter) => chapter.files));
+  const rest = files.filter((path) => !placed.has(path));
+  const chapters = [
+    ...groups.filter((chapter) => chapter.files.length > 0),
+    ...(rest.length > 0
+      ? [{ title: groups.length > 0 ? "Every other change" : "Every change", files: rest }]
+      : []),
+  ];
   const submitted = await mcp("tools/call", {
     name: "submit_guide",
     arguments: {
       summary: "A guide written by the stand-in agent.",
-      chapters: (flagged("split")
-        ? files.map((path) => ({ title: `Change in ${path}`, paths: [path] }))
-        : [{ title: "Every change", paths: files }]
-      ).map(({ title, paths }) => ({
-        title,
-        files: paths.map(entryOf),
-        risk: risk.chapter(paths),
+      chapters: chapters.map((chapter) => ({
+        title: chapter.title,
+        files: chapter.files.map(entryOf),
+        risk: risk.chapter(chapter.files),
       })),
       risk: risk.guide,
       focusAreas: [...prompt.matchAll(/^- `([^`]+)` .+: .+$/gm)].map((match) => ({
