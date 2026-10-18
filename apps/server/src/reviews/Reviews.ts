@@ -1778,7 +1778,8 @@ export const make = Effect.gen(function* () {
   /**
    * Moves the review from one of `from` to `preparing` with a new attempt and runs it.
    * A new `agent` replaces the review's; a different provider starts a new
-   * conversation with it.
+   * conversation with it. Uninterruptible once the attempt is committed: it must reach its
+   * worker, or nothing settles it until a restart (so is `ensureReview`).
    */
   const startAttempt = (
     review: StoredReview,
@@ -1801,11 +1802,12 @@ export const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       // A turned-off or removed instance quietly gives way to its kind's default, else the default agent.
-      const usable = yield* usableAgent(agent);
+      // Reading the catalog can wait on providers; nothing is committed yet, so it can be interrupted.
+      const usable = yield* Effect.interruptible(usableAgent(agent));
       const attemptId = AttemptId.make(yield* newId);
       const at = yield* now;
       // Another conversation group (another kind or config folder) starts a new conversation.
-      const sameGroup = yield* agents.sameGroup(usable.instance);
+      const sameGroup = yield* Effect.interruptible(agents.sameGroup(usable.instance));
       // The revision number comes from the row the compare-and-set wins, not from the
       // caller's read, which a revision committed since would make stale.
       const revision = yield* sql.withTransaction(
@@ -1854,7 +1856,7 @@ export const make = Effect.gen(function* () {
       );
       yield* publish(review.key);
       return true;
-    });
+    }).pipe(Effect.uninterruptible);
 
   const ensureReview = (
     subject: NewSubject,
@@ -1912,7 +1914,7 @@ export const make = Effect.gen(function* () {
         yield* publish(key);
       }
       return { review, created };
-    });
+    }).pipe(Effect.uninterruptible);
 
   const dbFailures = {
     SqlError: () =>
@@ -2164,8 +2166,12 @@ export const make = Effect.gen(function* () {
       }
     });
 
+  /** A pull request's Stop; a local review's key is a string too, and stops only through `local`. */
   const stop = (key: PullRequestKey) =>
-    end(key, "stopped").pipe(Effect.andThen(snapshotOf(key)), Effect.catchTags(dbFailures));
+    (isLocalReviewKey(key) ? Effect.void : end(key, "stopped")).pipe(
+      Effect.andThen(snapshotOf(key)),
+      Effect.catchTags(dbFailures),
+    );
 
   /** Every review the watcher reads: all pull requests' that are not done. */
   const watched = sql`

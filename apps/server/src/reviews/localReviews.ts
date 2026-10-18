@@ -19,7 +19,7 @@ import {
   type LocalReviewStatus,
   type LocalReviewWatchEvent,
   type LocalRun,
-  type LocalSource,
+  LocalSource,
   type ReviewActivity,
   type ReviewCore,
   ReviewError,
@@ -136,6 +136,7 @@ const decodeRevisionCapture = Schema.decodeUnknownEffect(
 const decodeLatestCapture = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ capture: Schema.NullOr(Schema.fromJsonString(LocalCapture)) })),
 );
+const encodeSource = Schema.encodeSync(Schema.fromJsonString(LocalSource));
 const decodeRevisionCommits = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ head_sha: Schema.String, merge_base_sha: Schema.String })),
 );
@@ -206,6 +207,12 @@ const onWhat = (branch: string | null) => (branch === null ? "a detached HEAD" :
 const titleOf = (source: { readonly name: string; readonly branch: string | null }) =>
   `${source.name} · ${source.branch ?? "detached HEAD"}`;
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+const sameSource = (left: LocalSource, right: LocalSource) =>
+  left.name === right.name &&
+  left.path === right.path &&
+  left.branch === right.branch &&
+  left.base === right.base &&
+  left.head === right.head;
 const sameOptions = (left: AgentSelection["options"], right: AgentSelection["options"]) => {
   const key = (options: AgentSelection["options"]) =>
     options
@@ -370,6 +377,13 @@ export const makeLocalReviews = (port: LocalPort, capture: LocalCaptureService) 
               previous: previous?.capture ?? null,
               description,
             });
+            const source: LocalSource = {
+              name: identity.name,
+              path: identity.path,
+              branch: identity.branch,
+              base,
+              head,
+            };
             if (
               existing !== null &&
               previous !== null &&
@@ -380,19 +394,18 @@ export const makeLocalReviews = (port: LocalPort, capture: LocalCaptureService) 
               agent.instance === existing.instance &&
               agent.model === existing.model &&
               sameOptions(agent.options, existing.modelOptions)
-            )
+            ) {
+              // Run again asks for what this run asked for, though it found nothing new.
+              if (!sameSource(source, existing.local)) {
+                yield* sql`UPDATE reviews SET local = ${encodeSource(source)} WHERE id = ${existing.id}`;
+                yield* port.publish(key);
+              }
               return {
                 outcome: "unchanged",
                 snapshot: yield* snapshotOf(key),
                 message: `Nothing changed since revision ${previous.revision}. The guide is current.`,
               } satisfies LocalGenerateResult;
-            const source: LocalSource = {
-              name: identity.name,
-              path: identity.path,
-              branch: identity.branch,
-              base,
-              head,
-            };
+            }
             const started =
               existing === null
                 ? (yield* port.ensureReview(
@@ -439,16 +452,22 @@ export const makeLocalReviews = (port: LocalPort, capture: LocalCaptureService) 
         }),
       ).pipe(Effect.catchTags(dbFailures));
 
-    /** Stops a guide being written. Revisions stay readable; with nothing running it changes nothing. */
+    /**
+     * Stops a guide being written. Revisions stay readable; with nothing running it changes
+     * nothing. Behind the key's gate, so a run can't start while the stopped one is cleaned up.
+     */
     const stop = (key: LocalReviewKey) =>
-      Effect.gen(function* () {
-        const review = yield* port.findLocal(key);
-        if (review !== null && running(review.status))
-          yield* port
-            .end(key, "stopped")
-            .pipe(Effect.catchTag("ReviewStateError", () => Effect.void));
-        return yield* snapshotOf(key);
-      }).pipe(Effect.catchTags(dbFailures));
+      command(
+        key,
+        Effect.gen(function* () {
+          const review = yield* port.findLocal(key);
+          if (review !== null && running(review.status))
+            yield* port
+              .end(key, "stopped")
+              .pipe(Effect.catchTag("ReviewStateError", () => Effect.void));
+          return yield* snapshotOf(key);
+        }),
+      ).pipe(Effect.catchTags(dbFailures));
 
     /**
      * Deletes the review, its revisions and prkit's copy of its snapshots. Rows first, in one
