@@ -1217,10 +1217,8 @@ export const make = Effect.gen(function* () {
    * file over the cap is never read; the rest come back from one `git cat-file --batch` run. It
    * takes no repository gate: reading objects is safe beside a fetch.
    */
-  const readTexts = (ref: PullRequestRef, sha: string, paths: ReadonlyArray<string>) =>
+  const textsAt = (target: GitTarget, sha: string, paths: ReadonlyArray<string>, failure: string) =>
     Effect.gen(function* () {
-      const target = bare(repoPath(ref));
-      const failure = `prkit couldn't read this commit from its copy of ${repoName(ref)}.`;
       const asked = paths.filter(isTreePath);
       const listing =
         asked.length === 0
@@ -1238,6 +1236,13 @@ export const make = Effect.gen(function* () {
         files: paths.map((path) => ({ path, text: textAt(tree.get(path), blobs) })),
       } satisfies DiffTexts;
     });
+  const readTexts = (ref: PullRequestRef, sha: string, paths: ReadonlyArray<string>) =>
+    textsAt(
+      bare(repoPath(ref)),
+      sha,
+      paths,
+      `prkit couldn't read this commit from its copy of ${repoName(ref)}.`,
+    );
 
   /** Guides of local changes: snapshots of the user's own repository, in copies prkit owns. */
   const local = makeLocalCapture({
@@ -1250,6 +1255,7 @@ export const make = Effect.gen(function* () {
     serialized,
     ensureWorktree,
     snapshotOf: (repo, from, to) => snapshotOf(bare(repo), from, to),
+    readTexts: (repo, sha, paths, failure) => textsAt(bare(repo), sha, paths, failure),
     relation,
     commitsSince,
     worktreePath,

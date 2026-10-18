@@ -13,6 +13,7 @@ A guide of a repository's changes before a pull request exists, asked for from a
 - `local.tab`: `generate_local_guide` opens the review's tab without focus, after the PR tabs. The server keeps it (`open_local_reviews`), so a relaunch restores it; Remove drops the row with the review. Cmd+W and the tab's close button close it, Cmd+2..9 count PR tabs only.
 - `local.page`: the header (folder and branch, "Local changes", base, head mode, folder, captured time, left-out files), progress, the guide with every revision's files openable in full, Run again (the agent picker in its popover), Stop, failed with Retry, Remove behind a confirmation, and the removed state at a stale link.
 - `local.palette`: the palette's "Local reviews" group, newest first, opening the tab.
+- `local.scope`: the guide, its draft and its progress name the function, class, loop or branch above each hunk and show moved code, as a pull request's do. The new side comes from the review's own copy (`diffs.texts` with a `local` source), never the working tree.
 - `local.notify`: "Guide ready" or "Guide updated" with `<name> · <branch> · N chapters` as a toast, and as a macOS notification whose click opens the page (`pnpm smoke:desktop`).
 
 ## How to get to it (user POV)
@@ -52,6 +53,15 @@ Fake GitHub and the stand-in Claude only, so no fixture lock: `pnpm e2e run test
 - **Toast:** from Settings > Appearance, a CLI run with a change raises "Guide updated" with `widgets · feature/limits · 1 chapter`, whose Open shows the page.
 - **Remove:** ⋯ > "Remove local review…", then Remove in the `alertdialog`: the tab goes, the row goes, the palette shows no Local reviews group, and opening `/local/<key>` shows "This local review was removed" with Go to Inbox.
 - **Evidence:** every frame is saved with `app.screenshot` and copied to `.e2e/evidence/local-guides-ui/` as `local-<state>-<theme>.png`, with the CLI transcript. Frames avoid Settings > Outside agents and the Inbox footer, which print this machine's paths.
+
+### Scope and moved code (`tests/local-diff-scope.e2e.ts`)
+
+Fake GitHub and the stand-in Claude only, so no fixture lock: `pnpm e2e run tests/local-diff-scope.e2e.ts`. `localRepoFixture` takes the smarter-diff fixture's files (`tests/smarterDiffFixture.ts`): a long `Router` class changed in one line deep in `handle`, `normalizeUrl` moved into another file, and `formatRow` moved up its own file. The stand-in writes one chapter per file (`claude.split(true)`).
+
+- **Scope:** on the page, `getByRole("region", "src/router.js")`'s separator reads `export class Router { › … › for (const route of this.routes) { › if (match) {` (`scopesOf` in `tests/diffRows.ts`), and its title names every opener.
+- **Moved:** `src/report.js` has `button "Show src/report.js lines 1-6"` where `formatRow` landed.
+- **Snapshot, not the working tree:** after the guide is written, the journey renames `handle` in the working tree and reloads. The separator still names `async handle(req, res) {`.
+- **Evidence:** `local-scope-light`, `local-scope-dark`, `local-moved-light` and `local-moved-dark`.
 
 ## Gotchas
 

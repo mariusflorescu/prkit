@@ -1,10 +1,10 @@
 import { describe, test } from "@e2e-dev/web";
 import { expect } from "e2e";
-import * as Schema from "effect/Schema";
 
 import { setUpFakeClaude } from "./fakeClaude.ts";
 import { startInstance, stopFakeInstance } from "./fakeGitHub.ts";
-import { draftOn, type Fixtures, fixesTab, openSendToAgent, pickModel } from "./fixActions.ts";
+import { rowOf, scopesOf } from "./diffRows.ts";
+import { draftOn, fixesTab, openSendToAgent, pickModel } from "./fixActions.ts";
 import { FIXTURE_REPO, NEEDS_FIXTURE, prPath } from "./fixturePr.ts";
 import { emulateOsColorScheme, screenshotLightAndDark } from "./osColorScheme.ts";
 import {
@@ -18,64 +18,6 @@ import {
 const TURN_WAIT = 180_000;
 const MOVED_FROM_LINKS = new RegExp(`^Show src/links\\.js lines ${SMARTER_DIFF.cutAt}-\\d+$`);
 const MOVED_TO_URLS = new RegExp(`^Show src/urls\\.js lines ${SMARTER_DIFF.landedAt}-\\d+$`);
-
-const Row = Schema.NullOr(
-  Schema.Struct({
-    background: Schema.String,
-    selected: Schema.Boolean,
-    top: Schema.Number,
-    bottom: Schema.Number,
-    viewport: Schema.Number,
-  }),
-);
-const decodeRow = Schema.decodeSync(Schema.fromJsonString(Row));
-
-/** One code row of a card's diff, read inside its shadow root: its look and where it is. */
-const rowOf = async ({ browser }: Fixtures, path: string, side: "old" | "new", line: number) =>
-  decodeRow(
-    await browser.evaluate(
-      ({ path, type, line }) => {
-        const root = document.querySelector(`[data-path="${path}"] diffs-container`)?.shadowRoot;
-        const row = root?.querySelector(
-          `[data-line][data-line-type="${type}"][data-line="${line}"]`,
-        );
-        if (!row) return "null";
-        const box = row.getBoundingClientRect();
-        return JSON.stringify({
-          background: getComputedStyle(row).backgroundColor,
-          selected: row.hasAttribute("data-selected-line"),
-          top: box.top,
-          bottom: box.bottom,
-          viewport: window.innerHeight,
-        });
-      },
-      { path, type: side === "old" ? "change-deletion" : "change-addition", line },
-    ),
-  );
-
-/** The scope text in a card's separators, in order, and their heights. */
-const scopesOf = async ({ browser }: Fixtures, path: string) =>
-  Schema.decodeSync(
-    Schema.fromJsonString(
-      Schema.Array(
-        Schema.Struct({ text: Schema.String, title: Schema.String, height: Schema.Number }),
-      ),
-    ),
-  )(
-    await browser.evaluate((path) => {
-      const root = document.querySelector(`[data-path="${path}"] diffs-container`)?.shadowRoot;
-      return JSON.stringify(
-        [...(root?.querySelectorAll<HTMLElement>("[data-scope]") ?? [])].map((scope) => {
-          const separator = scope.closest<HTMLElement>("[data-separator]");
-          return {
-            text: scope.textContent ?? "",
-            title: separator?.title ?? "",
-            height: separator?.getBoundingClientRect().height ?? 0,
-          };
-        }),
-      );
-    }, path),
-  );
 
 const inView = (row: { top: number; bottom: number; viewport: number } | null) =>
   row !== null && row.top >= 0 && row.bottom <= row.viewport;

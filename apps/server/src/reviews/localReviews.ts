@@ -138,6 +138,9 @@ const decodeLatestCapture = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ capture: Schema.NullOr(Schema.fromJsonString(LocalCapture)) })),
 );
 const encodeSource = Schema.encodeSync(Schema.fromJsonString(LocalSource));
+const decodeHeads = Schema.decodeUnknownEffect(
+  Schema.Array(Schema.Struct({ head_sha: Schema.NullOr(Schema.String) })),
+);
 const decodeRevisionCommits = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ head_sha: Schema.String, merge_base_sha: Schema.String })),
 );
@@ -540,6 +543,20 @@ export const makeLocalReviews = (port: LocalPort, capture: LocalCaptureService) 
         return { content, sha } satisfies FileContents;
       }).pipe(Effect.catchTags({ ...dbFailures, RepoError: captureFailures.RepoError }));
 
+    /** The new side of changed files at an attempt's snapshot, for the scope above each hunk. */
+    const texts = (key: LocalReviewKey, attemptId: AttemptId, paths: ReadonlyArray<string>) =>
+      Effect.gen(function* () {
+        const rows = yield* sql`
+          SELECT a.head_sha FROM review_attempts a JOIN reviews r ON r.id = a.review_id
+          WHERE a.id = ${attemptId} AND r.pr_key = ${key} AND r.local IS NOT NULL`.pipe(
+          Effect.flatMap(decodeHeads),
+        );
+        const headSha = rows[0]?.head_sha ?? null;
+        if (headSha === null)
+          return yield* new GuideNotFoundError({ key, message: "This snapshot isn't ready yet." });
+        return yield* capture.texts(key, headSha, paths);
+      }).pipe(Effect.catchTags({ ...dbFailures, RepoError: captureFailures.RepoError }));
+
     const list = () =>
       port.locals.pipe(
         Effect.map((reviews) => reviews.map(toEntry)),
@@ -645,7 +662,7 @@ export const makeLocalReviews = (port: LocalPort, capture: LocalCaptureService) 
         }).pipe(Effect.catchTags(dbFailures)),
       );
 
-    return { keyOf, generate, get, retry, stop, remove, fileContents, list, watch, feed };
+    return { keyOf, generate, get, retry, stop, remove, fileContents, texts, list, watch, feed };
   });
 
 export type LocalReviews = Effect.Success<ReturnType<typeof makeLocalReviews>>;

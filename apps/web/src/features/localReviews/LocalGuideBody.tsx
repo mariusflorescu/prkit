@@ -49,7 +49,7 @@ export function LocalGuideBody({
           activity={snapshot.activity}
           subject="your changes"
           expectedFiles={3}
-          source={null}
+          source={{ _tag: "local", key: review.key, attemptId: snapshot.attempt.id }}
         />
       );
     case "failed":

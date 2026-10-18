@@ -17,9 +17,17 @@ export const handbook = (changes: Readonly<Record<number, string>> = {}) =>
  * branched from, a feature branch with one commit, then uncommitted, deleted, untracked
  * and ignored files. Its config names a clean filter that leaves a mark when it runs, so
  * a journey can prove prkit never runs anything the repository's config names. The base's
- * `docs/handbook.md` stays unchanged until a journey edits it.
+ * `docs/handbook.md` stays unchanged until a journey edits it. `files` adds a journey's own
+ * files to the base and changes them, uncommitted, on the branch.
  */
-export const localRepoFixture = (root: string, name = "widgets") => {
+export const localRepoFixture = (
+  root: string,
+  name = "widgets",
+  files: {
+    readonly base: Readonly<Record<string, string>>;
+    readonly head: Readonly<Record<string, string>>;
+  } = { base: {}, head: {} },
+) => {
   const repo = NodePath.join(root, name);
   const filterMark = NodePath.join(root, `${name}-filter-ran`);
   NodeFS.mkdirSync(repo, { recursive: true });
@@ -52,6 +60,7 @@ export const localRepoFixture = (root: string, name = "widgets") => {
   write("assets/logo.bin", Buffer.from([0, 1, 2, 3, 0, 255]));
   write("docs/handbook.md", handbook());
   NodeFS.symlinkSync("src/limits.ts", NodePath.join(repo, "limits-link"));
+  for (const [path, content] of Object.entries(files.base)) write(path, content);
   git(["add", "-A"]);
   git(["commit", "-m", "Base"]);
   const base = git(["rev-parse", "HEAD"]);
@@ -63,6 +72,7 @@ export const localRepoFixture = (root: string, name = "widgets") => {
   write("src/limits.ts", "export const limit = 2;\nexport const enabled = true;\n");
   NodeFS.rmSync(NodePath.join(repo, "src/retired.ts"));
   write("src/flags.ts", "export const flags = ['limits'];\n");
+  for (const [path, content] of Object.entries(files.head)) write(path, content);
   write("node_modules/ignored.js", "ignored\n");
   write(".gitattributes", "*.ts filter=mark\n");
   git(["config", "filter.mark.clean", `touch '${filterMark}'; cat`]);
