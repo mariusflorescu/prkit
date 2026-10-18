@@ -1,4 +1,3 @@
-import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeOs from "node:os";
@@ -7,7 +6,6 @@ import * as NodePath from "node:path";
 import { type Browser, describe, test } from "@e2e-dev/web";
 import { expect, type Screen, type TestFixtures } from "e2e";
 
-import { childEnv } from "../packages/contracts/src/childEnv.ts";
 import { type RunFile, repoRoot } from "../scripts/verify-run.ts";
 import { evidenceFolder, revealedLine } from "./askJourney.ts";
 import { startInstance, stopFakeInstance } from "./fakeGitHub.ts";
@@ -350,9 +348,7 @@ const journey = (agent: Agent) => async (page: Page) => {
     await ask(CONTAINED);
     await answered(CONTAINED);
     const checkouts = NodePath.join(run.home, "asks", "checkouts");
-    const askCheckouts = NodeFS.readdirSync(checkouts).map((name) =>
-      NodePath.join(checkouts, name),
-    );
+    await expect.poll(() => NodeFS.readdirSync(checkouts), { timeout: 15_000 }).toEqual([]);
     const containedId = String(questionRow(run.home, CONTAINED)?.id);
     const refusals = decisionsAfter(
       run.log,
@@ -363,15 +359,7 @@ const journey = (agent: Agent) => async (page: Page) => {
     const sessionAfter = sha256(guideSession);
     const asked = questionRows(run.home);
     const contained = {
-      askCheckouts: askCheckouts.length,
-      madeInAskCheckout: askCheckouts.filter((dir) => NodeFS.existsSync(NodePath.join(dir, MADE))),
       madeInReviewWorktree: NodeFS.existsSync(NodePath.join(worktree, MADE)),
-      askCheckoutStatus: askCheckouts.map((dir) =>
-        NodeChildProcess.execFileSync("git", ["-C", dir, "status", "--porcelain"], {
-          env: childEnv(process.env),
-          encoding: "utf8",
-        }),
-      ),
       refused: refusals.length > 0,
       sessionsChanged: sessions.some((session) => session !== review.session),
       guideSessionUnchanged: sessionBefore === sessionAfter,
@@ -385,10 +373,7 @@ const journey = (agent: Agent) => async (page: Page) => {
     note("sessions", { guide: review.session, questions: asked.map((row) => row.session ?? null) });
     note("containedAnswer", String(questionRow(run.home, CONTAINED)?.answer));
     expect(contained).toEqual({
-      askCheckouts: 1,
-      madeInAskCheckout: [],
       madeInReviewWorktree: false,
-      askCheckoutStatus: [""],
       refused: true,
       sessionsChanged: false,
       guideSessionUnchanged: true,
