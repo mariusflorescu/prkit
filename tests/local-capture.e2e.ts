@@ -158,8 +158,6 @@ test(
         };
       };
 
-      // A plain branch: a commit, then unstaged, staged, staged-then-edited, staged-then-undone,
-      // deleted, untracked, ignored and executable changes.
       const widgets = repository(root, "widgets", {
         ".gitignore": "dist/\n",
         "README.md": "Widgets\n",
@@ -180,11 +178,14 @@ test(
       widgets.write("notes.md", "Notes\n");
       NodeFS.rmSync(NodePath.join(widgets.repo, "src/retired.ts"));
       widgets.write("docs/limits.md", "# Limits\n");
+      widgets.write("docs/intent.md", "# Intent\n");
+      widgets.git(["add", "--intent-to-add", "docs/intent.md"]);
       widgets.write("dist/out.js", "built\n");
       NodeFS.chmodSync(NodePath.join(widgets.repo, "run.sh"), 0o755);
       const plain = guide(widgets.repo);
       expect(plain.files).toEqual(gitView(widgets.git));
       expect(plain.files).toEqual([
+        "added docs/intent.md",
         "added docs/limits.md",
         "added src/staged.ts",
         "modified README.md",
@@ -218,7 +219,6 @@ test(
       expect(renormalized.patchOf("notes.txt")).toContain("-one\r\n-two\r\n+one\n+two\n");
       expect(renormalized.patchOf("build.sh")).toContain("-echo one\r\n-echo two\r\n+echo one\n");
 
-      // The same through `core.autocrlf`, with no attributes at all.
       const autocrlf = repository(root, "autocrlf", {
         "README.md": "Line endings\n",
         "notes.txt": "one\r\ntwo\r\n",
@@ -239,8 +239,6 @@ test(
       expect(executable.files).toEqual(gitView(modes.git));
       expect(executable.patchOf("run.sh")).toContain("new mode 100755");
 
-      // A clean filter, then `git add --renormalize`: prkit runs no filter, so the file is left
-      // out and named, never read as unchanged.
       const filtered = repository(root, "filtered", {
         ".gitattributes": "*.dat filter=upper\n",
         "data.dat": "hello\n",

@@ -431,8 +431,9 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
   const copyObjects = (user: UserRepository, copy: string, roots: ReadonlyArray<string>) =>
     Effect.gen(function* () {
       const failure = "Couldn't copy your repository's objects into prkit's copy.";
-      const listed = yield* run(["rev-list", "--objects", "--no-object-names", ...roots], {
+      const listed = yield* run(["rev-list", "--objects", "--no-object-names", "--stdin"], {
         target: user,
+        input: `${roots.join("\n")}\n`,
       });
       if (listed.code !== 0) return yield* missingOr(listed.stderr, failure);
       const checked = yield* git(["cat-file", "--batch-check=%(objectname)"], {
@@ -563,10 +564,11 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
 
   /**
    * The ids `git add` gives `files`: line endings, `ident` and the like converted by the user's
-   * attributes, by git's own rules. git reads the user's work tree into an index of prkit's,
-   * HEAD's with the user's own entries for `staged`, since whether git converts a file's line
-   * endings depends on the entry it already has. It writes objects only to the copy, whose
-   * config names no filter command to run.
+   * attributes, by git's own rules. git reads the user's work tree into an index of prkit's:
+   * HEAD's, with `staged`, the user's own entries where they differ. git reads an attributes
+   * file missing from the work tree from the index, and whether it converts a file's line
+   * endings depends on the entry the file already has. It writes objects only to the copy,
+   * whose config names no filter command to run.
    */
   const addedShas = (input: {
     readonly user: UserRepository;
@@ -719,8 +721,12 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
       const staged = [...new Set(entries.map((entry) => entry.path))].filter(
         (file) => !tracked.has(file) && !listed.has(file),
       );
+      // The entry git reads for a path: stage 0, or in a conflict ours, then the base, then theirs.
+      const rank = ["3", "1", "2", "0"];
       const indexed = new Map(
-        entries.filter((entry) => entry.stage === "0").map((entry) => [entry.path, entry]),
+        entries
+          .toSorted((left, right) => rank.indexOf(left.stage) - rank.indexOf(right.stage))
+          .map((entry) => [entry.path, entry]),
       );
       const files = [
         ...[...tracked].filter(([, entry]) => entry.type !== "commit").map(([file]) => file),
@@ -833,25 +839,18 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
               ),
             );
       // The rest as `git add` stores them: line endings, `ident` and the like by git's own rules.
-      const readable = contents.filter((change) => !unread.has(change.path));
       const added = yield* addedShas({
         user,
         copy,
         scratch,
         identity,
         headTree: input.headTree,
-        files: readable.map((change) => change.path),
-        // Only entries of files HEAD has: a new file's may be an intent-to-add, with no object.
-        staged: readable.flatMap((change) => {
-          const entry = indexed.get(change.path);
-          const old = tracked.get(change.path);
-          return entry !== undefined &&
-            old !== undefined &&
-            entry.sha !== old.sha &&
-            (entry.mode === "100644" || entry.mode === "100755")
-            ? [entry]
-            : [];
-        }),
+        files: contents.filter((change) => !unread.has(change.path)).map((change) => change.path),
+        staged: [...indexed.values()].filter(
+          (entry) =>
+            (entry.mode === "100644" || entry.mode === "100755") &&
+            entry.sha !== tracked.get(entry.path)?.sha,
+        ),
         settings: [
           ...(attributesFile === null ? [] : ["-c", `core.attributesFile=${attributesFile}`]),
           ...(autocrlf === null ? [] : ["-c", `core.autocrlf=${autocrlf}`]),
