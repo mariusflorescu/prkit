@@ -52,7 +52,6 @@ const pickRepository = async ({ screen }: Pick<Fixtures, "screen">) => {
   });
 };
 
-/** The words of the two path editors: ignore rules and the "Always look closely at" paths. */
 const EDITOR_WORDS = {
   ignore: { item: "Rule", add: "Add rule", save: "Save ignore rules" },
   sensitive: { item: "Path", add: "Add path", save: "Save look-closely paths" },
@@ -71,7 +70,6 @@ const addRule = async (
   await expect(form.getByRole("button", words.save)).toBeHidden({ timeout: 15_000 });
 };
 
-/** Runs a capture in a narrow window, then gives the window its size back. */
 const atNarrowWidth = async (browser: Browser, capture: () => Promise<void>) => {
   const size = await browser.evaluate(() => ({
     width: window.innerWidth,

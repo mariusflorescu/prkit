@@ -24,8 +24,8 @@ export function RiskSignalChip({
   onFile: (path: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  // Opening a file moves focus to its card, so closing must not hand it back to the chip.
-  const opened = useRef(false);
+  // Opening a file moves focus to its card, so closing must not hand focus back to the chip.
+  const openedFile = useRef(false);
   const { label, text } = describeSignal(signal);
   if (signal._tag === "large")
     return (
@@ -35,7 +35,6 @@ export function RiskSignalChip({
     );
   const patternOf = (file: { readonly pattern: string; readonly scope: GuideScopeName }) =>
     `${file.pattern} (${SCOPE_LABELS[file.scope]})`;
-  // Look-closely files under the path that matched them; other signals just list theirs.
   const groups: ReadonlyArray<{ pattern: string | null; paths: ReadonlyArray<string> }> =
     signal._tag === "sensitive"
       ? [...new Set(signal.files.map(patternOf))].map((pattern) => ({
@@ -49,7 +48,7 @@ export function RiskSignalChip({
     <Popover
       open={open}
       onOpenChange={(next) => {
-        opened.current = false;
+        openedFile.current = false;
         setOpen(next);
       }}
     >
@@ -60,7 +59,7 @@ export function RiskSignalChip({
         width="lg"
         align="start"
         padding="compact"
-        finalFocus={() => !opened.current}
+        finalFocus={() => !openedFile.current}
         aria-label={label}
       >
         <div data-risk-signal-popup="">
@@ -76,7 +75,7 @@ export function RiskSignalChip({
                         type="button"
                         aria-label={`Open ${path}`}
                         onClick={() => {
-                          opened.current = true;
+                          openedFile.current = true;
                           setOpen(false);
                           onFile(path);
                         }}

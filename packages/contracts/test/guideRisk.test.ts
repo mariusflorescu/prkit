@@ -13,7 +13,7 @@ import {
 } from "../src/guideNormalize.ts";
 import aiStored from "./fixtures/vercel-ai-22182/stored.json" with { type: "json" };
 
-/** New-side lines 10-12. */
+/** A file whose hunk shows new-side lines 10-12. */
 const file = (path: string): DiffFile => ({
   path,
   previousPath: null,

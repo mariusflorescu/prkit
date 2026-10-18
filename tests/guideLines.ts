@@ -1,10 +1,14 @@
 import type { Browser } from "@e2e-dev/web";
 import type { Screen } from "e2e";
 
-/** Taps a file:line chip, then reads where its line landed 100 ms and 1.5 s later. */
+/**
+ * Taps a file:line chip, then reads where its line landed 100 ms and 1.5 s later. `within`
+ * narrows the chip to one region when the same line is linked from more than one place.
+ */
 export const lineOpener =
-  (screen: Screen, browser: Browser) => async (path: string, line: number) => {
-    await screen.getByRole("button", `Open ${path} line ${line}`).tap();
+  (screen: Screen, browser: Browser) =>
+  async (path: string, line: number, within: Pick<Screen, "getByRole"> = screen) => {
+    await within.getByRole("button", `Open ${path} line ${line}`).tap();
     return browser.evaluate(
       async (target: { path: string; line: number }) => {
         const read = () => {

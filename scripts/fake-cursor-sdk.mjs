@@ -188,7 +188,6 @@ const changedFiles = (prompt) => {
   });
 };
 
-/** The risk a one-chapter guide needs. A file under the reviewer's look-closely paths makes it at least medium. */
 const riskOf = (prompt, files) => {
   const level = prompt.includes("- Look closely:") ? "medium" : "low";
   return {

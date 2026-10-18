@@ -2,7 +2,6 @@ import { describeSignal, type RiskSignal, SCOPE_LABELS, signalFiles } from "@prk
 
 const LISTED_FILES = 20;
 
-/** What each check looks for, in the order the signals fire. */
 const CHECKED: Record<RiskSignal["_tag"], string> = {
   sensitive: "paths the reviewer always looks closely at",
   migration: "database migrations and schema files",
@@ -27,10 +26,7 @@ const filesOf = (signal: RiskSignal) => {
   ];
 };
 
-/**
- * The prompt's section on what prkit found in the reviewed files, and the log label for it.
- * The agent weighs these with what it reads; the reviewer sees them next to its level.
- */
+/** The prompt's section on what prkit found in the reviewed files, and the log label for it. */
 export const riskSignalLines = (signals: ReadonlyArray<RiskSignal>) => {
   const fired: ReadonlySet<string> = new Set(signals.map((signal) => signal._tag));
   const missing = Object.entries(CHECKED).flatMap(([tag, words]) =>

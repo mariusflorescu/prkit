@@ -113,8 +113,7 @@ export function GuideView({
     return owners;
   }, [guide.chapters]);
   const [jump, setJump] = useState<LineJump | null>(null);
-  // Revisions written before risk show none of it. A draft keeps the room from the start,
-  // so nothing moves when the agent rates it.
+  // A draft shows the risk card from the start, so nothing moves when the agent rates it.
   const rated =
     draft !== undefined ||
     guide.risk !== null ||

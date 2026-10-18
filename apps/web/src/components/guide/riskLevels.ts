@@ -10,7 +10,6 @@ export const RISK_LEVELS: Record<
   low: { label: "Low", meaning: "Nothing here needs a careful read." },
   medium: { label: "Medium", meaning: "Some parts need a careful read." },
   high: { label: "High", meaning: "Read this closely." },
-  // prkit's chapter of files the ignore rules skipped: the agent never read them.
   "not-reviewed": {
     label: "Not reviewed",
     meaning: "Your ignore rules skipped these files, so the agent didn't read them.",

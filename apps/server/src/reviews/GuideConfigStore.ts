@@ -32,8 +32,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import { GitHubApi } from "../github/GitHubApi.ts";
 
-/** Ignore rules and look-closely paths are stored the same way. */
-const IgnoreValue = Schema.Struct({
+const PathRulesValue = Schema.Struct({
   rules: Schema.Array(IgnoreRule),
   overrides: Schema.Array(GuideOverride),
 });
@@ -42,7 +41,7 @@ const FocusValue = Schema.Struct({
   overrides: Schema.Array(GuideOverride),
 });
 const GuidanceValue = Schema.Struct({ text: Schema.String, mode: GuidanceMode });
-const IgnoreJson = Schema.fromJsonString(IgnoreValue);
+const PathRulesJson = Schema.fromJsonString(PathRulesValue);
 const FocusJson = Schema.fromJsonString(FocusValue);
 const GuidanceJson = Schema.fromJsonString(GuidanceValue);
 
@@ -59,7 +58,7 @@ const RepositoryRow = Schema.Struct({
   name: Schema.String,
 });
 const decodeSections = Schema.decodeUnknownEffect(Schema.Array(SectionRow));
-const decodeIgnore = Schema.decodeEffect(IgnoreJson);
+const decodePathRules = Schema.decodeEffect(PathRulesJson);
 const decodeFocus = Schema.decodeEffect(FocusJson);
 const decodeGuidance = Schema.decodeEffect(GuidanceJson);
 const decodeRepositories = Schema.decodeUnknownEffect(Schema.Array(RepositoryRow));
@@ -199,7 +198,7 @@ export const make = Effect.gen(function* () {
               return yield* new GuideConfigConflict({ message: CONFLICT });
             rules.push({ id: rule.id ?? (yield* newId), pattern: rule.pattern });
           }
-          return yield* Schema.encodeEffect(IgnoreJson)({ rules, overrides: edit.overrides });
+          return yield* Schema.encodeEffect(PathRulesJson)({ rules, overrides: edit.overrides });
         }
         case "focus": {
           const known = new Set(current.focus.areas.map((area) => area.id));
@@ -244,11 +243,11 @@ export const make = Effect.gen(function* () {
           ignore:
             ignore === undefined
               ? emptyScopeConfig.ignore
-              : { version: ignore.version, ...(yield* decodeIgnore(ignore.value)) },
+              : { version: ignore.version, ...(yield* decodePathRules(ignore.value)) },
           sensitive:
             sensitive === undefined
               ? emptyScopeConfig.sensitive
-              : { version: sensitive.version, ...(yield* decodeIgnore(sensitive.value)) },
+              : { version: sensitive.version, ...(yield* decodePathRules(sensitive.value)) },
           focus:
             focus === undefined
               ? emptyScopeConfig.focus

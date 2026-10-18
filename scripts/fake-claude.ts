@@ -203,7 +203,6 @@ const changedFiles = (prompt: string) => {
   });
 };
 
-/** The risk the stand-in's guide needs. A file under the reviewer's look-closely paths makes it at least medium. */
 const riskOf = (prompt: string) => {
   const level = prompt.includes("- Look closely:") ? "medium" : "low";
   return {

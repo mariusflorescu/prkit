@@ -86,8 +86,7 @@ const MIGRATION_FOLDERS = new Set([
   "versions",
 ]);
 const SCHEMA_FILES = new Set(["schema.prisma", "schema.rb", "structure.sql"]);
-/** Migrations are numbered or timestamped: 0016_x.py, 20260728145403_x.rb, V3__x.sql. */
-const NUMBERED = /^(v?\d+[_.-]|\d{8,})/iu;
+const MIGRATION_PREFIX = /^(v?\d+[_.-]|\d{8,})/iu;
 const isMigration = (path: string) => {
   if (isTest(path)) return false;
   const parts = path.split("/");
@@ -95,14 +94,15 @@ const isMigration = (path: string) => {
   if (SCHEMA_FILES.has(name) || /(^|\/)prisma\/schema\/[^/]+\.prisma$/u.test(path)) return true;
   const folder = parts.findIndex((part) => MIGRATION_FOLDERS.has(part.toLowerCase()));
   if (folder === -1 || folder === parts.length - 1)
-    return name.endsWith(".sql") && NUMBERED.test(name);
-  return parts.slice(folder + 1).some((part) => NUMBERED.test(part)) || name === "migration.sql";
+    return name.endsWith(".sql") && MIGRATION_PREFIX.test(name);
+  return (
+    parts.slice(folder + 1).some((part) => MIGRATION_PREFIX.test(part)) || name === "migration.sql"
+  );
 };
 
 const CI =
   /^(\.github\/workflows\/|\.github\/actions\/|\.circleci\/|\.buildkite\/|\.gitlab-ci\.yml$|\.gitlab\/ci\/|Jenkinsfile|azure-pipelines\.ya?ml$|\.travis\.yml$|bitbucket-pipelines\.yml$|\.drone\.yml$|\.woodpecker)/u;
 
-/** The added and removed lines of a text patch. */
 const changedLines = (file: DiffFile) => {
   const added: Array<string> = [];
   const removed: Array<string> = [];
@@ -115,11 +115,7 @@ const changedLines = (file: DiffFile) => {
   return { added, removed };
 };
 
-/**
- * Dependency manifests, each with what a dependency line looks like in it, so a changed
- * script or version field doesn't count. Null: the file is only a dependency list.
- */
-const MANIFESTS: ReadonlyArray<{ readonly name: RegExp; readonly entry: RegExp | null }> = [
+const MANIFESTS: ReadonlyArray<{ readonly name: RegExp; readonly entry: RegExp }> = [
   {
     name: /^(package|composer)\.json$/u,
     entry:
@@ -133,10 +129,6 @@ const MANIFESTS: ReadonlyArray<{ readonly name: RegExp; readonly entry: RegExp |
     name: /^(Cargo|pyproject)\.toml$/u,
     entry: /^\s*[\w.-]+\s*=\s*(\{.*version|"(\^|~|>|<|=|\d))|^\s*"[\w.[\]-]+\s*(>=|==|~=|<|>|\^)/u,
   },
-  {
-    name: /^(go\.mod|Gemfile|Pipfile|Podfile|requirements[^/]*\.txt|constraints[^/]*\.txt)$/u,
-    entry: null,
-  },
   { name: /\.gemspec$/u, entry: /add_(runtime_|development_)?dependency/u },
   { name: /^pom\.xml$/u, entry: /<(version|artifactId)>/u },
   {
@@ -147,12 +139,14 @@ const MANIFESTS: ReadonlyArray<{ readonly name: RegExp; readonly entry: RegExp |
   { name: /^mix\.exs$/u, entry: /\{:\w+,\s*"/u },
   { name: /\.csproj$|^Directory\.Packages\.props$/u, entry: /PackageReference|PackageVersion/u },
 ];
+/** Files that list nothing but dependencies, so any change to them is one. */
+const DEPENDENCY_LISTS =
+  /^(go\.mod|Gemfile|Pipfile|Podfile|requirements[^/]*\.txt|constraints[^/]*\.txt)$/u;
 const changesDependencies = (file: DiffFile) => {
-  if (isLockfile(file.path)) return true;
+  if (isLockfile(file.path) || DEPENDENCY_LISTS.test(basename(file.path))) return true;
   const manifest = MANIFESTS.find((candidate) => candidate.name.test(basename(file.path)));
   if (manifest === undefined) return false;
   const { entry } = manifest;
-  if (entry === null) return true;
   const { added, removed } = changedLines(file);
   return [...added, ...removed].some((line) => entry.test(line));
 };

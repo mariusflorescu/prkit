@@ -110,7 +110,6 @@ export async function loadFixture(name: string) {
   if (fixture.stored) return { fixture, guide: readStored(guideJson), snapshot, warnings: [] };
   const guide = readGuide(guideJson);
   const { reviewed, skipped } = projectSnapshot(effectiveRules(fixture.ignore), snapshot);
-  // Guides written before risk are checked without an attempt's context, as they were then.
   const context =
     guide.risk === undefined
       ? null

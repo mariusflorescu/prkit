@@ -322,10 +322,7 @@ const decodeClaimed = Schema.decodeUnknownEffect(
 );
 const encodeStatus = Schema.encodeSync(Schema.fromJsonString(ReviewStatus));
 const encodeGuide = Schema.encodeSync(Schema.fromJsonString(NormalizedGuide));
-/**
- * The previous guide as the agent reads it: indented, so no line is too long to read, and
- * without prkit's signals, which the prompt gives fresh.
- */
+/** The previous guide as the agent reads it: indented, so no line is too long to read. */
 const encodeReadableGuide = Schema.encodeSync(
   Schema.fromJsonString(NormalizedGuide.mapFields(Struct.omit(["signals"])), { space: 2 }),
 );

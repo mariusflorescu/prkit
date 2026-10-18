@@ -357,22 +357,21 @@ describe("look-closely paths", () => {
     repository: null,
     pullRequest: null,
   };
-  /** What these settings hashed to before look-closely paths existed. */
-  const hashBefore = "5bb868e86613e6b1";
+  const hashBeforeLookClosely = "5bb868e86613e6b1";
 
   it("keeps every settings hash from before them until one is on", () => {
-    expect(resolveGuideConfig(layers).hash).toBe(hashBefore);
+    expect(resolveGuideConfig(layers).hash).toBe(hashBeforeLookClosely);
     expect(
       resolveGuideConfig({
         ...layers,
         repository: scope({ close: [["r-auth", "src/auth/"]] }),
         pullRequest: scope({ closeOverrides: [off("r-auth")] }),
       }).hash,
-    ).toBe(hashBefore);
+    ).toBe(hashBeforeLookClosely);
     expect(
       resolveGuideConfig({ ...layers, repository: scope({ close: [["r-auth", "src/auth/"]] }) })
         .hash,
-    ).not.toBe(hashBefore);
+    ).not.toBe(hashBeforeLookClosely);
   });
 
   it("resolve like ignore rules across scopes, and match a rename by either path", () => {

@@ -16,7 +16,8 @@ import { emulateOsColorScheme, screenshotLightAndDark } from "./osColorScheme.ts
 import { pickGuideRepository } from "./pickers.ts";
 import { setUpRealClaude } from "./realClaude.ts";
 
-const KEY = "github.com/budget/fixtures#9";
+const PR = 9;
+const KEY = `github.com/budget/fixtures#${PR}`;
 const EVIDENCE = NodePath.join(repoRoot, ".e2e", "evidence", "guide-risk");
 const decodeGuide = Schema.decodeUnknownSync(Schema.fromJsonString(NormalizedGuide));
 
@@ -49,12 +50,10 @@ const SESSION = [
   "",
 ].join("\n");
 
-/** Three pull requests that should come out low, medium and high, as PR 9 of the fake GitHub. */
 const CASES: ReadonlyArray<{
   readonly name: string;
   readonly level: RiskLevel;
   readonly signals: ReadonlyArray<string>;
-  /** A Global "Always look closely at" path saved before the guide is written. */
   readonly lookClosely: string | null;
   readonly files: { readonly base: Record<string, string>; readonly head: Record<string, string> };
 }> = [
@@ -217,7 +216,7 @@ const CASES: ReadonlyArray<{
 ];
 
 const guideUrl = (url: string) =>
-  `${url}/pr/github.com/budget/fixtures/9?account=${encodeURIComponent("github.com/budget-test")}&tab=guide`;
+  `${url}/pr/github.com/budget/fixtures/${PR}?account=${encodeURIComponent("github.com/budget-test")}&tab=guide`;
 
 const AUTH_FILES = CASES.find((entry) => entry.name === "auth-migration")?.files;
 
@@ -438,7 +437,7 @@ describe("a real Claude guide rates how carefully to read", { tags: ["agent"] },
             await expect.poll(focused).toBe(reason.chapter);
             if (reason.at === null) continue;
             await overview.scrollIntoView();
-            const opened = await openLine(reason.at.path, reason.at.line);
+            const opened = await openLine(reason.at.path, reason.at.line, row);
             expect(opened.late).toMatchObject({ open: true, selected: [reason.at.line] });
           }
           for (const chapter of guide.chapters) {
@@ -449,13 +448,17 @@ describe("a real Claude guide rates how carefully to read", { tags: ["agent"] },
                 `[data-chapter-id="${chapter.id}"] [data-chapter-meta] [data-risk-tag]`,
               ),
             ).toBeVisible();
-            for (const reason of chapter.risk?.reasons ?? []) {
+            const items = browser.locator(
+              `[data-chapter-id="${chapter.id}"] [data-chapter-risk-reasons] li`,
+            );
+            for (const [index, reason] of (chapter.risk?.reasons ?? []).entries()) {
+              const item = items.nth(index);
+              await item.scrollIntoView();
               if (reason.line !== null) {
-                await section.scrollIntoView();
-                const opened = await openLine(reason.file, reason.line);
+                const opened = await openLine(reason.file, reason.line, item);
                 expect(opened.late).toMatchObject({ open: true, selected: [reason.line] });
               } else {
-                await section.getByRole("button", `Open ${reason.file}`).tap();
+                await item.getByRole("button", `Open ${reason.file}`).tap();
                 await expect
                   .poll(() =>
                     browser.evaluate(() =>

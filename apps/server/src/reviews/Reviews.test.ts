@@ -133,7 +133,6 @@ const FLOW = {
   ],
   edges: [{ from: "shorten", to: "check" }],
 };
-/** A chapter's rating: a guide stored under the attempt's frozen facts has one for each. */
 const rated = (file: string) => ({
   level: "low" as const,
   reasons: [{ text: "A plain check.", file }],
@@ -456,7 +455,6 @@ const ALREADY_STORED =
 const NO_REJECTED =
   "prkit has no rejected guide from this attempt to revise. Call submit_guide with the whole guide.";
 const SECOND: Guide = { ...GUIDE, summary: ["A second guide for the same attempt."] };
-/** One chapter and no rating, for an attempt that froze prkit's signals. */
 const UNRATED: Guide = {
   summary: ["Checks a link against its limits before storing it."],
   chapters: [
@@ -469,7 +467,6 @@ const UNRATED: Guide = {
     },
   ],
 };
-/** What `UNRATED` needs to be accepted. */
 const RATING: GuidePatch = {
   risk: { level: "low", reasons: [{ text: "A plain check.", chapter: "limits" }] },
   chapters: [{ ...UNRATED.chapters[0], risk: rated("src/limits.js") }],
