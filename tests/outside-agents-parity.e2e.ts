@@ -483,7 +483,6 @@ test(
           await ok("pin_answer", { ...pr, questionId: again.questionId, pinned: false }),
         ).pinned,
       ).toBe(false);
-      // Answers come from the guide's own conversation, so only the review's account asks or reads them.
       const elsewhere = { ...pr, accountId: second.accountId };
       await refusal("read_pull_request_questions", elsewhere, `go through ${accountId}`);
       await refusal(
