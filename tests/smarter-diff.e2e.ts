@@ -165,20 +165,6 @@ describe("smarter diffs on a refactor", { skip: NEEDS_FIXTURE }, () => {
         for (const opener of SMARTER_DIFF.routerScope) expect(scoped?.title).toContain(opener);
         await screenshotLightAndDark(app, browser, "files-scope");
 
-        // Expanding the lines above shows the inner openers, so the row keeps only the rest.
-        await browser.locator(`[data-path="${SMARTER_DIFF.router}"] [data-scope]`).tap();
-        await expect
-          .poll(
-            async () => (await scopesOf(fixtures, SMARTER_DIFF.router)).map((scope) => scope.text),
-            {
-              timeout: 15_000,
-            },
-          )
-          .not.toContain(
-            `${SMARTER_DIFF.routerScope[0]} › … › ${SMARTER_DIFF.routerScope[2]} › ${SMARTER_DIFF.routerScope[3]}`,
-          );
-        await app.screenshot("files-scope-expanded");
-
         await screen.getByRole("button", "Split").tap();
         await expect(urls.getByRole("button", MOVED_FROM_LINKS)).toBeVisible();
         await urls.scrollIntoView();
@@ -186,12 +172,28 @@ describe("smarter diffs on a refactor", { skip: NEEDS_FIXTURE }, () => {
         // Split reads new lines from its right column and writes the scope in its left one.
         await router.scrollIntoView();
         await expect
+          .poll(
+            async () => (await scopesOf(fixtures, SMARTER_DIFF.router)).map((scope) => scope.text),
+            {
+              timeout: 15_000,
+            },
+          )
+          .toEqual([
+            `${SMARTER_DIFF.routerScope[0]} › … › ${SMARTER_DIFF.routerScope[2]} › ${SMARTER_DIFF.routerScope[3]}`,
+          ]);
+        await app.screenshot("files-scope-split");
+        await screen.getByRole("button", "Unified").tap();
+
+        // The row expands like any other; once the lines above show, their openers are on the
+        // page and the row with its scope goes.
+        await router.scrollIntoView();
+        await browser.locator(`[data-path="${SMARTER_DIFF.router}"] [data-scope]`).tap();
+        await expect
           .poll(async () => (await scopesOf(fixtures, SMARTER_DIFF.router)).length, {
             timeout: 15_000,
           })
-          .toBe(1);
-        await app.screenshot("files-scope-split");
-        await screen.getByRole("button", "Unified").tap();
+          .toBe(0);
+        await app.screenshot("files-scope-expanded");
         await browser.setViewport({ width: 800, height: 800 });
         await urls.scrollIntoView();
         await app.screenshot("files-moved-narrow");
@@ -239,12 +241,14 @@ describe("smarter diffs on a refactor", { skip: NEEDS_FIXTURE }, () => {
         // A fix that moves `describeLink` into the report and changes a line deep in `handle`.
         claude.edits(FIX_EDITS);
         await screen.getByRole("navigation", "Pull request tabs").getByRole("link", "Files").tap();
-        await screen.getByRole("region", SMARTER_DIFF.router).scrollIntoView();
+        // A draft on a file that shows from its first line; the stand-in's fix writes the same
+        // files whatever the comment says.
+        await screen.getByRole("region", SMARTER_DIFF.urls).scrollIntoView();
         await draftOn(
           fixtures,
-          SMARTER_DIFF.routerChange,
-          "Say why private is enough.",
-          SMARTER_DIFF.router,
+          SMARTER_DIFF.addedAt,
+          "Keep fbclid out on purpose?",
+          SMARTER_DIFF.urls,
         );
         const dialog = await openSendToAgent(fixtures, 1);
         await pickModel(fixtures, dialog, "sonnet", /Claude Sonnet/);
