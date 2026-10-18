@@ -46,7 +46,7 @@ const STATS = {
 };
 const UNSAFE = {
   action: "Shorten `javascript:alert(1)`.",
-  expect: "A 400, and no new link.",
+  expect: "A 400, and nothing new at http://localhost:3000/<code>.",
 };
 
 const ticks = (home: string) =>
@@ -218,6 +218,9 @@ test(
       await expect(box(1)).toHaveAttribute("aria-checked", "true");
       await expect(box(2)).toHaveAttribute("aria-checked", "false");
       await expect(box(3)).toHaveAttribute("aria-checked", "false");
+      await expect(
+        plan.getByText("A 400, and nothing new at http://localhost:3000/<code>."),
+      ).toBeVisible();
       await plan.scrollIntoView();
       await screenshotLightAndDark(app, browser, "manual-check-r2-kept");
 
