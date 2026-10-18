@@ -5,22 +5,27 @@ import { ChapterRoadmap } from "./ChapterRoadmap";
 import { FlowCard } from "./FlowCard";
 import { FocusAreasSection } from "./FocusAreasSection";
 import { FocusList } from "./FocusList";
+import { RiskOverview } from "./RiskOverview";
 import { SummaryPanel } from "./SummaryPanel";
 import { indexFlowNodes, layoutFlow } from "./flowLayout";
 
 export function GuideOverview({
   guide,
   files,
+  rated,
   onChapter,
   onLine,
+  onFile,
   prUrl,
   prDescription,
   pendingChapterIds,
 }: {
   guide: NormalizedGuide;
   files: ReadonlyMap<string, DiffFile>;
+  rated: boolean;
   onChapter: (id: string) => void;
   onLine: (at: DiffLineRef) => void;
+  onFile: (path: string) => void;
   prUrl?: string | undefined;
   prDescription?: string | undefined;
   pendingChapterIds: ReadonlySet<string>;
@@ -44,6 +49,14 @@ export function GuideOverview({
   }, [flow, guide.chapters]);
   return (
     <div data-guide-overview="">
+      <RiskOverview
+        guide={guide}
+        rated={rated}
+        onChapter={onChapter}
+        onLine={onLine}
+        onFile={onFile}
+        prUrl={prUrl}
+      />
       <div data-overview-grid="" data-layout={layout}>
         <SummaryPanel guide={guide} prUrl={prUrl} />
         {flow && (
@@ -60,6 +73,7 @@ export function GuideOverview({
       <ChapterRoadmap
         chapters={guide.chapters}
         files={files}
+        rated={rated}
         onChapter={onChapter}
         pendingChapterIds={pendingChapterIds}
       />
