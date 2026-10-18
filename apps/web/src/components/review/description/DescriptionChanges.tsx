@@ -14,24 +14,28 @@ const options: FileDiffOptions<undefined, undefined> = {
   unsafeCSS: DIFF_CSS,
 };
 
+// GitHub keeps a description without a final newline. Shown as text, that difference is
+// noise: it would mark the last unchanged line as removed and added again.
+const asLines = (text: string) => (text === "" || text.endsWith("\n") ? text : `${text}\n`);
+
 /** Exactly what saving changes in the description, as a diff of its Markdown. */
 export function DescriptionChanges({ before, after }: { before: string; after: string }) {
   const fileDiff = useMemo(
     () =>
       parseDiffFromFile(
-        { name: "description.md", contents: before },
-        { name: "description.md", contents: after },
+        { name: "description.md", contents: asLines(before) },
+        { name: "description.md", contents: asLines(after) },
       ),
     [before, after],
   );
   if (before === after)
     return (
-      <p role="status" data-description-unchanged="">
+      <p role="status" className="text-xs text-muted-foreground">
         Nothing would change: the description already says this.
       </p>
     );
   return (
-    <div data-description-changes="">
+    <div data-description-changes="" className="overflow-hidden rounded-lg border border-border">
       <FileDiff fileDiff={fileDiff} options={options} className="block [color-scheme:inherit]" />
     </div>
   );

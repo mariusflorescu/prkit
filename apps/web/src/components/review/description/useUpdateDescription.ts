@@ -29,12 +29,15 @@ export const useUpdateDescription = (detail: PullRequestDetail) => {
         toastManager.add({ type: "success", title: "Description put back" });
         return;
       }
-      toastManager.add({
+      const toast = toastManager.add({
         type: "success",
         title: "Description updated on GitHub",
         actionProps: {
           children: "Undo",
-          onClick: () => update.mutate({ before: change.after, after: change.before, undo: true }),
+          onClick: () => {
+            toastManager.close(toast);
+            update.mutate({ before: change.after, after: change.before, undo: true });
+          },
         },
       });
     },

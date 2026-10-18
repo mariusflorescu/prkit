@@ -65,11 +65,16 @@
  *                                       request event that long ago (default 0); asking twice adds the event only
  *   POST unrequest?pr=<n>&login=<l>|team=<slug>   takes the request back, as a submitted review does; events stay
  *   POST unreadable?pr=<n>              the waits read answers a null node and a FORBIDDEN error for it from now on
- *   POST fail?kind=<kind>&status=<s>&times=<n>
+ *   POST fail?kind=<kind>&status=<s>&times=<n>&message=<m>
  *                                       the next n requests counted as `kind` (say `graphql:review-waits`)
- *                                       get that status (default 502) and `{}`, counted as `<kind>:failed`;
- *                                       n defaults to 1, 0 clears it, and reset-stats leaves it alone
+ *                                       get that status (default 502) and `{}`, or `{"message": m}` with a
+ *                                       message, counted as `<kind>:failed`; a refused write changes
+ *                                       nothing. n defaults to 1, 0 clears it, and reset-stats leaves it alone
  *   POST behind?pr=<n>&by=<k>           its base gained k commits, so Update branch applies
+ *   POST describe?pr=<n>                its author or description, as JSON `{ "author", "body" }`,
+ *                                       either one (bumps updatedAt). PATCH on the pull request
+ *                                       changes its title and description too, counted as
+ *                                       `rest:pull-edit`
  *   GET  pull?pr=<n>                    its node id, head sha and workflow run ids, for assertions
  *   GET  writes                         every mutation and REST write, with its input
  *   POST limit?resource=graphql|core&seconds=<s>   the limit is used up until then
@@ -132,6 +137,14 @@ const decodeFiles = Schema.decodeUnknownSync(
 const decodeTexts = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.Record(Schema.String, Schema.String)),
 );
+const decodeDescribe = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      author: Schema.optionalKey(Schema.String),
+      body: Schema.optionalKey(Schema.String),
+    }),
+  ),
+);
 let nextComment = 10_000;
 /** Rate limit state per resource, like GitHub's own windows. */
 const quotas = {
@@ -141,7 +154,7 @@ const quotas = {
 type Resource = keyof typeof quotas;
 const latency: Record<Resource, number> = { core: 0, graphql: 0 };
 
-const failures = new Map<string, { status: number; times: number }>();
+const failures = new Map<string, { status: number; times: number; message: string | null }>();
 
 const remaining = (resource: Resource) =>
   Date.now() < quotas[resource].limitedUntil ? 0 : Math.max(0, LIMIT - quotas[resource].used);
@@ -186,7 +199,12 @@ const failedByControl = (response: NodeHttp.ServerResponse, resource: Resource, 
   failure.times--;
   if (failure.times <= 0) failures.delete(kind);
   count(`${kind}:failed`, failure.status, 0);
-  send(response, resource, failure.status, "{}");
+  send(
+    response,
+    resource,
+    failure.status,
+    failure.message === null ? "{}" : encodeJson({ message: failure.message }),
+  );
   return true;
 };
 
@@ -220,7 +238,11 @@ const control = (url: URL, method: string, text: string, response: NodeHttp.Serv
     const kind = url.searchParams.get("kind") ?? "";
     const times = Number(url.searchParams.get("times") ?? "1");
     if (times > 0)
-      failures.set(kind, { status: Number(url.searchParams.get("status") ?? "502"), times });
+      failures.set(kind, {
+        status: Number(url.searchParams.get("status") ?? "502"),
+        times,
+        message: url.searchParams.get("message"),
+      });
     else failures.delete(kind);
     return answer({ ok: true, kind, times });
   }
@@ -374,6 +396,13 @@ const control = (url: URL, method: string, text: string, response: NodeHttp.Serv
     unreadable.add(pull.number);
     return answer({ ok: true });
   }
+  if (name === "describe" && method === "POST" && pull !== undefined) {
+    const given = decodeDescribe(text);
+    if (given.author !== undefined) pull.author = given.author;
+    if (given.body !== undefined) pull.body = given.body;
+    pull.updatedAt = Date.now();
+    return answer({ ok: true });
+  }
   if (name === "behind" && pull !== undefined) {
     pull.behindBy = Number(url.searchParams.get("by") ?? "1");
     return answer({ ok: true });
@@ -493,6 +522,7 @@ const server = NodeHttp.createServer((request, response) => {
       request.headers.authorization ?? "",
     );
     if (failedByControl(response, "core", answer.kind)) return;
+    if ("commit" in answer) answer.commit();
     const cost = answer.status === 304 ? 0 : 1;
     quotas.core.used += cost;
     count(answer.kind, answer.status, cost);

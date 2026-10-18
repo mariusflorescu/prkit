@@ -52,16 +52,19 @@ export interface Pull {
   size: { additions: number; deletions: number; files: number };
   requested: Array<Reviewer>;
   reviewEvents: Array<ReviewEvent>;
+  /** Its description; null answers `Body of fixture <number>`. */
+  body: string | null;
 }
 /** What a pull request starts with for what the inbox shows of it; each call gives it lists of its own. */
 export const pullDefaults = (): Pick<
   Pull,
-  "createdAt" | "size" | "requested" | "reviewEvents"
+  "createdAt" | "size" | "requested" | "reviewEvents" | "body"
 > => ({
   createdAt: start,
   size: { additions: 1, deletions: 0, files: 1 },
   requested: [],
   reviewEvents: [],
+  body: null,
 });
 export const unreadable = new Set<number>();
 export const pulls = new Map<number, Pull>();
