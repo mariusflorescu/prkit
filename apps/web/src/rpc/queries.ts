@@ -13,6 +13,7 @@ import {
   type ReviewKey,
   type FixerFeedEntry,
   type FixerTurnId,
+  type LocalReviewKey,
 } from "@prkit/contracts";
 import {
   getAgentCatalog,
@@ -45,6 +46,8 @@ import {
   listReviewThreads,
   getFixer,
   getFixerDiff,
+  getLocalReview,
+  listLocalReviews,
   getPushAccess,
   getScriptAccess,
   listFixerSettings,
@@ -152,6 +155,21 @@ export const reviewQuery = (key: PullRequestKey) =>
     staleTime: Infinity,
     retry: false,
   });
+/** Kept current by `localReviews.watch`; see `useLocalReviewWatch`. */
+export const localReviewQuery = (key: LocalReviewKey) =>
+  queryOptions({
+    queryKey: ["localReview", key],
+    queryFn: () => getLocalReview(key),
+    staleTime: Infinity,
+    retry: false,
+  });
+/** Every local review, latest changed first; `localReviews.feed` keeps it current. */
+export const localReviewsQuery = queryOptions({
+  queryKey: ["localReviews"],
+  queryFn: listLocalReviews,
+  staleTime: Infinity,
+  retry: false,
+});
 /** A revision never changes once written. */
 export const guideQuery = (key: ReviewKey, revision: number) =>
   queryOptions({

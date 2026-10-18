@@ -5,12 +5,15 @@ import type {
   UpdateChannel,
 } from "@prkit/contracts";
 
-/** A PR's tab to open from a notification click: Guide, unless it says Fixes. */
-export interface GuideTarget {
-  readonly key: string;
-  readonly accountId: string;
-  readonly tab?: "guide" | "fixes";
-}
+/** What a notification click opens: a PR's Guide (or Fixes) tab, or a local review's page. */
+export type GuideTarget =
+  | {
+      readonly kind: "pull-request";
+      readonly key: string;
+      readonly accountId: string;
+      readonly tab?: "guide" | "fixes";
+    }
+  | { readonly kind: "local"; readonly key: string };
 
 /** The app's own updates, run by the desktop shell. Every call answers with the state after it. */
 export interface DesktopUpdatesBridge {
@@ -31,9 +34,11 @@ export interface PrkitDesktopBridge {
   readonly isDesktop: true;
   readonly onOpenSettings: (callback: () => void) => () => void;
   /** A macOS notification; clicking it focuses the window and calls `onOpenGuide`. */
-  readonly notify: (
-    notification: GuideTarget & { readonly title: string; readonly body: string },
-  ) => void;
+  readonly notify: (notification: {
+    readonly target: GuideTarget;
+    readonly title: string;
+    readonly body: string;
+  }) => void;
   readonly onOpenGuide: (callback: (target: GuideTarget) => void) => () => void;
   /** Tells the shell the chosen theme, so the title bar, menus and Dock icon follow it. */
   readonly setTheme: (theme: ThemePreference) => void;

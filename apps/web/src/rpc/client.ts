@@ -51,6 +51,12 @@ import {
   type ScopeConfig,
   type ReviewFeedEvent,
   type ReviewKey,
+  type LocalGenerateResult,
+  type LocalReviewEntry,
+  type LocalReviewFeedEvent,
+  type LocalReviewKey,
+  type LocalReviewSnapshot,
+  type LocalReviewWatchEvent,
   type ReviewSnapshot,
   type StackGuidesResult,
   type ReviewWatchEvent,
@@ -79,6 +85,7 @@ import {
 } from "@prkit/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Stream from "effect/Stream";
@@ -147,6 +154,7 @@ const isRpcClientError = Schema.is(RpcClientError.RpcClientError);
 
 const call = <A, E>(
   use: (client: WsClient["Service"]) => Effect.Effect<A, E | RpcClientError.RpcClientError>,
+  timeout: Duration.Input = CALL_TIMEOUT,
 ): Promise<A> => {
   const current = getRuntime();
   if (current === null) return Promise.reject(new MissingSessionTokenError());
@@ -154,7 +162,7 @@ const call = <A, E>(
   // declares reach TanStack Query as they are, so the UI can explain them.
   return current.runPromise(
     WsClient.use(use).pipe(
-      Effect.timeout(CALL_TIMEOUT),
+      Effect.timeout(timeout),
       Effect.catchIf(
         (error): error is RpcClientError.RpcClientError | Cause.TimeoutError =>
           isRpcClientError(error) || Cause.isTimeoutError(error),
@@ -543,6 +551,66 @@ export const watchReviewFeed = (onEvent: (event: ReviewFeedEvent) => void): (() 
   const fiber = current.runFork(
     WsClient.use((client) =>
       client[WS_METHODS.reviewsFeed]({}).pipe(
+        Stream.runForEach((event) => Effect.sync(() => onEvent(event))),
+      ),
+    ).pipe(Effect.ignore, Effect.andThen(Effect.sleep("2 seconds")), Effect.forever),
+  );
+  return () => {
+    current.runFork(Fiber.interrupt(fiber));
+  };
+};
+
+// Guides of local changes: no account, and nothing reaches GitHub.
+export const listLocalReviews = (): Promise<ReadonlyArray<LocalReviewEntry>> =>
+  call((client) => client[WS_METHODS.localReviewsList]({}));
+export const getLocalReview = (key: LocalReviewKey): Promise<LocalReviewSnapshot> =>
+  call((client) => client[WS_METHODS.localReviewsGet]({ key }));
+/** Run again: a new snapshot of the folder, which can take a while for a large working tree. */
+export const generateLocalReview = (
+  key: LocalReviewKey,
+  input: { readonly agent?: AgentSelection; readonly regenerate?: boolean } = {},
+): Promise<LocalGenerateResult> =>
+  call((client) => client[WS_METHODS.localReviewsGenerate]({ key, ...input }), "3 minutes");
+export const stopLocalReview = (key: LocalReviewKey): Promise<LocalReviewSnapshot> =>
+  call((client) => client[WS_METHODS.localReviewsStop]({ key }));
+export const retryLocalReview = (key: LocalReviewKey): Promise<LocalReviewSnapshot> =>
+  call((client) => client[WS_METHODS.localReviewsRetry]({ key }));
+export const removeLocalReview = (key: LocalReviewKey): Promise<void> =>
+  call((client) => client[WS_METHODS.localReviewsRemove]({ key }).pipe(Effect.asVoid));
+export const getLocalFileContents = (
+  key: LocalReviewKey,
+  revision: number,
+  path: string,
+  side: FileSide,
+): Promise<FileContents> =>
+  call((client) => client[WS_METHODS.localReviewsFileContents]({ key, revision, path, side }));
+/** Like `watchReview`: a snapshot first on every subscription, then updates, then `removed`. */
+export const watchLocalReview = (
+  key: LocalReviewKey,
+  onEvent: (event: LocalReviewWatchEvent) => void,
+): (() => void) => {
+  const current = getRuntime();
+  if (current === null) return () => {};
+  const fiber = current.runFork(
+    WsClient.use((client) =>
+      client[WS_METHODS.localReviewsWatch]({ key }).pipe(
+        Stream.runForEach((event) => Effect.sync(() => onEvent(event))),
+      ),
+    ).pipe(Effect.ignore, Effect.andThen(Effect.sleep("2 seconds")), Effect.forever),
+  );
+  return () => {
+    current.runFork(Fiber.interrupt(fiber));
+  };
+};
+/** Every local review for the whole app, opening with the full index on each subscription. */
+export const watchLocalReviewFeed = (
+  onEvent: (event: LocalReviewFeedEvent) => void,
+): (() => void) => {
+  const current = getRuntime();
+  if (current === null) return () => {};
+  const fiber = current.runFork(
+    WsClient.use((client) =>
+      client[WS_METHODS.localReviewsFeed]({}).pipe(
         Stream.runForEach((event) => Effect.sync(() => onEvent(event))),
       ),
     ).pipe(Effect.ignore, Effect.andThen(Effect.sleep("2 seconds")), Effect.forever),

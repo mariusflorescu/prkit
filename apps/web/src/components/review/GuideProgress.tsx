@@ -42,7 +42,8 @@ export function GuideProgress({
   subject: string;
   /** How many file rows to sketch until the attempt lists them. */
   expectedFiles: number;
-  stop: { readonly pending: boolean; readonly error: Error | null; readonly run: () => void };
+  /** Absent when the page around it has its own Stop. */
+  stop?: { readonly pending: boolean; readonly error: Error | null; readonly run: () => void };
   /** Where the draft's scope lines read the new side; null reads none. */
   source: DiffSource | null;
   prUrl?: string;
@@ -75,14 +76,14 @@ export function GuideProgress({
           })}
           label={progress.label}
           startedAt={attempt.startedAt}
-          stopping={stop.pending}
-          onStop={stop.run}
+          stopping={stop?.pending ?? false}
+          {...(stop === undefined ? {} : { onStop: stop.run })}
         />
         <ProgressBar fraction={progress.fraction} label={progress.label} />
         {attempt.startedBy !== null && (
           <p className="text-xs text-muted-foreground">Started from {attempt.startedBy}</p>
         )}
-        {stop.error && (
+        {stop?.error && (
           <p role="alert" className="text-xs text-error-foreground">
             {stop.error.message}{" "}
             <Button variant="link" size="xs" onClick={stop.run}>

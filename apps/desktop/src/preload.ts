@@ -2,11 +2,14 @@ import type { DesktopUpdateState, ThemePreference, UpdateChannel } from "@prkit/
 import { DesktopUpdateIpc } from "@prkit/contracts/desktopUpdateIpc";
 import { contextBridge, ipcRenderer } from "electron";
 
-interface GuideTarget {
-  readonly key: string;
-  readonly accountId: string;
-  readonly tab?: "guide" | "fixes";
-}
+type GuideTarget =
+  | {
+      readonly kind: "pull-request";
+      readonly key: string;
+      readonly accountId: string;
+      readonly tab?: "guide" | "fixes";
+    }
+  | { readonly kind: "local"; readonly key: string };
 
 // Shape mirrors PrkitDesktopBridge in apps/web/src/lib/desktop.ts.
 contextBridge.exposeInMainWorld("prkitDesktop", {
@@ -17,7 +20,11 @@ contextBridge.exposeInMainWorld("prkitDesktop", {
     ipcRenderer.on("prkit:open-settings", listener);
     return () => ipcRenderer.removeListener("prkit:open-settings", listener);
   },
-  notify: (notification: GuideTarget & { readonly title: string; readonly body: string }) => {
+  notify: (notification: {
+    readonly target: GuideTarget;
+    readonly title: string;
+    readonly body: string;
+  }) => {
     ipcRenderer.send("prkit:notify", notification);
   },
   setTheme: (theme: ThemePreference) => {
