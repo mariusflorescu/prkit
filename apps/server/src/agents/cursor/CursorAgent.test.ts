@@ -719,11 +719,10 @@ describe("Cursor turns", () => {
 const runRunner = async (name: string) => {
   const input = await turnInput(name, { _tag: "read-only", tmpDir: `${root}/tmp-${name}` });
   return new Promise<{ readonly code: number | null; readonly stdout: string }>((resolve) => {
-    const child = NodeChildProcess.spawn(
-      process.execPath,
-      [new URL("./runner.ts", import.meta.url).pathname],
-      { cwd: input.cwd, env: { PATH: process.env.PATH, HOME: `${root}/${name}-home` } },
-    );
+    const child = NodeChildProcess.spawn(process.execPath, [runner], {
+      cwd: input.cwd,
+      env: { PATH: process.env.PATH, HOME: `${root}/${name}-home` },
+    });
     let stdout = "";
     child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
     child.on("close", (code) => resolve({ code, stdout }));
