@@ -69,6 +69,12 @@
   scroll-padding-bottom: var(--pr-covered-bottom, 0px);
   scrollbar-gutter: stable;
 }
+/* A length, so readingLine reads the open dock's max() in pixels rather than as text. */
+@property --pr-covered-bottom {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
 /* What the Ask dock covers at the bottom of the guide; a diff line scrolled to stops above it. */
 [data-pr-scroll]:has([data-ask-dock="closed"]) {
   --pr-covered-bottom: 56px;

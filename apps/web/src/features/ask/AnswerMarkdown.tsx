@@ -19,8 +19,8 @@ const components: Components = {
 };
 
 /**
- * An answer as the PR's own markdown reads (full GFM, no HTML), with `path:line` references
- * to `files` linked to that line of the guide's diff.
+ * An answer in full GFM, with tags shown as the agent wrote them (a `<T>` it names stays) and
+ * `path:line` references to `files` linked to that line of the guide's diff.
  */
 export const AnswerMarkdown = memo(function AnswerMarkdown({
   text,
@@ -40,11 +40,7 @@ export const AnswerMarkdown = memo(function AnswerMarkdown({
   };
   return (
     <div className="pr-markdown" onClick={open}>
-      <Markdown
-        skipHtml
-        remarkPlugins={[remarkGfm, [remarkCodeRefs, { files }]]}
-        components={components}
-      >
+      <Markdown remarkPlugins={[remarkGfm, [remarkCodeRefs, { files }]]} components={components}>
         {text}
       </Markdown>
     </div>
