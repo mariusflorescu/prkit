@@ -278,7 +278,7 @@ export const normalizeFlow = (
     return normalizeBehavior(raw, raw.rows, chapterIds, snapshot, mode, context, report);
   if (!isGraph) {
     report.errors.push(
-      "`flow` needs a graph (`nodes` and `edges`) or a behavior diff (`rows`). Send one, or leave `flow` out if neither helps.",
+      "`flow` needs a graph (`nodes` and `edges`) or a behavior diff (`rows`). Send one, or if neither helps, call submit_guide again with the whole guide and no `flow`.",
     );
     return null;
   }

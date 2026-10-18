@@ -293,7 +293,7 @@ describe("agent correction messages", () => {
       guide: flowGuide({ title: "Change" }),
       snapshot: flowSnapshot,
       errors: [
-        "`flow` needs a graph (`nodes` and `edges`) or a behavior diff (`rows`). Send one, or leave `flow` out if neither helps.",
+        "`flow` needs a graph (`nodes` and `edges`) or a behavior diff (`rows`). Send one, or if neither helps, call submit_guide again with the whole guide and no `flow`.",
       ],
     },
     {
