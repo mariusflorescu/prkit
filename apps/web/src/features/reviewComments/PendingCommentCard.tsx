@@ -19,6 +19,7 @@ import { DiffSnippet } from "./DiffSnippet";
 import { storePending } from "./reviewCommentsCache";
 import { OUTDATED_WHY, rangeLabel, suggestionLabel } from "./reviewCommentPresentation";
 import { useReviewCommentsStore } from "./reviewCommentsStore";
+import { useOpenForm } from "./useOpenForm";
 
 /**
  * A draft that goes out with the review, where it sits on the diff on screen. A moved one
@@ -37,6 +38,7 @@ export function PendingCommentCard({
   const client = useQueryClient();
   const store = storePending(client, pr.key, pr.accountId);
   const [editing, setEditing] = useState(false);
+  useOpenForm(pr.key, editing);
   const moving = useReviewCommentsStore((state) => state.moving?.id === comment.id);
   const startMove = useReviewCommentsStore((state) => state.startMove);
   const stopMove = useReviewCommentsStore((state) => state.stopMove);

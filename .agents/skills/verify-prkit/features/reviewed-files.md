@@ -46,4 +46,4 @@ Preconditions:
 - On the fake's PR 9 the Files tab reads only `src/limits.ts` from the fake while the guide reads the local git diff, whose `src/change-0.ts` patch has no match there. Don't compare Files and Guide on that PR; the fixture test does it on real data.
 - The fake's files are one line each, so nothing scrolls on PR 1: `r` with nothing focused ticks the first card.
 - Clearing session storage before a relaunch also clears the PR's remembered inner tab; open Files by its link or URL.
-- `j` and `k` in the PR view measure chapters from `[data-guide-scroll]`, which does not scroll there: `j` goes to the first chapter and `k` does nothing. `tests/reviewed-guide.e2e.ts` records each press in `.e2e/evidence/reviewed-progress/chapter-keys.json` without failing.
+- `j` and `k` measure chapters from the reading line under the pinned header, the same answer the chapter rail shows ([chapter-rail.md](./chapter-rail.md)); `tests/reviewed-guide.e2e.ts` also records each press in `.e2e/evidence/reviewed-progress/chapter-keys.json`.

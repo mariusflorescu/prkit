@@ -199,7 +199,7 @@ const layerHandlers = WsRpcGroup.toLayer(
       [WS_METHODS.guideSettingsGet]: () => guideSettings.get(),
       [WS_METHODS.guideSettingsUpdate]: (patch) => guideSettings.update(patch),
       [WS_METHODS.appearanceGet]: () => appearance.get(),
-      [WS_METHODS.appearanceUpdate]: ({ theme }) => appearance.update(theme),
+      [WS_METHODS.appearanceUpdate]: (change) => appearance.update(change),
       [WS_METHODS.guideConfigScope]: ({ scope }) => guideConfig.scope(scope),
       [WS_METHODS.guideConfigPullRequest]: ({ key, accountId }) =>
         guideConfig.forPullRequest(key, accountId),

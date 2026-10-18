@@ -20,6 +20,14 @@ export type FakeNote = {
   text: string;
 };
 
+export type FakeChapter = {
+  title: string;
+  kind?: "core" | "supporting" | "data" | "config" | "tests" | "docs" | "generated";
+  files: ReadonlyArray<string>;
+  /** The chapter's level; the stand-in rates the others alike. */
+  risk?: "low" | "medium" | "high";
+};
+
 const Prompt = Schema.fromJsonString(
   Schema.Struct({ prompt: Schema.String, context: Schema.NullOr(Schema.String) }),
 );
@@ -28,8 +36,8 @@ const Prompt = Schema.fromJsonString(
  * The stand-in Claude Code of scripts/fake-claude.ts, in a folder of its own: pass `file` to
  * `verify-app start --claude`. `hold` keeps its next turns writing until `release`,
  * `failing` makes them end with an error instead of a guide, `notes` gives its guides line
- * notes, `split` gives each file of their guides a chapter of its own, `chapters` splits them
- * into named chapters, `edits` has its next fixes write files, and `plant` has its next fixes
+ * notes, `fileNotes` file notes, `split` gives each file of their guides a chapter of its own,
+ * `chapters` splits them into named chapters (with a kind and level when given), `edits` has its next fixes write files, and `plant` has its next fixes
  * and resolutions leave something behind (scripts/fake-claude.ts lists what).
  */
 export const setUpFakeClaude = (name: string) => {
@@ -54,8 +62,10 @@ export const setUpFakeClaude = (name: string) => {
     failing: (on: boolean) => flag("fail", on),
     notes: (notes: Record<string, ReadonlyArray<FakeNote>>) =>
       NodeFS.writeFileSync(NodePath.join(dir, "notes"), JSON.stringify(notes)),
+    fileNotes: (notes: Record<string, string>) =>
+      NodeFS.writeFileSync(NodePath.join(dir, "file-notes"), JSON.stringify(notes)),
     split: (on: boolean) => flag("split", on),
-    chapters: (chapters: ReadonlyArray<{ title: string; files: ReadonlyArray<string> }>) =>
+    chapters: (chapters: ReadonlyArray<FakeChapter>) =>
       NodeFS.writeFileSync(NodePath.join(dir, "chapters"), JSON.stringify(chapters)),
     /** Whole files, by path in the checkout, that the next fixes write. */
     edits: (files: Record<string, string>) =>

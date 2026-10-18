@@ -1,0 +1,36 @@
+# Guide notes on Files
+
+People who skip the guide still get its notes. On the Files tab, the latest accepted guide's line notes sit under their lines and its file notes at the top of their files, each with a quiet `Guide` label, but only where they still apply to GitHub's diff at the head: a line note lands where its row and three rows around it still read the same (`placeNote`), and a file note only while GitHub's change of the file is the one the guide read. Question and risk notes keep `Add as comment`, which makes the same draft the Guide tab would. One toolbar toggle hides or shows them, and the choice survives a relaunch. A quiet line above the list says when the guide was written for an older commit and how many notes no longer match, when a newer guide is ready, or when the notes couldn't load. Notes never move under the reader on their own: the tab keeps the revision it took until the reader asks for the newer one.
+
+## Sub-features
+
+- `files-notes` draws placed notes with `[data-guide-note]` labelled `Guide question`, `Guide risk` or `Guide note`, and the file note in `[data-file-diff-note]` after a `Guide` label. The card header counts placed risks and questions. prkit's own "Skipped by your ignore rules" chapter adds nothing to Files.
+- `files-notes-toggle` is `button "Hide guide notes"` / `button "Show guide notes"` (pressed when shown) in the tab row, present once the PR has an accepted guide. Hidden notes are not read at all. The choice is stored by the server as `appearance.guideNotesOnFiles` in `settings`; a missing or damaged value reads as shown.
+- `files-notes-comment` opens the composer at the note's line on GitHub's diff (`textbox "Comment on line 19"`). The draft carries the note's identity, so `In your review.` shows under the same note on the Guide tab too, and the other way round. A draft whose lines changed since, so it waits below the diff, reads `In your review, on lines that changed since. It waits below the diff.`
+- `files-notes-older` says `Guide notes come from r1, written for an older commit. They show only where the code still reads the same.`, then `3 no longer match and are hidden.`, then `prkit is updating the guide.` while a new revision is being written. On a current guide with notes GitHub's diff can't show: `1 guide note is hidden: GitHub's diff doesn't show its line now.`
+- `files-notes-newer` keeps the revision the tab took and says `A newer guide is ready.` with `button "Show its notes"` once another is accepted; the notes change only once that guide was read, and a failed read toasts `Couldn't load the newer guide's notes` and keeps the old ones.
+- `files-notes-writing`: while a new comment, an edit or a reply is open in the PR's diffs, the notes on screen hold still, since the diff keys its inline content by position and a change would lose the words. Hiding says `Guide notes hide once your comment is done.`, showing or a first guide says `Guide notes show once your comment is done.`, and a newer guide says `Its notes show once your comment is done.`
+- `files-notes-states`: the first paint waits for the notes, so they never push a diff down; notes turned on later show `Loading guide notes...`; a failed read shows `Couldn't load the guide's notes.` with the server's words and `Retry`, and the diffs still render.
+
+## How to get to it (user POV)
+
+- Open a PR with an accepted guide and choose `Files`.
+
+## Driving it with e2e
+
+Preconditions:
+
+- `pnpm build` ran after the last change. `tests/files-guide-notes.e2e.ts` starts its own instance on the fake GitHub with the stand-in Claude (`claude.notes`, `claude.fileNotes`, `claude.hold`) and the local git fixture, so it needs no fixture repository and spends no subscription. It serves `fake.files(9, ...)` from `git.patch(9, path)` so Files and the guide read the same change.
+
+- **Placed.** After `Generate guide` writes r1, Files shows three `Guide question` notes and one `Guide risk` under `src/limits.ts`, the file note, `3 questions` and `1 risk` in the header, the toggle pressed, and the hidden line for the `src/change-0.ts` note GitHub doesn't list.
+- **Comment.** `Add as comment, question on line 3` on Files opens `textbox "Comment on line 3"` with the note's words; Cmd+Enter stores one `pending_comments` row with a `note_key`. The Guide tab's same note reads `In your review.` and carries no `Guide` label.
+- **Hide and relaunch.** Tap `Hide guide notes`: no notes, no file note, no line. Stop the instance with `keepHome`, check `SELECT value FROM settings WHERE key = 'appearance.guideNotesOnFiles'` is `false`, start again: still hidden. `Show guide notes` brings them back.
+- **Older guide.** Hold the stand-in and push code with four lines above and one noted line changed. Files places the brace question at line 19, keeps the old-side risk, drops the changed line's note and the file note, says the older line with `3 no longer match and are hidden.` and `prkit is updating the guide.`, and the slug note's draft follows its code to line 7 and still reads `In your review.` under the note. Commenting the brace note opens `Comment on line 19`; with new words typed, `Hide guide notes` says the notes hide once the comment is done and leaves the words, and `Show guide notes` takes that back.
+- **Newer guide.** Release the stand-in: r2 lands, the notes stay r1's, and `A newer guide is ready.` offers `Show its notes`. Tapping it shows r2's notes (line 14 back) with the file note, and the brace note still reads `In your review.`
+- **Proof.** `pnpm e2e run tests/files-guide-notes.e2e.ts --output .e2e/proof/<name>` saves `files-notes`, `files-note-composer`, `files-notes-older`, `files-notes-older-moved` and `files-notes-newer` in light and dark, and `files-notes-hidden`.
+
+## Gotchas
+
+- e2e's roles have no `note`; find notes by `[data-guide-note]` and their `aria-label`, under the file's `[data-path]`.
+- Wait for a push by the card's stat (`+14 -1`): the diff's lines live in Pierre's shadow root.
+- Post `fake.files` before `fake.gitHead`, or the first read of the new head can get the old files.

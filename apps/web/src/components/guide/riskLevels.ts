@@ -25,5 +25,8 @@ export const fileLabel = (paths: ReadonlyArray<string>) => (path: string) =>
     : basename(path);
 
 /** A chapter's tag: its own level, or "Not reviewed" on prkit's skipped chapter of a rated guide. */
-export const chapterRisk = (chapter: GuideChapter, rated: boolean) =>
+export const chapterRisk = (
+  chapter: GuideChapter,
+  rated: boolean,
+): RiskLevel | "not-reviewed" | null =>
   chapter.risk?.level ?? (rated && chapter.id === SKIPPED_CHAPTER_ID ? "not-reviewed" : null);

@@ -3,6 +3,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { create } from "zustand";
 
+import { type FileFilter, NO_FILE_FILTER } from "~/features/pullRequest/fileFilter";
 import {
   FIRST_SETTINGS_SECTION,
   SETTINGS_SECTIONS,
@@ -11,7 +12,11 @@ import {
 
 export const PullRequestTab = Schema.Literals(["conversation", "files", "guide", "fixes"]);
 export type PullRequestTab = typeof PullRequestTab.Type;
-type ViewMemory = { tab: PullRequestTab; scroll: Partial<Record<PullRequestTab, number>> };
+type ViewMemory = {
+  tab: PullRequestTab;
+  scroll: Partial<Record<PullRequestTab, number>>;
+  filesFilter: FileFilter;
+};
 
 /**
  * The Settings tab: whether it is in the strip, the section it shows, and the PR tab it was
@@ -52,10 +57,14 @@ type Session = {
   failed: { command: WorkspaceCommand; message: string } | null;
   rememberTab: (key: PullRequestKey, tab: PullRequestTab) => void;
   rememberScroll: (key: PullRequestKey, tab: PullRequestTab, top: number) => void;
+  rememberFilesFilter: (key: PullRequestKey, filter: FileFilter) => void;
   setPaletteOpen: (open: boolean, mode?: "all" | "open-pr") => void;
   rememberClosed: (tab: ClosedTab) => void;
   setSettingsTab: (change: Partial<SettingsTab>) => void;
 };
+const viewOf = (state: Session, key: PullRequestKey): ViewMemory =>
+  state.views[key] ?? { tab: "files", scroll: {}, filesFilter: NO_FILE_FILTER };
+
 export const useWorkspaceSession = create<Session>((set) => ({
   closed: [],
   views: {},
@@ -65,14 +74,22 @@ export const useWorkspaceSession = create<Session>((set) => ({
   failed: null,
   rememberTab: (key, tab) =>
     set((state) => ({
-      views: { ...state.views, [key]: { tab, scroll: state.views[key]?.scroll ?? {} } },
+      views: { ...state.views, [key]: { ...viewOf(state, key), tab } },
     })),
   rememberScroll: (key, tab, top) =>
     set((state) => ({
       views: {
         ...state.views,
-        [key]: { tab, scroll: { ...state.views[key]?.scroll, [tab]: top } },
+        [key]: {
+          ...viewOf(state, key),
+          tab,
+          scroll: { ...state.views[key]?.scroll, [tab]: top },
+        },
       },
+    })),
+  rememberFilesFilter: (key, filesFilter) =>
+    set((state) => ({
+      views: { ...state.views, [key]: { ...viewOf(state, key), filesFilter } },
     })),
   setPaletteOpen: (paletteOpen, paletteMode = "all") => set({ paletteOpen, paletteMode }),
   rememberClosed: (tab) => set((state) => ({ closed: [...state.closed, tab].slice(-30) })),

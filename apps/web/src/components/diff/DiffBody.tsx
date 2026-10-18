@@ -64,6 +64,7 @@ export function DiffBody({
   loadContents,
   trailingLines,
   prUrl,
+  fromGuide = false,
 }: {
   file: DiffFile;
   annotations: ReadonlyArray<DiffAnnotation>;
@@ -71,6 +72,8 @@ export function DiffBody({
   loadContents?: LoadContents | undefined;
   trailingLines?: number | undefined;
   prUrl?: string | undefined;
+  /** Labels the line notes as the guide's, on a diff that isn't the guide's. */
+  fromGuide?: boolean | undefined;
 }) {
   const { diffStyle, wrap } = useDiffPrefs();
   const moves = useFileMoves(file.path);
@@ -202,7 +205,13 @@ export function DiffBody({
   const renderAnnotation = useCallback(
     ({ metadata }: DiffLineAnnotation<Pin>) =>
       metadata.kind === "note" ? (
-        <GuideNote text={metadata.note.text} tone={metadata.note.tone} prUrl={prUrl} pinned>
+        <GuideNote
+          text={metadata.note.text}
+          tone={metadata.note.tone}
+          prUrl={prUrl}
+          pinned
+          fromGuide={fromGuide}
+        >
           {noteFooter?.(metadata.note, metadata.index)}
         </GuideNote>
       ) : metadata.kind === "move" ? (
@@ -210,7 +219,7 @@ export function DiffBody({
       ) : (
         renderComment?.(metadata.point)
       ),
-    [prUrl, renderComment, noteFooter],
+    [prUrl, renderComment, noteFooter, fromGuide],
   );
   const selection = comments?.selection;
   const composing = selection ? `${pointKey(selection.start)},${pointKey(selection.end)}` : "";

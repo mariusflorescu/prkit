@@ -1,13 +1,13 @@
 import type { DiffFile, PullRequestDetail, PullRequestFiles as Files } from "@prkit/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderTreeIcon } from "lucide-react";
-import { useLayoutEffect, useRef, useState } from "react";
+import { BookOpenTextIcon, FolderTreeIcon } from "lucide-react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 import {
   DiffControls,
   DiffList,
   FileDiffCard,
-  FileTree,
+  type DiffListHandle,
   type LoadContents,
 } from "~/components/diff";
 import { useReviewedKey } from "~/components/diff/useReviewedKey";
@@ -15,9 +15,14 @@ import { Skeleton } from "~/components/ui/skeleton";
 import { TabActions } from "~/components/TabActions";
 import { ToolbarIconButton } from "~/components/ToolbarIconButton";
 import { ListError } from "~/components/ListError";
+import { FilesGuideNotesStatus } from "~/features/guideNotes/FilesGuideNotesStatus";
+import type { FileGuideNotes } from "~/features/guideNotes/placeGuideNotes";
+import { useFilesGuideNotes } from "~/features/guideNotes/useFilesGuideNotes";
+import { useGuideNotesOnFiles } from "~/features/guideNotes/useGuideNotesOnFiles";
 import { ReviewedCount } from "~/features/reviewedFiles/ReviewedCount";
 import { useReviewedFiles, versionOf } from "~/features/reviewedFiles/useReviewedFiles";
 import { ReviewCommentsAlerts } from "~/features/reviewComments/ReviewCommentsAlerts";
+import { useReviewCommentsStore, writingOn } from "~/features/reviewComments/reviewCommentsStore";
 import { useDiffComments } from "~/features/reviewComments/useDiffComments";
 import {
   pendingCommentsQuery,
@@ -26,9 +31,14 @@ import {
   reviewThreadsQuery,
 } from "~/rpc/queries";
 import { readViewMemory } from "~/features/workspace/sessionStore";
+import { FilesTreePanel } from "./FilesTreePanel";
 import { usePrViewStore } from "./prViewStore";
 import { orderDiffFiles } from "./pullRequestFileOrder";
+import { useFilesFilter } from "./useFilesFilter";
+import { useFilterKey } from "./useFilterKey";
 import "./pullRequest.css";
+
+const noNotes: FileGuideNotes["annotations"] = [];
 
 const toDiffFiles = (files: Files["files"]): DiffFile[] =>
   files.map((file) => {
@@ -73,6 +83,7 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
   const { showTree, toggleTree } = usePrViewStore();
   const [activePath, setActivePath] = useState<string>();
   const root = useRef<HTMLDivElement>(null);
+  const list = useRef<DiffListHandle>(null);
   const files = diffFiles(query.data);
   // Drafts and threads load with the files, so comments never push the diff down later.
   const pending = useQuery(pendingCommentsQuery(detail.key, detail.accountId));
@@ -80,18 +91,38 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
   // Marks load with the files too, so a reviewed file never opens and then folds.
   const reviewed = useReviewedFiles(detail.key, detail.accountId);
   useReviewedKey(root, reviewed.status === "ready" ? "[data-file-diff-card]" : null);
+  const [filter, setFilter] = useFilesFilter(detail.key);
+  const revealTree = useCallback(() => {
+    const view = usePrViewStore.getState();
+    if (!view.showTree) view.toggleTree();
+  }, []);
+  const filterRequest = useFilterKey(root, revealTree);
+  const notesShown = useGuideNotesOnFiles();
+  const writing = useReviewCommentsStore(writingOn(detail.key));
+  const guideNotes = useFilesGuideNotes(detail, query.data, notesShown.shown, writing);
+  const notes = guideNotes._tag === "ready" ? guideNotes.notes : null;
   const commentsFor = useDiffComments(detail, files, {
     commitSha: query.data?.headSha ?? detail.headSha,
     threads: true,
     outdated: true,
-    guideRevision: null,
+    notes: { on: "files", notes },
   });
+  // Notes that come with the first paint never push a diff down; ones turned on later say so
+  // above the list instead.
+  const [painted, setPainted] = useState(false);
+  const waiting =
+    query.isPending ||
+    pending.isPending ||
+    threads.isPending ||
+    reviewed.status === "pending" ||
+    notesShown.pending ||
+    (query.isSuccess && !painted && guideNotes._tag === "loading");
+  if (query.isSuccess && !waiting && !painted) setPainted(true);
   useLayoutEffect(() => {
     const viewport = root.current?.closest<HTMLDivElement>("[data-pr-scroll]");
-    if (viewport && query.isSuccess)
-      viewport.scrollTop = readViewMemory(detail.key)?.scroll.files ?? 0;
-  }, [detail.key, query.isSuccess]);
-  if (query.isPending || pending.isPending || threads.isPending || reviewed.status === "pending")
+    if (viewport && painted) viewport.scrollTop = readViewMemory(detail.key)?.scroll.files ?? 0;
+  }, [detail.key, painted]);
+  if (waiting)
     return (
       <div aria-busy="true" aria-label="Loading files" className="space-y-4 p-4">
         <Skeleton className="h-7 w-64" />
@@ -143,16 +174,27 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
       );
     return { oldContents: oldFile.content, newContents: newFile.content };
   };
-  const select = (path: string) => {
+  // The list opens a folded card, keeps it aligned while diffs above it draw, and focuses it,
+  // so `r` ticks the file just opened.
+  const open = (path: string) => {
     setActivePath(path);
-    const index = files.findIndex((file) => file.path === path);
-    root.current?.querySelector(`#pr-file-${index}`)?.scrollIntoView({ block: "start" });
+    list.current?.goTo({ path, range: null });
   };
   return (
     <div data-pr-files="" className="flex min-h-0 flex-col" ref={root}>
       <TabActions>
         <ReviewedCount reviewed={reviewed} files={files} />
         <DiffControls />
+        {guideNotes._tag !== "none" && (
+          <ToolbarIconButton
+            label={notesShown.shown ? "Hide guide notes" : "Show guide notes"}
+            pressed={notesShown.shown}
+            disabled={notesShown.saving}
+            onClick={() => notesShown.set(!notesShown.shown)}
+          >
+            <BookOpenTextIcon />
+          </ToolbarIconButton>
+        )}
         <ToolbarIconButton
           label={showTree ? "Hide file tree" : "Show file tree"}
           pressed={showTree}
@@ -162,6 +204,7 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
         </ToolbarIconButton>
       </TabActions>
       <ReviewCommentsAlerts pr={detail} />
+      <FilesGuideNotesStatus state={guideNotes} />
       {snapshot.changedFiles > files.length && (
         <p
           role="status"
@@ -185,6 +228,7 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
         <div className="flex min-h-0 flex-1 items-start">
           <div data-pr-files-scroll="" className="min-w-0 flex-1">
             <DiffList
+              ref={list}
               files={files}
               source={{
                 _tag: "pullRequest",
@@ -203,6 +247,9 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
                   loadContents={loadContents}
                   prUrl={detail.url}
                   comments={commentsFor(file)}
+                  annotations={notes?.files.get(file.path)?.annotations ?? noNotes}
+                  note={notes?.files.get(file.path)?.note ?? null}
+                  fromGuide
                   reviewed={
                     reviewed.status === "ready"
                       ? {
@@ -220,11 +267,14 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
               data-pr-files-tree=""
               className="w-[min(20rem,40%)] min-w-36 shrink-0 overflow-auto border-l border-border/60 bg-background"
             >
-              <FileTree
+              <FilesTreePanel
                 files={files}
-                order="reading"
-                {...(activePath === undefined ? {} : { activePath })}
-                onSelect={select}
+                stateOf={reviewed.status === "ready" ? reviewed.stateOf : null}
+                filter={filter}
+                onFilter={setFilter}
+                activePath={activePath}
+                onOpen={open}
+                focusRequest={filterRequest}
               />
             </aside>
           )}

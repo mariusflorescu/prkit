@@ -7,6 +7,7 @@ import {
   inOneHunk,
   type Landed,
   type LinePoint,
+  notePoint,
   type Outdated,
   type PendingComment,
   place,
@@ -19,6 +20,7 @@ import { useEffect, useMemo } from "react";
 
 import type { DiffComments } from "~/components/diff";
 import { toastManager } from "~/components/ui/toast";
+import type { FilesGuideNotes } from "~/features/guideNotes/placeGuideNotes";
 import { movePendingComment } from "~/rpc/client";
 import { pendingCommentsQuery, reviewThreadsQuery } from "~/rpc/queries";
 import { CommentPin } from "./CommentPin";
@@ -26,6 +28,16 @@ import { NoteCommentFooter } from "./NoteCommentFooter";
 import { OutdatedComments } from "./OutdatedComments";
 import { storePending } from "./reviewCommentsCache";
 import { type NoteDraft, useReviewCommentsStore } from "./reviewCommentsStore";
+import { sameRef, type ShownNote } from "./shownNote";
+
+/**
+ * Where the guide notes on screen come from, so their question and risk notes can become
+ * drafts: a revision's own diff on the Guide, or the latest guide's notes placed on GitHub's
+ * diff on Files (null while Files shows none).
+ */
+export type NoteSite =
+  | { readonly on: "guide"; readonly revision: number }
+  | { readonly on: "files"; readonly notes: FilesGuideNotes | null };
 
 export type CommentScope = {
   /** The head commit of the diff on screen. */
@@ -34,8 +46,7 @@ export type CommentScope = {
   threads: boolean;
   /** Whether drafts and threads whose lines are gone are listed under each file. */
   outdated: boolean;
-  /** The guide revision on screen, whose question and risk notes can become drafts. Null on Files. */
-  guideRevision: number | null;
+  notes: NoteSite | null;
 };
 
 type Pin = {
@@ -82,12 +93,20 @@ export function useDiffComments(
       }),
   });
   const moveComment = move.mutate;
-  const { commitSha, outdated: showOutdated, guideRevision } = scope;
+  const { commitSha, outdated: showOutdated } = scope;
+  // Read apart, so a caller's new scope object each render keeps the layers as they were.
+  const noteOn = scope.notes?.on ?? null;
+  const guideRevision = scope.notes?.on === "guide" ? scope.notes.revision : null;
+  const filesNotes = scope.notes?.on === "files" ? scope.notes.notes : null;
   const drafts = pending.data?.comments;
   const fromNotes = pending.data?.fromNotes;
-  // A note's composer sits on its revision's line numbers, so only that revision shows it.
+  // A note's composer sits on the line numbers of the diff it was opened on, so only that
+  // surface shows it, and on the Guide only that revision.
   const visibleComposer =
-    composer !== null && (composer.note === null || composer.note.ref.revision === guideRevision)
+    composer !== null &&
+    (composer.note === null ||
+      (composer.note.on === noteOn &&
+        (noteOn === "files" || composer.note.ref.revision === guideRevision)))
       ? composer
       : null;
   // GitHub numbers threads against the head it had when they were read, so they are
@@ -128,6 +147,23 @@ export function useDiffComments(
         if (placed._tag === "outdated") outdatedDrafts.push({ comment, placed });
         else pinAt(placed.placement.anchor.end).drafts.push({ comment, placed });
       }
+      // The Guide draws a revision's notes on that revision's rows, at their own lines and
+      // by their place among the file's notes. Files draws placed copies, known by identity.
+      const shownNote = (note: ShownNote["written"], index: number): ShownNote | null => {
+        if (guideRevision !== null)
+          return {
+            on: "guide",
+            ref: { revision: guideRevision, path: file.path, index },
+            written: note,
+            writtenRows: rows,
+            writtenHead: commitSha,
+            at: notePoint(note),
+            rows,
+            head: commitSha,
+          };
+        const placed = filesNotes?.byShown.get(note);
+        return placed === undefined ? null : { on: "files", ...placed, rows, head: commitSha };
+      };
       const open =
         visibleComposer?.path === file.path
           ? capture(rows, { path: file.path, ...visibleComposer.range }, commitSha)
@@ -178,24 +214,24 @@ export function useDiffComments(
           ) : null,
         count: fileDrafts.length + fileThreads.length,
         noteFooter:
-          guideRevision === null
+          noteOn === null
             ? undefined
-            : (note, index) => (
-                <NoteCommentFooter
-                  pr={owner}
-                  path={file.path}
-                  rows={rows}
-                  revisionHead={commitSha}
-                  revision={guideRevision}
-                  note={note}
-                  index={index}
-                  fromNotes={byNote}
-                  composing={
-                    visibleComposer?.note?.ref.path === file.path &&
-                    visibleComposer.note.ref.index === index
-                  }
-                />
-              ),
+            : (note, index) => {
+                const shown = shownNote(note, index);
+                return (
+                  shown && (
+                    <NoteCommentFooter
+                      pr={owner}
+                      note={shown}
+                      fromNotes={byNote}
+                      composing={
+                        visibleComposer?.note != null &&
+                        sameRef(visibleComposer.note.ref, shown.ref)
+                      }
+                    />
+                  )
+                );
+              },
       };
     };
     const layers = new Map(files.map((file) => [file.path, build(file)]));
@@ -211,7 +247,9 @@ export function useDiffComments(
     moving,
     commitSha,
     showOutdated,
+    noteOn,
     guideRevision,
+    filesNotes,
     compose,
     moveComment,
   ]);

@@ -17,9 +17,10 @@
  * `fail` file ends the turn with an error instead of a guide, and a `split` file gives every
  * file a chapter of its own, titled after the file. A `notes` file, JSON of
  * `{ [path]: [{ line, side, tone, text }] }`, gives those files line notes in the guide,
- * read when the guide is submitted; without it the guide has none. A `chapters` file, JSON of
- * `[{ title, files: [path] }]`, splits the guide into those chapters, with every file they leave
- * out in a last one. An `edits` file, JSON of `{ [path]: content }`, has the next fixes write
+ * read when the guide is submitted; without it the guide has none. A `file-notes` file,
+ * `{ [path]: note }`, gives those files a file note. A `chapters` file, JSON of
+ * `[{ title, files: [path], kind?, risk? }]`, splits the guide into those chapters, in that
+ * order and with that kind and level, with every file they leave out in a last one. An `edits` file, JSON of `{ [path]: content }`, has the next fixes write
  * those files besides `stand-in.md`. Before a fix or resolution reports, it also plants what
  * these files ask for, as something outside prkit's sandboxes could:
  *
@@ -126,8 +127,18 @@ const Notes = Schema.fromJsonString(
   ),
 );
 const Chapters = Schema.fromJsonString(
-  Schema.Array(Schema.Struct({ title: Schema.String, files: Schema.Array(Schema.String) })),
+  Schema.Array(
+    Schema.Struct({
+      title: Schema.String,
+      files: Schema.Array(Schema.String),
+      kind: Schema.optionalKey(
+        Schema.Literals(["core", "supporting", "data", "config", "tests", "docs", "generated"]),
+      ),
+      risk: Schema.optionalKey(Schema.Literals(["low", "medium", "high"])),
+    }),
+  ),
 );
+const FileNotes = Schema.fromJsonString(Schema.Record(Schema.String, Schema.String));
 const Edits = Schema.fromJsonString(Schema.Record(Schema.String, Schema.String));
 const McpReply = Schema.fromJsonString(
   Schema.Struct({
@@ -388,38 +399,71 @@ const turn = async (prompt: string) => {
   const notes = flagged("notes")
     ? Schema.decodeUnknownSync(Notes)(NodeFS.readFileSync(NodePath.join(control, "notes"), "utf8"))
     : {};
+  const fileNotes = flagged("file-notes")
+    ? Schema.decodeUnknownSync(FileNotes)(
+        NodeFS.readFileSync(NodePath.join(control, "file-notes"), "utf8"),
+      )
+    : {};
   const entryOf = (path: string) => {
     const annotations = notes[path];
-    return annotations === undefined ? path : { path, annotations };
+    const note = fileNotes[path];
+    if (annotations === undefined && note === undefined) return path;
+    return {
+      path,
+      ...(annotations === undefined ? {} : { annotations }),
+      ...(note === undefined ? {} : { note }),
+    };
   };
-  const groups = flagged("split")
+  type Planned = {
+    title: string;
+    kind?: (typeof Chapters.Type)[number]["kind"] | undefined;
+    level?: (typeof Chapters.Type)[number]["risk"] | undefined;
+    files: ReadonlyArray<string>;
+  };
+  const groups: ReadonlyArray<Planned> = flagged("split")
     ? files.map((path) => ({ title: `Change in ${path}`, files: [path] }))
     : flagged("chapters")
       ? Schema.decodeSync(Chapters)(
           NodeFS.readFileSync(NodePath.join(control, "chapters"), "utf8"),
-        ).map(({ title, files: paths }) => ({
+        ).map(({ title, files: paths, kind, risk: level }) => ({
           title,
+          kind,
+          level,
           files: paths.filter((path) => files.includes(path)),
         }))
       : [];
   const placed = new Set(groups.flatMap((chapter) => chapter.files));
   const rest = files.filter((path) => !placed.has(path));
-  const chapters = [
+  const chapters: ReadonlyArray<Planned> = [
     ...groups.filter((chapter) => chapter.files.length > 0),
     ...(rest.length > 0
       ? [{ title: groups.length > 0 ? "Every other change" : "Every change", files: rest }]
       : []),
   ];
+  const levels: ReadonlyArray<string> = ["low", "medium", "high"];
+  // A guide reads at least as carefully as its most careful chapter, or prkit refuses it.
+  const guideLevel =
+    levels[
+      Math.max(
+        levels.indexOf(risk.guide.level),
+        ...chapters.map((chapter) => levels.indexOf(chapter.level ?? risk.guide.level)),
+      )
+    ];
+  const chapterJson = ({ title, kind, level, files: paths }: Planned) => {
+    const chapter = {
+      title,
+      files: paths.map(entryOf),
+      risk:
+        level === undefined ? risk.chapter(paths) : { level, reasons: risk.chapter(paths).reasons },
+    };
+    return kind === undefined ? chapter : { ...chapter, kind };
+  };
   const submitted = await mcp("tools/call", {
     name: "submit_guide",
     arguments: {
       summary: "A guide written by the stand-in agent.",
-      chapters: chapters.map((chapter) => ({
-        title: chapter.title,
-        files: chapter.files.map(entryOf),
-        risk: risk.chapter(chapter.files),
-      })),
-      risk: risk.guide,
+      chapters: chapters.map(chapterJson),
+      risk: { level: guideLevel ?? risk.guide.level, reasons: risk.guide.reasons },
       focusAreas: [...prompt.matchAll(/^- `([^`]+)` .+: .+$/gm)].map((match) => ({
         id: match[1] ?? "",
         verdict: "nothing-notable",

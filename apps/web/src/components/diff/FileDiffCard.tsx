@@ -30,6 +30,8 @@ export type FileDiffCardProps = {
   reviewed?: ReviewedControl | undefined;
   /** Changes when the card should open again as it first would, such as a chapter unticked. */
   reopened?: number | undefined;
+  /** Labels the file note and line notes as the guide's, on a diff that isn't the guide's. */
+  fromGuide?: boolean | undefined;
 };
 
 export function FileDiffCard({
@@ -44,6 +46,7 @@ export function FileDiffCard({
   trailingLines,
   reviewed,
   reopened = 0,
+  fromGuide = false,
 }: FileDiffCardProps) {
   const reveal = useFileReveal(file.path);
   const [open, setOpen] = useState(
@@ -128,6 +131,7 @@ export function FileDiffCard({
           {file.previousPath && <p data-diff-placeholder="">Previously {file.previousPath}</p>}
           {note && (
             <div data-file-diff-note="">
+              {fromGuide && <p className="text-[11px] text-muted-foreground">Guide</p>}
               <InlineMarkdown text={note} prUrl={prUrl} />
             </div>
           )}
@@ -142,6 +146,7 @@ export function FileDiffCard({
               loadContents={loadContents}
               trailingLines={trailingLines}
               prUrl={prUrl}
+              fromGuide={fromGuide}
             />
           </RenderBoundary>
           {comments?.footer}

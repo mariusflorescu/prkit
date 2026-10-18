@@ -6,15 +6,18 @@ export function PendingChapter({
   index,
   total,
   id,
+  chapterId,
 }: {
   title: string;
   index: number;
   total: number;
   id: string;
+  chapterId: string;
 }) {
   return (
     <section
       data-guide-chapter=""
+      data-chapter-id={chapterId}
       data-pending=""
       id={id}
       tabIndex={-1}
