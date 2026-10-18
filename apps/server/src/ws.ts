@@ -164,6 +164,21 @@ const layerHandlers = WsRpcGroup.toLayer(
       [WS_METHODS.reviewsTypicalDuration]: ({ instance, lines }) =>
         reviews.typicalDuration(instance, lines),
       [WS_METHODS.guidesGet]: ({ key, revision }) => reviews.guide(key, revision),
+      // Guides of local changes.
+      [WS_METHODS.localReviewsList]: () => reviews.local.list(),
+      [WS_METHODS.localReviewsFeed]: () => reviews.local.feed(),
+      [WS_METHODS.localReviewsGet]: ({ key }) => reviews.local.get(key),
+      [WS_METHODS.localReviewsWatch]: ({ key }) => reviews.local.watch(key),
+      [WS_METHODS.localReviewsGenerate]: ({ key, agent, regenerate }) =>
+        reviews.local.generate({
+          target: { _tag: "key", key },
+          ...(agent === undefined ? {} : { agent }),
+          ...(regenerate === undefined ? {} : { regenerate }),
+        }),
+      [WS_METHODS.localReviewsStop]: ({ key }) => reviews.local.stop(key),
+      [WS_METHODS.localReviewsRetry]: ({ key }) => reviews.local.retry(key),
+      [WS_METHODS.localReviewsRemove]: ({ key }) => reviews.local.remove(key).pipe(Effect.as({})),
+      [WS_METHODS.localReviewsFileContents]: (input) => reviews.local.fileContents(input),
       // Pending review comments and GitHub review threads.
       [WS_METHODS.reviewCommentsList]: ({ key, accountId }) => reviewComments.list(key, accountId),
       [WS_METHODS.reviewCommentsAdd]: ({ key, accountId, placement, body }) =>

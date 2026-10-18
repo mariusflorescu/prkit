@@ -1,7 +1,13 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- lstat: effect/FileSystem's stat follows links, and the before/after check needs nanosecond mtimes.
 import * as NodeFs from "node:fs";
 
-import { type DiffSnapshot, LocalHead, LocalReviewKey, type ReviewId } from "@prkit/contracts";
+import {
+  type DiffSnapshot,
+  LocalHead,
+  LocalLeftOut,
+  LocalReviewKey,
+  type ReviewId,
+} from "@prkit/contracts";
 import type * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -19,14 +25,6 @@ export const localCopyPath = (path: Path.Path, home: string, key: LocalReviewKey
   path.join(home, "local", `${key.slice("local:".length)}.git`);
 
 const Commit = Schema.Struct({ sha: Schema.String, subject: Schema.String });
-
-/** A file the snapshot shows as committed (or leaves out when new), and why. */
-export const LeftOut = Schema.Struct({
-  path: Schema.String,
-  reason: Schema.Literals(["too-large", "filtered", "nested-repository"]),
-  bytes: Schema.NullOr(Schema.Int),
-});
-export type LeftOut = typeof LeftOut.Type;
 
 /**
  * What one run took. Two commits in prkit's copy carry it: B, the merge-base tree with no
@@ -55,7 +53,7 @@ export const LocalCapture = Schema.Struct({
   newCommits: Schema.NullOr(Schema.Array(Commit)),
   /** The working tree differs from the head commit; always false for the branch head. */
   uncommitted: Schema.Boolean,
-  leftOut: Schema.Array(LeftOut),
+  leftOut: Schema.Array(LocalLeftOut),
   description: Schema.NullOr(Schema.String),
   capturedAt: Schema.String,
 });
@@ -433,6 +431,33 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
       if (packed.code !== 0) return yield* missingOr(packed.stderr, failure);
     });
 
+  /**
+   * The user's own global ignore file, which prkit's isolated global config would hide. Only
+   * this one key is read from their global config files, without following includes.
+   */
+  const globalExcludes = Effect.gen(function* () {
+    const home = process.env.HOME ?? "";
+    const xdg = process.env.XDG_CONFIG_HOME ?? "";
+    const configs = [
+      ...(home === "" ? [] : [path.join(home, ".gitconfig")]),
+      ...(xdg !== ""
+        ? [path.join(xdg, "git", "config")]
+        : home === ""
+          ? []
+          : [path.join(home, ".config", "git", "config")]),
+    ];
+    for (const file of configs) {
+      if (!(yield* fs.exists(file))) continue;
+      const found = yield* run(
+        ["config", "--file", file, "--no-includes", "--type=path", "--get", "core.excludesFile"],
+        { target: plain },
+      );
+      if (found.code === 0 && found.stdout.trim() !== "") return found.stdout.trim();
+    }
+    // git's own default; prkit's git runs without XDG_CONFIG_HOME, so it is named here.
+    return xdg === "" ? null : path.join(xdg, "git", "ignore");
+  });
+
   const lookAll = (root: string, files: ReadonlyArray<string>) =>
     Effect.forEach(
       Array.from({ length: Math.ceil(files.length / 2000) }, (_, index) =>
@@ -509,8 +534,20 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
 
       const failure = "Couldn't list your repository's files.";
       yield* read(["read-tree", input.userHead], failure);
+      // `-c` would beat a repository's own setting, so the global one applies only without it.
+      const ownExcludes = yield* run(["config", "--get", "core.excludesFile"], { target: user });
+      const excludes = ownExcludes.code === 0 ? null : yield* globalExcludes;
       const others = fields(
-        yield* read(["ls-files", "-z", "--others", "--exclude-standard"], failure),
+        yield* read(
+          [
+            ...(excludes === null ? [] : ["-c", `core.excludesFile=${excludes}`]),
+            "ls-files",
+            "-z",
+            "--others",
+            "--exclude-standard",
+          ],
+          failure,
+        ),
       );
       const tracked = parseTree(
         yield* read(["ls-tree", "-r", "-z", "--full-tree", input.headTree], failure),
@@ -519,7 +556,7 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
         target: user,
       });
 
-      const leftOut: Array<LeftOut> = others
+      const leftOut: Array<LocalLeftOut> = others
         .filter((file) => file.endsWith("/"))
         .map((file) => ({ path: file.slice(0, -1), reason: "nested-repository", bytes: null }));
       const files = [
@@ -656,7 +693,7 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
       return { tree, leftOut: leftOut.toSorted(byPath) };
     });
 
-  const byPath = (left: LeftOut, right: LeftOut) =>
+  const byPath = (left: LocalLeftOut, right: LocalLeftOut) =>
     left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
 
   /**

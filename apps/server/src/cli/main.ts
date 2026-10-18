@@ -19,7 +19,7 @@ import {
   type CommandMapping,
   type ToolName,
 } from "./commands.ts";
-import { continuationOutput, humanOutput } from "./output.ts";
+import { continuationOutput, humanOutput, localOutput } from "./output.ts";
 
 type Value = Option.Option<Schema.Json>;
 type Input = Record<string, Flag.Flag<Value> | Argument.Argument<Value>>;
@@ -125,7 +125,7 @@ export const main = () => {
   const leaf = (name: ToolName, mapping: CommandMapping) => {
     const tool = toolkit.tools[name];
     const input: Input = {};
-    if (mapping.target)
+    if (mapping.target === "pr" || mapping.target === "repository")
       input.target = Argument.String(mapping.target === "pr" ? "pr" : "owner/repo").pipe(
         Argument.map((value) => Option.some<Schema.Json>(value)),
       );
@@ -151,7 +151,11 @@ export const main = () => {
             !(Array.isArray(value.value) && value.value.length === 0)
           )
             args[key] = value.value;
-        if (mapping.target) {
+        const named =
+          typeof args.path === "string" || args.key !== undefined || args.branch !== undefined;
+        if (mapping.target === "local" && args.key === undefined)
+          args.path = NodePath.resolve(typeof args.path === "string" ? args.path : process.cwd());
+        if (mapping.target === "pr" || mapping.target === "repository") {
           const selected = values.target;
           if (
             selected === undefined ||
@@ -223,8 +227,9 @@ export const main = () => {
           Effect.mapError((error) => new CliFailure({ code: 2, message: error.message })),
         );
         const result = yield* callTool(home, name, args);
+        const local = json ? null : localOutput(name, result, named);
         process.stdout.write(
-          `${json ? JSON.stringify(result) : [humanOutput(result), continuationOutput(result, process.argv.slice(3))].filter(Boolean).join("\n\n")}\n`,
+          `${json ? JSON.stringify(result) : (local ?? [humanOutput(result), continuationOutput(result, process.argv.slice(3))].filter(Boolean).join("\n\n"))}\n`,
         );
       }),
     ).pipe(Command.withDescription(tool.description ?? name));

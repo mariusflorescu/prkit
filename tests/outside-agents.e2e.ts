@@ -64,6 +64,9 @@ const READS = [
   "read_fix_patch",
   "read_fix_access",
   "read_settings",
+  "list_local_guides",
+  "read_local_guide",
+  "wait_for_local_guide",
 ].sort();
 const ALL = [
   ...READS,
@@ -84,6 +87,8 @@ const ALL = [
   "edit_review_comment",
   "move_review_comment",
   "mark_files_reviewed",
+  "generate_local_guide",
+  "stop_local_guide",
 ].sort();
 const NOT_OPEN = "prkit isn't open. Open it, then try again.";
 const OFF = "Outside agents are off. Turn them on in prkit > Settings > Outside agents.";

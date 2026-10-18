@@ -31,3 +31,5 @@ export type LocalReviewKey = typeof LocalReviewKey.Type;
 /** Any review's key, for the parts of a review that don't care what it is about. */
 export const ReviewKey = Schema.Union([LocalReviewKey, PullRequestKey]);
 export type ReviewKey = typeof ReviewKey.Type;
+
+export const isLocalReviewKey = Schema.is(LocalReviewKey);

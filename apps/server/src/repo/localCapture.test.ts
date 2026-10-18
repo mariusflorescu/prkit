@@ -317,6 +317,53 @@ describe("local capture", { timeout: 30_000 }, () => {
     expect(user.filterRan()).toBe(true);
   });
 
+  it("ignores what the user's global ignore file names, unless the repository sets its own", async () => {
+    const user = userRepository();
+    user.write("notes.md", "Notes\n");
+    user.git("add", "-A");
+    user.git("commit", "--quiet", "-m", "Base");
+    user.git("checkout", "--quiet", "-b", "feature/notes");
+    user.write("notes.md", "Notes, longer\n");
+    user.write(".DS_Store", "finder\n");
+    user.write("draft.tmp", "draft\n");
+    NodeFs.writeFileSync(NodePath.join(user.root, "global-ignore"), ".DS_Store\n");
+    NodeFs.writeFileSync(
+      NodePath.join(user.root, ".gitconfig"),
+      "[core]\n\texcludesFile = ~/global-ignore\n",
+    );
+    const snapshotFiles = (reviewId: ReviewId) =>
+      withCapture((local) =>
+        Effect.gen(function* () {
+          const identity = yield* local.identify(user.repo);
+          const { capture } = yield* local.capture({
+            identity,
+            base: "main",
+            head: "working-tree",
+            previous: null,
+            description: null,
+          });
+          const prepared = yield* local.prepare({
+            reviewId,
+            key: identity.key,
+            capture,
+            previousHead: null,
+          });
+          return prepared.snapshot.files.map((file) => file.path).toSorted();
+        }),
+      );
+
+    const home = process.env.HOME;
+    process.env.HOME = user.root;
+    try {
+      expect(await snapshotFiles(REVIEW)).toEqual(["draft.tmp", "notes.md"]);
+      NodeFs.writeFileSync(NodePath.join(user.root, "repository-ignore"), "draft.tmp\n");
+      user.git("config", "core.excludesFile", NodePath.join(user.root, "repository-ignore"));
+      expect(await snapshotFiles(ReviewId.make("review-2"))).toEqual([".DS_Store", "notes.md"]);
+    } finally {
+      process.env.HOME = home;
+    }
+  });
+
   it("refuses what it can't snapshot faithfully", async () => {
     const empty = userRepository();
     const lone = userRepository();

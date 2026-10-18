@@ -33,6 +33,9 @@ const Initialized = Schema.Struct({ protocolVersion: Schema.String });
 const Tools = Schema.Struct({ tools: Schema.Array(Schema.Struct({ name: Schema.String })) });
 const ToolFailure = Schema.Struct({ code: Schema.String });
 
+/** Waits, and a local guide's snapshot of a large working tree, can outlast a minute. */
+const LONG_CALLS = new Set(["wait_for", "wait_for_local_guide", "generate_local_guide"]);
+
 export const callTool = (home: string, name: string, args: Schema.Json) =>
   Effect.gen(function* () {
     const bridgeId = "prkit-cli";
@@ -84,7 +87,7 @@ export const callTool = (home: string, name: string, args: Schema.Json) =>
                 body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
                 signal: AbortSignal.any([
                   signal,
-                  AbortSignal.timeout(name === "wait_for" ? 610_000 : 60_000),
+                  AbortSignal.timeout(LONG_CALLS.has(name) ? 610_000 : 60_000),
                 ]),
               });
               session = response.headers.get("mcp-session-id") ?? session;

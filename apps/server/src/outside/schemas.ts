@@ -13,6 +13,9 @@ import {
   InboxReason,
   InboxResult,
   InboxSort,
+  LocalHead,
+  LocalLeftOut,
+  LocalReviewKey,
   ModelOptionSelection,
   NormalizedGuide,
   OutsideAccess,
@@ -486,3 +489,148 @@ export const WaitResult = Schema.Struct({
   fix: Schema.NullOr(FixResult),
 });
 export type WaitResult = typeof WaitResult.Type;
+
+// Local reviews: guides of a repository's changes before a pull request exists
+export const LocalTargetFields = {
+  ...ResponseFields,
+  key: Schema.optionalKey(
+    describe(
+      LocalReviewKey,
+      "The local review's key, as generate_local_guide or list_local_guides gave it.",
+    ),
+  ),
+  path: Schema.optionalKey(
+    describe(
+      Schema.String.check(Schema.isMinLength(1)),
+      "An absolute path inside the repository's work tree; its current branch names the review. The prkit CLI sends its working directory.",
+    ),
+  ),
+  branch: Schema.optionalKey(
+    describe(
+      Schema.NonEmptyString,
+      "A local branch, for a review of that branch's last commit rather than the folder's working tree.",
+    ),
+  ),
+};
+export const LocalTargetInput = Schema.Struct(LocalTargetFields);
+export type LocalTargetInput = typeof LocalTargetInput.Type;
+
+export const LocalGuideStatus = Schema.Struct({
+  key: LocalReviewKey,
+  /** The work tree's folder name, its path and the branch the review is about. */
+  name: Schema.String,
+  path: Schema.String,
+  branch: Schema.NullOr(Schema.String),
+  state: Schema.Literals(["preparing", "writing", "ready", "failed", "stopped"]),
+  message: Schema.NullOr(Schema.String),
+  latestRevision: Schema.NullOr(Schema.Int),
+  agent: Schema.NullOr(
+    Schema.Struct({ instance: AgentInstanceId, model: Schema.NullOr(Schema.String) }),
+  ),
+  startedBy: Schema.NullOr(Schema.String),
+  /** What the latest run took: the base, the head, and the files it left out of the snapshot. */
+  run: Schema.NullOr(
+    Schema.Struct({
+      baseRef: Schema.String,
+      head: LocalHead,
+      commits: Schema.Int,
+      uncommitted: Schema.Boolean,
+      description: Schema.NullOr(Schema.String),
+      leftOut: Schema.Array(LocalLeftOut),
+    }),
+  ),
+  progress: Schema.NullOr(
+    Schema.Struct({
+      narration: Schema.NullOr(Schema.String),
+      filesRead: Schema.Int,
+      files: Schema.Int,
+    }),
+  ),
+});
+export type LocalGuideStatus = typeof LocalGuideStatus.Type;
+
+export const GenerateLocalGuideInput = Schema.Struct({
+  ...ResponseFields,
+  path: describe(
+    Schema.String.check(Schema.isMinLength(1)),
+    "An absolute path inside the repository's work tree. The prkit CLI sends its working directory.",
+  ),
+  branch: Schema.optionalKey(
+    describe(
+      Schema.NonEmptyString,
+      "Review this local branch's last commit only, leaving uncommitted and untracked files out. Without it, the folder's working tree on its current branch.",
+    ),
+  ),
+  base: Schema.optionalKey(
+    describe(
+      Schema.NonEmptyString,
+      "The branch or commit the changes are measured from. Without it, the review's last base, else origin/HEAD's branch, origin/main, origin/master, main or master.",
+    ),
+  ),
+  description: Schema.optionalKey(
+    describe(
+      Schema.String.check(Schema.isMaxLength(4000)),
+      "What changed and why, in a few sentences. The guide quotes it as the author's claim to check. Without it, the last run's.",
+    ),
+  ),
+  regenerate: Schema.optionalKey(
+    describe(Schema.Boolean, "Write the guide again even when nothing changed since the last one."),
+  ),
+  instance: Schema.optionalKey(
+    describe(
+      AgentInstanceId,
+      "The agent instance to write it, as prkit_status lists them. The review's own agent, else prkit's default, when omitted.",
+    ),
+  ),
+  model: Schema.optionalKey(describe(Schema.NonEmptyString, "A model slug that instance offers.")),
+  options: Schema.optionalKey(Schema.Array(ModelOptionSelection)),
+});
+export const GenerateLocalGuideResult = Schema.Struct({
+  outcome: Schema.Literals(["started", "running", "unchanged"]),
+  message: Schema.String,
+  status: LocalGuideStatus,
+});
+export type GenerateLocalGuideResult = typeof GenerateLocalGuideResult.Type;
+
+export const ReadLocalGuideInput = Schema.Struct({
+  ...LocalTargetFields,
+  revision: Schema.optionalKey(
+    describe(
+      Schema.Int.check(Schema.isGreaterThan(0)),
+      "A revision to read; the latest when omitted.",
+    ),
+  ),
+});
+export const LocalGuideResult = Schema.Struct({
+  status: LocalGuideStatus,
+  guide: Schema.NullOr(
+    Schema.Struct({
+      revision: Schema.Int,
+      createdAt: Schema.String,
+      content: NormalizedGuide,
+    }),
+  ),
+});
+export type LocalGuideResult = typeof LocalGuideResult.Type;
+
+export const LocalWaitInput = Schema.Struct({
+  ...LocalTargetFields,
+  timeoutSeconds: Schema.optionalKey(
+    describe(
+      Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 600 })),
+      "How long to wait, 50 seconds when omitted, at most 600. A timeout stops only the waiting, never the work: call again to keep waiting.",
+    ),
+  ),
+});
+export const LocalWaitResult = Schema.Struct({
+  finished: Schema.Boolean,
+  status: LocalGuideStatus,
+});
+export type LocalWaitResult = typeof LocalWaitResult.Type;
+
+export const LocalListInput = Schema.Struct(PageFields);
+export const LocalListResult = Schema.Struct({
+  ...PageInfo,
+  items: Schema.Array(LocalGuideStatus),
+});
+export type LocalListResult = typeof LocalListResult.Type;

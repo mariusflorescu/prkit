@@ -16,6 +16,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import { HttpRouter, HttpServer } from "effect/http";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -69,6 +70,9 @@ const READS = [
   "read_fix_patch",
   "read_fix_access",
   "read_settings",
+  "list_local_guides",
+  "read_local_guide",
+  "wait_for_local_guide",
 ];
 const STARTS_WORK = [
   "open_pull_request",
@@ -88,6 +92,8 @@ const STARTS_WORK = [
   "edit_review_comment",
   "move_review_comment",
   "mark_files_reviewed",
+  "generate_local_guide",
+  "stop_local_guide",
 ];
 
 const Answer = Schema.Struct({
@@ -205,7 +211,20 @@ describe("outside agents' MCP endpoint", () => {
           layerOutside,
           layerWork,
           McpTokens.layer,
-          Layer.mock(Reviews, {}),
+          Layer.mock(Reviews, {
+            local: {
+              keyOf: () => Effect.die("unused"),
+              generate: () => Effect.die("unused"),
+              get: () => Effect.die("unused"),
+              retry: () => Effect.die("unused"),
+              stop: () => Effect.die("unused"),
+              remove: () => Effect.die("unused"),
+              fileContents: () => Effect.die("unused"),
+              list: () => Effect.die("unused"),
+              watch: () => Stream.die("unused"),
+              feed: () => Stream.die("unused"),
+            },
+          }),
           Layer.mock(Fixers, {}),
         ),
       ),

@@ -358,7 +358,7 @@ const Git = Layer.unwrap(
         prepare: () => Effect.die("unused"),
         contents: () => Effect.die("unused"),
         forget: () => Effect.die("unused"),
-        sweep: () => Effect.die("unused"),
+        sweep: () => Effect.void,
       },
       checkout: (_ref, worktree) => ({ repo: worktree, worktree, gitDir: worktree }),
       verifyCheckout: () => Effect.succeed(undefined),

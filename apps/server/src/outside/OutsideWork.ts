@@ -38,6 +38,7 @@ import { Workspace } from "../workspace/Workspace.ts";
 import { StartedBy } from "./StartedBy.ts";
 import { makeOutsideReads } from "./OutsideReads.ts";
 import { makeOutsideActions } from "./OutsideActions.ts";
+import { makeOutsideLocal } from "./OutsideLocal.ts";
 import { requestedAgent } from "./agentSelection.ts";
 import { placementOn } from "./githubLines.ts";
 import { makePager, type PageInput } from "./paging.ts";
@@ -945,9 +946,11 @@ export const make = Effect.gen(function* () {
 
   const reads = yield* makeOutsideReads(resolve, guideStatusOf);
   const actions = yield* makeOutsideActions(resolve, guideStatusOf, openPullRequests);
+  const local = yield* makeOutsideLocal;
   return {
     ...reads,
     ...actions,
+    ...local,
     status,
     inbox,
     openPullRequests,

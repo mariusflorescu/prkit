@@ -96,6 +96,34 @@ export default defineConfig({
         rules: { "shadcn/no-unknown-classes": "error" },
       },
       {
+        // Local reviews have no account: nothing they run may read a pull request or GitHub.
+        files: [
+          "apps/server/src/reviews/localReviews.ts",
+          "apps/server/src/repo/localCapture.ts",
+          "apps/server/src/outside/OutsideLocal.ts",
+        ],
+        rules: {
+          "eslint/no-restricted-imports": [
+            "error",
+            {
+              patterns: [
+                {
+                  group: [
+                    "**/accounts/*",
+                    "**/pullRequests/*",
+                    "**/github/GitHubApi*",
+                    "**/github/httpClient*",
+                    "**/github/budget*",
+                  ],
+                  message:
+                    "Local reviews have no account: keep GitHub, accounts and pull requests out of them.",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
         // Library boundaries that must speak `unknown`: effect/sql's Connection takes
         // `ReadonlyArray<unknown>` params, and node:sqlite throws untyped errors.
         files: ["apps/server/src/persistence/NodeSqliteClient.ts"],

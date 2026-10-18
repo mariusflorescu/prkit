@@ -1,6 +1,6 @@
 # Command line
 
-Settings > Outside agents > Command line installs the CLI for terminals, scripts and coding agents. The command palette also offers **Install command line tool**. Open prkit and turn Outside agents on before using it. Read only permits reads; Read and start work also permits guides, fix turns, local tabs and drafts, reviewed-file marks, saved inbox filters and PR-scope guide settings.
+Settings > Outside agents > Command line installs the CLI for terminals, scripts and coding agents. The command palette also offers **Install command line tool**. Open prkit and turn Outside agents on before using it. Read only permits reads; Read and start work also permits guides (of pull requests and of local changes), fix turns, local tabs and drafts, reviewed-file marks, saved inbox filters and PR-scope guide settings.
 
 The CLI calls the existing `/mcp/outside` tools. It uses the bridge's trusted discovery-file reader and sends **prkit CLI** as its client name. Work appears in the app as **Started from prkit CLI**. It never starts the app, opens the database or takes the home lock. The MCP bridge remains available separately.
 
@@ -59,13 +59,19 @@ prkit fix change acme/widgets#42 --instructions 'Keep the existing name' --reque
 prkit fix resolve acme/widgets#42 --strategy merge
 prkit pr open acme/widgets#42 --no-focus
 prkit tabs focus acme/widgets#42
+prkit local guide --description 'Raise the limit and add a flag for it'
+prkit local wait --timeout 600
+prkit local read --json
+prkit local guide --path ~/code/widgets --branch feature/limits --base main
 ```
 
-The command tree covers all 54 tools: status, accounts, agents, settings, inbox (and filters save), repos list/prs, pr read/files/file/timeline/threads/checks/conversation/stack/candidates/diff/open/reviewed (and reviewed set), guide list/read/generate/stop/revisions/revision/progress/duration/settings/scope/repositories/repository, guide settings save, fix list/read/turn/diff/patch/access/send/change/stop/retry/resolve, comments list/add/edit/move, tabs list/close/focus/reorder, and wait.
+The command tree covers all 59 tools: status, accounts, agents, settings, inbox (and filters save), repos list/prs, pr read/files/file/timeline/threads/checks/conversation/stack/candidates/diff/open/reviewed (and reviewed set), guide list/read/generate/stop/revisions/revision/progress/duration/settings/scope/repositories/repository, guide settings save, fix list/read/turn/diff/patch/access/send/change/stop/retry/resolve, comments list/add/edit/move, tabs list/close/focus/reorder, local guide/read/wait/stop/list, and wait.
 
 PRs accept HTTPS URLs or `owner/repo#number`, with `--host` for an Enterprise short form. Repository commands take `owner/repo`. `--account` selects the account when prkit asks for one; never switch accounts to work around a failure. Inbox `--repo owner/repo` selects a repository on github.com; quoted JSON with `host`, `owner` and `name` selects an Enterprise repository. Inbox also accepts reason, state, draft, checks, search and stacks selectors, and `--sort updated|waiting|size` for the order of each section (`updated` when omitted). These read filters do not change the app's saved filters. `prkit inbox filters save` replaces the saved search, account, repository and sort together, so it needs all four.
 
 Pick a ready, enabled agent instance from the paged `prkit agents --json` result, an unblocked model's slug, and only the option ids and values that model advertises. Repeated `--option id=value` flags select options; `true` and `false` are booleans. Repeated `--draft-ids` and `--thread-ids` select comments for fix send. Repeated `--paths` name the files for `pr reviewed set`, which marks them reviewed or, with `--no-reviewed`, not reviewed; repeating it changes nothing. Its `--head-sha` is the `headSha` that `prkit pr reviewed --json` returned. If the PR moved since, nothing is marked and it fails with `conflict`. The marks stay in prkit and never reach GitHub.
+
+`prkit local` writes guides of a repository's changes before a pull request exists. Every local command takes the working directory unless it gets `--key` or `--path`; the folder's repository and current branch name the review, so a subfolder or another worktree of the same branch finds the same one. `prkit local guide` snapshots the working tree (commits since the base, staged, unstaged and untracked files), or with `--branch` a branch's last commit, into a copy prkit owns, and starts the guide. It reads the repository without changing it or running anything its config names. A problem with the repository (not one, nothing changed, no base, no shared history, files changing mid-read) exits 1 with the reason before anything starts, and a run with nothing new since the last revision says so and starts no agent. Plain output says what happened in a line and which command follows it. `prkit local wait` has the same long timeout as `prkit wait`.
 
 For guides, read stack layers first. `--stack this` maps to this PR, `--stack all` to the whole stack, and `--stack 1,3` to chosen layer numbers. Use `--stack` once; numbered selection cannot be combined with `--layers`. The native values `this-pr`, `whole-stack` and `chosen-layers` also work, with repeated `--layers` for the last. `--regenerate` includes layers with guides. `--guidance` and `--focus` accept versioned JSON section edits, not plain strings. Read `prkit guide settings acme/widgets#42 --json` first and use the PR section's current version as `expectedVersion`; a stale version is refused. The command reference shows the full JSON shapes and the standalone PR settings save.
 
