@@ -4,15 +4,18 @@ import * as Schema from "effect/Schema";
 import { clipText } from "../pullRequests/clipText.ts";
 import type { PullRequestContext } from "../pullRequests/pullRequestContext.ts";
 
+// The agent reads this file with a tool that cuts any line over 2,000 characters and refuses a file
+// over about 25,000 tokens. The JSON is indented so each string sits on its own line, and these caps
+// keep every such line whole and the file small enough to read in one go.
 const LISTED_CHECKS = 10;
 const LISTED_THREADS = 10;
 const LISTED_COMMENTS = 3;
 const LISTED_ISSUES = 5;
 const NAME_MAX = 200;
 const COMMENT_MAX = 1_000;
-const ISSUE_BODY_MAX = 4_000;
+const ISSUE_BODY_MAX = 1_500;
 const UNREAD_MAX = 500;
-const URL_MAX = 2_000;
+const URL_MAX = 500;
 
 const Unread = Schema.Struct({ unread: Schema.String });
 const Checks = Schema.Struct({

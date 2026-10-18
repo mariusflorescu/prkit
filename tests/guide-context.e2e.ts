@@ -127,7 +127,8 @@ test(
       ])
         expect(first.prompt).not.toContain(word);
       const file = decodeFile(first.context);
-      expect(first.context.length).toBeLessThan(80_000);
+      expect(first.context.length).toBeLessThan(LONG_ISSUE_BODY.length);
+      expect(Math.max(...first.context.split("\n").map((line) => line.length))).toBeLessThan(2_000);
       expect(file.checks).toMatchObject({
         failing: 1,
         pending: 1,
