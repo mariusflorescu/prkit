@@ -312,7 +312,19 @@ const GitHub = Layer.mergeAll(
     rest: (_account, _path, schema) => Schema.decodeEffect(schema)(PULL).pipe(Effect.orDie),
   }),
   Layer.unwrap(
-    SubscriptionRef.make(0).pipe(Effect.map((presence) => Layer.mock(PullRequests, { presence }))),
+    SubscriptionRef.make(0).pipe(
+      Effect.map((presence) =>
+        Layer.mock(PullRequests, {
+          presence,
+          context: () =>
+            Effect.succeed({
+              checks: { _tag: "read", value: { failing: [], pending: [] } },
+              threads: { _tag: "read", value: [] },
+              issues: { _tag: "read", value: { total: 0, items: [] } },
+            }),
+        }),
+      ),
+    ),
   ),
 );
 

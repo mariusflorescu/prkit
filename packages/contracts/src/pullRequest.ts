@@ -11,6 +11,8 @@ export const PullRequestCheck = Schema.Struct({
   name: Schema.String,
   status: Schema.Literals(["passing", "failing", "pending", "neutral"]),
   url: Schema.NullOr(Schema.String),
+  /** GitHub's short account of the result, cut to a few hundred characters; null when it gave none. */
+  summary: Schema.NullOr(Schema.String),
 });
 export type PullRequestCheck = typeof PullRequestCheck.Type;
 export const PullRequestConversation = Schema.Struct({

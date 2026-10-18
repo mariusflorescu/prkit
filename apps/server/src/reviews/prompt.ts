@@ -7,6 +7,8 @@ import {
   SCOPE_LABELS,
 } from "@prkit/contracts";
 
+import type { PullRequestContext } from "../pullRequests/pullRequestContext.ts";
+import { contextLines, contextSection } from "./contextFile.ts";
 import type { ReviewTarget } from "./reviewTarget.ts";
 
 export interface PromptInput {
@@ -24,6 +26,8 @@ export interface PromptInput {
     /** Active areas only. */
     readonly focusAreas: ReadonlyArray<EffectiveFocusArea>;
   };
+  /** What GitHub says about the PR besides its diff, as a file the agent reads; null for a review with no pull request. */
+  readonly context: { readonly file: string; readonly read: PullRequestContext } | null;
   /** The stack the PR is a layer of, bottom to top; null when it isn't in one. */
   readonly stack: PullRequestStack | null;
   /** The last accepted revision, when its head or base is not what this attempt writes for. */
@@ -177,6 +181,7 @@ export const buildPrompt = (input: PromptInput) => {
     `task:${input.previous?._tag ?? "first"}`,
     `files:${snapshot.files.length}`,
     `hand-over:${input.streamsGuideInput ? "streamed" : "drafts"}`,
+    ...contextSection(input.context?.read ?? null),
     ...(stack === null ? [] : [stack.label]),
     ...(settings.skipped > 0 ? [`skipped:${settings.skipped}`] : []),
     ...settings.guidance.map((block) => `guidance:${block.scope}`),
@@ -211,6 +216,7 @@ export const buildPrompt = (input: PromptInput) => {
     body === "" ? "(no description)" : body,
     "</description>",
     "",
+    ...contextLines(input.context),
     ...(stack?.lines ?? []),
     ...guidanceLines(settings.guidance),
     ...focusLines(settings.focusAreas),

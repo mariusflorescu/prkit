@@ -1,6 +1,7 @@
 // The fake GitHub's REST answers: pulls, files, reviews, comments, checks and workflow runs.
 import * as Schema from "effect/Schema";
 
+import { seededCheckRuns, seeds } from "./context.ts";
 import {
   BASE,
   encodeJson,
@@ -248,21 +249,24 @@ export const rest = (
   if (area === "commits") {
     const owner = [...pulls.values()].find((candidate) => head(candidate) === id);
     const status = owner?.checks ?? "completed";
+    const seed = owner === undefined ? undefined : seeds.get(owner.number);
     const body =
       tail?.startsWith("check-runs") === true
         ? {
             check_runs:
               page > 1
                 ? []
-                : [
-                    {
-                      id: 1,
-                      name: "build",
-                      status,
-                      conclusion: status === "completed" ? "success" : null,
-                      html_url: null,
-                    },
-                  ],
+                : seed !== undefined
+                  ? seededCheckRuns(seed)
+                  : [
+                      {
+                        id: 1,
+                        name: "build",
+                        status,
+                        conclusion: status === "completed" ? "success" : null,
+                        html_url: null,
+                      },
+                    ],
           }
         : [];
     const etag = `"${sha(encodeJson(body))}"`;

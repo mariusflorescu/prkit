@@ -32,6 +32,7 @@ import {
   patchGuide,
   projectSnapshot,
   PullRequestKey,
+  type PullRequestRef,
   pullRequestKey,
   type PullRequestStack,
   resolveModelOptions,
@@ -81,12 +82,14 @@ import type { FileRead } from "../agents/commandReads.ts";
 import { processStartTime, reapAgentGroup } from "../agents/agentProcess.ts";
 import { Agents } from "../agents/Agents.ts";
 import * as ServerConfig from "../config.ts";
-import { GitHubApi } from "../github/GitHubApi.ts";
+import { GitHubApi, GitHubPriority } from "../github/GitHubApi.ts";
 import { makeKeyedGate } from "../github/keyedGate.ts";
 import { boundPort } from "../listenAddress.ts";
 import { McpTokens } from "../mcp/McpTokens.ts";
 import { PullRequests } from "../pullRequests/PullRequests.ts";
 import { type Checkout, RepoCache, type Since } from "../repo/RepoCache.ts";
+import { ContextPriority, unattended } from "./ContextPriority.ts";
+import { contextJson, contextNotes } from "./contextFile.ts";
 import { GuideConfigStore } from "./GuideConfigStore.ts";
 import { makeGuideStream } from "./guideStream.ts";
 import { GuideSettingsStore } from "./GuideSettingsStore.ts";
@@ -805,6 +808,20 @@ export const make = Effect.gen(function* () {
         ),
       );
 
+  /**
+   * What GitHub says about the PR besides its diff, read once for the head the attempt fetched:
+   * the prompt's view of it and the file the agent reads. The activity log says what it holds.
+   */
+  const contextFor = (review: Review, attemptId: AttemptId, ref: PullRequestRef, headSha: string) =>
+    Effect.gen(function* () {
+      const read = yield* pullRequests
+        .context(review.key, review.accountId, headSha)
+        .pipe(Effect.provideService(GitHubPriority, yield* ContextPriority));
+      for (const note of contextNotes(read))
+        yield* appendActivity(review.key, review.id, attemptId, "note", note);
+      return { read, json: contextJson(read, { ref, headSha }) };
+    });
+
   const failAttempt = (review: Review, attemptId: AttemptId, failure: AttemptFailure) =>
     Effect.gen(function* () {
       const at = yield* now;
@@ -1155,6 +1172,7 @@ export const make = Effect.gen(function* () {
         diff: path.join(diffDir, "pull-request.diff"),
         since: path.join(diffDir, `since-revision-${previous?.revision ?? 0}.diff`),
         guide: path.join(diffDir, `guide-revision-${previous?.revision ?? 0}.json`),
+        context: path.join(diffDir, "pull-request-context.json"),
       };
       const related = following(previous, since, files);
       const follows =
@@ -1230,6 +1248,7 @@ export const make = Effect.gen(function* () {
         "note",
         follows.note === null ? checkedOut : `${checkedOut}. ${follows.note}`,
       );
+      const context = yield* contextFor(review, attemptId, ref, ready.headSha);
       if (
         !(yield* setStatus(
           review.id,
@@ -1248,6 +1267,7 @@ export const make = Effect.gen(function* () {
           yield* fs.remove(tmpDir, { recursive: true, force: true });
           yield* fs.makeDirectory(tmpDir, { mode: 0o700 });
           yield* fs.writeFileString(files.diff, diff.text);
+          yield* fs.writeFileString(files.context, context.json);
           readContexts.set(attemptId, {
             worktree: ready.worktree,
             diffFile: files.diff,
@@ -1301,6 +1321,7 @@ export const make = Effect.gen(function* () {
           guidance: settings.guidance.filter((block) => block.replacedBy === null),
           focusAreas: settings.focusAreas.filter((area) => area.active),
         },
+        context: { file: files.context, read: context.read },
         stack,
         previous: follows.prompt,
         streamsGuideInput: provider.streamsGuideInput,
@@ -1773,7 +1794,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if ((yield* findReview(key)) !== null) return false;
       const agent = yield* chooseAgent(undefined, null);
-      const { created } = yield* ensureReview(key, accountId, agent, "auto");
+      const { created } = yield* unattended(ensureReview(key, accountId, agent, "auto"));
       return created;
     }).pipe(Effect.catchTags(dbFailures));
 
@@ -1880,7 +1901,9 @@ export const make = Effect.gen(function* () {
           return yield* end(review.key, action.reason);
         case "update": {
           yield* noteProblem(review, null);
-          const started = yield* startAttempt(review, "new-commits", { from: ["watching"] });
+          const started = yield* unattended(
+            startAttempt(review, "new-commits", { from: ["watching"] }),
+          );
           if (started)
             yield* Effect.logInfo("New head; updating the guide").pipe(
               Effect.annotateLogs({ reviewId: review.id, headSha: action.headSha }),
@@ -2418,7 +2441,7 @@ export const make = Effect.gen(function* () {
         review.status._tag === "failed" && review.status.attemptId !== null
           ? yield* batchOf(review.status.attemptId)
           : null;
-      yield* startAttempt(review, "retry", { batch });
+      yield* unattended(startAttempt(review, "retry", { batch }));
     }
     const live = new Set(
       (yield* sql`SELECT id FROM reviews WHERE json_extract(status, '$._tag') != 'done'`.pipe(

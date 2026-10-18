@@ -52,6 +52,11 @@
  *   POST limit?resource=graphql|core&seconds=<s>   the limit is used up until then
  *   POST latency?ms=<n>[&resource=graphql|core]   every API answer, or that resource's, waits this long
  *   POST archive?repo=<name>            archives a repository, so lists leave it out
+ *   POST context?pr=<n>                 seeds what the PR says besides its diff (the body is JSON, see
+ *                                       fake-github/context.ts): check runs with their output, review
+ *                                       threads and the issues it closes. It replaces the PR's earlier
+ *                                       seed and bumps updatedAt, like a comment does
+ *   POST remaining?resource=core|graphql&count=<n>   only <n> requests (or points) are left in the window
  */
 import * as NodeFS from "node:fs";
 import * as NodeHttp from "node:http";
@@ -59,6 +64,7 @@ import * as NodePath from "node:path";
 
 import * as Schema from "effect/Schema";
 
+import { decodeSeed, seeds } from "./fake-github/context.ts";
 import { graphql } from "./fake-github/graphql.ts";
 import {
   archived,
@@ -184,6 +190,23 @@ const control = (url: URL, method: string, text: string, response: NodeHttp.Serv
     });
     pull.updatedAt = Date.now();
     return answer({ ok: true, id });
+  }
+  if (name === "context" && method === "POST" && pull !== undefined) {
+    try {
+      seeds.set(pull.number, decodeSeed(text));
+    } catch (error) {
+      response.writeHead(400, { "content-type": "text/plain" });
+      response.end(error instanceof Error ? error.message : "The seed could not be read.");
+      return;
+    }
+    pull.updatedAt = Date.now();
+    return answer({ ok: true });
+  }
+  if (name === "remaining" && method === "POST") {
+    const resource = url.searchParams.get("resource") === "graphql" ? "graphql" : "core";
+    const count = Math.max(0, Number(url.searchParams.get("count") ?? "0"));
+    quotas[resource].used = Math.max(0, LIMIT - count);
+    return answer({ ok: true, resource, remaining: remaining(resource) });
   }
   if (name === "push" && pull !== undefined) {
     const commit = {

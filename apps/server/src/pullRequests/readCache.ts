@@ -260,12 +260,16 @@ export const makeReadCache = <V>(options: {
         /** False: a failed read fails instead of answering with the old value. */
         readonly fallback?: boolean;
         readonly accept?: (value: V) => boolean;
+        /** An answer older than this is read again, like an invalidated one, even when it is still fresh. */
+        readonly maxAgeMs?: number;
       } = {},
     ): Effect.Effect<Cached<V>, E, R> =>
       Effect.gen(function* () {
         const cached = usable(yield* lookup(key), opts.accept);
-        if (cached !== undefined && !cached.invalidated && !opts.refresh) {
-          const now = yield* Clock.currentTimeMillis;
+        const now = yield* Clock.currentTimeMillis;
+        const tooOld = (entry: Entry<V>, at: number) =>
+          opts.maxAgeMs !== undefined && at - entry.fetchedAt > opts.maxAgeMs;
+        if (cached !== undefined && !cached.invalidated && !opts.refresh && !tooOld(cached, now)) {
           if (now - cached.fetchedAt >= options.freshMs && !revalidating.has(id(key))) {
             revalidating.add(id(key));
             yield* Effect.forkIn(revalidate(key, fetch), scope);
@@ -282,6 +286,7 @@ export const makeReadCache = <V>(options: {
             if (
               entry !== undefined &&
               !entry.invalidated &&
+              !tooOld(entry, askedAt) &&
               (!opts.refresh || entry.fetchedAt >= askedAt)
             )
               return entry;

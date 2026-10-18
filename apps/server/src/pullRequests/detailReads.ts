@@ -22,10 +22,19 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { GitHubAccounts } from "../accounts/GitHubAccounts.ts";
-import { GitHubApi, GitHubRequestError } from "../github/GitHubApi.ts";
+import { GitHubApi, GitHubRequestError, queryFailure } from "../github/GitHubApi.ts";
 import { makeReviewThreads } from "./reviewThreads.ts";
 import { makeTimelineRead } from "./timelineRead.ts";
 import { makeActionReads } from "./actionReads.ts";
+import { clipText } from "./clipText.ts";
+import {
+  CLOSING_ISSUES_QUERY,
+  ClosingIssues,
+  ClosingIssuesResponse,
+  closingIssuesOf,
+  withheld,
+} from "./closingIssuesQuery.ts";
+import { makePullRequestContext } from "./pullRequestContext.ts";
 import { isoAt } from "../github/budget.ts";
 import { type Cached, makeReadCache } from "./readCache.ts";
 import { RestStack, restMembership, STACK_QUERY, StackResponse, stackOf } from "./stackQuery.ts";
@@ -74,12 +83,16 @@ export const CheckRun = Schema.Struct({
   status: Schema.String,
   conclusion: Schema.NullOr(Schema.String),
   html_url: Schema.NullOr(Schema.String),
+  output: Schema.optionalKey(
+    Schema.Struct({ title: Schema.NullOr(Schema.String), summary: Schema.NullOr(Schema.String) }),
+  ),
 });
 export const Status = Schema.Struct({
   id: Schema.Int,
   context: Schema.String,
   state: Schema.String,
   target_url: Schema.NullOr(Schema.String),
+  description: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 const RawFile = Schema.Struct({
   filename: Schema.String,
@@ -106,6 +119,16 @@ const checkStatus = (status: string, conclusion: string | null) => {
   return "failing" as const;
 };
 
+const SUMMARY_MAX = 300;
+const summaryOf = (...parts: ReadonlyArray<string | null | undefined>) => {
+  const text = parts
+    .flatMap((part) => (part == null || part.trim() === "" ? [] : [part]))
+    .join(": ")
+    .replaceAll(/\s+/g, " ")
+    .trim();
+  return text === "" ? null : clipText(text, SUMMARY_MAX);
+};
+
 /** The checks a detail shows for a commit's check runs. */
 export const shownCheckRuns = (
   runs: ReadonlyArray<typeof CheckRun.Type>,
@@ -115,6 +138,7 @@ export const shownCheckRuns = (
     name: check.name,
     status: checkStatus(check.status, check.conclusion),
     url: check.html_url,
+    summary: summaryOf(check.output?.title, check.output?.summary),
   }));
 /** The checks a detail shows for a commit's statuses: the newest one of each context. */
 export const shownStatuses = (
@@ -129,6 +153,7 @@ export const shownStatuses = (
     status:
       status.state === "success" ? "passing" : status.state === "pending" ? "pending" : "failing",
     url: status.target_url,
+    summary: summaryOf(status.description),
   }));
 };
 
@@ -136,6 +161,9 @@ const isGitHubError = Schema.is(GitHubRequestError);
 
 /** The owner's ten minutes: within them a read is answered from cache without GitHub. */
 export const FRESH_MS = 10 * 60_000;
+
+/** The guide's context takes no answer older than those ten minutes, and no old answer when GitHub can't be read. */
+const FRESH_ONLY = { maxAgeMs: FRESH_MS, fallback: false } as const;
 
 const freshnessOf = <V>(cached: Cached<V>): Freshness => ({
   fetchedAt: isoAt(cached.fetchedAt),
@@ -220,6 +248,15 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
     persist: true,
     changed: (cacheKey) => options.stackChanged(cacheKey.accountId),
   });
+  const closingIssuesCache = yield* makeReadCache({
+    name: "closing-issues",
+    json: Schema.fromJsonString(ClosingIssues),
+    maxEntries: 32,
+    maxBytes: 4 * 1024 * 1024,
+    freshMs: FRESH_MS,
+    persist: false,
+    changed: () => Effect.void,
+  });
   const MergeBase = Schema.Struct({ merge_base_commit: Schema.Struct({ sha: Schema.String }) });
   const mergeBases = yield* makeReadCache({
     name: "merge-base",
@@ -236,6 +273,8 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
     reason: PullRequestReadError["reason"],
     message: string,
   ) => new PullRequestReadError({ key, accountId, reason, message });
+  const noAccess = (accountId: AccountId) =>
+    `This pull request wasn't found or you have no access through account ${accountId}. Check its repository access in Settings, then retry.`;
   const binding = (key: PullRequestKey, accountId: AccountId) =>
     Effect.gen(function* () {
       const ref = refFromKey(key);
@@ -278,9 +317,7 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
                 : error.status === 401
                   ? "account"
                   : "github",
-              error.status === 404 || error.status === 403
-                ? `This pull request wasn't found or you have no access through account ${accountId}. Check its repository access in Settings, then retry.`
-                : error.message,
+              error.status === 404 || error.status === 403 ? noAccess(accountId) : error.message,
             ),
           ),
         ),
@@ -664,7 +701,7 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
     status: PullRequestStatus | null = null,
   ) =>
     Effect.all(
-      [detailCache, timelineCache, threadsCache, filesCache].map((cache) =>
+      [detailCache, timelineCache, threadsCache, filesCache, closingIssuesCache].map((cache) =>
         cache.invalidate(accountId, key),
       ),
       { discard: true },
@@ -674,6 +711,17 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
     detailCache
       .invalidate(accountId, key)
       .pipe(Effect.andThen(options.changed(key, accountId, null)));
+  const fetchThreads = (key: PullRequestKey, accountId: AccountId, ref: PullRequestRef) =>
+    reviewThreads
+      .read(accountId, ref)
+      .pipe(
+        deadline(
+          key,
+          accountId,
+          "GitHub review thread read",
+          "GitHub took too long to load review comments. Try refreshing.",
+        ),
+      );
   /** Threads as GitHub numbers them against the head the detail shows. */
   const threads = (key: PullRequestKey, accountId: AccountId) =>
     Effect.gen(function* () {
@@ -681,16 +729,7 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
       const shown = yield* detail(key, accountId);
       const cached = yield* threadsCache.read(
         cacheKey(key, account),
-        reviewThreads
-          .read(accountId, ref)
-          .pipe(
-            deadline(
-              key,
-              accountId,
-              "GitHub review thread read",
-              "GitHub took too long to load review comments. Try refreshing.",
-            ),
-          ),
+        fetchThreads(key, accountId, ref),
         { accept: (value) => value.headSha === shown.headSha },
       );
       return cached.value;
@@ -783,6 +822,57 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
       const shown = yield* detail(key, accountId);
       return shown.stack === null ? null : yield* readStack(key, accountId, shown.stack.number);
     });
+  /** The issues the PR says it closes, through the PR's own account. Read for the guide's context only. */
+  const closingIssues = (key: PullRequestKey, accountId: AccountId) =>
+    Effect.gen(function* () {
+      const { ref, account } = yield* binding(key, accountId);
+      const cached = yield* closingIssuesCache.read(
+        cacheKey(key, account),
+        Effect.gen(function* () {
+          const { data, errors } = yield* api.graphqlResult(
+            accountId,
+            CLOSING_ISSUES_QUERY,
+            { owner: ref.owner, name: ref.repo, number: ref.number },
+            ClosingIssuesResponse,
+          );
+          const failures = errors.filter((error) => !withheld(error));
+          if (data === null || failures.length > 0) return yield* queryFailure(accountId, failures);
+          const issues = closingIssuesOf(data);
+          if (issues === null) return yield* fail(key, accountId, "not-found", noAccess(accountId));
+          return issues;
+        }).pipe(
+          deadline(
+            key,
+            accountId,
+            "Linked issues read",
+            "GitHub took too long to load the linked issues. Try refreshing.",
+          ),
+        ),
+        FRESH_ONLY,
+      );
+      return cached.value;
+    }).pipe(readError(key, accountId));
+  /** The checks of the head an attempt fetched, answered from a read of the last ten minutes or from GitHub. */
+  const contextChecks = (key: PullRequestKey, accountId: AccountId, headSha: string) =>
+    Effect.gen(function* () {
+      const { account } = yield* binding(key, accountId);
+      const cached = yield* detailCache.read(cacheKey(key, account), fetchDetail(key, accountId), {
+        ...FRESH_ONLY,
+        accept: (value) => value.headSha === headSha,
+      });
+      return cached.value;
+    }).pipe(readError(key, accountId));
+  /** The threads as numbered against the head an attempt fetched, which is not always the detail's. */
+  const contextThreads = (key: PullRequestKey, accountId: AccountId, headSha: string) =>
+    Effect.gen(function* () {
+      const { account, ref } = yield* binding(key, accountId);
+      const cached = yield* threadsCache.read(
+        cacheKey(key, account),
+        fetchThreads(key, accountId, ref),
+        { ...FRESH_ONLY, accept: (value) => value.headSha === headSha },
+      );
+      return cached.value;
+    }).pipe(readError(key, accountId));
   /** Marks a stack's cached layers stale, so the next read goes to GitHub. */
   const invalidateStack = (accountId: AccountId, ref: PullRequestRef, stack: number) =>
     stackCache.invalidate(accountId, stackKey(ref, stack));
@@ -797,6 +887,15 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
       yield* invalidateStack(accountId, ref, cached.value.stack.number);
       yield* options.stackChanged(accountId);
     });
+  /**
+   * What GitHub says about the PR besides its diff, for the head an attempt fetched: each part
+   * is read through the PR's account and these caches, or says why it couldn't be.
+   */
+  const context = makePullRequestContext({
+    checks: contextChecks,
+    threads: contextThreads,
+    closingIssues,
+  });
   return {
     detail,
     cachedDetail,
@@ -814,5 +913,6 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
     threads,
     replyToThread,
     resolveThread,
+    context,
   };
 });

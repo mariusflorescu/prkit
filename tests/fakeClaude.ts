@@ -20,6 +20,10 @@ export type FakeNote = {
   text: string;
 };
 
+const Prompt = Schema.fromJsonString(
+  Schema.Struct({ prompt: Schema.String, context: Schema.NullOr(Schema.String) }),
+);
+
 /**
  * The stand-in Claude Code of scripts/fake-claude.ts, in a folder of its own: pass `file` to
  * `verify-app start --claude`. `hold` keeps its next turns writing until `release`,
@@ -58,6 +62,24 @@ export const setUpFakeClaude = (name: string) => {
     lingering: () => {
       const file = NodePath.join(dir, "linger.pid");
       return NodeFS.existsSync(file) ? Number(NodeFS.readFileSync(file, "utf8")) : null;
+    },
+    /** Every prompt so far, oldest first, with the context file it named as the turn saw it (null when it named none). */
+    prompts: () => {
+      const file = NodePath.join(dir, "prompts.jsonl");
+      if (!NodeFS.existsSync(file)) return [];
+      return NodeFS.readFileSync(file, "utf8")
+        .split("\n")
+        .filter((line) => line !== "")
+        .map((line) => {
+          const turn = Schema.decodeUnknownSync(Prompt)(line);
+          return {
+            prompt: turn.prompt,
+            context:
+              turn.context === null
+                ? null
+                : NodeFS.readFileSync(NodePath.join(dir, turn.context), "utf8"),
+          };
+        });
     },
     /** Every turn so far: the config folder it ran with, its session, and whether it resumed. */
     runs: () => {

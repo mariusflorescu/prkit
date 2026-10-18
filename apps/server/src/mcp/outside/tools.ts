@@ -225,7 +225,8 @@ const ReadThreads = read(
 
 const ReadChecks = read(
   Tool.make("read_checks", {
-    description: "Every check’s name, status and link, from the same cached PR detail as the app.",
+    description:
+      "Every check’s name, status, link and GitHub’s short summary of the result, from the same cached PR detail as the app.",
     parameters: Parity.PagedTargetInput,
     success: limited(Parity.ChecksResult),
     failure: OutsideToolFailure,
