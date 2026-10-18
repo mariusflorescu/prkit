@@ -31,6 +31,7 @@ export function GuideFixturePage() {
         key={fixture.name}
         guide={guide}
         snapshot={snapshot}
+        source={null}
         prUrl={fixture.prUrl}
         loadContents={unavailableContents}
       />

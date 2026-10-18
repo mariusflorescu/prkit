@@ -75,6 +75,30 @@ export const DIFF_CSS = `
   outline: 2px solid var(--ring);
   outline-offset: -2px;
 }
+[data-diff-type="split"][data-overflow="wrap"] { container-type: inline-size; }
+[data-overflow="scroll"] [data-deletions] [data-gutter] > [data-separator="line-info"] [data-separator-wrapper] {
+  width: 100cqi;
+}
+[data-overflow="wrap"] [data-deletions] [data-gutter] > [data-separator="line-info"] [data-separator-wrapper] {
+  width: 50cqi;
+}
+[data-unmodified-lines] > [data-scope] {
+  order: -1;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 11px var(--font-mono);
+  color: color-mix(in srgb, var(--code-foreground) 64%, var(--code-background));
+}
+[data-scope] > [data-scope-between] {
+  color: color-mix(in srgb, var(--code-foreground) 40%, var(--code-background));
+}
+[data-unmodified-lines][data-scoped]::after { display: none; }
+:is([data-separator="line-info"], [data-separator="line-info-basic"])[data-expand-index]:is(:hover, :focus-within) [data-scope] {
+  color: color-mix(in srgb, var(--code-foreground) 76%, var(--code-background));
+}
 [data-gutter] > [data-column-number]:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -2px;

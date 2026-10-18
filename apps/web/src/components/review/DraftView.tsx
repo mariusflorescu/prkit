@@ -50,6 +50,7 @@ export function DraftView({
       key={attemptId}
       guide={draft.data.normalized}
       snapshot={diff.data}
+      source={{ _tag: "attempt", key: detail.key, attemptId }}
       prUrl={detail.url}
       prDescription={detail.body}
       pendingChapterIds={pending}

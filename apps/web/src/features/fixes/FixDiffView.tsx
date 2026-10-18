@@ -1,26 +1,34 @@
-import type { DiffSnapshot, FixerTurn, PullRequestKey } from "@prkit/contracts";
+import type { DiffSnapshot, DiffSource, FixerTurn, PullRequestKey } from "@prkit/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { DiffWorkerPoolProvider, FileDiffCard } from "~/components/diff";
+import { DiffList, FileDiffCard } from "~/components/diff";
 import { DiffSkeleton } from "~/components/diff/DiffSkeleton";
 import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
 import { fixerDiffQuery } from "~/rpc/queries";
 
-const Files = ({ diff, empty }: { diff: DiffSnapshot; empty: string }) =>
+const Files = ({
+  diff,
+  source,
+  empty,
+}: {
+  diff: DiffSnapshot;
+  source: DiffSource;
+  empty: string;
+}) =>
   diff.files.length === 0 ? (
     <p role="status" className="text-xs text-muted-foreground">
       {empty}
     </p>
   ) : (
-    <DiffWorkerPoolProvider>
+    <DiffList files={diff.files} source={source}>
       <div className="space-y-3">
         {diff.files.map((file) => (
           <FileDiffCard key={file.path} file={file} />
         ))}
       </div>
-    </DiffWorkerPoolProvider>
+    </DiffList>
   );
 
 /**
@@ -41,7 +49,9 @@ export function FixDiffView({ prKey, turn }: { prKey: PullRequestKey; turn: Fixe
         </Button>
       </div>
     );
-  if (diff.data._tag === "commit") return <Files diff={diff.data.diff} empty="No file changes." />;
+  const source = { _tag: "fixerTurn", key: prKey, turnId: turn.id, sha } as const;
+  if (diff.data._tag === "commit")
+    return <Files diff={diff.data.diff} source={source} empty="No file changes." />;
   const sides = [
     { id: "ours", label: `Compared with ${turn.headRef ?? "this branch"}` },
     { id: "theirs", label: `Compared with ${turn.baseRef ?? "the base branch"}` },
@@ -71,7 +81,9 @@ export function FixDiffView({ prKey, turn }: { prKey: PullRequestKey; turn: Fixe
         ))}
       </div>
       <Files
+        key={side}
         diff={side === "ours" ? diff.data.ours : diff.data.theirs}
+        source={source}
         empty="The conflicted files ended up exactly as on this side."
       />
     </div>

@@ -275,3 +275,55 @@ diffs-container {
     gap: 6px;
   }
 }
+[data-diff-list-status] {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+[data-move-chip-row] {
+  padding: 4px 12px;
+}
+[data-move-chip] {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--info) 10%, var(--code-background));
+  color: var(--info-foreground);
+  font: 11px/16px var(--font-sans);
+  white-space: nowrap;
+}
+[data-move-chip] > svg,
+[data-move-chip-count] {
+  flex-shrink: 0;
+}
+[data-move-chip-link],
+[data-move-chip-where] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+}
+[data-move-chip-link] {
+  cursor: pointer;
+  text-decoration: underline transparent;
+  text-underline-offset: 2px;
+}
+[data-move-chip-link]:focus-visible {
+  border-radius: 2px;
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+@media (hover: hover) {
+  [data-move-chip-link]:hover {
+    text-decoration-color: currentColor;
+  }
+}

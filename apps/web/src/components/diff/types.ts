@@ -16,9 +16,13 @@ export type ContentsState =
 /** A run of diff lines from `start` to `end`, the same point for one line. */
 export type LineRange = { start: LinePoint; end: LinePoint };
 
-export type RevealLine = { readonly line: number; readonly onCell: (cell: HTMLElement) => void };
-/** Opens a file's card without pointing at a line, as for a deleted or binary file. */
-export type RevealFile = { readonly line: null };
+/**
+ * Lines to scroll to and highlight; `onCell` gets the first line's number cell once it
+ * renders. A null range only opens the file's card, as for a deleted or binary file.
+ */
+export type RevealLines =
+  | { readonly range: LineRange; readonly onCell: (cell: HTMLElement) => void }
+  | { readonly range: null };
 
 /** Review comments on one file's diff, opted into by the caller. */
 export type DiffComments = {
