@@ -91,9 +91,7 @@ process.exit(result.status ?? 1);
   };
   return {
     start,
-    /** The commit `refs/pull/<number>/head` points at. */
     head: (number: number) => git("rev-parse", `refs/pull/${number}/head`).trim(),
-    /** Commits these files, by path, on the PR's branch and moves its pull ref there. */
     commit: (number: number, files: Record<string, string>) => {
       git("checkout", "-q", `feature-${number}`);
       for (const [path, content] of Object.entries(files))

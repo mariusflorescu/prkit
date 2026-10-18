@@ -542,7 +542,6 @@ export const WsRpcGroup = RpcGroup.make(
     success: PendingComments,
     error: ReviewCommentsError,
   }),
-  // The client names a guide note, never a placement; the server places it on GitHub's diff now.
   Rpc.make(WS_METHODS.reviewCommentsAddFromNote, {
     payload: Schema.Struct({
       key: PullRequestKey,

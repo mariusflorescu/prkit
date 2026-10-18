@@ -44,7 +44,7 @@ export function NoteCommentButton({
     mutationFn: () =>
       client.fetchQuery(pullRequestFilesQuery(pr.key, pr.accountId, pr.headSha, pr.baseSha)),
     onSuccess: (files) => {
-      const placed = placeNote({ path, point, written: rows, files });
+      const placed = placeNote({ path, point, writtenRows: rows, files });
       if (placed._tag === "lost")
         toastManager.add({
           type: "warning",
@@ -59,7 +59,7 @@ export function NoteCommentButton({
           note: {
             ref: { revision, path, index },
             text: note.text,
-            lands: placed.moved ? placed.placement.anchor : null,
+            movedTo: placed.moved ? placed.placement.anchor : null,
           },
         });
     },

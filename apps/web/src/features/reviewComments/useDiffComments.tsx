@@ -37,7 +37,7 @@ export type CommentScope = {
   /** Whether drafts and threads whose lines are gone are listed under each file. */
   outdated: boolean;
   /** The guide revision on screen, whose question and risk notes can become drafts. Null on Files. */
-  revision: number | null;
+  guideRevision: number | null;
 };
 
 type Pin = {
@@ -99,12 +99,12 @@ export function useDiffComments(
       }),
   });
   const moveComment = move.mutate;
-  const { commitSha, outdated: showOutdated, revision } = scope;
+  const { commitSha, outdated: showOutdated, guideRevision } = scope;
   const drafts = pending.data?.comments;
   const fromNotes = pending.data?.fromNotes;
   // A note's composer sits on its revision's line numbers, so only that revision shows it.
-  const shown =
-    composer !== null && (composer.note === null || composer.note.ref.revision === revision)
+  const visibleComposer =
+    composer !== null && (composer.note === null || composer.note.ref.revision === guideRevision)
       ? composer
       : null;
   // GitHub numbers threads against the head it had when they were read, so they are
@@ -155,8 +155,11 @@ export function useDiffComments(
         }
       }
       const open =
-        shown?.path === file.path ? locate(rows, file.path, shown.range, commitSha) : null;
-      if (open) pinAt(open.anchor.end).composer = { placement: open, note: shown?.note ?? null };
+        visibleComposer?.path === file.path
+          ? locate(rows, file.path, visibleComposer.range, commitSha)
+          : null;
+      if (open)
+        pinAt(open.anchor.end).composer = { placement: open, note: visibleComposer?.note ?? null };
       return {
         pins: [...pins.values()].map((pin) => pin.point),
         render: (point) => {
@@ -201,7 +204,7 @@ export function useDiffComments(
           ) : null,
         count: fileDrafts.length + fileThreads.length,
         noteFooter:
-          revision === null
+          guideRevision === null
             ? undefined
             : (note, index) => {
                 if (!COMMENTABLE[note.tone]) return null;
@@ -213,11 +216,12 @@ export function useDiffComments(
                       pr={{ key, accountId, headSha, baseSha }}
                       path={file.path}
                       rows={rows}
-                      revision={revision}
+                      revision={guideRevision}
                       note={note}
                       index={index}
                       composing={
-                        shown?.note?.ref.path === file.path && shown.note.ref.index === index
+                        visibleComposer?.note?.ref.path === file.path &&
+                        visibleComposer.note.ref.index === index
                       }
                     />
                   );
@@ -226,7 +230,7 @@ export function useDiffComments(
                 return (
                   <NoteCommentStatus
                     comment={comment}
-                    pinned={
+                    underNote={
                       end.side === point.side &&
                       end.line === point.line &&
                       anchorHolds(rows, comment.anchor, comment.snippet)
@@ -247,11 +251,11 @@ export function useDiffComments(
     drafts,
     fromNotes,
     threadList,
-    shown,
+    visibleComposer,
     moving,
     commitSha,
     showOutdated,
-    revision,
+    guideRevision,
     compose,
     moveComment,
   ]);

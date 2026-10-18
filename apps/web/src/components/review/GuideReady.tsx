@@ -52,19 +52,18 @@ export function GuideReady({
     running && attempt?.draft != null
       ? { attempt, version: attempt.draft.version, growing: attempt.draft.growing }
       : null;
-  // A comment being written from a note keeps its revision on screen, so a new one
-  // doesn't replace the guide under it; then the view follows the newest again.
-  const held = useReviewCommentsStore((state) =>
+  // A new revision mustn't remount the guide under words being written from a note.
+  const composingRevision = useReviewCommentsStore((state) =>
     state.composer?.key === detail.key ? (state.composer.note?.ref.revision ?? null) : null,
   );
   const closeComposer = useReviewCommentsStore((state) => state.closeComposer);
   const revision =
     revisions.find((entry) => entry.revision === picked) ??
-    revisions.find((entry) => entry.revision === held) ??
+    revisions.find((entry) => entry.revision === composingRevision) ??
     latest;
   const guide = useQuery(guideQuery(detail.key, revision.revision));
-  // Notes say what became of their drafts with the first paint, never a moment later.
-  const pending = useQuery(pendingCommentsQuery(detail.key, detail.accountId));
+  // Notes show what became of their drafts with the first paint, not a moment later.
+  const drafts = useQuery(pendingCommentsQuery(detail.key, detail.accountId));
   const { retry } = useReviewActions(detail.key);
   const loadContents = useCallback<LoadContents>(
     async (file) => {
@@ -84,7 +83,7 @@ export function GuideReady({
     commitSha: revision.headSha,
     threads: current,
     outdated: false,
-    revision: revision.revision,
+    guideRevision: revision.revision,
   });
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -95,7 +94,7 @@ export function GuideReady({
         revisions={revisions}
         selected={picked === "draft" && draft !== null ? "draft" : revision.revision}
         onSelect={(next) => {
-          if (held !== null && next !== held) closeComposer();
+          if (composingRevision !== null && next !== composingRevision) closeComposer();
           setPicked(next === latest.revision ? null : next);
         }}
         shown={
@@ -122,7 +121,7 @@ export function GuideReady({
             growing={draft.growing}
           />
         </div>
-      ) : guide.isPending || pending.isPending ? (
+      ) : guide.isPending || drafts.isPending ? (
         <GuideSkeleton />
       ) : guide.isError ? (
         <ReviewAlert

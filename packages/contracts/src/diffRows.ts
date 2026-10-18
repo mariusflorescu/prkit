@@ -94,7 +94,6 @@ export const findSnippet = (rows: ReadonlyArray<DiffRow>, path: string, snippet:
   return found;
 };
 
-/** A line note as a guide revision stores it. */
 type LineNote = NormalizedGuide["chapters"][number]["files"][number]["annotations"][number];
 
 /** A note's line as a comment point: `additions` is GitHub's new side, `deletions` its old. */
@@ -132,24 +131,23 @@ export type NotePlacement =
 export const placeNote = (input: {
   path: string;
   point: LinePoint;
-  /** The rows of the diff the note was written on. */
-  written: ReadonlyArray<DiffRow>;
+  writtenRows: ReadonlyArray<DiffRow>;
   /** GitHub's files at the PR's head now. */
   files: PullRequestFiles;
 }): NotePlacement => {
-  const { path, point, written, files } = input;
+  const { path, point, writtenRows, files } = input;
   const lost = (reason: "file" | "lines"): NotePlacement => ({ _tag: "lost", reason });
   const file = files.files.find((candidate) => candidate.path === path);
   const current = file?.patch._tag === "text" ? diffRows(file.patch.patch) : [];
   if (current.length === 0) return lost("file");
-  const at = rowIndex(written, point);
-  const hunk = written[at]?.hunk;
+  const at = rowIndex(writtenRows, point);
+  const hunk = writtenRows[at]?.hunk;
   if (hunk === undefined) return lost("lines");
   let from = at;
-  while (at - from < CONTEXT_ROWS && written[from - 1]?.hunk === hunk) from--;
+  while (at - from < CONTEXT_ROWS && writtenRows[from - 1]?.hunk === hunk) from--;
   let to = at;
-  while (to - at < CONTEXT_ROWS && written[to + 1]?.hunk === hunk) to++;
-  const window = written.slice(from, to + 1);
+  while (to - at < CONTEXT_ROWS && writtenRows[to + 1]?.hunk === hunk) to++;
+  const window = writtenRows.slice(from, to + 1);
   const text = snippetOf(window);
   const offset = at - from;
   const readsAt = (start: number) => {

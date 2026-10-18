@@ -42,7 +42,6 @@ export interface Pull {
   runs: Array<{ id: number; status: string; conclusion: string | null }>;
 }
 export const pulls = new Map<number, Pull>();
-/** A PR's files answer as a journey set it, in place of the fixture's own. */
 export const servedFiles = new Map<
   number,
   ReadonlyArray<{

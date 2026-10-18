@@ -13,7 +13,6 @@ const Run = Schema.fromJsonString(
   }),
 );
 
-/** A line note as the stand-in writes it into a guide. */
 export type FakeNote = {
   line: number;
   side: "additions" | "deletions";
@@ -48,7 +47,6 @@ export const setUpFakeClaude = (name: string) => {
     hold: () => flag("hold", true),
     release: () => flag("hold", false),
     failing: (on: boolean) => flag("fail", on),
-    /** The line notes its guides give each file, by path, from the next submitted guide. */
     notes: (notes: Record<string, ReadonlyArray<FakeNote>>) =>
       NodeFS.writeFileSync(NodePath.join(dir, "notes"), JSON.stringify(notes)),
     /** `nested` takes the path for the repository; `null` stops planting it. */

@@ -91,9 +91,7 @@ export const startFakeGitHub = async (
     resetStats: () => post("reset-stats"),
     comment: (pr: number, size = 0) => post(`comment?pr=${pr}&size=${size}`),
     push: (pr: number) => post(`push?pr=${pr}`),
-    /** A local commit becomes the PR's head, as a push of it would make it. */
     gitHead: (pr: number, sha: string) => post(`git-head?pr=${pr}&sha=${sha}`),
-    /** The PR's files answer from now on, as GitHub's files API lists them. */
     files: (
       pr: number,
       files: ReadonlyArray<{

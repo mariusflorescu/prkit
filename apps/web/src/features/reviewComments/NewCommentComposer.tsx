@@ -41,10 +41,10 @@ export function NewCommentComposer({
         });
     },
   });
-  const lands = note?.lands ?? null;
-  const where = rangeLabel(lands ?? placement.anchor);
+  const movedTo = note?.movedTo ?? null;
+  const where = rangeLabel(movedTo ?? placement.anchor);
   const label =
-    lands === null ? `Comment on ${where}` : `Comment on ${where}, where this line is now`;
+    movedTo === null ? `Comment on ${where}` : `Comment on ${where}, where this line is now`;
   return (
     <CommentCard draft label={`New comment on ${placement.anchor.path} ${where}`}>
       <div className="mb-2 text-xs text-muted-foreground">

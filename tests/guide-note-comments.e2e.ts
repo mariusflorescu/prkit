@@ -42,7 +42,6 @@ export function short(slug: string) {
   return slug.length <= limits.slug;
 }
 `;
-/** Four lines above the code, and the first check's line changed. */
 const MOVED = `// Limits for links and slugs.
 // Every value is a length in characters.
 // Change them here and nowhere else.
@@ -80,14 +79,12 @@ const Review = Schema.Struct({
   ),
 });
 
-/** The one review prkit posted to the fake, and nothing else written. */
-const postedReview = async (fake: FakeGitHub) => {
+const onlyReviewPosted = async (fake: FakeGitHub) => {
   const writes = await fake.writes();
   expect(writes.map((write) => write.kind)).toEqual(["POST pulls/9/reviews"]);
   return Schema.decodeUnknownSync(Review)(writes[0]?.input);
 };
 
-/** GitHub's files answer for PR 9 when only `src/limits.ts` has a diff. */
 const servedLimits = (patch: string) => ({
   filename: LIMITS,
   status: "modified",
@@ -108,13 +105,11 @@ const draftRows = (home: string) =>
     `SELECT start_side AS side, end_line AS line, body, state, note_key IS NOT NULL AS fromNote FROM pending_comments WHERE pr_key = '${KEY}' ORDER BY created_at`,
   );
 
-/** The guide note of this tone and words in a chapter's diff of `path`. */
 const noteIn = (browser: Browser, path: string, tone: FakeNote["tone"], text: string) =>
   browser
     .locator(`[data-path="${path}"] [data-guide-note][data-tone="${tone}"]`)
     .filter({ hasText: text });
 
-/** A fresh fake GitHub, stand-in Claude and local git for one journey's own instance. */
 const fixtures = async (name: string) => {
   const fake = await startFakeGitHub(name);
   const claude = setUpFakeClaude(name);
@@ -126,7 +121,6 @@ const fixtures = async (name: string) => {
   return { fake, claude, git, launch };
 };
 
-/** Signs in, opens PR 9's Guide tab and has the stand-in write revision 1. */
 const openGuide = async (
   { app, screen, browser }: { app: TestFixtures["app"]; screen: Screen; browser: Browser },
   run: { url: string; openUrl: string },
@@ -233,7 +227,7 @@ test(
       await expect(dialog).toBeHidden({ timeout: 30_000 });
       await expect(slug.getByRole("status")).toHaveText("Posted on GitHub.", { timeout: 30_000 });
       await expect(url.getByRole("status")).toHaveText("Posted on GitHub.");
-      const review = await postedReview(fake);
+      const review = await onlyReviewPosted(fake);
       expect(review.commit_id).toBe(git.head(9));
       expect(review.comments).toEqual([
         {
@@ -425,7 +419,7 @@ test(
       const dialog = screen.getByRole("dialog", "Finish your review");
       await dialog.getByRole("button", "Submit review").tap();
       await expect(dialog).toBeHidden({ timeout: 30_000 });
-      const review = await postedReview(fake);
+      const review = await onlyReviewPosted(fake);
       expect(review.commit_id).toBe(moved);
       expect(review.comments).toEqual([
         { path: LIMITS, body: URL_RISK, line: 2, side: "LEFT" },
@@ -485,7 +479,7 @@ test(
       const doubled = noteIn(browser, LIMITS, "question", DOUBLED);
       await expect(doubled.getByRole("button", "Add as comment, question on line 2")).toBeVisible();
       await screenshotLightAndDark(app, browser, "revision-2-posted");
-      expect((await postedReview(fake)).comments).toHaveLength(2);
+      expect((await onlyReviewPosted(fake)).comments).toHaveLength(2);
     } finally {
       stopFakeInstance(name, { keepHome: false });
       fake.stop();

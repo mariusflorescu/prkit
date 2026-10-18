@@ -74,7 +74,6 @@ const EVENTS = {
   "request-changes": { request: "REQUEST_CHANGES", state: "CHANGES_REQUESTED" },
 } as const satisfies Record<ReviewEvent, { request: string; state: string }>;
 const GITHUB_SIDE = { old: "LEFT", new: "RIGHT" } as const;
-/** Why a guide note can't become a draft on GitHub's diff now. */
 const LOST = {
   file: "GitHub shows no diff for this file now, so prkit can't place a comment on it.",
   lines:
@@ -100,7 +99,6 @@ const toComment = (row: typeof Row.Type): PendingComment => ({
   updatedAt: row.updated_at,
 });
 
-/** The note at `ref` and the rows of the diff its revision was written on. */
 const findNote = (revision: GuideRevision, ref: NoteRef) => {
   const note = revision.normalized.chapters
     .flatMap((chapter) => chapter.files)
@@ -311,7 +309,7 @@ export const make = Effect.gen(function* () {
         const placed = placeNote({
           path: ref.path,
           point: notePoint(found.note),
-          written: found.rows,
+          writtenRows: found.rows,
           files: yield* pullRequests.files(key, accountId),
         });
         if (placed._tag === "lost") return yield* fail(LOST[placed.reason]);
