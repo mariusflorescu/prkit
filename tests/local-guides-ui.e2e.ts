@@ -1,7 +1,7 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
-import { type Browser, test } from "@e2e-dev/web";
+import { test } from "@e2e-dev/web";
 import { expect, type TestFixtures } from "e2e";
 import * as Schema from "effect/Schema";
 
@@ -15,7 +15,7 @@ import {
   stopFakeInstance,
 } from "./fakeGitHub.ts";
 import { readRows } from "./fixturePr.ts";
-import { cliIn, scratchRoot, switchOn } from "./localGuideSession.ts";
+import { cliIn, dismissToasts, scratchRoot, switchOn } from "./localGuideSession.ts";
 import { handbook, localRepoFixture } from "./localRepoFixture.ts";
 import { emulateOsColorScheme, screenshotLightAndDark } from "./osColorScheme.ts";
 
@@ -44,15 +44,6 @@ const keepEvidence = (log: ReadonlyArray<string>) => {
 
 const pageText = async (screen: TestFixtures["screen"]) =>
   (await screen.getByRole("main").textContent()) ?? "";
-
-/**
- * Closes the toasts on screen, so the next frame shows the page alone. Base UI keeps the
- * toast region out of the accessibility tree until it is focused, so this finds them by CSS.
- */
-const dismissToasts = async (browser: Browser) => {
-  const close = browser.locator('[aria-label="Dismiss notification"]');
-  while ((await close.count()) > 0) await close.first().tap();
-};
 
 test(
   "a local review has its own tab and page: progress, the guide, Run again, Stop, Remove and relaunch",

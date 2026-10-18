@@ -3,6 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
+import type { Browser } from "@e2e-dev/web";
 import { expect, type TestFixtures } from "e2e";
 
 import type { Fixtures } from "./fixActions.ts";
@@ -49,4 +50,13 @@ export const switchOn = async ({ app, screen, browser }: Fixtures, openUrl: stri
   await screen.getByRole("switch", "Let my coding agents use prkit").tap();
   await expect(screen.getByText("Outside agents can read", { exact: true })).toBeVisible();
   await outsideAccess({ screen }, "Read and start work");
+};
+
+/**
+ * Closes the toasts on screen, so the next frame shows the page alone. Base UI keeps the
+ * toast region out of the accessibility tree until it is focused, so this finds them by CSS.
+ */
+export const dismissToasts = async (browser: Browser) => {
+  const close = browser.locator('[aria-label="Dismiss notification"]');
+  while ((await close.count()) > 0) await close.first().tap();
 };
