@@ -394,8 +394,7 @@ describe("the fix agent, without running an agent", () => {
         await expect(file.getByRole("button", "Comment on line 1")).toBeVisible({
           timeout: 30_000,
         });
-        await file.getByRole("button", "src/limits.ts").focus();
-        await browser.keyboard.press("Tab");
+        await file.getByRole("button", "Comment on line 1").focus();
         await browser.keyboard.press("ArrowDown");
         await browser.keyboard.press("ArrowDown");
         await browser.keyboard.press("Enter");
