@@ -36,6 +36,7 @@ interface ContextReads {
   readonly checks: (
     key: PullRequestKey,
     accountId: AccountId,
+    headSha: string,
   ) => Effect.Effect<Pick<PullRequestDetail, "headSha" | "checks">, PullRequestReadError>;
   /** The threads as numbered against `headSha`. */
   readonly threads: (
@@ -78,7 +79,7 @@ export const makePullRequestContext = (reads: ContextReads) => {
     Effect.all(
       {
         checks: part(
-          reads.checks(key, accountId).pipe(
+          reads.checks(key, accountId, headSha).pipe(
             Effect.map((detail): ContextPart<ContextChecks> =>
               detail.headSha !== headSha
                 ? unread({ message: elsewhere("checks", detail.headSha, headSha) })

@@ -852,15 +852,14 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
       );
       return cached.value;
     }).pipe(readError(key, accountId));
-  /** The detail's checks, answered from a read of the last ten minutes or from GitHub. */
-  const contextChecks = (key: PullRequestKey, accountId: AccountId) =>
+  /** The checks of the head an attempt fetched, answered from a read of the last ten minutes or from GitHub. */
+  const contextChecks = (key: PullRequestKey, accountId: AccountId, headSha: string) =>
     Effect.gen(function* () {
       const { account } = yield* binding(key, accountId);
-      const cached = yield* detailCache.read(
-        cacheKey(key, account),
-        fetchDetail(key, accountId),
-        FRESH_ONLY,
-      );
+      const cached = yield* detailCache.read(cacheKey(key, account), fetchDetail(key, accountId), {
+        ...FRESH_ONLY,
+        accept: (value) => value.headSha === headSha,
+      });
       return cached.value;
     }).pipe(readError(key, accountId));
   /** The threads as numbered against the head an attempt fetched, which is not always the detail's. */
