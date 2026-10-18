@@ -1447,6 +1447,7 @@ export const make = Effect.gen(function* () {
           plan.prompt._tag === "pull-request" && plan.prompt.authored
             ? { description: plan.prompt.target.body.trim() }
             : null,
+        manualCheck: true,
       };
       // A guide written under other settings is written again from scratch, not updated on top.
       const changedSince =

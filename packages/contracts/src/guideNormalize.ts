@@ -31,6 +31,7 @@ import {
   words,
 } from "./guideCheck.ts";
 import { checkFlowLengths, flowTexts, normalizeFlow } from "./guideFlow.ts";
+import { manualCheckTexts, normalizeManualCheck } from "./guideManualCheck.ts";
 import { normalizeRisk, riskTexts } from "./guideRisk.ts";
 import { normalizePreflight, preflightTexts } from "./guidePreflight.ts";
 
@@ -50,6 +51,7 @@ export const checkContextOf = (config: AttemptConfig): GuideCheckContext => ({
   skipped: config.skipped,
   signals: config.signals,
   preflight: config.preflight,
+  manualCheck: config.manualCheck,
 });
 
 /** The chapter prkit appends for skipped files; an agent's chapter can't take its id. */
@@ -312,6 +314,7 @@ function* guideTexts(guide: NormalizedGuide) {
   for (const area of guide.focusAreas) yield area.text;
   yield guide.guidanceNote ?? "";
   yield* preflightTexts(guide.preflight);
+  yield* manualCheckTexts(guide.manualCheck);
 }
 
 const checkDashes = (guide: NormalizedGuide, report: Report) => {
@@ -395,7 +398,7 @@ const normalizeGuidanceNote = (raw: string | undefined, report: Report) => {
 };
 
 const normalize = (
-  guide: DraftGuide & Pick<Guide, "focusAreas" | "guidanceNote" | "preflight">,
+  guide: DraftGuide & Pick<Guide, "focusAreas" | "guidanceNote" | "manualCheck" | "preflight">,
   snapshot: DiffSnapshot,
   mode: Mode,
   context: GuideCheckContext | null,
@@ -445,6 +448,15 @@ const normalize = (
       mode === "draft"
         ? null
         : normalizePreflight({ raw: guide.preflight, chapters, snapshot, context, report }),
+    manualCheck:
+      mode === "draft"
+        ? null
+        : normalizeManualCheck({
+            raw: guide.manualCheck,
+            chapterIds,
+            required: context?.manualCheck === true,
+            report,
+          }),
   };
   checkLengths(normalized, report);
   checkDashes(normalized, report);

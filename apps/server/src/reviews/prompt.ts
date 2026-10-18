@@ -11,6 +11,7 @@ import {
 import type { PullRequestContext } from "../pullRequests/pullRequestContext.ts";
 import type { LocalCapture } from "../repo/localCapture.ts";
 import { contextLines, contextSection } from "./contextFile.ts";
+import { manualCheckLines } from "./manualCheckPrompt.ts";
 import { preflightLines } from "./preflightPrompt.ts";
 import { riskSignalLines } from "./riskPrompt.ts";
 import type { ReviewTarget } from "./reviewTarget.ts";
@@ -160,7 +161,7 @@ const handOverLines = (streamsGuideInput: boolean, change = "PR") => {
       ? [
           "2. Once you understand the change, write the whole guide in one `submit_guide` call. The reviewer sees it while you write it: the overview as soon as its fields are done, then each chapter the moment you close it. So write the fields in this order: `summary`, `flow` (the before/after in its one form, or left out when neither helps), `background`, `steps`, then `chapters` in reading order, each with its own `risk`, then `risk` for the whole " +
             whole +
-            ", then `focus`, `focusAreas` and `guidanceNote`.",
+            ", then `manualCheck`, then `focus`, `focusAreas` and `guidanceNote`.",
           "3. If `submit_guide` reports problems, fix every one with `revise_guide`, sending only the chapters and fields you change. Once prkit accepts the guide, end your turn.",
         ]
       : [
@@ -211,6 +212,7 @@ export const buildPrompt = (input: PromptInput) => {
   const stack = stackContext(input.subject.stack, target.ref.number, target.baseRef);
   const risk = riskSignalLines(input.signals);
   const preflight = input.subject.authored ? preflightLines(body) : null;
+  const manualCheck = manualCheckLines();
   const sections = [
     `task:${input.previous?._tag ?? "first"}`,
     `files:${snapshot.files.length}`,
@@ -224,6 +226,7 @@ export const buildPrompt = (input: PromptInput) => {
       ? [`focus-areas:${settings.focusAreas.map((area) => area.handle ?? "").join(",")}`]
       : []),
     risk.label,
+    manualCheck.label,
   ];
   const text = [
     taskFor(input.previous),
@@ -258,6 +261,7 @@ export const buildPrompt = (input: PromptInput) => {
     ...guidanceLines(settings.guidance),
     ...focusLines(settings.focusAreas),
     ...risk.lines,
+    ...manualCheck.lines,
     ...handOverLines(input.streamsGuideInput),
   ].join("\n");
   return { text, sections };
@@ -335,6 +339,7 @@ const localPrompt = (
   const hidden = capture.commitCount - listed.length;
   const description = capture.description?.trim() ?? "";
   const risk = riskSignalLines(input.signals);
+  const manualCheck = manualCheckLines();
   const sections = [
     `task:${input.previous?._tag ?? "first"}`,
     "subject:local",
@@ -347,6 +352,7 @@ const localPrompt = (
       ? [`focus-areas:${settings.focusAreas.map((area) => area.handle ?? "").join(",")}`]
       : []),
     risk.label,
+    manualCheck.label,
   ];
   const text = [
     localTask(input.previous),
@@ -388,6 +394,7 @@ const localPrompt = (
     ),
     ...focusLines(settings.focusAreas, "change"),
     ...risk.lines,
+    ...manualCheck.lines,
     ...handOverLines(input.streamsGuideInput, "change"),
   ].join("\n");
   return { text, sections };

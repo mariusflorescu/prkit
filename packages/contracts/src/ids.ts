@@ -36,3 +36,13 @@ export const ReviewKey = Schema.Union([LocalReviewKey, PullRequestKey]);
 export type ReviewKey = typeof ReviewKey.Type;
 
 export const isLocalReviewKey = Schema.is(LocalReviewKey);
+
+/**
+ * Whose reading a mark belongs to: a pull request as one account reads it, so another
+ * account starts with nothing marked, or a review of local changes, which has no account.
+ */
+export const ReviewSubject = Schema.Union([
+  Schema.TaggedStruct("pull-request", { key: PullRequestKey, accountId: AccountId }),
+  Schema.TaggedStruct("local", { key: LocalReviewKey }),
+]);
+export type ReviewSubject = typeof ReviewSubject.Type;

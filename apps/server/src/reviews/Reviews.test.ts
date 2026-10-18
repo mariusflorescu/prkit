@@ -137,6 +137,10 @@ const rated = (file: string) => ({
   level: "low" as const,
   reasons: [{ text: "A plain check.", file }],
 });
+const NOTHING_TO_CHECK = {
+  steps: [],
+  reason: "Only the limits move, so nothing behaves differently.",
+};
 const GUIDE: Guide = {
   summary: ["Checks a link against its limits before storing it."],
   flow: FLOW,
@@ -159,6 +163,7 @@ const GUIDE: Guide = {
       risk: rated("src/server.js"),
     },
   ],
+  manualCheck: NOTHING_TO_CHECK,
 };
 /** Both chapters claim `src/server.js`. */
 const REJECTED: Guide = {
@@ -466,6 +471,7 @@ const NO_REJECTED =
 const SECOND: Guide = { ...GUIDE, summary: ["A second guide for the same attempt."] };
 const UNRATED: Guide = {
   summary: ["Checks a link against its limits before storing it."],
+  manualCheck: NOTHING_TO_CHECK,
   chapters: [
     {
       id: "limits",

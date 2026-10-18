@@ -176,6 +176,9 @@ const handlers = (toolkit: OutsideToolkit) =>
         stop_local_guide: startsWork((input) =>
           respond("stop_local_guide", input, () => work.stopLocal(input)),
         ),
+        tick_manual_check_steps: startsWork((input) =>
+          respond("tick_manual_check_steps", input, () => work.tickManualCheck(input)),
+        ),
       };
     }),
   );

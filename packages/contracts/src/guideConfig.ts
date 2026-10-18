@@ -263,6 +263,8 @@ export const AttemptConfig = Schema.Struct({
   preflight: Schema.NullOr(Schema.Struct({ description: Schema.String })).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(null)),
   ),
+  /** The prompt asked for a manual check plan. False for attempts from before, which have none. */
+  manualCheck: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
 });
 export type AttemptConfig = typeof AttemptConfig.Type;
 

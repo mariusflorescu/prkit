@@ -190,6 +190,30 @@ const Preflight = Schema.Struct({
   ),
 });
 
+/**
+ * How a person sees the change working by hand: the agent's suggestion from reading the
+ * code, never something it ran. No steps and a `reason` when there is nothing to check by
+ * hand. `steps` is optional so that a guide leaving it out gets a plain-word error from
+ * `normalize`.
+ */
+const ManualCheck = Schema.Struct({
+  /** How to get the change running, from the repository's README, scripts or docs. */
+  setup: Schema.optionalKey(Schema.String),
+  steps: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        action: Schema.String,
+        expect: Schema.String,
+        /** What is most likely to go wrong in this step. */
+        watchFor: Schema.optionalKey(Schema.String),
+        /** The chapter whose code the step exercises. */
+        chapter: Schema.optionalKey(ChapterReference),
+      }),
+    ),
+  ),
+  reason: Schema.optionalKey(Schema.String),
+});
+
 const GuideChapter = Schema.Struct({ ...chapterFields, files: Schema.Array(FileEntry) });
 
 export const Guide = Schema.Struct({
@@ -205,6 +229,7 @@ export const Guide = Schema.Struct({
   /** One advisory sentence on how conflicting guidance was resolved. Never treated as proof. */
   guidanceNote: Schema.optionalKey(Schema.String),
   preflight: Schema.optionalKey(Preflight),
+  manualCheck: Schema.optionalKey(ManualCheck),
 });
 export type Guide = typeof Guide.Type;
 
@@ -243,6 +268,7 @@ export const GuidePatch = Schema.Struct({
   focusAreas: Schema.optionalKey(FocusAreaAnswers),
   guidanceNote: Schema.optionalKey(Schema.String),
   preflight: Schema.optionalKey(Preflight),
+  manualCheck: Schema.optionalKey(ManualCheck),
 });
 export type GuidePatch = typeof GuidePatch.Type;
 
@@ -275,6 +301,23 @@ export const NormalizedPreflight = Schema.Struct({
   ),
 });
 export type NormalizedPreflight = typeof NormalizedPreflight.Type;
+export const ManualCheckStep = Schema.Struct({
+  /** Inline markdown, like every text below. */
+  action: Schema.String,
+  expect: Schema.String,
+  watchFor: Schema.NullOr(Schema.String),
+  chapter: Schema.NullOr(Schema.String),
+});
+export type ManualCheckStep = typeof ManualCheckStep.Type;
+/** Steps to see the change working, or why there is nothing to check by hand. */
+export const NormalizedManualCheck = Schema.Union([
+  Schema.TaggedStruct("steps", {
+    setup: Schema.NullOr(Schema.String),
+    steps: Schema.NonEmptyArray(ManualCheckStep),
+  }),
+  Schema.TaggedStruct("nothing", { reason: Schema.String }),
+]);
+export type NormalizedManualCheck = typeof NormalizedManualCheck.Type;
 const NormalizedFlowGraph = Schema.Struct({
   _tag: Schema.Literal("graph").pipe(Schema.withDecodingDefaultKey(Effect.succeed("graph"))),
   title: Schema.String,
@@ -396,6 +439,10 @@ export const NormalizedGuide = Schema.Struct({
   ),
   /** Only on a guide the author asked for. Revisions written before pre-flights decode with none. */
   preflight: Schema.NullOr(NormalizedPreflight).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+  ),
+  /** Null in drafts and in revisions written before manual checks. */
+  manualCheck: Schema.NullOr(NormalizedManualCheck).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(null)),
   ),
 });

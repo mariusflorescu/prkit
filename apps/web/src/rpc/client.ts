@@ -63,6 +63,10 @@ import {
   type ReviewedDecision,
   type ReviewedFilesChange,
   type ReviewedMarks,
+  type ManualCheckDecision,
+  type ManualCheckTicks,
+  type ManualCheckTicksChange,
+  type ReviewSubject,
   type CommentPlacement,
   type NoteRef,
   type PendingComments,
@@ -286,6 +290,32 @@ export const watchReviewedFiles = (
   const fiber = current.runFork(
     WsClient.use((client) =>
       client[WS_METHODS.reviewedFilesChanges]({}).pipe(
+        Stream.runForEach((change) => Effect.sync(() => onChange(change))),
+      ),
+    ).pipe(Effect.ignore, Effect.andThen(Effect.sleep("2 seconds")), Effect.forever),
+  );
+  return () => {
+    current.runFork(Fiber.interrupt(fiber));
+  };
+};
+
+// The manual check steps the user ticked.
+export const getManualCheckTicks = (subject: ReviewSubject): Promise<ManualCheckTicks> =>
+  call((client) => client[WS_METHODS.manualCheckTicksGet]({ subject }));
+export const setManualCheckTicks = (
+  subject: ReviewSubject,
+  decision: ManualCheckDecision,
+): Promise<ManualCheckTicks> =>
+  call((client) => client[WS_METHODS.manualCheckTicksSet]({ subject, decision }));
+/** Hears ticks saved anywhere, an outside agent included, until the returned function is called. */
+export const watchManualCheckTicks = (
+  onChange: (change: ManualCheckTicksChange) => void,
+): (() => void) => {
+  const current = getRuntime();
+  if (current === null) return () => {};
+  const fiber = current.runFork(
+    WsClient.use((client) =>
+      client[WS_METHODS.manualCheckTicksChanges]({}).pipe(
         Stream.runForEach((change) => Effect.sync(() => onChange(change))),
       ),
     ).pipe(Effect.ignore, Effect.andThen(Effect.sleep("2 seconds")), Effect.forever),

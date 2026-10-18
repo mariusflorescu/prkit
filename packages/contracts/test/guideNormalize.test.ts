@@ -433,6 +433,7 @@ describe("checks that depend on the attempt's settings", () => {
     skipped: [skippedTest],
     signals: null,
     preflight: null,
+    manualCheck: false,
   };
   const check = (guide: object, withContext: GuideCheckContext | null = context) =>
     normalizeGuide(Schema.decodeUnknownSync(Guide)(guide), snapshot, withContext);

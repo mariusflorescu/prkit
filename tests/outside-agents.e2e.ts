@@ -89,6 +89,7 @@ const ALL = [
   "mark_files_reviewed",
   "generate_local_guide",
   "stop_local_guide",
+  "tick_manual_check_steps",
 ].sort();
 const NOT_OPEN = "prkit isn't open. Open it, then try again.";
 const OFF = "Outside agents are off. Turn them on in prkit > Settings > Outside agents.";

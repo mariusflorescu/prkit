@@ -3,6 +3,7 @@ import { type ReviewSnapshot } from "@prkit/contracts";
 
 import { Agents } from "../agents/Agents.ts";
 import { ReviewComments } from "../reviewComments/ReviewComments.ts";
+import { ManualCheckTicks } from "../manualCheck/ManualCheckTicks.ts";
 import { ReviewedFiles } from "../reviewedFiles/ReviewedFiles.ts";
 import { GuideConfigStore } from "../reviews/GuideConfigStore.ts";
 import { Reviews } from "../reviews/Reviews.ts";
@@ -34,6 +35,7 @@ export const makeOutsideActions = (
     const guideConfig = yield* GuideConfigStore;
     const comments = yield* ReviewComments;
     const reviewed = yield* ReviewedFiles;
+    const manualCheckTicks = yield* ManualCheckTicks;
 
     const close = (input: TargetInput) =>
       Effect.gen(function* () {
@@ -79,6 +81,25 @@ export const makeOutsideActions = (
             : error.reason === "moved"
               ? fail("conflict", error.message)
               : Effect.fail(asFailure(error)),
+        ),
+        Effect.mapError(asFailure),
+      );
+
+    const tickManualCheck = (input: typeof Inputs.TickManualCheckInput.Type) =>
+      Effect.gen(function* () {
+        const target = yield* resolve(input);
+        const result = yield* manualCheckTicks.tickSteps(
+          target,
+          input.revision,
+          input.steps,
+          input.ticked ?? true,
+        );
+        return { revision: result.revision, manualCheckTicked: result.ticked };
+      }).pipe(
+        Effect.catchTag("ManualCheckTicksError", (error) =>
+          error.reason === "no-such-step"
+            ? fail("invalid", error.message)
+            : Effect.fail(asFailure(error)),
         ),
         Effect.mapError(asFailure),
       );
@@ -178,5 +199,6 @@ export const makeOutsideActions = (
       editComment,
       moveComment,
       markFilesReviewed,
+      tickManualCheck,
     };
   });

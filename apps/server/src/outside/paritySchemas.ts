@@ -59,6 +59,7 @@ import {
   GuideStatus,
   FixResult,
   HOST_NAME,
+  ManualCheckTicked,
   OWNER_NAME,
   REPO_NAME,
   ReadPullRequestInput,
@@ -213,6 +214,26 @@ export const RevisionResult = Schema.Struct({
   createdAt: Schema.String,
   content: NormalizedGuide,
   config: AttemptConfig,
+  manualCheckTicked: ManualCheckTicked,
+});
+export const TickManualCheckInput = Schema.Struct({
+  ...TargetFields,
+  revision: Schema.Int.check(Schema.isGreaterThan(0)).annotate({
+    description:
+      "The guide revision whose manualCheck steps you read, from read_guide or read_guide_revision.",
+  }),
+  steps: Schema.NonEmptyArray(Schema.Int.check(Schema.isGreaterThan(0))).annotate({
+    description: "The steps to tick, by their 1-based number in that revision's manualCheck.",
+  }),
+  ticked: Schema.optionalKey(
+    Schema.Boolean.annotate({
+      description: "true ticks the steps (when omitted); false unticks them.",
+    }),
+  ),
+});
+export const TickManualCheckResult = Schema.Struct({
+  revision: Schema.Int,
+  manualCheckTicked: ManualCheckTicked,
 });
 export const ReviewDiffInput = Schema.Struct({ ...PagedTargetInput.fields, attemptId: AttemptId });
 export const ProgressResult = Schema.Struct({

@@ -41,6 +41,7 @@ const context: GuideCheckContext = {
     },
   ],
   signals,
+  manualCheck: false,
 };
 const check = (guide: object, withContext: GuideCheckContext = context) =>
   normalizeGuide(Schema.decodeUnknownSync(Guide)(guide), snapshot, withContext);

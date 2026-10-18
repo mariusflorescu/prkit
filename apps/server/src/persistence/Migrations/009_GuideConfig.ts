@@ -71,6 +71,7 @@ export default Effect.gen(function* () {
       skipped: [],
       signals: null,
       preflight: null,
+      manualCheck: false,
     });
     yield* sql`
       UPDATE review_attempts SET config = ${config}, config_hash = ${resolved.hash}

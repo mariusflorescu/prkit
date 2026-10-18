@@ -14,6 +14,7 @@ const PLAIN_ERRORS: Record<string, OutsideToolFailure["code"]> = {
   WorkspaceError: "conflict",
   ReviewCommentsError: "failed",
   ReviewedFilesError: "failed",
+  ManualCheckTicksError: "failed",
   FixerError: "failed",
   FixerStateError: "conflict",
   FixerWorkRefused: "not-allowed",

@@ -306,5 +306,26 @@
       "text": "The agent skill file still says missing branches are created from trunk.",
       "chapter": "docs"
     }
-  ]
+  ],
+  "manualCheck": {
+    "setup": "Build the extension from the checkout with `go build`, then try it in a scratch repository whose trunk is `main`.",
+    "steps": [
+      {
+        "action": "With a branch `feat/a` already there, run `gh stack init feat/a feat/b`.",
+        "expect": "It keeps `feat/a`, creates `feat/b` on top of it, and prints `main → feat/a → feat/b`.",
+        "watchFor": "`feat/b` made from `main` instead of from `feat/a`.",
+        "chapter": "init-flow"
+      },
+      {
+        "action": "Run `gh stack init --adopt feat/c` with `feat/c` already there.",
+        "expect": "A warning that `--adopt` isn't needed any more, and the stack is made anyway.",
+        "chapter": "init-flow"
+      },
+      {
+        "action": "Run `gh stack init 'bad..name' feat/d`.",
+        "expect": "An error that names `bad..name`, and no new branches.",
+        "chapter": "init-flow"
+      }
+    ]
+  }
 }

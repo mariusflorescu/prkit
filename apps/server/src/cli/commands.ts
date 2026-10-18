@@ -70,6 +70,7 @@ export const commandMap = {
   wait_for_local_guide: { path: ["local", "wait"], target: "local" },
   generate_local_guide: { path: ["local", "guide"], target: "local" },
   stop_local_guide: { path: ["local", "stop"], target: "local" },
+  tick_manual_check_steps: { path: ["guide", "tick"], target: "pr" },
 } satisfies Record<ToolName, CommandMapping>;
 
 export const flagName = (key: string) =>

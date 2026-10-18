@@ -45,6 +45,7 @@ import {
   type LocalCaptureService,
 } from "../repo/localCapture.ts";
 import { decide } from "./lifecycle.ts";
+import { subjectKey } from "./reviewSubject.ts";
 import type {
   Change,
   LocalStoredReview,
@@ -470,7 +471,7 @@ export const makeLocalReviews = (port: LocalPort, capture: LocalCaptureService) 
       ).pipe(Effect.catchTags(dbFailures));
 
     /**
-     * Deletes the review, its revisions and prkit's copy of its snapshots. Rows first, in one
+     * Deletes the review, its revisions, the reader's ticks and prkit's copy of its snapshots. Rows first, in one
      * transaction (foreign keys make a table this misses fail loudly), then the copy: a crash
      * between the two leaves a copy without a review, which startup's sweep removes.
      */
@@ -493,6 +494,8 @@ export const makeLocalReviews = (port: LocalPort, capture: LocalCaptureService) 
                 yield* sql`DELETE FROM review_revisions WHERE review_id = ${review.id}`;
                 yield* sql`DELETE FROM review_attempts WHERE review_id = ${review.id}`;
                 yield* sql`DELETE FROM reviews WHERE id = ${review.id}`;
+                yield* sql`
+                  DELETE FROM manual_check_ticks WHERE subject = ${subjectKey({ _tag: "local", key })}`;
               }),
             );
             yield* Effect.logInfo("Local review removed").pipe(
