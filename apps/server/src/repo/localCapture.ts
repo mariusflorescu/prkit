@@ -185,8 +185,14 @@ const parseTree = (text: string) =>
     }),
   );
 
-/** The paths `check-attr -z` reports a filter driver for: `<path>\0filter\0<value>\0` triples. */
-const filteredPaths = (text: string) => {
+/**
+ * What git would run or convert a file through that prkit can't: a filter command, or an
+ * encoding that fails the whole add on one bad byte. A changed file with either stays out.
+ */
+const UNREAD = ["filter", "working-tree-encoding"];
+
+/** The paths `check-attr -z` reports one of the asked attributes set for, from its triples. */
+const attributedPaths = (text: string) => {
   const parts = text.split("\0");
   const named = new Set<string>();
   for (let index = 0; index + 2 < parts.length; index += 3) {
@@ -195,6 +201,15 @@ const filteredPaths = (text: string) => {
   }
   return named;
 };
+
+/** `ls-files -s -z` entries, `<mode> <sha> <stage>\t<path>`, as each path's sha. */
+const parseStage = (text: string) =>
+  new Map(
+    fields(text).map((entry) => {
+      const tab = entry.indexOf("\t");
+      return [entry.slice(tab + 1), entry.slice(0, tab).split(" ")[1] ?? ""] as const;
+    }),
+  );
 
 /** `--stdin-paths` reads one path a line, and C-unquotes a line that starts with a double quote. */
 const stdinPath = (file: string) => {
@@ -432,40 +447,68 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
     });
 
   /**
-   * The user's own global ignore file, which prkit's isolated global config would hide. Only
-   * this one key is read from their global config files, without following includes.
+   * A key of the user's own global config, which prkit's isolated global config hides. Only
+   * that key is read from their global config files, without following includes; a path
+   * falls back to git's own default file there, which prkit's git (run without
+   * XDG_CONFIG_HOME) would otherwise miss.
    */
-  const globalExcludes = Effect.gen(function* () {
-    const home = process.env.HOME ?? "";
-    const xdg = process.env.XDG_CONFIG_HOME ?? "";
-    const configs = [
-      ...(home === "" ? [] : [path.join(home, ".gitconfig")]),
-      ...(xdg !== ""
-        ? [path.join(xdg, "git", "config")]
-        : home === ""
-          ? []
-          : [path.join(home, ".config", "git", "config")]),
-    ];
-    for (const file of configs) {
-      if (!(yield* fs.exists(file))) continue;
-      const found = yield* run(
-        ["config", "--file", file, "--no-includes", "--type=path", "--get", "core.excludesFile"],
-        { target: plain },
-      );
-      if (found.code === 0 && found.stdout.trim() !== "") return found.stdout.trim();
-    }
-    // git's own default; prkit's git runs without XDG_CONFIG_HOME, so it is named here.
-    return xdg === "" ? null : path.join(xdg, "git", "ignore");
-  });
+  const globalSetting = (key: string, defaultFile: string | null) =>
+    Effect.gen(function* () {
+      const home = process.env.HOME ?? "";
+      const xdg = process.env.XDG_CONFIG_HOME ?? "";
+      const configs = [
+        ...(home === "" ? [] : [path.join(home, ".gitconfig")]),
+        ...(xdg !== ""
+          ? [path.join(xdg, "git", "config")]
+          : home === ""
+            ? []
+            : [path.join(home, ".config", "git", "config")]),
+      ];
+      for (const file of configs) {
+        if (!(yield* fs.exists(file))) continue;
+        const found = yield* run(
+          [
+            "config",
+            "--file",
+            file,
+            "--no-includes",
+            ...(defaultFile === null ? [] : ["--type=path"]),
+            "--get",
+            key,
+          ],
+          { target: plain },
+        );
+        if (found.code === 0 && found.stdout.trim() !== "") return found.stdout.trim();
+      }
+      return defaultFile === null || xdg === "" ? null : path.join(xdg, "git", defaultFile);
+    });
 
-  const lookAll = (root: string, files: ReadonlyArray<string>) =>
-    Effect.forEach(
+  /**
+   * Each file as lstat sees it. A file under a symlink or anything else that isn't a real
+   * folder is `missing`, as git sees it, so nothing outside the repository is read.
+   */
+  const lookAll = (root: string, files: ReadonlyArray<string>) => {
+    const folders = new Map<string, boolean>();
+    const inFolder = (file: string): boolean => {
+      const parent = path.dirname(file);
+      if (parent === ".") return true;
+      const known = folders.get(parent);
+      if (known !== undefined) return known;
+      const real =
+        inFolder(parent) &&
+        NodeFs.lstatSync(path.join(root, parent), { throwIfNoEntry: false })?.isDirectory() ===
+          true;
+      folders.set(parent, real);
+      return real;
+    };
+    const missing: OnDisk = { kind: "missing" };
+    return Effect.forEach(
       Array.from({ length: Math.ceil(files.length / 2000) }, (_, index) =>
         files.slice(index * 2000, (index + 1) * 2000),
       ),
       (chunk) =>
         Effect.try({
-          try: () => chunk.map((file) => look(path.join(root, file))),
+          try: () => chunk.map((file) => (inFolder(file) ? look(path.join(root, file)) : missing)),
           catch: () =>
             new RepoError({
               reason: "repository",
@@ -473,6 +516,7 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
             }),
         }),
     ).pipe(Effect.map((chunks) => chunks.flat()));
+  };
 
   /**
    * `ls-files -v` of the user's index, read from a copy in prkit's copy: git touches a split
@@ -508,9 +552,74 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
     });
 
   /**
+   * The ids `git add` gives `files`: line endings, `ident` and the like converted by the user's
+   * attributes, by git's own rules. git reads the user's work tree into a HEAD index of prkit's
+   * and writes objects only to the copy, whose config names no filter command to run.
+   */
+  const addedShas = (input: {
+    readonly copy: string;
+    readonly scratch: string;
+    readonly identity: LocalIdentity;
+    readonly headTree: string;
+    readonly files: ReadonlyArray<string>;
+    readonly settings: ReadonlyArray<string>;
+  }) =>
+    Effect.gen(function* () {
+      if (input.files.length === 0) return new Map<string, string>();
+      const { copy, identity } = input;
+      const failure = "prkit couldn't read some of your files.";
+      // The repository's own attributes file, mirrored where git looks for it in the copy.
+      const info = path.join(identity.commonDir, "info", "attributes");
+      const mirror = path.join(copy, "info", "attributes");
+      if (yield* fs.exists(info)) {
+        yield* fs.makeDirectory(path.dirname(mirror), { recursive: true });
+        yield* fs.copyFile(info, mirror);
+      } else yield* fs.remove(mirror, { force: true });
+      const env = {
+        GIT_INDEX_FILE: path.join(input.scratch, "add-index"),
+        GIT_LITERAL_PATHSPECS: "1",
+      };
+      yield* git(["read-tree", input.headTree], { target: bare(copy), env, failure });
+      yield* git(
+        [
+          ...input.settings,
+          "-c",
+          "core.safecrlf=false",
+          "-c",
+          "gc.auto=0",
+          "-c",
+          "maintenance.auto=false",
+          "add",
+          "-f",
+          "--pathspec-from-file=-",
+          "--pathspec-file-nul",
+        ],
+        {
+          target: {
+            _tag: "worktree",
+            checkout: { repo: copy, worktree: identity.path, gitDir: copy },
+          },
+          env,
+          input: input.files.map((file) => `${file}\0`).join(""),
+          failure,
+        },
+      );
+      const staged = parseStage(
+        yield* git(["ls-files", "-s", "-z"], { target: bare(copy), env, failure }),
+      );
+      return new Map(
+        input.files.flatMap((file) => {
+          const sha = staged.get(file);
+          return sha === undefined ? [] : [[file, sha] as const];
+        }),
+      );
+    });
+
+  /**
    * The working tree's tree in the copy: HEAD's tree with every file as it is on disk, untracked
-   * files that aren't ignored, and deletions, hashed with no filters into the copy alone (a
-   * write that found the object in the user's objects would touch their file).
+   * files that aren't ignored, staged ones, and deletions. Every file is hashed with no filters
+   * into the copy alone (a write that found the object in the user's objects would touch their
+   * file); the changed ones again as `git add` would store them.
    */
   const workingTree = (input: {
     readonly user: UserRepository;
@@ -526,7 +635,8 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
       const read = (args: ReadonlyArray<string>, failure: string) =>
         git(args, { target: user, failure });
 
-      if ((yield* userIndexEntries(identity, copy, scratch)).some((entry) => /^[Ss] /.test(entry)))
+      const entries = yield* userIndexEntries(identity, copy, scratch);
+      if (entries.some((entry) => /^[Ss] /.test(entry)))
         return yield* refuse(
           "sparse-checkout",
           "prkit can't read sparse checkouts yet: files it can't see would look deleted.",
@@ -536,7 +646,8 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
       yield* read(["read-tree", input.userHead], failure);
       // `-c` would beat a repository's own setting, so the global one applies only without it.
       const ownExcludes = yield* run(["config", "--get", "core.excludesFile"], { target: user });
-      const excludes = ownExcludes.code === 0 ? null : yield* globalExcludes;
+      const excludes =
+        ownExcludes.code === 0 ? null : yield* globalSetting("core.excludesFile", "ignore");
       const others = fields(
         yield* read(
           [
@@ -555,12 +666,31 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
       const fileMode = yield* run(["config", "--type=bool", "--get", "core.fileMode"], {
         target: user,
       });
+      // What git reads when it adds a file: the repository's own setting, else the user's global one.
+      const ownAttributes = yield* run(["config", "--type=path", "--get", "core.attributesFile"], {
+        target: user,
+      });
+      const globalAttributes =
+        ownAttributes.code === 0 ? null : yield* globalSetting("core.attributesFile", "attributes");
+      const attributesFile =
+        ownAttributes.code === 0 ? ownAttributes.stdout.trim() : globalAttributes;
+      const ownAutocrlf = yield* run(["config", "--get", "core.autocrlf"], { target: user });
+      const autocrlf =
+        ownAutocrlf.code === 0
+          ? ownAutocrlf.stdout.trim()
+          : yield* globalSetting("core.autocrlf", null);
 
       const leftOut: Array<LocalLeftOut> = others
         .filter((file) => file.endsWith("/"))
         .map((file) => ({ path: file.slice(0, -1), reason: "nested-repository", bytes: null }));
+      const listed = new Set(others);
+      // Files staged though ignored (`git add -f`) are in neither list.
+      const staged = [...new Set(entries.map((entry) => entry.slice(2)))].filter(
+        (file) => !tracked.has(file) && !listed.has(file),
+      );
       const files = [
         ...[...tracked].filter(([, entry]) => entry.type !== "commit").map(([file]) => file),
+        ...staged,
         ...others.filter((file) => !file.endsWith("/")),
       ];
       const before = yield* lookAll(identity.path, files);
@@ -612,7 +742,7 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
       if (toHash.length > MAX_FILES || bytes > MAX_TOTAL_BYTES)
         return yield* refuse(
           "too-large",
-          `This change has ${toHash.length.toLocaleString("en-US")} files and ${gib(bytes)} to read. prkit reads at most ${MAX_FILES.toLocaleString("en-US")} files and ${gib(MAX_TOTAL_BYTES)} per run.`,
+          `Your working tree has ${toHash.length.toLocaleString("en-US")} files and ${gib(bytes)} to read. prkit reads at most ${MAX_FILES.toLocaleString("en-US")} files and ${gib(MAX_TOTAL_BYTES)} per run.`,
         );
 
       yield* fs.makeDirectory(path.join(scratch, "links"), { recursive: true });
@@ -635,6 +765,50 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
               }),
             );
 
+      for (const [index, entry] of toHash.entries()) {
+        const sha = hashed[index] ?? "";
+        const old = tracked.get(entry.path);
+        if (old === undefined || old.sha !== sha || old.mode !== entry.mode)
+          changes.push({ ...entry, sha });
+      }
+
+      const contents = changes.filter(
+        (change) => change.mode === "100644" || change.mode === "100755",
+      );
+      const unread =
+        contents.length === 0
+          ? new Set<string>()
+          : attributedPaths(
+              yield* git(
+                [
+                  ...(globalAttributes === null
+                    ? []
+                    : ["-c", `core.attributesFile=${globalAttributes}`]),
+                  "check-attr",
+                  "-z",
+                  "--stdin",
+                  ...UNREAD,
+                ],
+                {
+                  target: user,
+                  input: contents.map((change) => `${change.path}\0`).join(""),
+                  failure,
+                },
+              ),
+            );
+      // The rest as `git add` stores them: line endings, `ident` and the like by git's own rules.
+      const added = yield* addedShas({
+        copy,
+        scratch,
+        identity,
+        headTree: input.headTree,
+        files: contents.filter((change) => !unread.has(change.path)).map((change) => change.path),
+        settings: [
+          ...(attributesFile === null ? [] : ["-c", `core.attributesFile=${attributesFile}`]),
+          ...(autocrlf === null ? [] : ["-c", `core.autocrlf=${autocrlf}`]),
+        ],
+      });
+
       const after = yield* lookAll(identity.path, files);
       const settled = before.every((disk, index) => {
         const now = after[index];
@@ -646,30 +820,16 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
           "Your files changed while prkit read them. Run again when they settle.",
         );
 
-      for (const [index, entry] of toHash.entries()) {
-        const sha = hashed[index] ?? "";
-        const old = tracked.get(entry.path);
-        if (old === undefined || old.sha !== sha || old.mode !== entry.mode)
-          changes.push({ ...entry, sha });
-      }
-
-      const contents = changes.filter(
-        (change) => change.mode === "100644" || change.mode === "100755",
-      );
-      const filtered =
-        contents.length === 0
-          ? new Set<string>()
-          : filteredPaths(
-              yield* git(["check-attr", "-z", "--stdin", "filter"], {
-                target: user,
-                input: contents.map((change) => `${change.path}\0`).join(""),
-                failure,
-              }),
-            );
       for (const change of contents)
-        if (filtered.has(change.path))
+        if (unread.has(change.path))
           leftOut.push({ path: change.path, reason: "filtered", bytes: change.bytes });
-      const kept = changes.filter((change) => !filtered.has(change.path));
+      const kept = changes.flatMap((change) => {
+        if (unread.has(change.path)) return [];
+        const sha = added.get(change.path);
+        if (sha === undefined) return [change];
+        const old = tracked.get(change.path);
+        return old?.sha === sha && old.mode === change.mode ? [] : [{ ...change, sha }];
+      });
 
       if (kept.length === 0) return { tree: input.headTree, leftOut: leftOut.toSorted(byPath) };
       const index = { GIT_INDEX_FILE: path.join(scratch, "copy-index") };
@@ -717,11 +877,14 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
       Effect.gen(function* () {
         const existed = yield* fs.exists(path.join(copy, "HEAD"));
         const work = Effect.gen(function* () {
-          yield* fs.makeDirectory(copy, { recursive: true });
-          yield* git(
-            ["init", "--quiet", "--bare", `--object-format=${identity.objectFormat}`, copy],
-            { target: plain, failure: "Couldn't make prkit's copy of your changes." },
-          );
+          // Not again on a copy that exists: a kill mid-init would leave a config lock behind.
+          if (!existed) {
+            yield* fs.makeDirectory(copy, { recursive: true });
+            yield* git(
+              ["init", "--quiet", "--bare", `--object-format=${identity.objectFormat}`, copy],
+              { target: plain, failure: "Couldn't make prkit's copy of your changes." },
+            );
+          }
           yield* fs.remove(scratch, { recursive: true, force: true });
           yield* fs.makeDirectory(scratch, { recursive: true });
 
@@ -835,6 +998,11 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
                 `${input.head === "working-tree" ? "Local" : "Committed"} changes on ${identity.branch ?? "a detached HEAD"}`,
                 [previousKept && previous.baseTree === baseTree ? previous.headSha : mergeBaseSha],
               );
+          // The same trees always give the same H, so a run killed here would block every
+          // later one with its lock. Behind the copy's gate, no other git holds it.
+          yield* fs.remove(path.join(copy, "refs", "prkit", "captures", `${headSha}.lock`), {
+            force: true,
+          });
           yield* git(["update-ref", `refs/prkit/captures/${headSha}`, headSha], {
             target: bare(copy),
             failure: "Couldn't record the snapshot in prkit's copy.",

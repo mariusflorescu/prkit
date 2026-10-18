@@ -317,6 +317,77 @@ describe("local capture", { timeout: 30_000 }, () => {
     expect(user.filterRan()).toBe(true);
   });
 
+  it("snapshots what git sees: no file through a symlinked folder, staged ignored files, line endings git converts", async () => {
+    const user = userRepository();
+    user.write(
+      ".gitattributes",
+      "*.bat text eol=crlf\n*.cfg text=auto\n*.enc working-tree-encoding=UTF-16\n",
+    );
+    user.write("gradlew.bat", "@echo off\nrem first\n");
+    user.write("tool.bat", "@echo off\n");
+    user.write("config/settings.txt", "inside\n");
+    user.write("notes.md", "Notes\n");
+    user.git("add", "-A");
+    user.git("commit", "--quiet", "-m", "Base");
+    user.git("checkout", "--quiet", "-b", "feature/scripts");
+    // Checked out again, the batch files hold CRLF on disk as git writes them.
+    NodeFs.rmSync(user.file("gradlew.bat"));
+    NodeFs.rmSync(user.file("tool.bat"));
+    user.git("checkout", "--", "gradlew.bat", "tool.bat");
+    user.write("tool.bat", "@echo off\r\nrem changed\r\n");
+    user.write("legacy.enc", "converted\n");
+    // git reads a control byte as binary under `text=auto`, and keeps its CRLF.
+    user.write("blob.cfg", new Uint8Array([1, 97, 13, 10]));
+    const outside = NodePath.join(user.root, "outside");
+    NodeFs.mkdirSync(outside);
+    NodeFs.writeFileSync(NodePath.join(outside, "settings.txt"), "outside the repository\n");
+    NodeFs.rmSync(user.file("config"), { recursive: true });
+    NodeFs.symlinkSync(outside, user.file("config"));
+    user.write(".gitignore", "config\nbuild/\n");
+    user.write("build/out.txt", "forced\n");
+    user.git("add", "-f", "build/out.txt");
+    const before = user.fingerprint();
+
+    const { taken, files, tool, blob } = await withCapture((local) =>
+      Effect.gen(function* () {
+        const identity = yield* local.identify(user.repo);
+        const { capture } = yield* local.capture({
+          identity,
+          base: "main",
+          head: "working-tree",
+          previous: null,
+          description: null,
+        });
+        const prepared = yield* local.prepare({
+          reviewId: REVIEW,
+          key: identity.key,
+          capture,
+          previousHead: null,
+        });
+        return {
+          taken: capture,
+          files: prepared.snapshot.files.map((file) => [file.path, file.status]).toSorted(),
+          tool: yield* local.contents(identity.key, capture.headSha, "tool.bat"),
+          blob: yield* local.contents(identity.key, capture.headSha, "blob.cfg"),
+        };
+      }),
+    );
+
+    expect(user.fingerprint()).toBe(before);
+    expect(files).toEqual([
+      [".gitignore", "added"],
+      ["blob.cfg", "added"],
+      ["build/out.txt", "added"],
+      ["config/settings.txt", "removed"],
+      ["tool.bat", "modified"],
+    ]);
+    expect(tool).toBe("@echo off\nrem changed\n");
+    expect(blob).toBe("\u0001a\r\n");
+    expect(taken.leftOut).toEqual([
+      { path: "legacy.enc", reason: "filtered", bytes: "converted\n".length },
+    ]);
+  });
+
   it("ignores what the user's global ignore file names, unless the repository sets its own", async () => {
     const user = userRepository();
     user.write("notes.md", "Notes\n");
