@@ -18,6 +18,7 @@ const context: GuideCheckContext = {
   focusAreas: [],
   skipped: [],
   signals: null,
+  preflight: null,
   manualCheck: true,
 };
 const guide = {

@@ -398,8 +398,7 @@ const normalizeGuidanceNote = (raw: string | undefined, report: Report) => {
 };
 
 const normalize = (
-  guide: DraftGuide & Pick<Guide, "focusAreas" | "guidanceNote" | "preflight">,
-  guide: DraftGuide & Pick<Guide, "focusAreas" | "guidanceNote" | "manualCheck">,
+  guide: DraftGuide & Pick<Guide, "focusAreas" | "guidanceNote" | "manualCheck" | "preflight">,
   snapshot: DiffSnapshot,
   mode: Mode,
   context: GuideCheckContext | null,
