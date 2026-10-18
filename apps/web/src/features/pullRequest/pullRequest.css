@@ -66,6 +66,7 @@
   --collapse-pinned-height: var(--pr-pinned-height);
   position: relative;
   scroll-padding-top: var(--pr-pinned-height);
+  scroll-padding-bottom: var(--pr-covered-bottom, 0px);
   scrollbar-gutter: stable;
 }
 [data-pr-content] :where([data-file-diff-header]) {
@@ -77,6 +78,13 @@
 [data-pr-content] [data-guide-scroll] {
   overflow: visible;
   overscroll-behavior: auto;
+}
+[data-pr-content] [data-chapter-rail] {
+  --rail-top: calc(var(--pr-pinned-height) + 16px);
+  --rail-room: calc(
+    100dvh - var(--workspace-topbar-height) - var(--panel-inset) - var(--pr-pinned-height) -
+      var(--pr-covered-bottom, 0px) - 32px
+  );
 }
 [data-pr-files-tree] {
   position: sticky;

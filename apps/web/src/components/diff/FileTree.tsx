@@ -7,17 +7,24 @@ import "./diff.css";
 
 export type FileTreeProps = {
   files: ReadonlyArray<DiffFile>;
-  activePath?: string;
+  activePath?: string | undefined;
+  /** How many files the PR has, when `files` is only some of them. */
+  total?: number;
   onSelect: (path: string) => void;
   order?: "path" | "reading";
 };
 
-export function FileTree({ files, activePath, onSelect, order = "path" }: FileTreeProps) {
+export function FileTree({ files, activePath, total, onSelect, order = "path" }: FileTreeProps) {
   const entries = useMemo(() => buildFileTree(files, order), [files, order]);
   return (
     <nav data-file-tree="" aria-label="Changed files">
       <h3>
-        Files <span>{files.length}</span>
+        Files{" "}
+        <span>
+          {total === undefined || total === files.length
+            ? files.length
+            : `${files.length} of ${total}`}
+        </span>
       </h3>
       {entries.length === 0 ? (
         <p role="status">No changed files.</p>

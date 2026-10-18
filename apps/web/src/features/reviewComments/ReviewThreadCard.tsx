@@ -12,6 +12,7 @@ import { DiffSnippet } from "./DiffSnippet";
 import { ThreadComment } from "./ThreadComment";
 import { storeThreads } from "./reviewCommentsCache";
 import { hunkTail, rangeLabel } from "./reviewCommentPresentation";
+import { useOpenForm } from "./useOpenForm";
 
 /**
  * A GitHub review thread. Replies and resolving go to GitHub at once through the
@@ -33,6 +34,7 @@ export function ReviewThreadCard({
   const store = storeThreads(client, pr.key, pr.accountId);
   const [open, setOpen] = useState(!thread.resolved);
   const [replying, setReplying] = useState(false);
+  useOpenForm(pr.key, open && thread.canReply && replying);
   const reply = useMutation({
     mutationFn: (body: string) => replyToThread({ ...pr, threadId: thread.id, body }),
     onSuccess: (threads) => {

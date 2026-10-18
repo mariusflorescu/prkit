@@ -20,6 +20,7 @@ export function FileTreeBranch({
         <button
           type="button"
           data-file-tree-row=""
+          data-path={entry.file.path}
           aria-current={entry.file.path === activePath ? "true" : undefined}
           title={entry.file.path}
           onClick={() => onSelect(entry.file.path)}

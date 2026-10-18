@@ -5,8 +5,8 @@ import type { CliInstallState } from "@prkit/contracts";
  */
 import {
   type AppInfo,
+  type AppearanceChange,
   type AppearanceSettings,
-  type ThemePreference,
   type AccountsResult,
   type GitHubBudget,
   type GitHubEvent,
@@ -393,8 +393,8 @@ export const updateGuideSettings = (patch: {
 }): Promise<GuideSettings> => call((client) => client[WS_METHODS.guideSettingsUpdate](patch));
 export const getAppearance = (): Promise<AppearanceSettings> =>
   call((client) => client[WS_METHODS.appearanceGet]({}));
-export const updateAppearance = (theme: ThemePreference): Promise<AppearanceSettings> =>
-  call((client) => client[WS_METHODS.appearanceUpdate]({ theme }));
+export const updateAppearance = (change: AppearanceChange): Promise<AppearanceSettings> =>
+  call((client) => client[WS_METHODS.appearanceUpdate](change));
 // Outside agents (docs/features/outside-agents.md).
 export const getOutsideAgents = (): Promise<OutsideAgentsState> =>
   call((client) => client[WS_METHODS.outsideAgentsGet]({}));

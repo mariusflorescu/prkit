@@ -81,7 +81,7 @@ import {
   ReviewSubmitted,
   ReviewThreads,
 } from "./reviewComments.ts";
-import { AppearanceSettings, AppearanceSettingsError, ThemePreference } from "./appearance.ts";
+import { AppearanceChange, AppearanceSettings, AppearanceSettingsError } from "./appearance.ts";
 import {
   ReviewedDecision,
   ReviewedFilesChange,
@@ -569,7 +569,7 @@ export const WsRpcGroup = RpcGroup.make(
     error: AppearanceSettingsError,
   }),
   Rpc.make(WS_METHODS.appearanceUpdate, {
-    payload: Schema.Struct({ theme: ThemePreference }),
+    payload: AppearanceChange,
     success: AppearanceSettings,
     error: AppearanceSettingsError,
   }),

@@ -22,11 +22,14 @@ import { RenderBoundary } from "~/components/diff/RenderBoundary";
 import { useReviewedKey } from "~/components/diff/useReviewedKey";
 import { TabActions, useHasTabActions } from "~/components/TabActions";
 
+import { ChapterRail } from "./ChapterRail";
+import { railTicks } from "./railTicks";
 import { ChapterSection } from "./ChapterSection";
 import { GuideOverview } from "./GuideOverview";
 import { PendingChapter } from "./PendingChapter";
 import type { GuideChapter, ReviewedBinding } from "./types";
 import { useChapterKeyboard } from "./useChapterKeyboard";
+import { useReadingPin } from "./useReadingPin";
 import "./guide.css";
 
 export type GuideViewProps = {
@@ -87,18 +90,19 @@ export function GuideView({
       }),
     [files],
   );
+  // The one answer to "how far is this chapter reviewed", for its header and its rail tick.
+  const reviewOf = useCallback(
+    (chapter: GuideChapter) =>
+      reviewed === undefined ? null : chapterReview(filesOf(chapter), reviewed.stateOf),
+    [reviewed, filesOf],
+  );
   // Chapters already reviewed start closed. Marks that arrive later never fold or unfold one.
   const [collapsed, setCollapsed] = useState<ReadonlyMap<string, boolean>>(
     () =>
       new Map(
-        reviewed === undefined
-          ? []
-          : guide.chapters
-              .filter(
-                (chapter) =>
-                  chapterReview(filesOf(chapter), reviewed.stateOf)?.state === "reviewed",
-              )
-              .map((chapter): [string, boolean] => [chapter.id, true]),
+        guide.chapters
+          .filter((chapter) => reviewOf(chapter)?.state === "reviewed")
+          .map((chapter): [string, boolean] => [chapter.id, true]),
       ),
   );
   // Bumped when a chapter is unticked, so its open cards open their files like unticked files.
@@ -118,6 +122,7 @@ export function GuideView({
     guide.risk !== null ||
     guide.signals.length > 0 ||
     guide.chapters.some((chapter) => chapter.risk !== null);
+  const [pinned, setPinned] = useReadingPin(viewportRef);
 
   const scrollTo = useCallback((target: ScrollTarget) => {
     const viewport = viewportRef.current;
@@ -127,10 +132,11 @@ export function GuideView({
 
   const onChapter = useCallback(
     (id: string) => {
+      setPinned(id);
       setCollapsed((previous) => new Map(previous).set(id, false));
       scrollTo(byId(chapterId(id)));
     },
-    [chapterId, scrollTo],
+    [chapterId, scrollTo, setPinned],
   );
   const list = useRef<DiffListHandle>(null);
   const onLine = useCallback(
@@ -166,9 +172,14 @@ export function GuideView({
     if (next && section) alignIfAbove(section);
     return true;
   };
-  useChapterKeyboard(viewportRef, onChapter);
+  useChapterKeyboard(viewportRef, onChapter, pinned);
   useReviewedKey(viewportRef, reviewed === undefined ? null : "[data-guide-chapter]");
   useEffect(() => () => stopScroll.current?.(), []);
+
+  const ticks = useMemo(
+    () => railTicks(guide.chapters, pendingChapterIds, reviewOf, rated),
+    [guide.chapters, pendingChapterIds, reviewOf, rated],
+  );
 
   return (
     <div data-guide-view="">
@@ -194,6 +205,14 @@ export function GuideView({
       </div>
       <div ref={viewportRef} data-guide-scroll="">
         <div data-guide-content="">
+          {ticks.length >= 2 && (
+            <ChapterRail
+              ticks={ticks}
+              total={draft?.growing === true ? null : ticks.length}
+              pinned={pinned}
+              onChapter={onChapter}
+            />
+          )}
           <DiffList ref={list} files={snapshot.files} source={source} locate={locate}>
             <RenderBoundary title="The guide overview">
               <GuideOverview
@@ -217,11 +236,11 @@ export function GuideView({
                     index={index}
                     total={guide.chapters.length}
                     id={chapterId(chapter.id)}
+                    chapterId={chapter.id}
                   />
                 );
               const isCollapsed = collapsed.get(chapter.id) ?? chapter.kind === "generated";
-              const review =
-                reviewed === undefined ? null : chapterReview(filesOf(chapter), reviewed.stateOf);
+              const review = reviewOf(chapter);
               return (
                 <RenderBoundary key={chapter.id} title={`Chapter ${index + 1}`}>
                   <ChapterSection

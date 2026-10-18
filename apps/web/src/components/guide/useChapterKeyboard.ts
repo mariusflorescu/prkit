@@ -1,10 +1,11 @@
 import { useEffect, type RefObject } from "react";
 
-import { readingLine } from "~/components/diff/readingLine";
+import { readingPosition } from "./readingPosition";
 
 export function useChapterKeyboard(
   viewportRef: RefObject<HTMLDivElement | null>,
   onChapter: (id: string) => void,
+  pinned: string | null,
 ) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -16,9 +17,11 @@ export function useChapterKeyboard(
         (event.key !== "j" && event.key !== "k")
       )
         return;
+      // The diffs draw in shadow roots, where the event's target is only the host.
+      const origin = event.composedPath()[0];
       if (
-        event.target instanceof HTMLElement &&
-        (event.target.matches("input, textarea, select") || event.target.isContentEditable)
+        origin instanceof HTMLElement &&
+        (origin.matches("input, textarea, select") || origin.isContentEditable)
       )
         return;
       const viewport = viewportRef.current;
@@ -29,21 +32,17 @@ export function useChapterKeyboard(
           !viewport.contains(event.target))
       )
         return;
-      const line = readingLine(viewport);
-      if (line === null) return;
-      // A chapter scrolled to sits its scroll margin below the reading line.
-      const top = line.top + 16;
-      const chapters = Array.from(viewport.querySelectorAll<HTMLElement>("[data-guide-chapter]"));
-      const target =
-        event.key === "j"
-          ? chapters.find((chapter) => chapter.getBoundingClientRect().top > top + 4)
-          : chapters.findLast((chapter) => chapter.getBoundingClientRect().top < top - 4);
-      if (target?.dataset.chapterId) {
+      const position = readingPosition(viewport, pinned);
+      if (position === null) return;
+      const { chapters, index, aligned } = position;
+      const next = event.key === "j" ? index + 1 : aligned ? index - 1 : index;
+      const target = chapters[next]?.dataset.chapterId;
+      if (target) {
         event.preventDefault();
-        onChapter(target.dataset.chapterId);
+        onChapter(target);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [viewportRef, onChapter]);
+  }, [viewportRef, onChapter, pinned]);
 }

@@ -1,4 +1,4 @@
-import type { AppearanceSettings } from "@prkit/contracts";
+import type { ThemePreference } from "@prkit/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { updateAppearance } from "~/rpc/client";
@@ -8,19 +8,21 @@ import { appearanceQuery } from "~/rpc/queries";
 export function useAppearance() {
   const client = useQueryClient();
   const appearance = useQuery(appearanceQuery);
+  // Only the theme is written back, so a guide notes choice saved meanwhile stays.
+  const setTheme = (theme: ThemePreference) =>
+    client.setQueryData(appearanceQuery.queryKey, (cached) => cached && { ...cached, theme });
   const update = useMutation({
-    mutationFn: updateAppearance,
+    mutationFn: (theme: ThemePreference) => updateAppearance({ theme }),
     onMutate: async (theme) => {
       await client.cancelQueries({ queryKey: appearanceQuery.queryKey });
-      const before = client.getQueryData(appearanceQuery.queryKey);
-      client.setQueryData(appearanceQuery.queryKey, { theme } satisfies AppearanceSettings);
+      const before = client.getQueryData(appearanceQuery.queryKey)?.theme;
+      setTheme(theme);
       return { before };
     },
     onError: (_error, _theme, context) => {
-      if (context?.before !== undefined)
-        client.setQueryData(appearanceQuery.queryKey, context.before);
+      if (context?.before !== undefined) setTheme(context.before);
     },
-    onSuccess: (saved) => client.setQueryData(appearanceQuery.queryKey, saved),
+    onSuccess: (saved) => setTheme(saved.theme),
   });
   return { appearance, update };
 }

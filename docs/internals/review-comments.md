@@ -22,13 +22,15 @@ Drafts written before prkit kept the context have none (`context` is NULL). Such
 
 ## Drafts from guide notes
 
-A question or risk note on the Guide tab can start a draft. The composer opens under the note holding the note's words, and nothing is stored until the user adds it. A plain note explains the change to the reviewer, so it has no such action.
+A question or risk note can start a draft, on the Guide tab and among the guide's notes on the Files tab. The composer opens under the note holding the note's words, and nothing is stored until the user adds it. A plain note explains the change to the reviewer, so it has no such action.
+
+Files shows the latest accepted revision's notes on GitHub's diff at the head. Each line note is placed with `placeNote`, the rule below, and a file note shows only while `compareVersions` says GitHub's change of the file is the one the guide read; the rest are counted and left out, and a line above the list says when the guide is for an older head. A placed note keeps its revision identity (its `NoteRef` and the `noteKey` from the revision's rows), so the same remark has one draft whichever tab it was started from. The tab takes the newest revision when its notes first load or are turned on, and offers a revision accepted later instead of swapping it in, so notes never move under the reader.
 
 The draft keeps a `note_key`, the note's file, side, diff row and words as `noteKey` in `packages/contracts/src/diffRows.ts` builds it. It names the remark, not the revision, so a later revision with the same words on the same code finds the draft and the note says what became of it. New code under the note, or new words, is a new remark. A note makes one draft in any state, published and fixed ones included, so the same remark never posts twice; deleting the draft frees the note. The check runs under the PR's semaphore and a partial unique index backs it. A second window's add gets an error, not the list, so the words in its field stay.
 
 A note is numbered by its revision's local diff, which can be for an older head than GitHub's. `reviewComments.addFromNote` takes where the note is and the user's words, never a placement. The server finds the note, captures it on its revision's diff, reads GitHub's head and files as a submission does, and places it there like any draft. A note that would be outdated there is refused. The browser runs the same two functions on the click, so a line that changed is refused before anyone types, but the server's run is the one stored, at GitHub's head, and the draft is an ordinary one from then on.
 
-While a note's composer is open, the Guide tab keeps that revision on screen, so a revision the watcher accepts meanwhile doesn't remount the diff and take the user's words. Once it closes, the tab follows the newest revision again. Leaving the Guide tab closes a note's composer, because its words go with the tab and the hold would protect nothing.
+While a note's composer is open, the tab it was opened on keeps that revision on screen, so a revision the watcher accepts meanwhile doesn't remount the diff and take the user's words. The composer belongs to that tab's line numbers: the revision's own diff on the Guide, GitHub's on Files. Once it closes, the Guide follows the newest revision again. Leaving the tab closes a note's composer, because its words go with the tab and the hold would protect nothing.
 
 ## Finishing a review
 

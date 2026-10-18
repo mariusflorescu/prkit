@@ -6,12 +6,13 @@ import type {
   RevisionSummary,
 } from "@prkit/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import type { LoadContents } from "~/components/diff";
 import { GuideView } from "~/components/guide";
 import { useReviewCommentsStore } from "~/features/reviewComments/reviewCommentsStore";
 import { useDiffComments } from "~/features/reviewComments/useDiffComments";
+import { useNoteComposerHold } from "~/features/reviewComments/useNoteComposerHold";
 import { ReviewedCount } from "~/features/reviewedFiles/ReviewedCount";
 import { useReviewedFiles } from "~/features/reviewedFiles/useReviewedFiles";
 import { getFileContents } from "~/rpc/client";
@@ -54,19 +55,8 @@ export function GuideReady({
     running && attempt?.draft != null
       ? { attempt, version: attempt.draft.version, growing: attempt.draft.growing }
       : null;
-  // A new revision mustn't remount the guide under words being written from a note.
-  const composingRevision = useReviewCommentsStore((state) =>
-    state.composer?.key === detail.key ? (state.composer.note?.ref.revision ?? null) : null,
-  );
+  const composingRevision = useNoteComposerHold(detail.key, "guide");
   const closeComposer = useReviewCommentsStore((state) => state.closeComposer);
-  // Leaving the guide takes a note's half-written words with it, so the hold goes too.
-  useEffect(
-    () => () => {
-      const { composer } = useReviewCommentsStore.getState();
-      if (composer?.key === detail.key && composer.note !== null) closeComposer();
-    },
-    [detail.key, closeComposer],
-  );
   const revision =
     revisions.find((entry) => entry.revision === picked) ??
     revisions.find((entry) => entry.revision === composingRevision) ??
@@ -94,7 +84,7 @@ export function GuideReady({
     commitSha: revision.headSha,
     threads: current,
     outdated: false,
-    guideRevision: revision.revision,
+    notes: { on: "guide", revision: revision.revision },
   });
   return (
     <div className="flex h-full min-h-0 flex-col">
