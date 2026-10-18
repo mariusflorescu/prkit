@@ -3,7 +3,7 @@ import * as Schema from "effect/Schema";
 import { AgentSelection } from "./agent.ts";
 import { AgentInstanceId, AgentProviderKind } from "./agentInstance.ts";
 import { DiffSnapshot } from "./diffSnapshot.ts";
-import { NormalizedGuide } from "./guide.ts";
+import { NormalizedGuide, RiskLevel } from "./guide.ts";
 import { AttemptConfig } from "./guideConfig.ts";
 import { AccountId, PullRequestKey, ReviewId, ReviewKey } from "./ids.ts";
 import { ModelOptionSelection } from "./model.ts";
@@ -225,6 +225,8 @@ export const ReviewFeedEntry = Schema.Struct({
   accountId: AccountId,
   status: Schema.Literals(["preparing", "writing", "watching", "failed", "done"]),
   latestRevision: Schema.NullOr(Schema.Int),
+  /** The pull request's level in its latest revision; null with no revision or one from before risk. */
+  risk: Schema.NullOr(RiskLevel),
 });
 export type ReviewFeedEntry = typeof ReviewFeedEntry.Type;
 

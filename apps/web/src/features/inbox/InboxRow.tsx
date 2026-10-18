@@ -16,6 +16,7 @@ import { cn } from "~/lib/utils";
 import { reviewFeedQuery } from "~/rpc/queries";
 
 import { InboxGuideMark } from "./InboxGuideMark";
+import { InboxRiskMark } from "./InboxRiskMark";
 import { InboxStackMark } from "./InboxStackMark";
 import { InboxTriage } from "./InboxTriage";
 import type { RowClock } from "./inboxPresentation";
@@ -101,6 +102,7 @@ export function InboxRow({
               <span className="min-w-0 truncate text-sm">{entry.title}</span>
               <InboxStackMark stack={entry.stack} />
               <InboxGuideMark review={review} />
+              <InboxRiskMark review={review} />
               {entry.reviewDecision && (
                 <span className="hidden shrink-0 text-2xs text-muted-foreground lg:inline">
                   {REVIEWS[entry.reviewDecision]}

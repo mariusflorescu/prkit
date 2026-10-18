@@ -16,15 +16,18 @@ const SEARCH_SAVE_DELAY = 400;
 /**
  * Keeps the Inbox's filters with the server's workspace, so a reload or a relaunch shows
  * the same ones, less any account removed since, and drops a saved repository filter whose
- * repository is gone. `entries` is the inbox once it has loaded.
+ * repository is gone. `entries` is the inbox once it has loaded. Says whether the rows can
+ * show: the saved sort is back, or the saved filters couldn't be read, so a relaunch never
+ * paints the default order first.
  */
 export function useSavedInboxFilters(entries: ReadonlyArray<InboxEntry> | undefined) {
   const client = useQueryClient();
   const saved = useQuery({ ...workspaceQuery, select: (workspace) => workspace.inboxFilters });
   const accounts = useQuery(accountsQuery);
-  const { restored, search, account, repository, sort } = useInboxStore(
-    useShallow(({ restored, search, account, repository, sort }) => ({
+  const { restored, sortRestored, search, account, repository, sort } = useInboxStore(
+    useShallow(({ restored, sortRestored, search, account, repository, sort }) => ({
       restored,
+      sortRestored,
       search,
       account,
       repository,
@@ -49,6 +52,9 @@ export function useSavedInboxFilters(entries: ReadonlyArray<InboxEntry> | undefi
   });
   const list = useQuery({ ...repositoriesQuery, enabled: repository !== null });
 
+  useEffect(() => {
+    if (saved.data) useInboxStore.getState().restoreSort(saved.data.sort);
+  }, [saved.data]);
   useEffect(() => {
     if (saved.data && accounts.data)
       useInboxStore.getState().restore(withLiveAccounts(saved.data, accounts.data.accounts));
@@ -79,4 +85,5 @@ export function useSavedInboxFilters(entries: ReadonlyArray<InboxEntry> | undefi
     )
       useInboxStore.getState().setRepository(null);
   }, [repository, saved.data, list.data, entries]);
+  return sortRestored || saved.isError;
 }

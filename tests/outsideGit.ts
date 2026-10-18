@@ -38,7 +38,7 @@ export const outsideGit = (name: string, { fetches = true } = {}) => {
   );
   git("add", ".");
   git("commit", "-qm", "Base fixture");
-  for (const number of [1, 2, 9]) {
+  for (const number of [1, 2, 4, 6, 9]) {
     git("checkout", "-qb", `feature-${number}`, number === 2 ? "feature-1" : "main");
     NodeFS.writeFileSync(
       NodePath.join(source, "src", "change-0.ts"),

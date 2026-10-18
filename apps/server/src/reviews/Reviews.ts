@@ -58,6 +58,7 @@ import {
   type ReviewWatchEvent,
   refFromKey,
   reviewedSnapshot,
+  RiskLevel,
   riskSignals,
   SKIPPED_CHAPTER_ID,
   selectionProblem,
@@ -269,6 +270,8 @@ const FeedRow = Schema.Struct({
   account_id: AccountIdSchema,
   status: Schema.fromJsonString(ReviewStatus),
   latest_revision: Schema.NullOr(Schema.Int),
+  /** Null with no revision and for revisions written before risk. */
+  risk: Schema.NullOr(RiskLevel),
 });
 const DurationRow = Schema.Struct({ seconds: Schema.Number });
 const GuideRow = Schema.Struct({
@@ -440,6 +443,7 @@ const toFeedEntry = (row: typeof FeedRow.Type): ReviewFeedEntry => ({
   accountId: row.account_id,
   status: row.status._tag,
   latestRevision: row.latest_revision,
+  risk: row.risk,
 });
 
 /** A review's agent: what the user picked, or `model` null for the agent's own default. */
@@ -2682,10 +2686,22 @@ export const make = Effect.gen(function* () {
 
   const feedEntry = (key: ReviewKey) =>
     sql`
-      SELECT pr_key, account_id, status, latest_revision FROM reviews
-      WHERE pr_key = ${key} AND local IS NULL`.pipe(
+      SELECT r.pr_key, r.account_id, r.status, r.latest_revision, json_extract(v.guide, '$.risk.level') AS risk
+      FROM reviews r LEFT JOIN review_revisions v ON v.review_id = r.id AND v.revision = r.latest_revision
+      WHERE r.pr_key = ${key} AND r.local IS NULL`.pipe(
       Effect.flatMap(decodeFeed),
       Effect.map((rows) => rows.map(toFeedEntry)),
+    );
+
+  /** Every review of a pull request as the feed opens with it. */
+  const index = () =>
+    sql`
+      SELECT r.pr_key, r.account_id, r.status, r.latest_revision, json_extract(v.guide, '$.risk.level') AS risk
+      FROM reviews r LEFT JOIN review_revisions v ON v.review_id = r.id AND v.revision = r.latest_revision
+      WHERE r.local IS NULL`.pipe(
+      Effect.flatMap(decodeFeed),
+      Effect.map((rows) => rows.map(toFeedEntry)),
+      Effect.catchTags(dbFailures),
     );
 
   /**
@@ -2698,11 +2714,7 @@ export const make = Effect.gen(function* () {
         // Subscribe before reading, so nothing that lands in between is lost.
         const changed = yield* PubSub.subscribe(changes);
         const ready = yield* PubSub.subscribe(notices);
-        const all =
-          yield* sql`SELECT pr_key, account_id, status, latest_revision FROM reviews WHERE local IS NULL`.pipe(
-            Effect.flatMap(decodeFeed),
-            Effect.map((rows) => rows.map(toFeedEntry)),
-          );
+        const all = yield* index();
         const sent = new Map(all.map((entry) => [entry.key, JSON.stringify(entry)]));
         const updates = Stream.fromSubscription(changed).pipe(
           Stream.mapEffect((change) => feedEntry(change.key).pipe(Effect.catchTags(dbFailures))),
@@ -2727,7 +2739,7 @@ export const make = Effect.gen(function* () {
             ),
           ),
         );
-      }).pipe(Effect.catchTags(dbFailures)),
+      }),
     );
 
   /** Checks a guide against the attempt's snapshot: a valid one is stored, a rejected one kept for `revise_guide`. */
@@ -2984,6 +2996,7 @@ export const make = Effect.gen(function* () {
     retry,
     stop,
     watch,
+    index,
     feed,
     guide,
     revisionContext,

@@ -628,7 +628,11 @@ export const watchGitHub = (onEvent: (event: GitHubEvent) => void): (() => void)
  * Follows every review app-wide (inbox marks, tab indicators, notifications) until
  * the returned function is called. Each subscription opens with the full index.
  */
-export const watchReviewFeed = (onEvent: (event: ReviewFeedEvent) => void): (() => void) => {
+/** `onLost` runs each time the feed ends or fails, before it is opened again. */
+export const watchReviewFeed = (
+  onEvent: (event: ReviewFeedEvent) => void,
+  onLost: () => void,
+): (() => void) => {
   const current = getRuntime();
   if (current === null) return () => {};
   const fiber = current.runFork(
@@ -636,7 +640,12 @@ export const watchReviewFeed = (onEvent: (event: ReviewFeedEvent) => void): (() 
       client[WS_METHODS.reviewsFeed]({}).pipe(
         Stream.runForEach((event) => Effect.sync(() => onEvent(event))),
       ),
-    ).pipe(Effect.ignore, Effect.andThen(Effect.sleep("2 seconds")), Effect.forever),
+    ).pipe(
+      Effect.ignore,
+      Effect.andThen(Effect.sync(onLost)),
+      Effect.andThen(Effect.sleep("2 seconds")),
+      Effect.forever,
+    ),
   );
   return () => {
     current.runFork(Fiber.interrupt(fiber));

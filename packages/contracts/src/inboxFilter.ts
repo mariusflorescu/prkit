@@ -1,3 +1,4 @@
+import type { RiskLevel } from "./guide.ts";
 import type { AccountId } from "./ids.ts";
 import {
   type InboxEntry,
@@ -81,9 +82,13 @@ const REASONS_BY_PRIORITY = InboxReason.literals.toSorted(
 );
 
 /** One group of entries in a sort's order, with a stack at its best-ranked layer. */
-export const sortInboxGroup = (entries: ReadonlyArray<InboxEntry>, sort: InboxSort) => {
+export const sortInboxGroup = (
+  entries: ReadonlyArray<InboxEntry>,
+  sort: InboxSort,
+  riskOf: (entry: InboxEntry) => RiskLevel | null,
+) => {
   const ranked = entries
-    .map((entry) => ({ entry, rank: INBOX_SORTS[sort].rank(entry) }))
+    .map((entry) => ({ entry, rank: INBOX_SORTS[sort].rank(entry, riskOf(entry)) }))
     .toSorted(
       (left, right) => compareRanks(left.rank, right.rank) || tiebreak(left.entry, right.entry),
     );
@@ -91,10 +96,15 @@ export const sortInboxGroup = (entries: ReadonlyArray<InboxEntry>, sort: InboxSo
 };
 
 /** Entries grouped by primary reason, each group in `sortInboxGroup`'s order. */
-export const orderInbox = (entries: ReadonlyArray<InboxEntry>, sort: InboxSort) =>
+export const orderInbox = (
+  entries: ReadonlyArray<InboxEntry>,
+  sort: InboxSort,
+  riskOf: (entry: InboxEntry) => RiskLevel | null,
+) =>
   REASONS_BY_PRIORITY.flatMap((reason) =>
     sortInboxGroup(
       entries.filter((entry) => primaryInboxReason(entry.reasons) === reason),
       sort,
+      riskOf,
     ),
   );

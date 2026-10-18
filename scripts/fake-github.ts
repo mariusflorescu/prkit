@@ -7,7 +7,8 @@
  * of label, reviewer, title, assignee, base branch, reference and state events by
  * several people, at fixed times, and one mention from a repository the account can't
  * see, which comes back as a null node and a FORBIDDEN error like GitHub's. PR 9, opened
- * by its URL too, changes one file in one hunk of context, a deletion and two additions.
+ * by its URL too, changes one file in one hunk of context, a deletion and two additions,
+ * and is in the inbox only once a review is requested of the account (`request-review`).
  *
  * PRs 1-3 have a review pending from the account, with one request event at the start;
  * the rest have none. PR 9 joins the inbox's review requests once `request-review` asks for one. A second GraphQL request, `PrkitReviewWaits`, asks for the pending

@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 
+import { type RiskLevel, riskRank } from "./guide.ts";
 import type { InboxEntry, PullRequestSummary } from "./inbox.ts";
 
 export const SIZE_BUCKETS = [
@@ -99,7 +100,7 @@ export const compareRanks = (left: InboxRank, right: InboxRank) => {
   return left.length < right.length ? -1 : 0;
 };
 
-export const INBOX_SORT_IDS = ["updated", "waiting", "size"] as const;
+export const INBOX_SORT_IDS = ["updated", "waiting", "size", "risk"] as const;
 type InboxSortId = (typeof INBOX_SORT_IDS)[number];
 export const DEFAULT_INBOX_SORT: InboxSortId = "updated";
 
@@ -125,13 +126,15 @@ const waitingTime = (entry: InboxEntry): InboxTime | null =>
       ? { verb: "waiting", at: entry.wait.since }
       : null;
 
+const waitingRank = timeRank(waitingTime, 1);
+
 interface InboxSortSpec {
   readonly label: string;
   readonly description: string;
   /** The time the sort orders by, which the row shows; null when the entry has none or the sort isn't by time. */
   readonly time: (entry: InboxEntry) => InboxTime | null;
-  /** A comparable key, or null for an entry that sorts after every ranked one. */
-  readonly rank: (entry: InboxEntry) => InboxRank;
+  /** A comparable key, or null for an entry that sorts after every ranked one. `risk` is the level of the pull request's latest guide, null with none. */
+  readonly rank: (entry: InboxEntry, risk: RiskLevel | null) => InboxRank;
 }
 
 /**
@@ -150,7 +153,7 @@ export const INBOX_SORTS: Record<InboxSortId, InboxSortSpec> = {
     description:
       "Review requests by how long they have waited on you, longest first, then drafts and requests with no known wait. Your own and involved pull requests by how long ago they were opened.",
     time: waitingTime,
-    rank: timeRank(waitingTime, 1),
+    rank: waitingRank,
   },
   size: {
     label: "Smallest first",
@@ -160,6 +163,16 @@ export const INBOX_SORTS: Record<InboxSortId, InboxSortSpec> = {
       const size = pullRequestSize(entry);
       return [SIZE_BUCKETS.findIndex((row) => row.bucket === size.bucket), size.lines, size.files];
     },
+  },
+  risk: {
+    label: "Riskiest first",
+    description:
+      "Pull requests whose latest guide asks for the closest read first: high, then medium, then low, then those with no rated guide. Inside each of those, the one that has waited longest comes first, as under Waiting longest.",
+    time: waitingTime,
+    rank: (entry, risk) => [
+      risk === null ? 1 : -riskRank(risk),
+      ...(waitingRank(entry) ?? [Infinity]),
+    ],
   },
 };
 

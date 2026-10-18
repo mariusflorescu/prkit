@@ -140,7 +140,10 @@ export function GuideNotifications() {
         }
       }
     };
-    const stopFeed = watchReviewFeed(onEvent);
+    // A feed that fails before its first index reads as no reviews, so nothing waits on it forever.
+    const stopFeed = watchReviewFeed(onEvent, () =>
+      client.setQueryData(reviewFeedQuery.queryKey, (previous) => previous ?? new Map()),
+    );
     const stopLocalFeed = watchLocalReviewFeed(onLocalEvent);
     const stopClicks = desktopBridge?.onOpenGuide((target) => {
       if (target.kind === "local") {
