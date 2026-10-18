@@ -47,7 +47,7 @@ The inventory covers every WebSocket RPC and the app's local presentation action
 | Typical guide duration | reviews.typicalDuration | `read_guide_duration` | Read |
 | Guide defaults and auto mode | guideSettings.get | `read_settings` | Read |
 | Change default agent or auto mode | guideSettings.update | Excluded B | Excluded |
-| Resolved guide settings and preview | guideConfig.pullRequest | `read_guide_settings`: scope versions, active guidance/focus/rules, skipped files | Read |
+| Resolved guide settings and preview | guideConfig.pullRequest | `read_guide_settings`: scope versions, active guidance/focus/ignore rules/look-closely paths, skipped files | Read |
 | Read scope settings and repository lookup | guideConfig.scope, guideConfig.repositories, guideConfig.findRepository | `read_guide_scope`, `list_guide_repositories`, `find_guide_repository` | Read |
 | Save guide settings | guideConfig.save | `save_pull_request_guide_settings`, and guidance/focus in `generate_guide`, only for this PR. Global and Repository changes excluded B | Work |
 | Agent picker, status and model options | agents.catalog | `list_agents`; safe fields only, no environment values | Read |

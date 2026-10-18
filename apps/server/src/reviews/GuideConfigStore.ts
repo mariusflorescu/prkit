@@ -32,6 +32,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import { GitHubApi } from "../github/GitHubApi.ts";
 
+/** Ignore rules and look-closely paths are stored the same way. */
 const IgnoreValue = Schema.Struct({
   rules: Schema.Array(IgnoreRule),
   overrides: Schema.Array(GuideOverride),
@@ -47,7 +48,7 @@ const GuidanceJson = Schema.fromJsonString(GuidanceValue);
 
 const SectionRow = Schema.Struct({
   scope: Schema.String,
-  section: Schema.Literals(["ignore", "focus", "guidance"]),
+  section: Schema.Literals(["ignore", "sensitive", "focus", "guidance"]),
   version: Schema.Int,
   value: Schema.String,
 });
@@ -91,8 +92,10 @@ const scopeKey = (scope: GuideScope) => {
 const editProblem = (scope: GuideScope, edit: GuideSectionEdit): string | null => {
   const inherits = scope._tag !== "global";
   switch (edit._tag) {
-    case "ignore": {
-      if (edit.rules.length > MAX_RULES) return `Keep it to ${MAX_RULES} rules.`;
+    case "ignore":
+    case "sensitive": {
+      if (edit.rules.length > MAX_RULES)
+        return `Keep it to ${MAX_RULES} ${edit._tag === "ignore" ? "rules" : "paths"}.`;
       const seen = new Set<string>();
       for (const rule of edit.rules) {
         const problem = ignorePatternProblem(rule.pattern);
@@ -162,7 +165,7 @@ const CONFLICT =
 
 /**
  * Guide settings (docs/internals/architecture.md "Guide settings"): each scope's ignore
- * rules, focus areas and guidance, saved per section with a version check.
+ * rules, look-closely paths, focus areas and guidance, saved per section with a version check.
  */
 export class GuideConfigStore extends Context.Service<
   GuideConfigStore,
@@ -187,8 +190,9 @@ export const make = Effect.gen(function* () {
   const encodeEdit = (edit: GuideSectionEdit, current: ScopeConfig) =>
     Effect.gen(function* () {
       switch (edit._tag) {
-        case "ignore": {
-          const known = new Set(current.ignore.rules.map((rule) => rule.id));
+        case "ignore":
+        case "sensitive": {
+          const known = new Set(current[edit._tag].rules.map((rule) => rule.id));
           const rules: Array<IgnoreRule> = [];
           for (const rule of edit.rules) {
             if (rule.id !== null && !known.has(rule.id))
@@ -233,6 +237,7 @@ export const make = Effect.gen(function* () {
       const configs = new Map<string, ScopeConfig>();
       for (const key of keys) {
         const ignore = row(key, "ignore");
+        const sensitive = row(key, "sensitive");
         const focus = row(key, "focus");
         const guidance = row(key, "guidance");
         configs.set(key, {
@@ -240,7 +245,10 @@ export const make = Effect.gen(function* () {
             ignore === undefined
               ? emptyScopeConfig.ignore
               : { version: ignore.version, ...(yield* decodeIgnore(ignore.value)) },
-          sensitive: emptyScopeConfig.sensitive,
+          sensitive:
+            sensitive === undefined
+              ? emptyScopeConfig.sensitive
+              : { version: sensitive.version, ...(yield* decodeIgnore(sensitive.value)) },
           focus:
             focus === undefined
               ? emptyScopeConfig.focus
