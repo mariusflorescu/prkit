@@ -48,7 +48,14 @@ import {
   RepositoryFixerSettings,
   ScriptAccess,
 } from "./fixer.ts";
-import { AccountId, LocalReviewKey, PullRequestKey, ReviewCommentId, ReviewKey } from "./ids.ts";
+import {
+  AccountId,
+  LocalReviewKey,
+  PullRequestKey,
+  ReviewCommentId,
+  ReviewKey,
+  ReviewSubject,
+} from "./ids.ts";
 import {
   LocalGenerateResult,
   LocalReviewEntry,
@@ -88,6 +95,12 @@ import {
   ReviewedFilesError,
   ReviewedMarks,
 } from "./reviewedFiles.ts";
+import {
+  ManualCheckDecision,
+  ManualCheckTicks,
+  ManualCheckTicksChange,
+  ManualCheckTicksError,
+} from "./manualCheckTicks.ts";
 import { PullRequestStack, StackGuidesResult } from "./stack.ts";
 import {
   InboxFilters,
@@ -150,6 +163,9 @@ export const WS_METHODS = {
   reviewedFilesGet: "reviewedFiles.get",
   reviewedFilesSet: "reviewedFiles.set",
   reviewedFilesChanges: "reviewedFiles.changes",
+  manualCheckTicksGet: "manualCheckTicks.get",
+  manualCheckTicksSet: "manualCheckTicks.set",
+  manualCheckTicksChanges: "manualCheckTicks.changes",
   reviewsGet: "reviews.get",
   reviewsGenerate: "reviews.generate",
   reviewsGenerateStack: "reviews.generateStack",
@@ -419,6 +435,22 @@ export const WsRpcGroup = RpcGroup.make(
   Rpc.make(WS_METHODS.reviewedFilesChanges, {
     payload: Schema.Struct({}),
     success: ReviewedFilesChange,
+    stream: true,
+  }),
+  // The manual check steps the reader ticked (docs/internals/architecture.md "Manual checks").
+  Rpc.make(WS_METHODS.manualCheckTicksGet, {
+    payload: Schema.Struct({ subject: ReviewSubject }),
+    success: ManualCheckTicks,
+    error: ManualCheckTicksError,
+  }),
+  Rpc.make(WS_METHODS.manualCheckTicksSet, {
+    payload: Schema.Struct({ subject: ReviewSubject, decision: ManualCheckDecision }),
+    success: ManualCheckTicks,
+    error: ManualCheckTicksError,
+  }),
+  Rpc.make(WS_METHODS.manualCheckTicksChanges, {
+    payload: Schema.Struct({}),
+    success: ManualCheckTicksChange,
     stream: true,
   }),
   // Reviews, guides and agents (docs/internals/architecture.md "The review lifecycle").

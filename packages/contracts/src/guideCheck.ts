@@ -25,6 +25,8 @@ export interface GuideCheckContext {
   readonly signals: ReadonlyArray<RiskSignal> | null;
   /** The author's own change needs a pre-flight; null forbids one. */
   readonly preflight: { readonly description: string } | null;
+  /** The guide must have a manual check plan. */
+  readonly manualCheck: boolean;
 }
 
 export const slugify = (text: string) =>
