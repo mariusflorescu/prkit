@@ -114,6 +114,15 @@ const handlers = (toolkit: OutsideToolkit) =>
         read_settings: reads((input) =>
           respond("read_settings", input, () => work.settings(input)),
         ),
+        list_local_guides: reads((input) =>
+          respond("list_local_guides", input, () => work.listLocal(input)),
+        ),
+        read_local_guide: reads((input) =>
+          respond("read_local_guide", input, () => work.readLocal(input)),
+        ),
+        wait_for_local_guide: reads((input) =>
+          respond("wait_for_local_guide", input, () => work.waitLocal(input)),
+        ),
         open_pull_request: startsWork((input) =>
           respond("open_pull_request", input, () => work.open(input)),
         ),
@@ -160,6 +169,12 @@ const handlers = (toolkit: OutsideToolkit) =>
         ),
         mark_files_reviewed: startsWork((input) =>
           respond("mark_files_reviewed", input, () => work.markFilesReviewed(input)),
+        ),
+        generate_local_guide: startsWork((input) =>
+          respond("generate_local_guide", input, () => work.generateLocal(input)),
+        ),
+        stop_local_guide: startsWork((input) =>
+          respond("stop_local_guide", input, () => work.stopLocal(input)),
         ),
       };
     }),

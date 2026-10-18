@@ -25,6 +25,7 @@ import {
   type GuidePatch,
   type GuideRepository,
   type GuideRevision,
+  isLocalReviewKey,
   LocalReviewKey,
   LocalSource,
   mergeDraft,
@@ -95,6 +96,7 @@ import { makeKeyedGate } from "../github/keyedGate.ts";
 import { boundPort } from "../listenAddress.ts";
 import { McpTokens } from "../mcp/McpTokens.ts";
 import { PullRequests } from "../pullRequests/PullRequests.ts";
+import { LocalCapture } from "../repo/localCapture.ts";
 import {
   type CacheRef,
   type Checkout,
@@ -108,6 +110,7 @@ import { GuideConfigStore } from "./GuideConfigStore.ts";
 import { makeGuideStream } from "./guideStream.ts";
 import { GuideSettingsStore } from "./GuideSettingsStore.ts";
 import { decide, type Observation, observe, STARTABLE } from "./lifecycle.ts";
+import { makeLocalReviews } from "./localReviews.ts";
 import {
   buildPrompt,
   type DiffSection,
@@ -320,6 +323,12 @@ const decodeOutcomes = Schema.decodeUnknownEffect(
     }),
   ),
 );
+const decodeCaptures = Schema.decodeUnknownEffect(
+  Schema.Array(Schema.Struct({ capture: Schema.NullOr(Schema.fromJsonString(LocalCapture)) })),
+);
+const decodeLocalKeys = Schema.decodeUnknownEffect(
+  Schema.Array(Schema.Struct({ pr_key: LocalReviewKey })),
+);
 const decodeClaimed = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ origin_key: PullRequestKey, account_id: AccountIdSchema })),
 );
@@ -335,18 +344,19 @@ const encodeDraft = Schema.encodeSync(Schema.fromJsonString(DraftGuide));
 const encodeOutline = Schema.encodeSync(Schema.fromJsonString(OutlineChapters));
 const encodeOptions = Schema.encodeSync(Schema.fromJsonString(Schema.Array(ModelOptionSelection)));
 const encodeLocal = Schema.encodeSync(Schema.fromJsonString(LocalSource));
+const encodeCapture = Schema.encodeSync(Schema.fromJsonString(LocalCapture));
 
 /** A pull request's review. */
 interface PullRequestReview extends Review {
   readonly kind: "pull-request";
 }
 /** A review of local changes. It has no account to read anything through. */
-interface LocalStoredReview extends ReviewCore {
+export interface LocalStoredReview extends ReviewCore {
   readonly kind: "local";
   readonly key: LocalReviewKey;
   readonly local: LocalSource;
 }
-type StoredReview = PullRequestReview | LocalStoredReview;
+export type StoredReview = PullRequestReview | LocalStoredReview;
 /** What the watcher reads and applies its reads to: pull requests only. */
 export type WatchedReview = PullRequestReview;
 
@@ -415,7 +425,7 @@ const toFeedEntry = (row: typeof FeedRow.Type): ReviewFeedEntry => ({
 });
 
 /** A review's agent: what the user picked, or `model` null for the agent's own default. */
-interface StoredAgent {
+export interface StoredAgent {
   readonly instance: AgentInstanceId;
   /** The instance's kind, so a review still names its agent after the instance is removed. */
   readonly provider: AgentProviderKind;
@@ -429,16 +439,16 @@ const storedAgentOf = (review: ReviewCore): StoredAgent => ({
   options: review.modelOptions,
 });
 /** Who started a review: the user, or auto mode for a review request. */
-type Origin = "user" | "auto" | "outside";
+export type Origin = "user" | "auto" | "outside";
 /** What a new review is about: a pull request, through an account, or local changes. */
-type NewSubject =
+export type NewSubject =
   | { readonly kind: "pull-request"; readonly key: PullRequestKey; readonly accountId: AccountId }
   | {
       readonly kind: "local";
       readonly key: LocalReviewKey;
       readonly local: LocalSource;
-      /** What the first attempt reviews (JSON). */
-      readonly capture: string;
+      /** What the first attempt reviews. */
+      readonly capture: LocalCapture;
     };
 
 /** One line, trimmed and cut to `max` characters, for what the agent reports. */
@@ -465,6 +475,8 @@ const following = (
   previous: { readonly revision: number; readonly head_sha: string } | null,
   since: Since,
   files: { readonly since: string; readonly guide: string },
+  /** A local run: its commits are the author's, not the snapshot commits prkit made. */
+  local: LocalCapture | null,
 ): {
   /** Replaces the attempt's trigger once the head is known; null keeps it. */
   readonly trigger: AttemptTrigger | null;
@@ -476,25 +488,33 @@ const following = (
   if (previous === null) return unrelated;
   const { revision, head_sha: headSha } = previous;
   switch (since._tag) {
-    case "descends":
+    case "descends": {
+      const commits = local === null ? since.commits : (local.newCommits ?? []);
       return {
         trigger: "new-commits",
-        commits: since.commits.length,
-        note: `${plural(since.commits.length, "new commit")} since revision ${revision}`,
+        commits: commits.length,
+        note:
+          local === null
+            ? `${plural(commits.length, "new commit")} since revision ${revision}`
+            : `The changes moved on since revision ${revision}${commits.length === 0 ? "" : `, with ${plural(commits.length, "new commit")}`}`,
         prompt: {
           _tag: "descends",
           revision,
           headSha,
-          commits: since.commits,
+          commits,
           diffFile: files.since,
           guideFile: files.guide,
         },
       };
+    }
     case "rewritten":
       return {
         trigger: "rewritten",
         commits: null,
-        note: `The history was rewritten since revision ${revision}, so the guide is written fresh`,
+        note:
+          local === null
+            ? `The history was rewritten since revision ${revision}, so the guide is written fresh`
+            : `The base moved since revision ${revision}, so the guide is written fresh`,
         prompt: { _tag: "rewritten", revision, headSha },
       };
     case "same":
@@ -516,13 +536,13 @@ const sinceDiff = (snapshot: DiffSnapshot) =>
         .join("");
 
 /** Change notices for `watch`: which review changed and the activity lines it gained. */
-interface Change {
+export interface Change {
   readonly key: ReviewKey;
   readonly activity: ReadonlyArray<ReviewActivity>;
 }
 
 /** A guide the user asked for (or auto mode started) was accepted, or a stack's batch finished. */
-type ReadyNotice =
+export type ReadyNotice =
   | {
       readonly _tag: "ready";
       readonly review: StoredReview;
@@ -671,6 +691,13 @@ export const make = Effect.gen(function* () {
   /** The review a new subject would make, looked up among its own kind only. */
   const findSubject = (subject: NewSubject) =>
     subject.kind === "pull-request" ? findReview(subject.key) : findLocal(subject.key);
+  /** Every local review, the latest changed first. */
+  const locals = sql`SELECT * FROM reviews WHERE local IS NOT NULL ORDER BY updated_at DESC`.pipe(
+    Effect.flatMap(decodeLocals),
+    Effect.map((rows) => rows.map(toLocalReview)),
+  );
+  /** The review a key names, among its own kind. */
+  const findStored = (key: ReviewKey) => (isLocalReviewKey(key) ? findLocal(key) : findReview(key));
   const findReviewById = (id: ReviewId) =>
     sql`SELECT * FROM reviews WHERE id = ${id}`.pipe(
       Effect.flatMap(decodeReviews),
@@ -682,16 +709,22 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const review = yield* findReview(key);
       if (review === null) return { key, review: null, attempt: null, revisions: [] };
+      return { key, review: toReview(review), ...(yield* progressOf(review.id)) };
+    });
+
+  /** A review's latest attempt, as its progress is shown, and every revision. */
+  const progressOf = (reviewId: ReviewId) =>
+    Effect.gen(function* () {
       const attempts = yield* sql`
         SELECT id, revision, trigger, phase, head_sha, commits, started_at, finished_at, narration,
           started_by, draft_outline, draft_version FROM review_attempts
-        WHERE review_id = ${review.id} ORDER BY rowid DESC LIMIT 1`.pipe(
+        WHERE review_id = ${reviewId} ORDER BY rowid DESC LIMIT 1`.pipe(
         Effect.flatMap(decodeAttempts),
       );
       const revisions = yield* sql`
         SELECT r.revision, r.attempt_id, a.trigger, r.head_sha, r.created_at FROM review_revisions r
         JOIN review_attempts a ON a.id = r.attempt_id
-        WHERE r.review_id = ${review.id} ORDER BY r.revision`.pipe(Effect.flatMap(decodeRevisions));
+        WHERE r.review_id = ${reviewId} ORDER BY r.revision`.pipe(Effect.flatMap(decodeRevisions));
       const attempt = attempts[0];
       const files =
         attempt === undefined
@@ -705,8 +738,6 @@ export const make = Effect.gen(function* () {
       for (const pending of attempt === undefined ? [] : (reading.get(attempt.id)?.values() ?? []))
         for (const file of [...pending.direct, ...pending.sections]) inFlight.add(file);
       return {
-        key,
-        review: toReview(review),
         attempt:
           attempt === undefined
             ? null
@@ -754,12 +785,26 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const summary = yield* summaryOf(key);
       if (summary.review === null || summary.attempt === null) return { ...summary, activity: [] };
-      const rows = yield* sql`
-        SELECT id, attempt_id, at, kind, text, detail FROM (
-          SELECT * FROM review_activity WHERE attempt_id = ${summary.attempt.id} ORDER BY id DESC LIMIT 200
-        ) ORDER BY id`.pipe(Effect.flatMap(decodeActivity));
-      return { ...summary, activity: rows.map(toActivity) } satisfies ReviewSnapshot;
+      const activity = yield* activityOf(summary.attempt.id);
+      return { ...summary, activity } satisfies ReviewSnapshot;
     });
+
+  /** An attempt's last 200 activity lines, oldest first. */
+  const activityOf = (attemptId: AttemptId) =>
+    sql`
+      SELECT id, attempt_id, at, kind, text, detail FROM (
+        SELECT * FROM review_activity WHERE attempt_id = ${attemptId} ORDER BY id DESC LIMIT 200
+      ) ORDER BY id`.pipe(
+      Effect.flatMap(decodeActivity),
+      Effect.map((rows) => rows.map(toActivity)),
+    );
+
+  /** What a local attempt reviews; null for a pull request's. */
+  const captureOf = (attemptId: AttemptId) =>
+    sql`SELECT capture FROM review_attempts WHERE id = ${attemptId}`.pipe(
+      Effect.flatMap(decodeCaptures),
+      Effect.map((rows) => rows[0]?.capture ?? null),
+    );
 
   const appendActivity = (
     key: ReviewKey,
@@ -873,8 +918,8 @@ export const make = Effect.gen(function* () {
     readonly at: string;
     /** The stack batch the attempt was started in, announced with the others. */
     readonly batch: string | null;
-    /** What a local attempt reviews (JSON); null for a pull request's. */
-    readonly capture: string | null;
+    /** What a local attempt reviews; null for a pull request's. */
+    readonly capture: LocalCapture | null;
   }) =>
     Effect.gen(function* () {
       const startedBy = yield* StartedBy;
@@ -883,7 +928,7 @@ export const make = Effect.gen(function* () {
           instance_id, model, batch_id, started_by, capture)
         VALUES (${input.id}, ${input.reviewId}, ${input.revision}, ${input.trigger}, ${runId}, 'preparing-code',
           ${input.at}, ${input.agent.provider}, ${input.agent.instance}, ${input.agent.model}, ${input.batch},
-          ${startedBy}, ${input.capture})`;
+          ${startedBy}, ${input.capture === null ? null : encodeCapture(input.capture)})`;
     });
 
   /** Says in the attempt's activity which outside agent started it, if one did. */
@@ -1309,9 +1354,44 @@ export const make = Effect.gen(function* () {
       return { _tag: "plan", plan } satisfies PullRequestFront;
     });
 
-  /** Guides of local changes aren't written yet. */
-  const localPlan = (_review: LocalStoredReview): Effect.Effect<AttemptPlan, AttemptFailure> =>
-    fail("repository", "prkit can't write guides of local changes yet.");
+  /**
+   * Local changes: the snapshot the attempt's run took, checked out from the review's own copy
+   * for this attempt only, and Global guide settings, the only scope a local review has.
+   */
+  const localPlan = (
+    review: LocalStoredReview,
+    attemptId: AttemptId,
+    previous: typeof PreviousRow.Type | null,
+  ) =>
+    Effect.gen(function* () {
+      const capture = yield* captureOf(attemptId);
+      if (capture === null)
+        return yield* fail("repository", "This run has no snapshot. Run prkit again.");
+      const settings = yield* guideConfig.resolveGlobal();
+      yield* Effect.addFinalizer(() =>
+        repo.removeWorktree(review.id, cacheOf(review)).pipe(Effect.ignore),
+      );
+      const code = yield* repo.local
+        .prepare({
+          reviewId: review.id,
+          key: review.key,
+          capture,
+          previousHead: previous?.head_sha ?? null,
+        })
+        .pipe(Effect.catchTag("RepoError", (error) => fail(error.reason, error.message)));
+      const plan: AttemptPlan = {
+        code,
+        baseRef: capture.baseRef,
+        settings,
+        repository: null,
+        retargeted: null,
+        prompt: { _tag: "local", name: review.local.name, capture },
+        title: `${review.local.name} · ${capture.branch ?? "detached HEAD"}`,
+        cache: { _tag: "local", key: review.key },
+        files: [],
+      };
+      return plan;
+    });
 
   const runAttempt = (
     review: StoredReview,
@@ -1338,7 +1418,7 @@ export const make = Effect.gen(function* () {
       const front: PullRequestFront =
         review.kind === "pull-request"
           ? yield* pullRequestPlan(review, attemptId, previous)
-          : { _tag: "plan", plan: yield* localPlan(review) };
+          : { _tag: "plan", plan: yield* localPlan(review, attemptId, previous) };
       if (front._tag === "ended")
         return yield* end(front.key, front.state).pipe(
           Effect.catchTag("ReviewStateError", () => Effect.void),
@@ -1368,11 +1448,16 @@ export const make = Effect.gen(function* () {
       // The guide's commands keep their temporary files here, removed with the diffs.
       const tmpDir = turnTmpDir(path, attemptId);
       const files = {
-        diff: path.join(diffDir, "pull-request.diff"),
+        diff: path.join(diffDir, review.kind === "local" ? "changes.diff" : "pull-request.diff"),
         since: path.join(diffDir, `since-revision-${previous?.revision ?? 0}.diff`),
         guide: path.join(diffDir, `guide-revision-${previous?.revision ?? 0}.json`),
       };
-      const related = following(previous, since, files);
+      const related = following(
+        previous,
+        since,
+        files,
+        plan.prompt._tag === "local" ? plan.prompt.capture : null,
+      );
       const follows =
         retargeted !== null
           ? {
@@ -1693,7 +1778,8 @@ export const make = Effect.gen(function* () {
   /**
    * Moves the review from one of `from` to `preparing` with a new attempt and runs it.
    * A new `agent` replaces the review's; a different provider starts a new
-   * conversation with it.
+   * conversation with it. Uninterruptible once the attempt is committed: it must reach its
+   * worker, or nothing settles it until a restart (so is `ensureReview`).
    */
   const startAttempt = (
     review: StoredReview,
@@ -1703,20 +1789,25 @@ export const make = Effect.gen(function* () {
       agent = storedAgentOf(review),
       batch = null,
       capture = null,
+      source = null,
     }: {
       from?: ReadonlyArray<ReviewStatus["_tag"]>;
       agent?: StoredAgent;
       batch?: string | null;
-      capture?: string | null;
+      /** What a local attempt reviews. */
+      capture?: LocalCapture | null;
+      /** A local review's folder, base and head as this run asked for them. */
+      source?: LocalSource | null;
     } = {},
   ) =>
     Effect.gen(function* () {
       // A turned-off or removed instance quietly gives way to its kind's default, else the default agent.
-      const usable = yield* usableAgent(agent);
+      // Reading the catalog can wait on providers; nothing is committed yet, so it can be interrupted.
+      const usable = yield* Effect.interruptible(usableAgent(agent));
       const attemptId = AttemptId.make(yield* newId);
       const at = yield* now;
       // Another conversation group (another kind or config folder) starts a new conversation.
-      const sameGroup = yield* agents.sameGroup(usable.instance);
+      const sameGroup = yield* Effect.interruptible(agents.sameGroup(usable.instance));
       // The revision number comes from the row the compare-and-set wins, not from the
       // caller's read, which a revision committed since would make stale.
       const revision = yield* sql.withTransaction(
@@ -1732,6 +1823,8 @@ export const make = Effect.gen(function* () {
             RETURNING latest_revision`.pipe(Effect.flatMap(decodeStarted));
           const won = rows[0];
           if (won === undefined) return null;
+          if (source !== null)
+            yield* sql`UPDATE reviews SET local = ${encodeLocal(source)} WHERE id = ${review.id}`;
           const next = (won.latest_revision ?? 0) + 1;
           yield* insertAttempt({
             id: attemptId,
@@ -1748,9 +1841,11 @@ export const make = Effect.gen(function* () {
       );
       if (revision === null) return false;
       yield* noteStartedBy(review.key, review.id, attemptId);
+      const started: StoredReview =
+        review.kind === "local" && source !== null ? { ...review, local: source } : review;
       yield* launch(
         {
-          ...review,
+          ...started,
           provider: usable.provider,
           instance: usable.instance,
           sessionId: sameGroup.includes(review.instance) ? review.sessionId : null,
@@ -1761,7 +1856,7 @@ export const make = Effect.gen(function* () {
       );
       yield* publish(review.key);
       return true;
-    });
+    }).pipe(Effect.uninterruptible);
 
   const ensureReview = (
     subject: NewSubject,
@@ -1819,7 +1914,7 @@ export const make = Effect.gen(function* () {
         yield* publish(key);
       }
       return { review, created };
-    });
+    }).pipe(Effect.uninterruptible);
 
   const dbFailures = {
     SqlError: () =>
@@ -1836,7 +1931,7 @@ export const make = Effect.gen(function* () {
    * The agent for a new attempt: the one asked for (checked against the catalog),
    * else the review's own, else the default from Settings > Guides.
    */
-  const chooseAgent = (requested: AgentSelection | undefined, review: Review | null) =>
+  const chooseAgent = (requested: AgentSelection | undefined, review: ReviewCore | null) =>
     Effect.gen(function* () {
       if (requested === undefined && review !== null) return storedAgentOf(review);
       const catalog = yield* agents.catalog();
@@ -2035,10 +2130,10 @@ export const make = Effect.gen(function* () {
    * tokens revoked, checkout removed. Revisions stay. The Stop command and the
    * watcher (merged, closed) both come through here.
    */
-  const end = (key: PullRequestKey, reason: DoneReason) =>
+  const end = (key: ReviewKey, reason: DoneReason) =>
     Effect.gen(function* () {
       for (let tries = 0; tries < 3; tries++) {
-        const review = yield* findReview(key);
+        const review = yield* findStored(key);
         const outcome = decide("stop", review?.status ?? null);
         if (outcome._tag === "reject")
           return yield* new ReviewStateError({ key, message: outcome.message });
@@ -2071,8 +2166,12 @@ export const make = Effect.gen(function* () {
       }
     });
 
+  /** A pull request's Stop; a local review's key is a string too, and stops only through `local`. */
   const stop = (key: PullRequestKey) =>
-    end(key, "stopped").pipe(Effect.andThen(snapshotOf(key)), Effect.catchTags(dbFailures));
+    (isLocalReviewKey(key) ? Effect.void : end(key, "stopped")).pipe(
+      Effect.andThen(snapshotOf(key)),
+      Effect.catchTags(dbFailures),
+    );
 
   /** Every review the watcher reads: all pull requests' that are not done. */
   const watched = sql`
@@ -2199,18 +2298,18 @@ export const make = Effect.gen(function* () {
       }).pipe(Effect.catchTags(dbFailures)),
     );
 
-  const guide = (key: PullRequestKey, revision: number | undefined) =>
+  const guide = (key: ReviewKey, revision: number | undefined) =>
     Effect.gen(function* () {
       const rows = yield* (
         revision === undefined
           ? sql`
             SELECT r.revision, r.head_sha, r.created_at, r.guide, a.snapshot, a.config FROM review_revisions r
             JOIN reviews v ON v.id = r.review_id JOIN review_attempts a ON a.id = r.attempt_id
-            WHERE v.pr_key = ${key} AND v.local IS NULL ORDER BY r.revision DESC LIMIT 1`
+            WHERE v.pr_key = ${key} ORDER BY r.revision DESC LIMIT 1`
           : sql`
             SELECT r.revision, r.head_sha, r.created_at, r.guide, a.snapshot, a.config FROM review_revisions r
             JOIN reviews v ON v.id = r.review_id JOIN review_attempts a ON a.id = r.attempt_id
-            WHERE v.pr_key = ${key} AND v.local IS NULL AND r.revision = ${revision}`
+            WHERE v.pr_key = ${key} AND r.revision = ${revision}`
       ).pipe(Effect.flatMap(decodeGuides));
       const row = rows[0];
       if (row === undefined)
@@ -2218,7 +2317,9 @@ export const make = Effect.gen(function* () {
           key,
           message:
             revision === undefined
-              ? "This pull request has no guide yet."
+              ? isLocalReviewKey(key)
+                ? "These local changes have no guide yet."
+                : "This pull request has no guide yet."
               : `Guide revision ${revision} doesn't exist.`,
         });
       return {
@@ -2285,7 +2386,7 @@ export const make = Effect.gen(function* () {
         WHERE attempt_id = ${attemptId} AND path = ${filePath} RETURNING path`;
       if (updated.length === 0)
         return yield* new ToolRejected({
-          message: `\`${filePath}\` isn't a changed file in this pull request. Use the path exactly as the diff lists it.`,
+          message: `\`${filePath}\` isn't one of this diff's changed files. Use the path exactly as the diff lists it.`,
         });
       yield* publish(row.pr_key);
       return { message: "Noted." } satisfies ToolReceipt;
@@ -2377,14 +2478,12 @@ export const make = Effect.gen(function* () {
     );
 
   /** The latest draft of an attempt, normalized for rendering. */
-  const draft = (key: PullRequestKey, attemptId: AttemptId) =>
+  const draft = (key: ReviewKey, attemptId: AttemptId) =>
     Effect.gen(function* () {
       const rows = yield* sql`
         SELECT a.snapshot, a.draft, a.config, a.draft_version FROM review_attempts a
         JOIN reviews r ON r.id = a.review_id
-        WHERE a.id = ${attemptId} AND r.pr_key = ${key} AND r.local IS NULL`.pipe(
-        Effect.flatMap(decodeDraft),
-      );
+        WHERE a.id = ${attemptId} AND r.pr_key = ${key}`.pipe(Effect.flatMap(decodeDraft));
       const row = rows[0];
       const normalized =
         row?.draft == null || row.snapshot === null || row.config === null
@@ -2403,14 +2502,12 @@ export const make = Effect.gen(function* () {
     }).pipe(Effect.catchTags(dbFailures));
 
   /** The diff an attempt works on, once its head is fetched. */
-  const diff = (key: PullRequestKey, attemptId: AttemptId) =>
+  const diff = (key: ReviewKey, attemptId: AttemptId) =>
     Effect.gen(function* () {
       const rows = yield* sql`
         SELECT a.snapshot, a.draft, a.config, a.draft_version FROM review_attempts a
         JOIN reviews r ON r.id = a.review_id
-        WHERE a.id = ${attemptId} AND r.pr_key = ${key} AND r.local IS NULL`.pipe(
-        Effect.flatMap(decodeDraft),
-      );
+        WHERE a.id = ${attemptId} AND r.pr_key = ${key}`.pipe(Effect.flatMap(decodeDraft));
       const snapshot = rows[0]?.snapshot ?? null;
       if (snapshot === null)
         return yield* new GuideNotFoundError({ key, message: "The code isn't checked out yet." });
@@ -2685,15 +2782,20 @@ export const make = Effect.gen(function* () {
         AND json_extract(status, '$.reason') = 'interrupted'`.pipe(Effect.flatMap(decodeReviews));
     for (const row of interrupted) {
       const review = toStored(row);
+      const attemptId = review.status._tag === "failed" ? review.status.attemptId : null;
       // A stack's guide picks up where it left off and is still announced with the others.
-      const batch =
-        review.status._tag === "failed" && review.status.attemptId !== null
-          ? yield* batchOf(review.status.attemptId)
-          : null;
-      yield* unattended(startAttempt(review, "retry", { batch }));
+      const batch = attemptId === null ? null : yield* batchOf(attemptId);
+      // Local changes are written again from the snapshot that attempt took, not the folder now.
+      const capture =
+        review.kind === "local" && attemptId !== null ? yield* captureOf(attemptId) : null;
+      if (review.kind === "local" && capture === null) continue;
+      yield* unattended(startAttempt(review, "retry", { batch, capture }));
     }
+    // A local review's checkout lives only while one of its attempts runs.
     const live = new Set(
-      (yield* sql`SELECT id FROM reviews WHERE json_extract(status, '$._tag') != 'done'`.pipe(
+      (yield* sql`
+        SELECT id FROM reviews WHERE json_extract(status, '$._tag') != 'done'
+          AND (local IS NULL OR current_attempt_id IS NOT NULL)`.pipe(
         Effect.flatMap(decodeIds),
       )).map((row) => row.id),
     );
@@ -2716,6 +2818,12 @@ export const make = Effect.gen(function* () {
         yield* fs.remove(turnTmpDir(path, name), { recursive: true, force: true });
         yield* fs.remove(path.join(diffsDir, name), { recursive: true, force: true });
       }
+    const locals = yield* sql`SELECT pr_key FROM reviews WHERE local IS NOT NULL`.pipe(
+      Effect.flatMap(decodeLocalKeys),
+    );
+    yield* repo.local
+      .sweep(new Set(locals.map((row) => row.pr_key)))
+      .pipe(Effect.catchTag("RepoError", (error) => Effect.logWarning(error.message)));
     yield* Effect.logInfo("Reconciled reviews").pipe(
       Effect.annotateLogs({
         interrupted: stale.length,
@@ -2726,6 +2834,24 @@ export const make = Effect.gen(function* () {
   });
 
   yield* reconcile;
+
+  const local = yield* makeLocalReviews(
+    {
+      findLocal,
+      locals,
+      progressOf,
+      activityOf,
+      captureOf,
+      chooseAgent,
+      ensureReview,
+      startAttempt,
+      end,
+      publish,
+      changes,
+      notices,
+    },
+    repo.local,
+  );
 
   return {
     get,
@@ -2749,6 +2875,7 @@ export const make = Effect.gen(function* () {
     reportProgress,
     watched,
     observed,
+    local,
   };
 });
 

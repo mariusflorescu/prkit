@@ -6,7 +6,8 @@ export type ToolName = keyof typeof toolkit.tools;
 
 export type CommandMapping = {
   readonly path: readonly [string, ...string[]];
-  readonly target?: "pr" | "repository";
+  /** `local` takes `--key` or `--path`, and without either the working directory. */
+  readonly target?: "pr" | "repository" | "local";
 };
 
 export const commandMap = {
@@ -64,6 +65,11 @@ export const commandMap = {
   edit_review_comment: { path: ["comments", "edit"], target: "pr" },
   move_review_comment: { path: ["comments", "move"], target: "pr" },
   mark_files_reviewed: { path: ["pr", "reviewed", "set"], target: "pr" },
+  list_local_guides: { path: ["local", "list"] },
+  read_local_guide: { path: ["local", "read"], target: "local" },
+  wait_for_local_guide: { path: ["local", "wait"], target: "local" },
+  generate_local_guide: { path: ["local", "guide"], target: "local" },
+  stop_local_guide: { path: ["local", "stop"], target: "local" },
 } satisfies Record<ToolName, CommandMapping>;
 
 export const flagName = (key: string) =>

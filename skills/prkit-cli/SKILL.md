@@ -1,11 +1,11 @@
 ---
 name: prkit-cli
-description: Use prkit, the desktop app on this Mac for reviewing GitHub pull requests, whenever the user mentions prkit, a guide or guided review, their review queue, PRs assigned to them, or asks you to prepare, summarize or follow up on pull request reviews on this machine. Use it even if they don't mention the CLI. Read their inbox and diffs, choose an installed agent and model to write a guide, follow its progress, and hand local draft comments to prkit's fix agent. Start with prkit status; keep GitHub writes in the app for the user to approve.
+description: Use prkit, the desktop app on this Mac for reviewing GitHub pull requests, whenever the user mentions prkit, a guide or guided review, their review queue, PRs assigned to them, or asks you to prepare, summarize or follow up on pull request reviews on this machine, or to show the user a guided review of local changes, yours or theirs, before a pull request exists. Use it even if they don't mention the CLI. Read their inbox and diffs, choose an installed agent and model to write a guide, follow its progress, and hand local draft comments to prkit's fix agent. Start with prkit status; keep GitHub writes in the app for the user to approve.
 ---
 
 # prkit CLI
 
-prkit is a local app that keeps the user's pull request inbox across their GitHub accounts, writes **guides** (an agent's walkthrough of a PR's diff, chapter by chapter), and runs a **fix agent** that turns review comments into commits. Those commits wait in the app until the user clicks Push. The command talks to the running app, so everything you start shows up in the app too, labelled "Started from prkit CLI".
+prkit is a local app that keeps the user's pull request inbox across their GitHub accounts, writes **guides** (an agent's walkthrough of a PR's diff, or of a local branch's changes, chapter by chapter), and runs a **fix agent** that turns review comments into commits. Those commits wait in the app until the user clicks Push. The command talks to the running app, so everything you start shows up in the app too, labelled "Started from prkit CLI".
 
 The installed CLI is the source of truth for flags: run `prkit --help` or `prkit <command> --help` whenever you're unsure. Read [the command reference](references/commands.md) when you need a less common read, local tab or draft action, or versioned guide settings.
 
@@ -42,7 +42,7 @@ Repository commands take `owner/repo`; inbox filters use `--repo owner/repo`. Ac
 
 ## What it won't do, and why
 
-Anything that writes to GitHub stays a click in the app: pushing, merging, posting or resolving comments and reviews, reviewers, labels, closing a PR. So do account and agent setup, Global or Repository settings changes, and discarding or reverting fix work. This is on purpose: an agent reading PR content can be steered by it, so nothing it says can reach GitHub without the user seeing it first. A repository where the user enabled both automatic conflict resolution and automatic push is an existing exception: prkit's watcher can resolve and push conflicts on watched PRs.
+Anything that writes to GitHub stays a click in the app: pushing, merging, posting or resolving comments and reviews, reviewers, labels, closing a PR. So do account and agent setup, Global or Repository settings changes, discarding or reverting fix work, and removing a local guide. This is on purpose: an agent reading PR content can be steered by it, so nothing it says can reach GitHub without the user seeing it first. A repository where the user enabled both automatic conflict resolution and automatic push is an existing exception: prkit's watcher can resolve and push conflicts on watched PRs.
 
 Reading settings is allowed. At Read and start work you can also open, close, focus or reorder local tabs, save the app's inbox filters, edit or move local draft comments, mark files reviewed, and save PR-scope guide settings. These stay on the machine. Closing a tab doesn't close the PR on GitHub.
 
@@ -93,6 +93,26 @@ prkit pr checks <pr> --json
 For several PRs, start every guide first, then wait on each; prkit queues work behind running agents.
 
 `--focus` and `--guidance` are versioned JSON edits that save this PR's settings when generation starts, not plain strings. Read `prkit guide settings <pr> --json` first. Use the matching `scopes.pullRequest.focus.version` or `scopes.pullRequest.guidance.version` as `expectedVersion`. Preserve current items and overrides that the user hasn't asked to change. See the reference for the JSON shapes and standalone PR settings saves. On a version conflict, read again and reconcile the user's change; don't overwrite the newer settings blindly.
+
+### Review local changes before a pull request
+
+Use this when you or the user changed code in a local repository and the user wants to see what changed before it becomes a pull request: "walk me through what you changed", "guide my branch", "review my local changes". prkit copies a snapshot of the folder as it is (the branch's commits since its base, plus staged, unstaged and untracked files) and never changes the repository.
+
+Run it from inside the repository, or pass `--path`:
+
+```sh
+prkit local guide --description "One or two sentences on what changed and why"
+prkit local wait --timeout 600
+prkit local read --json
+```
+
+1. `prkit local guide` answers at once. A problem with the repository exits 1 with the reason, such as not a repository, nothing changed, no base found or no shared history: fix what it says, or tell the user. Pass `--base <branch>` when the branch didn't start from origin's default branch (prkit tries it, then `origin/main`, `origin/master`, `main` and `master`), and `--branch <name>` for a branch's last commit alone, without uncommitted work. `--agent`, `--model` and `--option` pick the agent as for `prkit guide generate`.
+2. Write `--description` as the author's claim: what changed and why, in plain words. The guide quotes it and checks it against the diff, so don't oversell.
+3. `prkit local wait` returns when the guide is written. If `finished` is false, call it again.
+4. Read it with `prkit local read --json`. Give the user the summary, the before/after (`content.flow`), the main risks, and anything the snapshot left out (`status.run.leftOut`: files over 50 MB, Git LFS files, nested repositories). prkit keeps every revision.
+5. After more changes, run `prkit local guide` again for the next revision. "Nothing changed since revision N" means the guide is current; `--regenerate` writes it again anyway.
+
+Never stash, commit, switch branches or touch the user's files to make it work: prkit reads the folder as it is. `prkit local stop` stops a guide while it is written. Removing a local guide is the user's click in prkit.
 
 ### Hand review comments to the fix agent
 

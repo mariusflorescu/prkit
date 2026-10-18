@@ -48,7 +48,15 @@ import {
   RepositoryFixerSettings,
   ScriptAccess,
 } from "./fixer.ts";
-import { AccountId, PullRequestKey, ReviewCommentId } from "./ids.ts";
+import { AccountId, LocalReviewKey, PullRequestKey, ReviewCommentId, ReviewKey } from "./ids.ts";
+import {
+  LocalGenerateResult,
+  LocalReviewEntry,
+  LocalReviewError,
+  LocalReviewFeedEvent,
+  LocalReviewSnapshot,
+  LocalReviewWatchEvent,
+} from "./localReview.ts";
 import { GitHubBudget, GitHubEvent } from "./github.ts";
 import { InboxError, InboxRead, InboxResult } from "./inbox.ts";
 import {
@@ -150,6 +158,15 @@ export const WS_METHODS = {
   reviewsDiff: "reviews.diff",
   reviewsTypicalDuration: "reviews.typicalDuration",
   guidesGet: "guides.get",
+  localReviewsList: "localReviews.list",
+  localReviewsFeed: "localReviews.feed",
+  localReviewsGet: "localReviews.get",
+  localReviewsWatch: "localReviews.watch",
+  localReviewsGenerate: "localReviews.generate",
+  localReviewsStop: "localReviews.stop",
+  localReviewsRetry: "localReviews.retry",
+  localReviewsRemove: "localReviews.remove",
+  localReviewsFileContents: "localReviews.fileContents",
   reviewCommentsList: "reviewComments.list",
   reviewCommentsAdd: "reviewComments.add",
   reviewCommentsAddFromNote: "reviewComments.addFromNote",
@@ -450,7 +467,7 @@ export const WsRpcGroup = RpcGroup.make(
     stream: true,
   }),
   Rpc.make(WS_METHODS.reviewsDiff, {
-    payload: Schema.Struct({ key: PullRequestKey, attemptId: AttemptId }),
+    payload: Schema.Struct({ key: ReviewKey, attemptId: AttemptId }),
     success: DiffSnapshot,
     error: Schema.Union([ReviewError, GuideNotFoundError]),
   }),
@@ -460,13 +477,77 @@ export const WsRpcGroup = RpcGroup.make(
     error: ReviewError,
   }),
   Rpc.make(WS_METHODS.guidesGet, {
-    payload: Schema.Struct({ key: PullRequestKey, revision: Schema.optionalKey(Schema.Int) }),
+    payload: Schema.Struct({ key: ReviewKey, revision: Schema.optionalKey(Schema.Int) }),
     success: GuideRevision,
     error: Schema.Union([ReviewError, GuideNotFoundError]),
   }),
   Rpc.make(WS_METHODS.guidesDraft, {
-    payload: Schema.Struct({ key: PullRequestKey, attemptId: AttemptId }),
+    payload: Schema.Struct({ key: ReviewKey, attemptId: AttemptId }),
     success: DraftGuideResult,
+    error: Schema.Union([ReviewError, GuideNotFoundError]),
+  }),
+  // Guides of local changes (docs/internals/architecture.md "Local reviews"). The CLI and
+  // outside agents start them from a folder; the app runs them again, stops and removes them.
+  Rpc.make(WS_METHODS.localReviewsList, {
+    payload: Schema.Struct({}),
+    success: Schema.Array(LocalReviewEntry),
+    error: ReviewError,
+  }),
+  Rpc.make(WS_METHODS.localReviewsFeed, {
+    payload: Schema.Struct({}),
+    success: LocalReviewFeedEvent,
+    error: ReviewError,
+    stream: true,
+  }),
+  Rpc.make(WS_METHODS.localReviewsGet, {
+    payload: Schema.Struct({ key: LocalReviewKey }),
+    success: LocalReviewSnapshot,
+    error: ReviewError,
+  }),
+  Rpc.make(WS_METHODS.localReviewsWatch, {
+    payload: Schema.Struct({ key: LocalReviewKey }),
+    success: LocalReviewWatchEvent,
+    error: ReviewError,
+    stream: true,
+  }),
+  /** Run again: a new snapshot of the same folder, branch, base and head. */
+  Rpc.make(WS_METHODS.localReviewsGenerate, {
+    payload: Schema.Struct({
+      key: LocalReviewKey,
+      /** Absent: the review's own selection. */
+      agent: Schema.optionalKey(AgentSelection),
+      /** Write the guide again even when nothing changed since the last revision. */
+      regenerate: Schema.optionalKey(Schema.Boolean),
+    }),
+    success: LocalGenerateResult,
+    error: Schema.Union([ReviewError, LocalReviewError]),
+  }),
+  Rpc.make(WS_METHODS.localReviewsStop, {
+    payload: Schema.Struct({ key: LocalReviewKey }),
+    success: LocalReviewSnapshot,
+    error: ReviewError,
+  }),
+  /** A failed run again, on the snapshot it took. */
+  Rpc.make(WS_METHODS.localReviewsRetry, {
+    payload: Schema.Struct({ key: LocalReviewKey }),
+    success: LocalReviewSnapshot,
+    error: Schema.Union([ReviewError, ReviewStateError]),
+  }),
+  /** Deletes the review, its revisions and prkit's copy of its snapshots. */
+  Rpc.make(WS_METHODS.localReviewsRemove, {
+    payload: Schema.Struct({ key: LocalReviewKey }),
+    success: Schema.Struct({}),
+    error: ReviewError,
+  }),
+  /** A file as one revision's snapshot (new) or its base (old) holds it. */
+  Rpc.make(WS_METHODS.localReviewsFileContents, {
+    payload: Schema.Struct({
+      key: LocalReviewKey,
+      revision: Schema.Int,
+      path: Schema.String,
+      side: FileSide,
+    }),
+    success: FileContents,
     error: Schema.Union([ReviewError, GuideNotFoundError]),
   }),
   Rpc.make(WS_METHODS.guideSettingsGet, {

@@ -79,6 +79,18 @@ The first two save the PR's section as part of generation. The standalone save a
 
 Scope reads accept `{"_tag":"repository","repositoryId":"<id>"}` or `{"_tag":"pull-request","key":"github.com/owner/repo#123"}` as well as global. Only PR-scope writes exist in the CLI. Changing global defaults, repository settings or agent setup remains an app action.
 
+## Local changes
+
+| Command                                          | What it returns or changes                                                                                                        |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `prkit local guide --description 'What and why'` | Snapshots the folder's working tree on its current branch and starts a guide; `outcome` says `started`, `running` or `unchanged`. |
+| `prkit local read --json`                        | State, what the run took (base, head, files left out) and the latest guide; `--revision 1` reads an earlier one.                  |
+| `prkit local wait --timeout 600 --json`          | Waits for the guide to stop running; a timeout never stops it.                                                                    |
+| `prkit local stop`                               | Stops a guide while it is written; revisions stay readable.                                                                       |
+| `prkit local list --json`                        | Paged local guides, the latest changed first.                                                                                     |
+
+`prkit local guide` takes `--path` for another folder, `--branch <name>` for that branch's last commit alone, `--base <branch>` for the base, `--description` for the author's words, `--regenerate` to write the guide again with nothing changed, and `--agent`, `--model` and `--option` as guide generation does. Read, wait and stop name the review by `--key local:<16 hex>`, by `--path`, or by the working directory, with `--branch` for a branch-tip review. Without `--key` or `--path` every local command sends the working directory.
+
 ## Comments and fixes
 
 | Command                                                                                                                         | What it returns or changes                                                                                                                           |
@@ -123,4 +135,4 @@ Read `prkit pr reviewed <pr> --json` first for the paths and its `headSha`. If t
 | `prkit tabs focus <pr>`                                                                | Focuses an already open tab.                                                           |
 | `prkit tabs reorder --keys github.com/owner/repo#123 --keys github.com/owner/repo#124` | Saves the complete tab order; stale or incomplete lists fail. Read the tab list first. |
 
-All reads work at Read only. Local changes, guide/fix work and PR settings saves require Read and start work, enforced by the server. There are no GitHub write commands. `prkit --version` and `prkit --completions zsh` also work offline.
+All reads work at Read only, `prkit local read`, `wait` and `list` included. Local changes, guide/fix work, `prkit local guide` and `stop`, and PR settings saves require Read and start work, enforced by the server. There are no GitHub write commands. `prkit --version` and `prkit --completions zsh` also work offline.

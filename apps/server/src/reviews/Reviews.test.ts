@@ -351,6 +351,15 @@ const Git = Layer.unwrap(
         GIT_TERMINAL_PROMPT: "0",
         GIT_NO_LAZY_FETCH: "1",
       },
+      local: {
+        copyOf: () => home,
+        identify: () => Effect.die("unused"),
+        capture: () => Effect.die("unused"),
+        prepare: () => Effect.die("unused"),
+        contents: () => Effect.die("unused"),
+        forget: () => Effect.die("unused"),
+        sweep: () => Effect.void,
+      },
       checkout: (_ref, worktree) => ({ repo: worktree, worktree, gitDir: worktree }),
       verifyCheckout: () => Effect.succeed(undefined),
       prepare: () =>

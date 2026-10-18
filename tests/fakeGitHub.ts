@@ -21,6 +21,15 @@ const Stats = Schema.fromJsonString(
     refused: Schema.Number,
     mergedInSearch: Schema.Number,
     byKind: Schema.Record(Schema.String, Schema.Number),
+    /** The latest requests, oldest first. */
+    log: Schema.Array(
+      Schema.Struct({
+        at: Schema.String,
+        kind: Schema.String,
+        status: Schema.Number,
+        cost: Schema.Number,
+      }),
+    ),
   }),
 );
 const decodeStats = Schema.decodeUnknownSync(Stats);

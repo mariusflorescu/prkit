@@ -9,6 +9,7 @@ import {
   type ReviewId,
 } from "@prkit/contracts";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -36,17 +37,14 @@ import {
   GitTampered,
   gitArgs,
   gitDirEnv,
+  RepoError,
 } from "./gitRun.ts";
 import { linksRefusal, newLinks } from "./links.ts";
+import { localCopyPath, makeLocalCapture } from "./localCapture.ts";
 import { type NestedEntry, nestedGitEntries } from "./nestedRepos.ts";
 import { rebaseStateHash } from "./rebaseState.ts";
 
-export { type Checkout, GitTampered } from "./gitRun.ts";
-
-export class RepoError extends Schema.TaggedError<RepoError>()("RepoError", {
-  reason: Schema.Literals(["account", "repository"]),
-  message: Schema.String,
-}) {}
+export { type Checkout, GitTampered, RepoError } from "./gitRun.ts";
 
 /** prkit committed nothing: the agent made or changed a symlink or submodule (docs/internals/fix-agent.md). */
 export class LinkRefused extends Schema.TaggedError<LinkRefused>()("LinkRefused", {
@@ -122,8 +120,8 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const accounts = yield* GitHubAccounts;
+  const crypto = yield* Crypto.Crypto;
   const reposDir = path.join(config.home, "repos");
-  const localDir = path.join(config.home, "local");
   const worktreesDir = path.join(config.home, "worktrees");
   const fixesDir = path.join(config.home, "fixes");
   const gitconfig = path.join(config.home, "gitconfig");
@@ -176,7 +174,7 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const cwd = cwdOf(options.target);
         const child = yield* spawner.spawn(
-          ChildProcess.make("git", gitArgs(args), {
+          ChildProcess.make("git", gitArgs(args, options.target), {
             ...(cwd === undefined ? {} : { cwd }),
             env: childEnv(process.env, {
               ...isolatedGitEnv,
@@ -241,7 +239,7 @@ export const make = Effect.gen(function* () {
   const cachePath = (cache: CacheRef) =>
     cache._tag === "pull-request"
       ? repoPath(cache.ref)
-      : path.join(localDir, `${cache.key.slice("local:".length)}.git`);
+      : localCopyPath(path, config.home, cache.key);
   const worktreePath = (reviewId: ReviewId) => path.join(worktreesDir, reviewId);
 
   /** A worktree as prkit lays it out, with its git dir and common dir computed, never read from it. */
@@ -1241,6 +1239,22 @@ export const make = Effect.gen(function* () {
       } satisfies DiffTexts;
     });
 
+  /** Guides of local changes: snapshots of the user's own repository, in copies prkit owns. */
+  const local = makeLocalCapture({
+    fs,
+    path,
+    crypto,
+    home: config.home,
+    run,
+    git,
+    serialized,
+    ensureWorktree,
+    snapshotOf: (repo, from, to) => snapshotOf(bare(repo), from, to),
+    relation,
+    commitsSince,
+    worktreePath,
+  });
+
   return {
     isolatedGitEnv,
     checkout,
@@ -1273,6 +1287,7 @@ export const make = Effect.gen(function* () {
     removeFixer,
     listFixers,
     readTexts,
+    local,
   };
 });
 

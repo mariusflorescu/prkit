@@ -29,7 +29,7 @@ describe("gitArgs and gitDirEnv", () => {
   const co: Checkout = { repo: "/r/x.git", worktree: "/w/f1", gitDir: "/r/x.git/worktrees/f1" };
 
   it("pins every hostile config off before the subcommand", () => {
-    expect(gitArgs(["reset", "--hard", "HEAD"])).toEqual([
+    expect(gitArgs(["reset", "--hard", "HEAD"], { _tag: "plain" })).toEqual([
       "-c",
       "core.fsmonitor=false",
       "-c",

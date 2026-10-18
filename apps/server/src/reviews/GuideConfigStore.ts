@@ -287,6 +287,18 @@ export const make = Effect.gen(function* () {
   const resolve = (repositoryId: RepositoryId, key: PullRequestKey) =>
     layers(repositoryId, key).pipe(Effect.map(resolveGuideConfig));
 
+  /** Global settings alone, for a guide of local changes, which has no other scope. */
+  const resolveGlobal = () =>
+    read([{ _tag: "global" }]).pipe(
+      Effect.map((get) =>
+        resolveGuideConfig({
+          global: get({ _tag: "global" }),
+          repository: null,
+          pullRequest: null,
+        }),
+      ),
+    );
+
   const save = (input: GuideConfigSave) =>
     Effect.gen(function* () {
       const edit = trimmed(input.edit);
@@ -400,7 +412,17 @@ export const make = Effect.gen(function* () {
       } satisfies PullRequestGuideConfig;
     });
 
-  return { scope, layers, resolve, save, remember, repositories, findRepository, forPullRequest };
+  return {
+    scope,
+    layers,
+    resolve,
+    resolveGlobal,
+    save,
+    remember,
+    repositories,
+    findRepository,
+    forPullRequest,
+  };
 });
 
 export const layer = Layer.effect(GuideConfigStore, make);

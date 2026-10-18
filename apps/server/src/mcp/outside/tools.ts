@@ -9,14 +9,24 @@ import {
   FixResult,
   StopFixResult,
   GenerateGuideInput,
+  GenerateLocalGuideInput,
+  GenerateLocalGuideResult,
   GuideResult,
   GuideStatus,
   InboxInput,
   InboxListResult,
+  LocalGuideResult,
+  LocalGuideStatus,
+  LocalListInput,
+  LocalListResult,
+  LocalTargetInput,
+  LocalWaitInput,
+  LocalWaitResult,
   OpenInput,
   OpenPullRequestsResult,
   OutsideToolFailure,
   PullRequestResult,
+  ReadLocalGuideInput,
   ReadPullRequestInput,
   ReviseInput,
   SendToFixInput,
@@ -448,6 +458,40 @@ const ReadSettings = read(
   "Read settings",
 );
 
+const LOCAL_HINT =
+  " Name it by key, or by path: an absolute folder inside the repository, whose current branch (or the branch you pass) names the review. The prkit CLI sends its working directory.";
+
+const ListLocalGuides = read(
+  Tool.make("list_local_guides", {
+    description:
+      "Every guide of local changes prkit has (a repository's branch before a pull request exists, not pull requests), the latest changed first, with its state.",
+    parameters: LocalListInput,
+    success: limited(LocalListResult),
+    failure: OutsideToolFailure,
+  }),
+  "List local guides",
+);
+
+const ReadLocalGuide = read(
+  Tool.make("read_local_guide", {
+    description: `A guide of local changes: its state (preparing, writing, ready, failed, stopped), progress while it is written, what the run took (base, head, files left out), and the latest guide, or the revision you ask for.${LOCAL_HINT}`,
+    parameters: ReadLocalGuideInput,
+    success: limited(LocalGuideResult),
+    failure: OutsideToolFailure,
+  }),
+  "Read a local guide",
+);
+
+const WaitForLocalGuide = read(
+  Tool.make("wait_for_local_guide", {
+    description: `Waits until a guide of local changes stops running, or the timeout passes (50 seconds unless you ask for more, at most 600), and returns its state; finished says which. A timeout never stops the work: call again to keep waiting.${LOCAL_HINT}`,
+    parameters: LocalWaitInput,
+    success: limited(LocalWaitResult),
+    failure: OutsideToolFailure,
+  }),
+  "Wait for a local guide",
+);
+
 /**
  * The outside endpoint's tools. A "starts work" tool is declared with `work`, which sets its
  * level and hides it while `canStartWork` says no, in one step; handlers check the level again
@@ -660,6 +704,29 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
     true,
   );
 
+  const GenerateLocalGuide = work(
+    Tool.make("generate_local_guide", {
+      description:
+        "Starts prkit's agent writing a guide of the changes in a local git repository, before a pull request exists: its working tree (commits since the base plus uncommitted and untracked files) on the current branch, or with branch, that branch's last commit. prkit copies a snapshot and never changes the repository. Run it again after more changes for the next revision; with nothing new it says so and starts nothing. A problem with the repository is answered at once. It takes minutes and queues behind other agent work: call wait_for_local_guide, then read_local_guide. instance, model and options pick the agent (list_agents lists them).",
+      parameters: GenerateLocalGuideInput,
+      success: limited(GenerateLocalGuideResult),
+      failure: OutsideToolFailure,
+    }),
+    "Generate a local guide",
+    false,
+  );
+
+  const StopLocalGuide = work(
+    Tool.make("stop_local_guide", {
+      description: `Stops a guide of local changes while it is written. Written revisions stay readable, and generating it again starts the next one.${LOCAL_HINT}`,
+      parameters: LocalTargetInput,
+      success: limited(LocalGuideStatus),
+      failure: OutsideToolFailure,
+    }),
+    "Stop a local guide",
+    true,
+  );
+
   return Toolkit.make(
     PrkitStatus,
     ListInbox,
@@ -698,6 +765,9 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
     ReadFixPatch,
     ReadFixAccess,
     ReadSettings,
+    ListLocalGuides,
+    ReadLocalGuide,
+    WaitForLocalGuide,
     OpenPullRequest,
     GenerateGuide,
     StopGuide,
@@ -715,6 +785,8 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
     EditReviewComment,
     MoveReviewComment,
     MarkFilesReviewed,
+    GenerateLocalGuide,
+    StopLocalGuide,
   );
 };
 

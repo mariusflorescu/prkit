@@ -5,7 +5,7 @@ import { AgentInstanceId, AgentProviderKind } from "./agentInstance.ts";
 import { DiffSnapshot } from "./diffSnapshot.ts";
 import { NormalizedGuide } from "./guide.ts";
 import { AttemptConfig } from "./guideConfig.ts";
-import { AccountId, PullRequestKey, ReviewId } from "./ids.ts";
+import { AccountId, PullRequestKey, ReviewId, ReviewKey } from "./ids.ts";
 import { ModelOptionSelection } from "./model.ts";
 
 export const AttemptId = Schema.NonEmptyString.pipe(Schema.brand("AttemptId"));
@@ -272,11 +272,11 @@ export class ReviewError extends Schema.TaggedError<ReviewError>()("ReviewError"
 
 /** The command doesn't apply to the review's current state, e.g. Retry on a review that is writing. */
 export class ReviewStateError extends Schema.TaggedError<ReviewStateError>()("ReviewStateError", {
-  key: PullRequestKey,
+  key: ReviewKey,
   message: Schema.String,
 }) {}
 
 export class GuideNotFoundError extends Schema.TaggedError<GuideNotFoundError>()(
   "GuideNotFoundError",
-  { key: PullRequestKey, message: Schema.String },
+  { key: ReviewKey, message: Schema.String },
 ) {}

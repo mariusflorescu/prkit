@@ -1,6 +1,6 @@
 # Outside agents
 
-Settings > Outside agents lets the owner's own MCP client (Claude Code, Codex, Cursor, anything that starts a server over stdio) use prkit from a terminal session: see the inbox, open a PR in the app, start and read a guide, add draft comments and send them to the fix agent, and follow its progress. It is off by default. Anything that reaches GitHub stays a click in the app: pushing, merging, posting a review, replying to or resolving a thread.
+Settings > Outside agents lets the owner's own MCP client (Claude Code, Codex, Cursor, anything that starts a server over stdio) use prkit from a terminal session: see the inbox, open a PR in the app, start and read a guide, add draft comments and send them to the fix agent, follow its progress, and have a guide written of a repository's local changes before a pull request exists. It is off by default. Anything that reaches GitHub stays a click in the app: pushing, merging, posting a review, replying to or resolving a thread.
 
 ## Setup
 
@@ -73,7 +73,11 @@ The inventory covers every WebSocket RPC and the app's local presentation action
 | Appearance | appearance.get, appearance.update | `read_settings`; changes excluded B | Read / Excluded |
 | Outside agents state/access/reset | outsideAgents.get, outsideAgents.update, outsideAgents.reset | `read_settings`; enabling/disabling, access changes and Reset access excluded B | Read / Excluded |
 | CLI setup and skill installer | cliInstall.get, cliInstall.install, cliInstall.uninstall, cliInstall.skill | Setup status is presentation; installing/removing the launcher and opening the skill installer are excluded B: machine setup | Presentation / Excluded |
-| Live updates and waiting | github.events, workspace.changes, reviewedFiles.changes, reviews.watch, fixers.watch | Finite snapshot reads above plus `wait_for`; no outside background subscriptions or polling loop | Read |
+| Local guides: list, read, file contents | localReviews.list, localReviews.get, localReviews.fileContents, guides.get | `list_local_guides`, `read_local_guide` | Read |
+| Start and stop a local guide | localReviews.generate, localReviews.stop | `generate_local_guide` from a folder (the app's Run again takes the review's key), `stop_local_guide` | Work |
+| Retry a local guide's failed run | localReviews.retry | App only: `generate_local_guide` again takes a fresh snapshot instead | App |
+| Remove a local guide | localReviews.remove | Excluded C | Excluded |
+| Live updates and waiting | github.events, workspace.changes, reviewedFiles.changes, reviews.watch, fixers.watch, localReviews.watch, localReviews.feed | Finite snapshot reads above plus `wait_for` and `wait_for_local_guide`; no outside background subscriptions or polling loop | Read |
 | Desktop updater: channel/automatic checks, check/download/install/restart | Electron update bridge | Changes excluded B (installation and trust). Native updater status has no server service and is outside this unit’s server-only build scope; release notes and What’s new are presentation. | Excluded / Presentation |
 | Navigation, inner tabs, scrolling, collapses, keyboard shortcuts, text selection, copy/open links | Presentation only | Read the corresponding data or use the workspace tool; these have no separate domain operation | Presentation |
 
@@ -124,6 +128,11 @@ When a complete result is too large, the success value is a typed `_tag: "respon
 | `edit_review_comment` | Work | `EditCommentInput` schema |
 | `move_review_comment` | Work | `MoveCommentInput` schema |
 | `mark_files_reviewed` | Work | `MarkFilesReviewedInput` schema: `headSha` (the one `read_reviewed_files` returned), `paths` and `reviewed` (true when omitted) |
+| `list_local_guides` | Read | `LocalListInput` schema (no PR target) |
+| `read_local_guide` | Read | `ReadLocalGuideInput` schema: a local target and `revision` (no PR target) |
+| `wait_for_local_guide` | Read | `LocalWaitInput` schema: a local target and `timeoutSeconds` (no PR target) |
+| `generate_local_guide` | Work | `GenerateLocalGuideInput` schema: `path`, `branch`, `base`, `description`, `regenerate`, `instance`, `model`, `options` (no PR target) |
+| `stop_local_guide` | Work | `LocalTargetInput` schema (no PR target) |
 
 `list_inbox` orders each section by `sort`: `updated` (the default, most recent activity first), `waiting` (review requests by how long they have waited on the owner, longest first, then drafts and requests with no known wait; the owner's own and involved PRs by when they were opened) or `size` (smallest size first, then fewest changed lines, then fewest files); `sort` is `updated` when omitted. The app orders its window with the same function, so a client sees the order the owner sees, and the sort is part of a cursor's identity. A read applies only to the PRs prkit holds, up to 100 per search. Each PR also carries `createdAt`, `size` and `wait`. `size` is `{bucket, additions, deletions, lines, files, readingMinutes}`: XS to XL from the larger of the changed lines (`additions + deletions`: 10, 100, 400, 1,000) and the files (2, 5, 15, 30), and a reading time of `ceil(lines / 20 + files / 2)` minutes, at least 1. `wait` is null unless the PR is a review request; otherwise `{_tag: "waiting", since, cause, via, atLeast}` (`cause` is `requested`, `requested-again` or `ready`, `via` says whether the owner or teams were asked, and `atLeast` means the wait may be longer than `since` says), `{_tag: "draft"}`, or `{_tag: "unknown", reason}` with `not-read`, `no-history` or `unreadable`. `save_inbox_filters` replaces the saved search, account, repository and sort together, so it needs all four. A window that is already open keeps its own until the next load.
 
@@ -133,7 +142,7 @@ When a complete result is too large, the success value is a typed `_tag: "respon
 
 `list_open_pull_requests` continues to mean open **app tabs**. `list_repository_pull_requests` lists a repository's open PRs. `read_guide_revision` returns the guide and frozen settings; use the revision's `attemptId` from `list_guide_revisions` with `read_review_diff` for its exact saved diff. `read_fix_turn` returns the full per-comment/per-file report and script decision. Neither read starts an agent.
 
-The CLI uses one command map in `apps/server/src/cli/commands.ts`. Its parity check compares the map with all 54 tools exactly, and its flags come from the same parameter schemas. The public skill and CLI documentation are checked against that map too.
+The CLI uses one command map in `apps/server/src/cli/commands.ts`. Its parity check compares the map with all 59 tools exactly, and its flags come from the same parameter schemas. The public skill and CLI documentation are checked against that map too.
 
 Each tool is declared once with its level (`apps/server/src/mcp/outside/tools.ts`): `reads` or `startsWork` wraps the handler, and the server refuses to start when a handler's level differs from its tool's. A tool above the client's level is hidden from `tools/list` and unknown to `tools/call`, checked again on every call, so lowering the level takes effect at once. Other failures come back as tool errors with a code (`invalid`, `not-found`, `account-needed`, `not-allowed`, `not-ready`, `conflict`, `github`, `failed`) and a plain message.
 
@@ -142,6 +151,10 @@ Never offered: pushing, merging or any other pull request action, submitting a r
 One case reaches GitHub without a click, and it is the owner's own opt-in. In a repository with both "Resolve conflicts automatically" and "Push fixes automatically" on, the watcher resolves a conflicting PR it watches (an open tab, a watched guide or an active fix session) and pushes the result (`FixerWatcher`, `conflictTurn`). So `open_pull_request`, `generate_guide`, `send_to_fix_agent` or `resolve_conflicts` on such a PR can lead to that push, exactly as doing the same in the app does. Opening tabs or using `generate_guide` for several stack layers makes each of those PRs one the watcher may resolve and push, just as doing the same in the app does. The turn is the watcher's, not the client's, and there is no extra guard: the two settings are what the owner chose for that repository.
 
 `add_review_comment`, `send_to_fix_agent` and `ask_fix_agent_to_change` take a `clientRequestId`. A request is the tool, the client, the pull request and that id (`outside_requests`, kept a day): a retry gets the first answer, looked up before anything else, instead of doing it twice; the same id with other input answers `conflict`. Each key has its own lock, so one slow call holds back only its own retries.
+
+## Local changes
+
+The five local tools never name a pull request or an account, and reach only prkit's reviews and agents. A local target is a `key` (`local:` and 16 hex), or an absolute `path` inside a git work tree: the repository and the branch it has checked out name the review, so one branch is one review whichever worktree or subfolder asks. `branch` names another local branch instead, for a guide of that branch's last commit. `generate_local_guide` snapshots the folder when it is called, so every problem with the repository (not one, nothing changed, no base, no shared history, files changing while prkit reads them) is answered at once, with the sentence the app would show, and nothing starts. With nothing new since the last revision it answers `unchanged` and starts no agent. Files over 50 MB, files a git filter such as Git LFS stores, and repositories nested inside are left out of the snapshot and listed in the run's `leftOut`. Removing a local review, and retrying a failed run on its old snapshot, stay in the app.
 
 ## Accounts
 
