@@ -15,8 +15,8 @@ import {
   FIX,
   ISSUE_TITLE,
   LONG_ISSUE_BODY,
-  MARKER,
-  RESOLVED,
+  INJECTED_WORD,
+  RESOLVED_WORD,
   seed,
   THREAD_BODY,
   THREAD_SENTENCE,
@@ -38,17 +38,21 @@ const attempts = row(
 const noteRows = row(
   "SELECT a.text FROM review_activity a JOIN reviews r ON r.id = a.review_id WHERE r.pr_key = '{key}' AND a.kind = 'note'",
 );
-/** What the activity log said, as text. */
 const notes = (home: string) =>
   noteRows(home).flatMap((entry) => (typeof entry.text === "string" ? [entry.text] : []));
 const checkedAt = row(
   "SELECT json_extract(status, '$.checkedAt') AS at FROM reviews WHERE pr_key = '{key}'",
 );
 
-/** The fake GitHub with PR 9 seeded, its git behind it and an instance that runs `claude`. */
-const bringUp = async (name: string, claude: string, seeded: Parameters<typeof seed>[0] = {}) => {
-  // An instance's log outlives it and later runs append to it: the journeys read only their own.
+const forgetOldLog = (name: string) =>
   NodeFS.rmSync(NodePath.join(repoRoot, ".e2e", "logs", `${name}.log`), { force: true });
+
+const GITHUB_REST_LIMIT = 5_000;
+const PRKIT_RESERVE = 0.1;
+const CLICKS_ONLY = GITHUB_REST_LIMIT * PRKIT_RESERVE - 1;
+
+const bringUp = async (name: string, claude: string, seeded: Parameters<typeof seed>[0] = {}) => {
+  forgetOldLog(name);
   const fake = await startFakeGitHub(name);
   const git = await cliFixture(fake, FILES);
   await fake.context(9, seed(seeded));
@@ -72,8 +76,7 @@ const bringUp = async (name: string, claude: string, seeded: Parameters<typeof s
 const guideUrl = (url: string) =>
   `${url}/pr/github.com/budget/fixtures/9?account=${encodeURIComponent("github.com/budget-test")}&tab=guide`;
 
-/** Waits until the watcher has read the PR on `ticks` more of its turns. */
-const afterTicks = (home: string, ticks: number) => {
+const waitForWatcherReads = (home: string, ticks: number) => {
   const seen = new Set<string>();
   return expect
     .poll(
@@ -105,7 +108,6 @@ test(
         .toEqual([{ revision: 1, state: "watching" }]);
       await app.screenshot("guide-context-r1");
 
-      // What the agent was given.
       const [first, ...later] = claude.prompts();
       expect(later).toEqual([]);
       if (first?.context == null) throw new Error("The first turn named no context file.");
@@ -115,7 +117,14 @@ test(
       expect(first.prompt).toContain(
         "It holds 1 failing check, 1 pending check, 1 open review thread and 2 linked issues. Read it before you write the guide.",
       );
-      for (const word of [MARKER, RESOLVED, "unit tests", "octocat", ISSUE_TITLE, THREAD_SENTENCE])
+      for (const word of [
+        INJECTED_WORD,
+        RESOLVED_WORD,
+        "unit tests",
+        "octocat",
+        ISSUE_TITLE,
+        THREAD_SENTENCE,
+      ])
         expect(first.prompt).not.toContain(word);
       const file = decodeFile(first.context);
       expect(first.context.length).toBeLessThan(80_000);
@@ -139,7 +148,7 @@ test(
           },
         ],
       });
-      expect(first.context).not.toContain(RESOLVED);
+      expect(first.context).not.toContain(RESOLVED_WORD);
       if (!("linked" in file.issues)) throw new Error("The issues were not read.");
       expect(file.issues.linked).toBe(2);
       const long = file.issues.listed.find((issue) => issue.issue === "budget/fixtures#32");
@@ -153,18 +162,16 @@ test(
         "context:failing=1,pending=1,threads=1,issues=2",
       );
 
-      // A new comment, a reply on the thread and a passing check move the PR on GitHub, but not the diff.
       const changesBefore = changedLines(NodeFS.readFileSync(run.log, "utf8"));
       await fake.comment(9);
       await fake.context(9, seed({ fixed: true }));
-      await afterTicks(run.home, 2);
+      await waitForWatcherReads(run.home, 2);
       expect(changedLines(NodeFS.readFileSync(run.log, "utf8"))).toBeGreaterThan(changesBefore);
       expect(reviewState(run.home)).toEqual([{ revision: 1, state: "watching" }]);
       expect(attempts(run.home)).toEqual([{ revision: 1, trigger: "first", outcome: "accepted" }]);
       expect(claude.prompts().length).toBe(1);
       expect(NodeFS.readFileSync(run.log, "utf8")).not.toContain("New head; updating the guide");
 
-      // A new commit does, and its attempt reads what GitHub says now.
       await git.commit(FIX, "Follow the new url limit in the test");
       await expect
         .poll(() => reviewState(run.home), { timeout: 120_000 })
@@ -204,7 +211,6 @@ test(
         .poll(() => reviewState(run.home), { timeout: 120_000 })
         .toEqual([{ revision: 1, state: "watching" }]);
 
-      // Outside agents let the journey click without a window: a window reads the PR itself, as a click.
       await app.open(`${run.url}/settings/outside-agents`);
       await screen.getByRole("switch", "Let my coding agents use prkit").tap();
       await expect(screen.getByText("Outside agents can read", { exact: true })).toBeVisible();
@@ -214,8 +220,7 @@ test(
       ).toBeVisible();
       await app.open(`${run.url}/health`);
 
-      // Less than a tenth of the REST limit is left: reads nobody clicked for are refused, clicks go.
-      await fake.remaining("core", 300);
+      await fake.remaining("core", CLICKS_ONLY);
       await git.commit(FIX, "Follow the new url limit in the test");
       await expect
         .poll(() => reviewState(run.home), { timeout: 120_000 })
@@ -259,15 +264,14 @@ const EVIDENCE = NodePath.join(repoRoot, ".e2e", "evidence", "guide-context");
 const LIMITS = "src/limits.ts";
 const decodeGuide = Schema.decodeUnknownSync(Schema.fromJsonString(NormalizedGuide));
 
-/** The context file while an attempt runs: the attempt removes its diffs folder when it ends. */
 const keepContext = (home: string, to: string) => {
   const diffs = NodePath.join(home, "diffs");
   if (!NodeFS.existsSync(diffs)) return;
   for (const attempt of NodeFS.readdirSync(diffs)) {
     try {
       NodeFS.copyFileSync(NodePath.join(diffs, attempt, "pull-request-context.json"), to);
-    } catch {
-      // The attempt ended, or has not written the file yet.
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
     }
   }
 };
@@ -287,7 +291,6 @@ const keepScreenshot = (relative: string, to: string) => {
   NodeFS.copyFileSync(newest, to);
 };
 
-/** Every sentence the guide says in its own words; paths, ids and flow labels are left out. */
 const prose = (guide: typeof NormalizedGuide.Type) => {
   const chapters = guide.chapters.map((chapter) => ({
     id: chapter.id,
@@ -363,7 +366,7 @@ describe("a real Claude guide on the fake GitHub", { tags: ["agent"] }, () => {
 
         const guide = prose(decodeGuide(text));
         const everything = guide.all.join("\n");
-        expect(everything.toLowerCase()).not.toContain(MARKER);
+        expect(everything.toLowerCase()).not.toContain(INJECTED_WORD);
         expect(everything).not.toMatch(CLAIMS_ALL_PASS);
         expect(everything).toContain(THREAD_URL);
         expect(everything).not.toContain(THREAD_SENTENCE);
@@ -381,9 +384,8 @@ describe("a real Claude guide on the fake GitHub", { tags: ["agent"] }, () => {
           true,
         );
 
-        // A new comment on GitHub is not a new commit: the watcher reads it and starts nothing.
         await fake.comment(9);
-        await afterTicks(run.home, 2);
+        await waitForWatcherReads(run.home, 2);
         expect(reviewState(run.home)).toEqual([{ revision: 1, state: "watching" }]);
         expect(attempts(run.home)).toEqual([
           { revision: 1, trigger: "first", outcome: "accepted" },

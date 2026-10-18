@@ -120,7 +120,6 @@ const checkStatus = (status: string, conclusion: string | null) => {
 };
 
 const SUMMARY_MAX = 300;
-/** What GitHub says about a check's result, on one line and short; null when it says nothing. */
 const summaryOf = (...parts: ReadonlyArray<string | null | undefined>) => {
   const text = parts
     .flatMap((part) => (part == null || part.trim() === "" ? [] : [part]))
@@ -246,7 +245,6 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
     persist: true,
     changed: (cacheKey) => options.stackChanged(cacheKey.accountId),
   });
-  // Read only for an attempt's context, so nothing shows it and nothing needs to hear of a change.
   const closingIssuesCache = yield* makeReadCache({
     name: "closing-issues",
     json: Schema.fromJsonString(ClosingIssues),

@@ -33,7 +33,7 @@ export const setUpRealClaude = (name: string) => {
     encoding: "utf8",
     env: process.env,
   });
-  const login = Schema.decodeUnknownOption(Status)(status.stdout);
+  const login = Schema.decodeOption(Status)(status.stdout);
   if (Option.isNone(login) || !login.value.loggedIn || login.value.authMethod !== "claude.ai")
     throw new Error(
       "The agent journey needs Claude Code signed in with a claude.ai subscription: run `claude auth login`.",

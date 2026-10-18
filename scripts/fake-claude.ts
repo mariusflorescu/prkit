@@ -26,10 +26,10 @@
  *             of its own for a second, as Claude Code runs commands. Its PID goes in `linger.pid`
  *
  * Every turn appends `{configDir, session, resumed}` to `runs.log` there, and its prompt to
- * `prompts.jsonl` with a copy of the context file the prompt names (`context-<turn>.json`),
- * because the attempt removes its diffs folder when it ends. With CLAUDE_CONFIG_DIR
- * set to a folder under `.e2e/`, it also saves the session as Claude Code does, under `projects/`,
- * so prkit can resume it with `--resume`. Any other folder is the user's own: it saves nothing.
+ * `prompts.jsonl` with a copy of the context file the prompt names (`context-<turn>.json`).
+ * With CLAUDE_CONFIG_DIR set to a folder under `.e2e/`, it also saves the session as Claude Code
+ * does, under `projects/`, so prkit can resume it with `--resume`. Any other folder is the user's
+ * own: it saves nothing.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
@@ -312,7 +312,6 @@ const resolve = async (prompt: string) => {
   );
 };
 
-/** The prompt of this turn, and a copy of the file it names with what GitHub says besides the diff. */
 const keepPrompt = (prompt: string) => {
   if (control === "") return;
   const lines = prompt.split("\n");

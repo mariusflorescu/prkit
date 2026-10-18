@@ -1,4 +1,3 @@
-// What a journey seeds into a pull request besides its diff: check results, review threads and linked issues.
 import * as Schema from "effect/Schema";
 
 import { iso, OWNER, type Pull, REPO, start } from "./model.ts";
@@ -40,7 +39,6 @@ export const ContextSeed = Schema.Struct({
 export type ContextSeed = typeof ContextSeed.Type;
 export const decodeSeed = Schema.decodeUnknownSync(Schema.fromJsonString(ContextSeed));
 
-/** The seeds by PR number. A PR without one answers exactly as it did before seeding existed. */
 export const seeds = new Map<number, ContextSeed>();
 
 const CLOSING_ISSUES_LIMIT = 10;
@@ -63,7 +61,6 @@ export const seededCheckRuns = (seed: ContextSeed) =>
     output: { title: check.title ?? null, summary: check.summary ?? null },
   }));
 
-/** The review threads in GitHub's GraphQL node shape. */
 export const seededThreads = (pull: Pull, seed: ContextSeed) =>
   seed.threads.map((thread, index) => ({
     id: thread.id,

@@ -6,7 +6,6 @@ import type { FakeGitHub } from "./fakeGitHub.ts";
 
 type Files = Readonly<Record<string, string>>;
 
-/** What PR 9 is by default: one file whose limit goes from 1 to 2. */
 const DEFAULT_FILES: { readonly base: Files; readonly head: Files } = {
   base: { "src/limits.ts": "export const limit = 1;\n" },
   head: { "src/limits.ts": "export const limit = 2;\nexport const enabled = true;\n" },
@@ -47,7 +46,6 @@ export const cliFixture = async (fake: FakeGitHub, files = DEFAULT_FILES) => {
     }
     git(["add", ...Object.keys(changes)]);
   };
-  /** Moves PR 9's branch and ref to a new commit and tells the fake, so a watcher sees a real new head. */
   const advance = async (message: string) => {
     git(["commit", "-m", message]);
     const head = git(["rev-parse", "HEAD"]);
