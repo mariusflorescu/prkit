@@ -32,6 +32,7 @@ import {
   patchGuide,
   projectSnapshot,
   PullRequestKey,
+  type PullRequestRef,
   pullRequestKey,
   type PullRequestStack,
   resolveModelOptions,
@@ -807,6 +808,20 @@ export const make = Effect.gen(function* () {
         ),
       );
 
+  /**
+   * What GitHub says about the PR besides its diff, read once for the head the attempt fetched:
+   * the prompt's view of it and the file the agent reads. The activity log says what it holds.
+   */
+  const contextFor = (review: Review, attemptId: AttemptId, ref: PullRequestRef, headSha: string) =>
+    Effect.gen(function* () {
+      const read = yield* pullRequests
+        .context(review.key, review.accountId, headSha)
+        .pipe(Effect.provideService(GitHubPriority, yield* ContextPriority));
+      for (const note of contextNotes(read))
+        yield* appendActivity(review.key, review.id, attemptId, "note", note);
+      return { read, json: contextJson(read, { ref, headSha }) };
+    });
+
   const failAttempt = (review: Review, attemptId: AttemptId, failure: AttemptFailure) =>
     Effect.gen(function* () {
       const at = yield* now;
@@ -1233,11 +1248,7 @@ export const make = Effect.gen(function* () {
         "note",
         follows.note === null ? checkedOut : `${checkedOut}. ${follows.note}`,
       );
-      const context = yield* pullRequests
-        .context(review.key, review.accountId, ready.headSha)
-        .pipe(Effect.provideService(GitHubPriority, yield* ContextPriority));
-      for (const note of contextNotes(context))
-        yield* appendActivity(review.key, review.id, attemptId, "note", note);
+      const context = yield* contextFor(review, attemptId, ref, ready.headSha);
       if (
         !(yield* setStatus(
           review.id,
@@ -1256,10 +1267,7 @@ export const make = Effect.gen(function* () {
           yield* fs.remove(tmpDir, { recursive: true, force: true });
           yield* fs.makeDirectory(tmpDir, { mode: 0o700 });
           yield* fs.writeFileString(files.diff, diff.text);
-          yield* fs.writeFileString(
-            files.context,
-            contextJson(context, { ref, headSha: ready.headSha }),
-          );
+          yield* fs.writeFileString(files.context, context.json);
           readContexts.set(attemptId, {
             worktree: ready.worktree,
             diffFile: files.diff,
@@ -1313,7 +1321,7 @@ export const make = Effect.gen(function* () {
           guidance: settings.guidance.filter((block) => block.replacedBy === null),
           focusAreas: settings.focusAreas.filter((area) => area.active),
         },
-        context: { file: files.context, read: context },
+        context: { file: files.context, read: context.read },
         stack,
         previous: follows.prompt,
         streamsGuideInput: provider.streamsGuideInput,
