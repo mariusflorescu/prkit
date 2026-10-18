@@ -71,6 +71,12 @@ export const WorkspaceCommand = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("close-local"), key: LocalReviewKey }),
 ]);
 export type WorkspaceCommand = typeof WorkspaceCommand.Type;
+/** An outside agent's open without focus: the tab joins the strip, the active PR stays. */
+export type BackgroundOpen = {
+  readonly kind: "open-in-background";
+  readonly key: PullRequestKey;
+  readonly accountId: AccountId;
+};
 export class WorkspaceError extends Schema.TaggedError<WorkspaceError>()("WorkspaceError", {
   message: Schema.String,
 }) {}
@@ -88,7 +94,10 @@ export const refFromKey = (key: PullRequestKey) => {
 export const newerWorkspace = (current: Workspace | undefined, next: Workspace) =>
   current !== undefined && current.version > next.version ? current : next;
 
-export const applyWorkspaceCommand = (current: Workspace, command: WorkspaceCommand): Workspace => {
+export const applyWorkspaceCommand = (
+  current: Workspace,
+  command: WorkspaceCommand | BackgroundOpen,
+): Workspace => {
   switch (command.kind) {
     case "open":
       return {
@@ -101,6 +110,16 @@ export const applyWorkspaceCommand = (current: Workspace, command: WorkspaceComm
             ],
         activeKey: command.key,
       };
+    case "open-in-background":
+      return current.open.some((row) => row.key === command.key)
+        ? current
+        : {
+            ...current,
+            open: [
+              ...current.open,
+              { key: command.key, accountId: command.accountId, position: current.open.length },
+            ],
+          };
     case "activate":
       return current.open.some((row) => row.key === command.key)
         ? { ...current, activeKey: command.key }

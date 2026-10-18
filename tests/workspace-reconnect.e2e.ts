@@ -120,6 +120,7 @@ test(
       });
       expect(cli(root, ["pr", "open", target(3), "--no-focus", "--json"]).code).toBe(0);
       expect(cli(fixture.repo, ["local", "guide", "--json"]).code).toBe(0);
+      expect(cli(root, ["tabs", "focus", target(2), "--json"]).code).toBe(0);
       await new Promise((resolve) => setTimeout(resolve, 3_000));
       const missed = await tabs.getByRole("link", /^Open budget\/fixtures #3\b/).count();
       expect(missed, "the offline window can't hear the new tabs").toBe(0);

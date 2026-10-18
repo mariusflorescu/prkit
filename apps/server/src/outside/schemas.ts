@@ -200,7 +200,7 @@ export const OpenInput = Schema.Struct({
   focus: Schema.optionalKey(
     describe(
       Schema.Boolean,
-      "Show it in prkit's window and bring the window forward; true when omitted. false opens it quietly in the tab strip.",
+      "Show it in prkit's window and bring the window forward; true when omitted. false opens it quietly at the end of the tab strip and leaves the active pull request as it is.",
     ),
   ),
 });

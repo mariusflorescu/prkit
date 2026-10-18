@@ -1,5 +1,6 @@
 import {
   applyWorkspaceCommand,
+  type BackgroundOpen,
   DEFAULT_INBOX_SORT,
   type InboxFilters,
   InboxSort,
@@ -89,13 +90,16 @@ export const make = Effect.gen(function* () {
    * outside agent's) is `announce`d, so every window shows it; `focus` asks them to show that
    * PR. A local review's tab never takes focus, and removing the review drops its row.
    */
-  const command = (input: WorkspaceCommand, announce?: { readonly focus: boolean }) =>
+  const command = (
+    input: WorkspaceCommand | BackgroundOpen,
+    announce?: { readonly focus: boolean },
+  ) =>
     gate.withPermits(1)(
       sql
         .withTransaction(
           Effect.gen(function* () {
             const current = yield* read();
-            if (input.kind === "open") {
+            if (input.kind === "open" || input.kind === "open-in-background") {
               const ref = refFromKey(input.key);
               if (!ref || !input.accountId.startsWith(`${ref.host}/`))
                 return yield* new WorkspaceError({

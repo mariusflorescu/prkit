@@ -761,9 +761,14 @@ export const make = Effect.gen(function* () {
   const open = (input: TargetInput & { readonly focus?: boolean }) =>
     Effect.gen(function* () {
       const target = yield* resolve(input);
+      const focus = input.focus !== false;
       yield* workspace.command(
-        { kind: "open", key: target.key, accountId: target.accountId },
-        { focus: input.focus !== false },
+        {
+          kind: focus ? "open" : "open-in-background",
+          key: target.key,
+          accountId: target.accountId,
+        },
+        { focus },
       );
       return yield* openPullRequests();
     }).pipe(Effect.mapError(asFailure));
