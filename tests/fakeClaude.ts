@@ -37,11 +37,10 @@ const Prompt = Schema.fromJsonString(
  * `verify-app start --claude`. `hold` keeps its next turns writing until `release`,
  * `failing` makes them end with an error instead of a guide, `notes` gives its guides line
  * notes, `fileNotes` file notes, `split` gives each file of their guides a chapter of its own,
- * `chapters` splits them into named chapters (with a kind and level when given), `edits` has its next fixes write files, and `plant` has its next fixes
- * and resolutions leave something behind (scripts/fake-claude.ts lists what).
- * notes, `split` gives each file of their guides a chapter of its own, `preflight` is the
- * author's pre-flight their guides send when the prompt asks for one, and `plant` has its
- * next fixes and resolutions leave something behind (scripts/fake-claude.ts lists what).
+ * `chapters` splits them into named chapters (with a kind and level when given), `preflight` is
+ * the author's pre-flight their guides send when the prompt asks for one, `edits` has its next
+ * fixes write files, and `plant` has its next fixes and resolutions leave something behind
+ * (scripts/fake-claude.ts lists what).
  */
 export const setUpFakeClaude = (name: string) => {
   const dir = NodePath.join(repoRoot, ".e2e", "fake", `${name}-claude`);
