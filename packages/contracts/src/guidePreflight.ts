@@ -23,6 +23,15 @@ type Claim = NormalizedPreflight["description"][number];
 type Place = { readonly chapter: string; readonly at: DiffLineRef | null };
 
 const ITEMS_MAX = 4;
+/** Chapters of these kinds hold nothing a missing test would cover, whatever the file is. */
+const UNTESTED_KINDS: ReadonlySet<Chapter["kind"]> = new Set([
+  "tests",
+  "docs",
+  "generated",
+  "config",
+]);
+/** Code that configures a tool (`vite.config.ts`, `.eslintrc.js`), not code a test covers. */
+const TOOL_CONFIG = /(^|\/)(\.[^/]+rc|[^/]+\.config)\.[a-z]+$/iu;
 const WORDS_MAX = 50;
 const QUOTE_MAX = 200;
 
@@ -140,6 +149,7 @@ const normalizeClaim = (
 const normalizeTest = (
   raw: RawTest,
   where: string,
+  chapters: ReadonlyArray<Chapter>,
   snapshot: DiffSnapshot,
   context: GuideCheckContext | null,
   report: Report,
@@ -160,7 +170,12 @@ const normalizeTest = (
     report.errors.push(`${where}: \`${path}\` is deleted, so no test needs to cover it.`);
     return null;
   }
-  if (!isChangedSource(file))
+  const owner = chapters.find((chapter) => chapter.files.some((entry) => entry.path === path));
+  if (
+    !isChangedSource(file) ||
+    TOOL_CONFIG.test(path) ||
+    (owner !== undefined && UNTESTED_KINDS.has(owner.kind))
+  )
     report.errors.push(
       `${where}: \`${path}\` isn't changed source code: it is a test, config, docs, generated code or a rename. Point at the changed code that no test covers.`,
     );
@@ -245,7 +260,7 @@ export const normalizePreflight = (input: {
           .filter(present),
     tests: tests
       .map((test, index) =>
-        normalizeTest(test, `preflight test ${index + 1}`, snapshot, context, report),
+        normalizeTest(test, `preflight test ${index + 1}`, chapters, snapshot, context, report),
       )
       .filter(present),
   };

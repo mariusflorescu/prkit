@@ -77,7 +77,7 @@ const CODE =
 const GENERATED =
   /(^|\/)(generated|__generated__|dist|build|vendor|node_modules)\/|\.(gen|generated|min)\.[a-z]+$|\.pb\.go$|_pb2\.py$|\.d\.ts$/iu;
 const isCode = (path: string) => CODE.test(path) && !GENERATED.test(path);
-/** Code a test could cover that this diff changes: not a test, config, docs, generated or a rename. */
+/** A code file this diff changes: not a test, not generated, and more than a rename. */
 export const isChangedSource = (file: DiffFile) =>
   isCode(file.path) && !isTest(file.path) && file.additions + file.deletions > 0;
 

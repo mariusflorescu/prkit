@@ -44,6 +44,17 @@ const snapshot: DiffSnapshot = {
       patch: { _tag: "text", patch: '@@ -1 +1 @@\n-{"strict": false}\n+{"strict": true}' },
     },
     {
+      path: "vite.config.ts",
+      previousPath: null,
+      status: "modified",
+      additions: 1,
+      deletions: 0,
+      patch: {
+        _tag: "text",
+        patch: "@@ -1 +1,2 @@\n export default {};\n+export const port = 3000;",
+      },
+    },
+    {
       path: "src/slug.ts",
       previousPath: "src/slugs.ts",
       status: "renamed",
@@ -68,7 +79,7 @@ const base = {
       id: "limits",
       title: "Limits grow",
       kind: "core",
-      files: ["src/limits.ts", "src/old.ts", "src/slug.ts", "tsconfig.json"],
+      files: ["src/limits.ts", "src/old.ts", "src/slug.ts", "tsconfig.json", "vite.config.ts"],
     },
     { id: "tests", title: "Tests follow", kind: "tests", files: ["test/limits.test.ts"] },
   ],
@@ -153,16 +164,18 @@ describe("the author's pre-flight", () => {
         { text: "Old code.", path: "src/old.ts" },
         { text: "Strict mode.", path: "tsconfig.json" },
         { text: "Moved.", path: "src/slug.ts" },
+        { text: "The port.", path: "vite.config.ts" },
         { text: "Nothing tests this.", path: "src/limits.ts" },
       ],
     });
     expect(errors).toEqual([
-      expect.stringContaining("`preflight.tests` has 6 items. Keep the 4"),
+      expect.stringContaining("`preflight.tests` has 7 items. Keep the 4"),
       expect.stringContaining("`src/limits.ts` is already listed"),
       expect.stringContaining("`test/limits.test.ts` isn't changed source code"),
       expect.stringContaining("`src/old.ts` is deleted"),
       expect.stringContaining("`tsconfig.json` isn't changed source code"),
       expect.stringContaining("`src/slug.ts` isn't changed source code"),
+      expect.stringContaining("`vite.config.ts` isn't changed source code"),
     ]);
   });
 
