@@ -75,7 +75,11 @@ const turnMessage = (input: TurnInput) =>
  * user's or the repository's Cursor settings (`settingSources: []`), and a turn offers only the
  * tools in tools.ts, never shell, so Cursor writes guides and edit-only fixes.
  */
-export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetup) {
+export const make = Effect.fn("CursorAgent.make")(function* (
+  setup: InstanceSetup,
+  /** The runner to start instead of the one next to this module: a bundle a test built. */
+  runner?: string,
+) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -95,6 +99,7 @@ export const make = Effect.fn("CursorAgent.make")(function* (setup: InstanceSetu
 
   /** The runner next to this module: built into the bundle, or the source in development. */
   const runnerScript = Effect.gen(function* () {
+    if (runner !== undefined) return runner;
     const here = path.dirname(yield* path.fromFileUrl(new URL(import.meta.url)));
     const built = path.join(here, "cursorRunner.mjs");
     return (yield* fs.exists(built)) ? built : path.join(here, "runner.ts");

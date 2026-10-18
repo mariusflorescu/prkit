@@ -20,6 +20,7 @@ import * as References from "effect/References";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/process";
+import { build } from "vite-plus";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
 import * as ServerConfig from "../../config.ts";
@@ -57,6 +58,7 @@ let root = "";
 let home = "";
 let control = "";
 let mcpUrl = "";
+let runner = "";
 /** Each MCP call prkit's stand-in server got: its method and tool, and whether it had the token. */
 const mcpCalls: Array<{
   readonly method: string;
@@ -103,6 +105,21 @@ beforeAll(async () => {
     }),
   );
   home = `${root}/prkit-home`;
+  // The runner bundled like the app's: from source, each start loads about 180 modules and takes
+  // two to three times as long, which put six starts in a row past 5 s on a busy machine.
+  runner = `${root}/runner/cursorRunner.mjs`;
+  await build({
+    configFile: false,
+    logLevel: "silent",
+    root: new URL("../../..", import.meta.url).pathname,
+    ssr: { noExternal: true, target: "node" },
+    build: {
+      ssr: "src/agents/cursor/runner.ts",
+      outDir: `${root}/runner`,
+      minify: false,
+      rollupOptions: { output: { entryFileNames: "cursorRunner.mjs" } },
+    },
+  });
   // The stand-in SDK as a package folder, steered from `control` in it.
   control = `${root}/sdk/control`;
   const source = await fsRun(
@@ -192,7 +209,7 @@ const instance = (
     process.env.PRKIT_E2E = "1";
     process.env[SDK_PATH_VARIABLE] = `${root}/sdk`;
   }
-  return run(CursorAgent.make(setupOf(id, options.env)));
+  return run(CursorAgent.make(setupOf(id, options.env), runner));
 };
 
 const flag = (name: string, on: boolean) =>
@@ -386,7 +403,7 @@ describe("Cursor's status", () => {
   it("loads an SDK from PRKIT_CURSOR_SDK_PATH only in e2e", async () => {
     await instance("cursor");
     delete process.env.PRKIT_E2E;
-    const outside = await run(CursorAgent.make(setupOf("cursor")));
+    const outside = await run(CursorAgent.make(setupOf("cursor"), runner));
     expect(await Effect.runPromise(outside.check)).toMatchObject({ reason: "not-installed" });
   });
 
@@ -702,11 +719,10 @@ describe("Cursor turns", () => {
 const runRunner = async (name: string) => {
   const input = await turnInput(name, { _tag: "read-only", tmpDir: `${root}/tmp-${name}` });
   return new Promise<{ readonly code: number | null; readonly stdout: string }>((resolve) => {
-    const child = NodeChildProcess.spawn(
-      process.execPath,
-      [new URL("./runner.ts", import.meta.url).pathname],
-      { cwd: input.cwd, env: { PATH: process.env.PATH, HOME: `${root}/${name}-home` } },
-    );
+    const child = NodeChildProcess.spawn(process.execPath, [runner], {
+      cwd: input.cwd,
+      env: { PATH: process.env.PATH, HOME: `${root}/${name}-home` },
+    });
     let stdout = "";
     child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
     child.on("close", (code) => resolve({ code, stdout }));
