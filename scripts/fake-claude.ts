@@ -20,11 +20,13 @@
  * read when the guide is submitted; without it the guide has none. A `file-notes` file,
  * `{ [path]: note }`, gives those files a file note. A `chapters` file, JSON of
  * `[{ title, files: [path], kind?, risk? }]`, splits the guide into those chapters, in that
- * order and with that kind and level, with every file they leave out in a last one. When the
- * prompt asks for the author's pre-flight, the guide sends the JSON a `preflight` file holds as
- * it is, or `{}` (nothing to flag) without one. An `edits` file, JSON of `{ [path]: content }`,
- * has the next fixes write those files besides `stand-in.md`. Before a fix or resolution reports,
- * it also plants what these files ask for, as something outside prkit's sandboxes could:
+ * order and with that kind and level, with every file they leave out in a last one. A
+ * `manual-check` file holds the guide's `manualCheck` as JSON; without it the guide has nothing
+ * to check by hand. When the prompt asks for the author's pre-flight, the guide sends the JSON a
+ * `preflight` file holds as it is, or `{}` (nothing to flag) without one. An `edits` file, JSON
+ * of `{ [path]: content }`, has the next fixes write those files besides `stand-in.md`. Before a
+ * fix or resolution reports, it also plants what these files ask for, as something outside
+ * prkit's sandboxes could:
  *
  *   nested    an empty git repository at the path the file holds, inside the checkout
  *   todo      the rest of the stopped rebase's todo, in reverse
@@ -142,6 +144,20 @@ const Chapters = Schema.fromJsonString(
 );
 const FileNotes = Schema.fromJsonString(Schema.Record(Schema.String, Schema.String));
 const Edits = Schema.fromJsonString(Schema.Record(Schema.String, Schema.String));
+const ManualCheckJson = Schema.fromJsonString(
+  Schema.Struct({
+    setup: Schema.optionalKey(Schema.String),
+    steps: Schema.Array(
+      Schema.Struct({
+        action: Schema.String,
+        expect: Schema.String,
+        watchFor: Schema.optionalKey(Schema.String),
+        chapter: Schema.optionalKey(Schema.Union([Schema.String, Schema.Int])),
+      }),
+    ),
+    reason: Schema.optionalKey(Schema.String),
+  }),
+);
 const McpReply = Schema.fromJsonString(
   Schema.Struct({
     result: Schema.optionalKey(Schema.Struct({ isError: Schema.optionalKey(Schema.Boolean) })),
@@ -406,6 +422,11 @@ const turn = async (prompt: string) => {
         NodeFS.readFileSync(NodePath.join(control, "file-notes"), "utf8"),
       )
     : {};
+  const manualCheck = flagged("manual-check")
+    ? Schema.decodeUnknownSync(ManualCheckJson)(
+        NodeFS.readFileSync(NodePath.join(control, "manual-check"), "utf8"),
+      )
+    : { steps: [], reason: "The stand-in agent never suggests checks." };
   const entryOf = (path: string) => {
     const annotations = notes[path];
     const note = fileNotes[path];
@@ -475,6 +496,7 @@ const turn = async (prompt: string) => {
       summary: "A guide written by the stand-in agent.",
       chapters: chapters.map(chapterJson),
       risk: { level: guideLevel ?? risk.guide.level, reasons: risk.guide.reasons },
+      manualCheck,
       focusAreas: [...prompt.matchAll(/^- `([^`]+)` .+: .+$/gm)].map((match) => ({
         id: match[1] ?? "",
         verdict: "nothing-notable",

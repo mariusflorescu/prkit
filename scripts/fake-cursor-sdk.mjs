@@ -188,6 +188,8 @@ const changedFiles = (prompt) => {
   });
 };
 
+const NOTHING_TO_CHECK = { steps: [], reason: "The stand-in agent never suggests checks." };
+
 const riskOf = (prompt, files) => {
   const level = prompt.includes("- Look closely:") ? "medium" : "low";
   return {
@@ -331,6 +333,7 @@ class StandInAgent {
           summary: "A guide finishing while Cursor's own tool runs.",
           chapters: [{ title: "Every change", files, risk: risk.chapter }],
           risk: risk.guide,
+          manualCheck: NOTHING_TO_CHECK,
           ...preflightOf(message),
         };
         const callId = NodeCrypto.randomUUID();
@@ -406,6 +409,7 @@ class StandInAgent {
         summary: "A guide written by the stand-in Cursor.",
         chapters: [{ title: "Every change", files, risk: risk.chapter }],
         risk: risk.guide,
+        manualCheck: NOTHING_TO_CHECK,
         ...preflightOf(message),
       });
       return { status: submitted.ok ? "finished" : "error" };

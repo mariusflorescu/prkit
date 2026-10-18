@@ -16,7 +16,9 @@ const SHAPE =
 const tooLong = (text: string, max: number, where: string, report: Report) => {
   const count = words(text);
   if (count > max)
-    report.warnings.push(`${where} is ${count} words. Keep it to one short sentence, under ${max}.`);
+    report.warnings.push(
+      `${where} is ${count} words. Keep it to one short sentence, under ${max}.`,
+    );
 };
 
 const normalizeStep = (
