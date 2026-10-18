@@ -7,6 +7,7 @@ import { ReviewedToggle } from "~/components/diff/ReviewedToggle";
 
 import { ChapterRiskReasons } from "./ChapterRiskReasons";
 import { KindTag } from "./KindTag";
+import { PseudocodePair } from "./PseudocodePair";
 import { RiskTag } from "./RiskTag";
 import { chapterRisk } from "./riskLevels";
 import type { ChapterReviewedControl, GuideChapter } from "./types";
@@ -82,7 +83,9 @@ export function ChapterNarration({
                 <InlineMarkdown text={text} prUrl={prUrl} />
               </p>
             ))}
-            {chapter.pseudocode && <pre data-guide-pseudocode="">{chapter.pseudocode}</pre>}
+            {typeof chapter.pseudocode === "string"
+              ? chapter.pseudocode && <pre data-guide-pseudocode="">{chapter.pseudocode}</pre>
+              : chapter.pseudocode !== null && <PseudocodePair pair={chapter.pseudocode} />}
             {keyedItems(chapter.callouts, (callout) => JSON.stringify(callout)).map(
               ({ key, value: callout }) => (
                 <GuideNote key={key} text={callout.text} tone={callout.tone} prUrl={prUrl} />
