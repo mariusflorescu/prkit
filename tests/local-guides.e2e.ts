@@ -1,10 +1,9 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
-import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import { describe, test } from "@e2e-dev/web";
-import { expect, type TestFixtures } from "e2e";
+import { expect } from "e2e";
 import * as Schema from "effect/Schema";
 
 import {
@@ -15,7 +14,6 @@ import {
 } from "../apps/server/src/outside/schemas.ts";
 import { repoRoot } from "../scripts/verify-run.ts";
 import { setUpFakeClaude } from "./fakeClaude.ts";
-import type { Fixtures } from "./fixActions.ts";
 import {
   type FakeGitHub,
   startFakeGitHub,
@@ -24,6 +22,7 @@ import {
 } from "./fakeGitHub.ts";
 import { AGENT_RUNS, AGENT_SKIP, readRows } from "./fixturePr.ts";
 import { setUpRealClaude } from "./realClaude.ts";
+import { cliIn, outsideAccess, scratchRoot, switchOn } from "./localGuideSession.ts";
 import { localRepoFixture } from "./localRepoFixture.ts";
 
 const decodeGenerate = Schema.decodeSync(Schema.fromJsonString(GenerateLocalGuideResult));
@@ -43,10 +42,6 @@ const AttemptRows = Schema.Array(
     ),
   }),
 );
-
-/** Folders outside any repository, so nothing here is read as prkit's own checkout. */
-const scratchRoot = () =>
-  NodeFS.realpathSync(NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "prkit-local-guides-")));
 
 /** A repository with one commit and nothing else, built with none of this machine's config. */
 const plainRepository = (root: string, name: string, branch = "main") => {
@@ -73,45 +68,6 @@ const plainRepository = (root: string, name: string, branch = "main") => {
   git("add", "-A");
   git("commit", "-m", "First");
   return { repo, git };
-};
-
-/** The CLI an agent in a terminal runs, from `cwd`, with every call kept for the transcript. */
-const cliIn =
-  (launcher: string, home: string, log: Array<string>) =>
-  (cwd: string, args: ReadonlyArray<string>) => {
-    const result = NodeChildProcess.spawnSync(launcher, args, {
-      cwd,
-      encoding: "utf8",
-      env: { HOME: home, PATH: process.env.PATH ?? "/usr/bin:/bin", NO_COLOR: "1" },
-    });
-    log.push(
-      `$ (${NodePath.basename(cwd)}) prkit ${args.join(" ")}\nexit ${result.status}\n${result.stdout}${result.stderr}`,
-    );
-    return { code: result.status, stdout: result.stdout, stderr: result.stderr };
-  };
-
-/** Turns Outside agents on in Settings, at the level asked for. */
-const outsideAccess = async (
-  { screen }: Pick<TestFixtures, "screen">,
-  level: "Read only" | "Read and start work",
-) => {
-  await screen.getByRole("radio", level).tap();
-  await expect(
-    screen.getByText(
-      level === "Read only" ? "Outside agents can read" : "Outside agents can read and start work",
-      { exact: true },
-    ),
-  ).toBeVisible();
-};
-
-const switchOn = async ({ app, screen, browser }: Fixtures, openUrl: string) => {
-  await app.open(openUrl);
-  await expect(screen.getByRole("link", /#1 Budget fixture 1/)).toBeVisible({ timeout: 30_000 });
-  await browser.keyboard.press("Meta+Comma");
-  await screen.getByRole("link", "Outside agents").tap();
-  await screen.getByRole("switch", "Let my coding agents use prkit").tap();
-  await expect(screen.getByText("Outside agents can read", { exact: true })).toBeVisible();
-  await outsideAccess({ screen }, "Read and start work");
 };
 
 const writeTranscript = (name: string, log: ReadonlyArray<string>) => {
@@ -285,7 +241,8 @@ test(
       expect(cli(fixture.repo, ["inbox", "--json"]).stdout).not.toContain("local:");
       await screen.getByRole("link", "Inbox").tap();
       await expect(screen.getByRole("link", /#1 Budget fixture 1/)).toBeVisible();
-      await expect(screen.getByText(/widgets/)).toHaveCount(0);
+      // The local review has a tab in the strip; the Inbox itself never lists it.
+      await expect(screen.getByRole("main").getByText(/widgets/)).toHaveCount(0);
       await app.screenshot("local-guides-inbox");
 
       // A restart mid-attempt writes the guide from the snapshot that attempt took.
