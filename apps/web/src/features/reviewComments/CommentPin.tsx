@@ -1,6 +1,7 @@
 import type {
   AccountId,
   CommentPlacement,
+  Landed,
   PendingComment,
   PullRequestKey,
   ReviewThread,
@@ -20,7 +21,7 @@ export function CommentPin({
 }: {
   pr: { key: PullRequestKey; accountId: AccountId };
   threads: ReadonlyArray<ReviewThread>;
-  drafts: ReadonlyArray<PendingComment>;
+  drafts: ReadonlyArray<{ comment: PendingComment; placed: Landed }>;
   composer: { placement: CommentPlacement; note: NoteDraft | null } | null;
 }) {
   return (
@@ -28,8 +29,8 @@ export function CommentPin({
       {threads.map((thread) => (
         <ReviewThreadCard key={thread.id} thread={thread} pr={pr} />
       ))}
-      {drafts.map((comment) => (
-        <PendingCommentCard key={comment.id} comment={comment} pr={pr} />
+      {drafts.map(({ comment, placed }) => (
+        <PendingCommentCard key={comment.id} comment={comment} pr={pr} placed={placed} />
       ))}
       {composer && (
         <NewCommentComposer

@@ -1,6 +1,7 @@
 import {
   type AccountId,
   type AgentSelection,
+  CommentContext,
   type ConflictStrategy,
   FIXER_BUSY,
   type FixComment,
@@ -14,6 +15,7 @@ import {
   type FixerTurnState,
   FixerWorkRefused,
   type FixTarget,
+  place,
   type PullRequestKey,
   refFromKey,
 } from "@prkit/contracts";
@@ -123,7 +125,7 @@ export const make = Effect.gen(function* () {
       const drafts =
         draftIds.length === 0
           ? []
-          : yield* sql`SELECT id, path, start_side, start_line, end_side, end_line, snippet, body, state, submission_id
+          : yield* sql`SELECT id, path, start_side, start_line, end_side, end_line, snippet, context, commit_sha, body, state, submission_id
               FROM pending_comments WHERE pr_key = ${key} AND account_id = ${accountId} AND id IN ${sql.in(draftIds)}`.pipe(
               Effect.flatMap(
                 Schema.decodeUnknownEffect(
@@ -136,6 +138,8 @@ export const make = Effect.gen(function* () {
                       end_side: Schema.Literals(["old", "new"]),
                       end_line: Schema.Int,
                       snippet: Schema.String,
+                      context: Schema.NullOr(Schema.fromJsonString(CommentContext)),
+                      commit_sha: Schema.String,
                       body: Schema.String,
                       state: Schema.String,
                       submission_id: Schema.NullOr(Schema.String),
@@ -144,6 +148,16 @@ export const make = Effect.gen(function* () {
                 ),
               ),
             );
+      const files =
+        drafts.length === 0
+          ? null
+          : yield* pullRequests
+              .files(key, accountId)
+              .pipe(
+                Effect.catchTag("PullRequestReadError", (error) =>
+                  Effect.fail(new FixerError({ message: error.message })),
+                ),
+              );
       const threads = targets.some((target) => target._tag === "thread")
         ? (yield* pullRequests
             .threads(key, accountId)
@@ -158,16 +172,35 @@ export const make = Effect.gen(function* () {
         const id = `c${comments.length + 1}`;
         if (target._tag === "draft") {
           const draft = drafts.find((row) => row.id === target.id);
-          if (draft === undefined || draft.state !== "draft" || draft.submission_id !== null)
+          if (
+            draft === undefined ||
+            files === null ||
+            draft.state !== "draft" ||
+            draft.submission_id !== null
+          )
             return yield* new FixerError({
               message:
                 "A comment you picked was sent or changed meanwhile. Refresh and pick again.",
             });
+          const placed = place(
+            {
+              anchor: {
+                path: draft.path,
+                start: { side: draft.start_side, line: draft.start_line },
+                end: { side: draft.end_side, line: draft.end_line },
+              },
+              snippet: draft.snippet,
+              context: draft.context,
+              commitSha: draft.commit_sha,
+            },
+            files,
+          );
+          const at = placed._tag === "outdated" ? null : placed.placement.anchor;
           comments.push({
             id,
             source: { _tag: "draft", draftId: target.id },
             path: draft.path,
-            lines: { side: draft.end_side, start: draft.start_line, end: draft.end_line },
+            lines: at && { side: at.end.side, start: at.start.line, end: at.end.line },
             snippet: draft.snippet,
             body: draft.body,
           });

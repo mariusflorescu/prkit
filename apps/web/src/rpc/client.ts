@@ -446,8 +446,12 @@ export const addNoteComment = (input: {
   body: string;
 }): Promise<PendingComments> =>
   call((client) => client[WS_METHODS.reviewCommentsAddFromNote](input));
-export const editPendingComment = (id: ReviewCommentId, body: string): Promise<PendingComments> =>
-  call((client) => client[WS_METHODS.reviewCommentsEdit]({ id, body }));
+export const editPendingComment = (
+  id: ReviewCommentId,
+  body: string,
+  placement: CommentPlacement | null,
+): Promise<PendingComments> =>
+  call((client) => client[WS_METHODS.reviewCommentsEdit]({ id, body, placement }));
 export const movePendingComment = (
   id: ReviewCommentId,
   placement: CommentPlacement,

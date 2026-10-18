@@ -1,6 +1,6 @@
 import type {
   AccountId,
-  CommentPlacement,
+  Outdated,
   PendingComment,
   PullRequestKey,
   ReviewThread,
@@ -21,7 +21,7 @@ export function OutdatedComments({
 }: {
   pr: { key: PullRequestKey; accountId: AccountId };
   path: string;
-  drafts: ReadonlyArray<{ comment: PendingComment; suggestion: CommentPlacement | null }>;
+  drafts: ReadonlyArray<{ comment: PendingComment; placed: Outdated }>;
   threads: ReadonlyArray<ReviewThread>;
 }) {
   return (
@@ -30,8 +30,8 @@ export function OutdatedComments({
       data-outdated-comments=""
       className="border-t border-border/60 py-1"
     >
-      {drafts.map(({ comment, suggestion }) => (
-        <PendingCommentCard key={comment.id} comment={comment} pr={pr} outdated={{ suggestion }} />
+      {drafts.map(({ comment, placed }) => (
+        <PendingCommentCard key={comment.id} comment={comment} pr={pr} placed={placed} />
       ))}
       {threads.length > 0 && (
         <details className="group/outdated px-3 py-1">

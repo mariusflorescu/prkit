@@ -369,16 +369,7 @@ test(
         { ...pr, id: draft.id, body: "Wrong PR" },
         "isn't on this pull request",
       );
-      const placement = {
-        anchor: {
-          path: "src/limits.ts",
-          start: { side: "new", line: 3 },
-          end: { side: "new", line: 3 },
-        },
-        snippet: "+  slug: 64,",
-        commitSha: files.headSha,
-      };
-      await ok("move_review_comment", { ...ninth, id: draft.id, placement });
+      await ok("move_review_comment", { ...ninth, id: draft.id, path: "src/limits.ts", line: 3 });
       const sent = await ok("send_to_fix_agent", {
         ...ninth,
         ...selection,

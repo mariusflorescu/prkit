@@ -332,6 +332,7 @@ export const CommentsResult = Schema.Struct({
       side: Schema.Literals(["old", "new"]),
       startLine: Schema.Int,
       line: Schema.Int,
+      outdated: Schema.Boolean,
       body: Schema.String,
       state: Schema.String,
     }),

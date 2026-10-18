@@ -1,9 +1,10 @@
 import {
   type AccountId,
+  capture,
   type DiffRow,
   NOTE_LOST,
   notePoint,
-  placeNote,
+  place,
   type PullRequestKey,
 } from "@prkit/contracts";
 import { useMutation } from "@tanstack/react-query";
@@ -25,6 +26,7 @@ export function NoteCommentButton({
   pr,
   path,
   rows,
+  revisionHead,
   revision,
   note,
   index,
@@ -34,6 +36,8 @@ export function NoteCommentButton({
   path: string;
   /** The rows of the revision's diff of this file, which the note is written on. */
   rows: ReadonlyArray<DiffRow>;
+  /** The head commit of the revision's diff. */
+  revisionHead: string;
   revision: number;
   note: DiffAnnotation;
   index: number;
@@ -45,9 +49,10 @@ export function NoteCommentButton({
     // Read again on every click: the Files tab's copy never goes stale on its own.
     mutationFn: () => getPullRequestFiles(pr.key, pr.accountId),
     onSuccess: (files) => {
-      const placed = placeNote({ path, point, writtenRows: rows, files });
-      if (placed._tag === "lost")
-        toastManager.add({ type: "warning", ...NOTE_LOST[placed.reason] });
+      const written = capture(rows, { path, start: point, end: point }, revisionHead);
+      const placed = written && place(written, files);
+      if (placed === null || placed._tag === "outdated")
+        toastManager.add({ type: "warning", ...NOTE_LOST[placed?.why ?? "lines"] });
       else
         compose({
           key: pr.key,
@@ -56,7 +61,7 @@ export function NoteCommentButton({
           note: {
             ref: { revision, path, index },
             text: note.text,
-            movedTo: placed.moved ? placed.placement.anchor : null,
+            movedTo: placed._tag === "moved" ? placed.placement.anchor : null,
           },
         });
     },

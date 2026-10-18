@@ -8,10 +8,9 @@ import {
   type FixerTurn,
   type FixerTurnId,
   type FixTarget,
+  place,
   type PullRequestKey,
   pullRequestKey,
-  rangeRows,
-  diffRows,
   refFromKey,
   type ReviewSnapshot,
 } from "@prkit/contracts";
@@ -40,6 +39,7 @@ import { StartedBy } from "./StartedBy.ts";
 import { makeOutsideReads } from "./OutsideReads.ts";
 import { makeOutsideActions } from "./OutsideActions.ts";
 import { requestedAgent } from "./agentSelection.ts";
+import { placementOn } from "./githubLines.ts";
 import { makePager, type PageInput } from "./paging.ts";
 import { asFailure, fail } from "./errors.ts";
 import { OutsideAgents } from "./OutsideAgents.ts";
@@ -478,16 +478,24 @@ export const make = Effect.gen(function* () {
       const target = yield* resolve(input);
       const drafts = yield* reviewComments.list(target.key, target.accountId);
       const threads = yield* pullRequests.threads(target.key, target.accountId);
+      const files = yield* pullRequests.files(target.key, target.accountId);
       const result = {
-        drafts: drafts.comments.map((comment) => ({
-          id: comment.id,
-          path: comment.anchor.path,
-          side: comment.anchor.end.side,
-          startLine: comment.anchor.start.line,
-          line: comment.anchor.end.line,
-          body: comment.body,
-          state: comment.state,
-        })),
+        drafts: drafts.comments.map((comment) => {
+          const placed = place(comment, files);
+          // Where it sits now; an outdated draft names the lines it was written on, as threads do.
+          const { start, end } =
+            placed._tag === "outdated" ? comment.anchor : placed.placement.anchor;
+          return {
+            id: comment.id,
+            path: comment.anchor.path,
+            side: end.side,
+            startLine: start.line,
+            line: end.line,
+            outdated: placed._tag === "outdated",
+            body: comment.body,
+            state: comment.state,
+          };
+        }),
         threads: threads.threads.map((thread) => ({
           id: thread.id,
           path: thread.path,
@@ -781,26 +789,10 @@ export const make = Effect.gen(function* () {
         },
         AddedComment,
         Effect.gen(function* () {
-          const files = yield* pullRequests.files(target.key, target.accountId);
-          const file = files.files.find((entry) => entry.path === input.path);
-          if (file === undefined)
-            return yield* fail(
-              "invalid",
-              `${input.path} isn't among this pull request's changed files.`,
-            );
-          if (file.patch._tag !== "text")
-            return yield* fail("invalid", `${input.path} has no text diff to comment on.`);
-          const side = input.side ?? "new";
-          const range = rangeRows(
-            diffRows(file.patch.patch),
-            { side, line: input.startLine ?? input.line },
-            { side, line: input.line },
+          const placement = yield* placementOn(
+            yield* pullRequests.files(target.key, target.accountId),
+            input,
           );
-          if (range === null)
-            return yield* fail(
-              "invalid",
-              `Lines ${input.startLine ?? input.line}-${input.line} on the ${side} side of ${input.path} aren't inside one hunk of the diff. GitHub takes comments only there.`,
-            );
           const before = new Set(
             (yield* reviewComments.list(target.key, target.accountId)).comments.map(
               (comment) => comment.id,
@@ -809,11 +801,7 @@ export const make = Effect.gen(function* () {
           const after = yield* reviewComments.add(
             target.key,
             target.accountId,
-            {
-              anchor: { path: input.path, start: range.start, end: range.end },
-              snippet: range.snippet,
-              commitSha: files.headSha,
-            },
+            placement,
             input.body,
           );
           const added = after.comments.find((comment) => !before.has(comment.id));
