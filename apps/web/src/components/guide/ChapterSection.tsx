@@ -11,7 +11,7 @@ export function ChapterSection({
   total,
   files,
   id,
-  generation,
+  reopened,
   fileId,
   open,
   onToggle,
@@ -28,8 +28,8 @@ export function ChapterSection({
   total: number | null;
   files: ReadonlyMap<string, DiffFile>;
   id: string;
-  /** Changes when the chapter is unticked, so its cards start over as unticked files. */
-  generation: number;
+  /** Changes when the chapter is unticked, so its cards open again like unticked files. */
+  reopened: number;
   fileId: (path: string) => string;
   open: boolean;
   onToggle: () => void;
@@ -61,7 +61,8 @@ export function ChapterSection({
             if (!file) throw new Error(`The snapshot does not contain ${entry.path}.`);
             return (
               <FileDiffCard
-                key={`${generation}:${entry.path}`}
+                key={entry.path}
+                reopened={reopened}
                 file={file}
                 id={fileId(entry.path)}
                 note={entry.note}

@@ -34,6 +34,8 @@ export type FileDiffCardProps = {
   reveal?: RevealLine | null | undefined;
   /** The Reviewed checkbox; a reviewed file starts closed. */
   reviewed?: ReviewedControl | undefined;
+  /** Changes when the card should open again as it first would, such as a chapter unticked. */
+  reopened?: number | undefined;
 };
 
 export function FileDiffCard({
@@ -48,6 +50,7 @@ export function FileDiffCard({
   trailingLines,
   reveal = null,
   reviewed,
+  reopened = 0,
 }: FileDiffCardProps) {
   const [open, setOpen] = useState(
     (!defaultCollapsed && reviewed?.state !== "reviewed") || reveal !== null,
@@ -56,6 +59,12 @@ export function FileDiffCard({
   if (reveal !== revealed) {
     setRevealed(reveal);
     if (reveal !== null) setOpen(true);
+  }
+  // Opening in place keeps a comment the reader is still writing.
+  const [seenReopened, setSeenReopened] = useState(reopened);
+  if (reopened !== seenReopened) {
+    setSeenReopened(reopened);
+    if (!defaultCollapsed) setOpen(true);
   }
   const ref = useRef<HTMLElement>(null);
   const bodyId = useId();

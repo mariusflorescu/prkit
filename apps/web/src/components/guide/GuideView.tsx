@@ -101,8 +101,8 @@ export function GuideView({
               .map((chapter): [string, boolean] => [chapter.id, true]),
       ),
   );
-  // Bumped when a chapter is unticked, so its cards mount again and open like unticked files.
-  const [generations, setGenerations] = useState<ReadonlyMap<string, number>>(() => new Map());
+  // Bumped when a chapter is unticked, so its open cards open their files like unticked files.
+  const [reopened, setReopened] = useState<ReadonlyMap<string, number>>(() => new Map());
   const chapterId = useCallback((id: string) => `${prefix}-chapter-${id}`, [prefix]);
   const fileId = useCallback((path: string) => `${prefix}-file-${path}`, [prefix]);
   const owners = useMemo(() => {
@@ -180,7 +180,7 @@ export function GuideView({
     flushSync(() => {
       setCollapsed((previous) => new Map(previous).set(chapter.id, next));
       if (!next)
-        setGenerations((previous) =>
+        setReopened((previous) =>
           new Map(previous).set(chapter.id, (previous.get(chapter.id) ?? 0) + 1),
         );
     });
@@ -250,7 +250,7 @@ export function GuideView({
                     total={draft?.growing === true ? null : guide.chapters.length}
                     files={files}
                     id={chapterId(chapter.id)}
-                    generation={generations.get(chapter.id) ?? 0}
+                    reopened={reopened.get(chapter.id) ?? 0}
                     fileId={fileId}
                     open={!isCollapsed}
                     onToggle={() =>
