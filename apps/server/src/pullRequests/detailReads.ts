@@ -713,15 +713,15 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
     Effect.gen(function* () {
       if (paths.length === 0) return { files: [] };
       const { ref, account } = yield* binding(key, accountId);
-      // The sha becomes part of a cache key that never goes stale, so a branch name won't do.
-      if (!/^[0-9a-f]{40}$/.test(sha))
+      // The sha and the paths, joined on NUL, key an answer that never goes stale, so a branch
+      // name won't do, and neither will a path no tree can hold.
+      if (!/^[0-9a-f]{40}$/.test(sha) || paths.some((path) => path.includes("\0")))
         return yield* fail(
           key,
           accountId,
           "contents",
           "This commit can't be read. Refresh and try again.",
         );
-      // No path holds a NUL, so two batches never share a key.
       const cached = yield* textsCache.read(
         { accountId, configDir: account.configDir, key: `${key}:${sha}:${paths.join("\0")}` },
         readTexts(accountId, ref, sha, paths).pipe(

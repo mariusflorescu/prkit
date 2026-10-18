@@ -41,7 +41,6 @@ export function alignScroll(viewport: HTMLElement, content: Element | null, targ
   return { realign, stop };
 }
 
-/** The nearest ancestor that scrolls vertically. */
 export function scrollParent(element: Element) {
   for (let parent = element.parentElement; parent; parent = parent.parentElement) {
     const { overflowY } = getComputedStyle(parent);

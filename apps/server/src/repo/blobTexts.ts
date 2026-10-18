@@ -80,7 +80,6 @@ export const decodeBlob = (bytes: Uint8Array): FileText => {
   }
 };
 
-/** What a requested path reads as, given its tree entry and the blobs `parseBatch` found. */
 export const textAt = (
   entry: TreeEntry | undefined,
   blobs: ReadonlyMap<string, Uint8Array | null>,

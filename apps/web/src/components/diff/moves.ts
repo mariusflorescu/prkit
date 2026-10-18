@@ -11,10 +11,10 @@ export type MoveEnd = {
 };
 export type Move = {
   readonly id: number;
-  /** Side "old": where the block was cut. */
-  readonly from: MoveEnd;
-  /** Side "new": where it landed. */
-  readonly to: MoveEnd;
+  /** Where the block was cut. */
+  readonly from: MoveEnd & { readonly side: "old" };
+  /** Where it landed. */
+  readonly to: MoveEnd & { readonly side: "new" };
   /** How long the block is where it landed. */
   readonly lines: number;
   /** Lines inside the block that changed on the way. */
