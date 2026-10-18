@@ -46,10 +46,9 @@ export const ReviewStatus = Schema.Union([
 ]);
 export type ReviewStatus = typeof ReviewStatus.Type;
 
-export const Review = Schema.Struct({
+/** Everything about a review but what it is about. */
+export const ReviewCore = Schema.Struct({
   id: ReviewId,
-  key: PullRequestKey,
-  accountId: AccountId,
   /** The instance's kind, kept with it so a removed instance still shows the right agent. */
   provider: AgentProviderKind,
   instance: AgentInstanceId,
@@ -63,6 +62,16 @@ export const Review = Schema.Struct({
   watchProblem: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
   updatedAt: Schema.String,
+});
+export type ReviewCore = typeof ReviewCore.Type;
+
+const { id, ...unkeyed } = ReviewCore.fields;
+/** A pull request's review, read through its account. `id` leads, so the fields keep their order. */
+export const Review = Schema.Struct({
+  id,
+  key: PullRequestKey,
+  accountId: AccountId,
+  ...unkeyed,
 });
 export type Review = typeof Review.Type;
 

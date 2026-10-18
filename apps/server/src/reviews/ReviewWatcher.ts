@@ -3,7 +3,6 @@ import {
   type PullRequestCheck,
   type PullRequestKey,
   type PullRequestRef,
-  type Review,
   refFromKey,
 } from "@prkit/contracts";
 import * as Cause from "effect/Cause";
@@ -32,7 +31,7 @@ import { CheckRun, Status, shownCheckRuns, shownStatuses } from "../pullRequests
 import { PullRequests } from "../pullRequests/PullRequests.ts";
 import { Workspace } from "../workspace/Workspace.ts";
 import type { Observation } from "./lifecycle.ts";
-import { Reviews } from "./Reviews.ts";
+import { Reviews, type WatchedReview } from "./Reviews.ts";
 
 /** At most this many PRs per GraphQL request. */
 const BATCH_SIZE = 50;
@@ -95,7 +94,7 @@ interface Target {
   readonly key: PullRequestKey;
   readonly accountId: AccountId;
   readonly ref: PullRequestRef;
-  readonly review: Review | null;
+  readonly review: WatchedReview | null;
   readonly slow: boolean;
 }
 

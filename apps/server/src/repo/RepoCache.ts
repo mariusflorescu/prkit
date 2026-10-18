@@ -3,6 +3,7 @@ import {
   childEnv,
   type DiffSnapshot,
   type FixerId,
+  type LocalReviewKey,
   type PullRequestRef,
   type ReviewId,
 } from "@prkit/contracts";
@@ -84,6 +85,11 @@ export interface PreparedFix {
   readonly mergeBaseSha: string;
 }
 
+/** Where a review's objects live: its pull request's repository cache, or a local review's own copy. */
+export type CacheRef =
+  | { readonly _tag: "pull-request"; readonly ref: PullRequestRef }
+  | { readonly _tag: "local"; readonly key: LocalReviewKey };
+
 /** Who prkit's own commits are by: the PR's account. */
 export interface CommitIdentity {
   readonly name: string;
@@ -114,6 +120,7 @@ export const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const accounts = yield* GitHubAccounts;
   const reposDir = path.join(config.home, "repos");
+  const localDir = path.join(config.home, "local");
   const worktreesDir = path.join(config.home, "worktrees");
   const fixesDir = path.join(config.home, "fixes");
   const gitconfig = path.join(config.home, "gitconfig");
@@ -221,6 +228,10 @@ export const make = Effect.gen(function* () {
 
   const repoPath = (ref: PullRequestRef) =>
     path.join(reposDir, ref.host, ref.owner, `${ref.repo}.git`);
+  const cachePath = (cache: CacheRef) =>
+    cache._tag === "pull-request"
+      ? repoPath(cache.ref)
+      : path.join(localDir, `${cache.key.slice("local:".length)}.git`);
   const worktreePath = (reviewId: ReviewId) => path.join(worktreesDir, reviewId);
 
   /** A worktree as prkit lays it out, with its git dir and common dir computed, never read from it. */
@@ -624,29 +635,24 @@ export const make = Effect.gen(function* () {
   };
 
   /** Keeps an accepted revision's head reachable so git never collects it. */
-  const keepRevision = (
-    ref: PullRequestRef,
-    reviewId: ReviewId,
-    revision: number,
-    headSha: string,
-  ) =>
-    serialized(repoPath(ref))(
+  const keepRevision = (cache: CacheRef, reviewId: ReviewId, revision: number, headSha: string) =>
+    serialized(cachePath(cache))(
       git(["update-ref", `refs/prkit/${reviewId}/r${revision}`, headSha], {
-        target: bare(repoPath(ref)),
+        target: bare(cachePath(cache)),
       }),
     ).pipe(Effect.asVoid);
 
   /**
    * Removes a worktree's folder and prunes its now-stale entry from the cache. The cache
-   * is prkit's own (`repoPath(ref)`), never read from the worktree's `.git`; a caller that
-   * has no record of the review (`ref` null) just drops the folder, and the next
+   * is prkit's own (`cachePath(cache)`), never read from the worktree's `.git`; a caller that
+   * has no record of the review (`cache` null) just drops the folder, and the next
    * `ensureWorktree` on that cache prunes the stale entry.
    */
-  const removeWorktree = (reviewId: ReviewId, ref: PullRequestRef | null) =>
+  const removeWorktree = (reviewId: ReviewId, cache: CacheRef | null) =>
     Effect.gen(function* () {
       const worktree = worktreePath(reviewId);
       if (!(yield* fs.exists(worktree))) return false;
-      const repo = ref === null ? null : repoPath(ref);
+      const repo = cache === null ? null : cachePath(cache);
       const remove = Effect.gen(function* () {
         yield* fs.remove(worktree, { recursive: true, force: true });
         if (repo !== null && (yield* fs.exists(repo)))
