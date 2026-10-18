@@ -22,6 +22,7 @@ It is built as an Effect server that owns all real work, a thin React client, an
 - **attempt** - one revision attempt with its own process, fetched head, diff snapshot, and outcome.
 - **revision** - an accepted guide and the exact diff it explains. It stays readable after the PR moves.
 - **guide** - the visualize-pr `guide.json` overview, before/after (a graph or a behavior diff), chapters, and line notes.
+- **manual check** - the guide's suggestion of how to see the change working by hand: a few steps with what you should see and what to watch for, or nothing to check. The reader ticks steps, and a tick stays on a step that reads the same in the next revision.
 - **pre-flight** - the part of a guide only the PR's own author sees: what reviewers will probably ask, where the description and the code disagree, and tests that look missing, each pointing at its evidence.
 - **stack** - a GitHub stack of PRs, each building on the one below it, made with `gh stack`. Hosts without stacks (Enterprise Server) read as unstacked.
 - **layer** - one PR of a stack, numbered from the bottom (`Stack 2/3`). Its guide covers only its own diff.
