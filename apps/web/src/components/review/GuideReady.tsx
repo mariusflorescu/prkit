@@ -8,10 +8,15 @@ import {
   type RevisionSummary,
 } from "@prkit/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { LoadContents } from "~/components/diff";
+import { useLineFocus } from "~/components/diff/lineFocus";
 import { GuideView } from "~/components/guide";
+import { askAside } from "~/features/ask/askAside";
+import { AskDock } from "~/features/ask/AskDock";
+import { type AskTarget, AskTargetContext } from "~/features/ask/askTarget";
+import { useAsks } from "~/features/ask/useAsks";
 import { useReviewCommentsStore } from "~/features/reviewComments/reviewCommentsStore";
 import { useDiffComments } from "~/features/reviewComments/useDiffComments";
 import { useManualCheckTicks } from "~/features/manualCheck/useManualCheckTicks";
@@ -76,6 +81,32 @@ export function GuideReady({
     revisions.find((entry) => entry.revision === composingRevision) ??
     revisions.find((entry) => entry.revision === describing) ??
     latest;
+  const pick = useCallback(
+    (next: GuideChoice) => {
+      if (composingRevision !== null && next !== composingRevision) closeComposer();
+      if (describing !== null && next !== describing) setDescribing(null);
+      setPicked(next === latest.revision ? null : next);
+    },
+    [composingRevision, closeComposer, describing, latest.revision],
+  );
+  const reveal = useLineFocus((state) => state.reveal);
+  const clear = useLineFocus((state) => state.clear);
+  // A line asked for here is for this guide only.
+  useEffect(() => () => clear(), [clear]);
+  const target = useMemo<AskTarget>(
+    () => ({
+      key: detail.key,
+      reviewId: review.id,
+      revision: revision.revision,
+      openLine: (asked, path, line) => {
+        if (asked !== revision.revision) pick(asked);
+        reveal({ revision: asked, path, line });
+      },
+    }),
+    [detail.key, review.id, revision.revision, pick, reveal],
+  );
+  const aside = useMemo(() => askAside(target), [target]);
+  const showingDraft = picked === "draft" && draft !== null;
   const guide = useQuery(guideQuery(detail.key, revision.revision));
   const shown = useMemo(
     () =>
@@ -84,6 +115,7 @@ export function GuideReady({
         : forReader(guide.data, review.accountId, detail.accountId),
     [guide.data, review.accountId, detail.accountId],
   );
+  const asks = useAsks(review.id);
   // Notes show what became of their drafts with the first paint, not a moment later.
   const drafts = useQuery(pendingCommentsQuery(detail.key, detail.accountId));
   const { retry } = useReviewActions(detail.key);
@@ -115,97 +147,101 @@ export function GuideReady({
   });
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <GuideStatusBar
-        detail={detail}
-        review={review}
-        attempt={attempt}
-        revisions={revisions}
-        selected={picked === "draft" && draft !== null ? "draft" : revision.revision}
-        onSelect={(next) => {
-          if (composingRevision !== null && next !== composingRevision) closeComposer();
-          if (describing !== null && next !== describing) setDescribing(null);
-          setPicked(next === latest.revision ? null : next);
-        }}
-        shown={
-          guide.data === undefined || (picked === "draft" && draft !== null)
-            ? null
-            : { config: guide.data.config, latest: revision.revision === latest.revision }
-        }
-      />
-      {status._tag === "failed" && (
-        <ReviewAlert
-          title={FAILURE_TITLES[status.reason]}
-          message={retry.error?.message ?? status.message}
-          {...(status.reason === "account" ? { detail: `Read through ${detail.accountId}` } : {})}
-          retry={() => retry.mutate()}
-          retrying={retry.isPending}
+      <AskTargetContext value={showingDraft ? null : target}>
+        <GuideStatusBar
+          detail={detail}
+          review={review}
+          attempt={attempt}
+          revisions={revisions}
+          selected={showingDraft ? "draft" : revision.revision}
+          onSelect={pick}
+          shown={
+            guide.data === undefined || showingDraft
+              ? null
+              : { config: guide.data.config, latest: revision.revision === latest.revision }
+          }
         />
-      )}
-      {picked === "draft" && draft !== null ? (
-        <div className="min-h-0 flex-1">
-          <DraftView
-            reviewKey={detail.key}
-            attemptId={draft.attempt.id}
-            version={draft.version}
-            growing={draft.growing}
-            source={{ _tag: "attempt", key: detail.key, attemptId: draft.attempt.id }}
-            prUrl={detail.url}
-            prDescription={detail.body}
+        {status._tag === "failed" && (
+          <ReviewAlert
+            title={FAILURE_TITLES[status.reason]}
+            message={retry.error?.message ?? status.message}
+            {...(status.reason === "account" ? { detail: `Read through ${detail.accountId}` } : {})}
+            retry={() => retry.mutate()}
+            retrying={retry.isPending}
           />
-        </div>
-      ) : guide.isPending ||
-        drafts.isPending ||
-        reviewed.status === "pending" ||
-        manualCheckTicks.status === "pending" ? (
-        <GuideSkeleton />
-      ) : guide.isError ? (
-        <ReviewAlert
-          title="Couldn't load the guide"
-          message={guide.error.message}
-          retry={() => void guide.refetch()}
-        />
-      ) : (
-        <>
-          {drafts.isError && (
+        )}
+        <div className="flex min-h-0 flex-1 flex-col">
+          {showingDraft ? (
+            <div className="min-h-0 flex-1">
+              <DraftView
+                reviewKey={detail.key}
+                attemptId={draft.attempt.id}
+                version={draft.version}
+                growing={draft.growing}
+                source={{ _tag: "attempt", key: detail.key, attemptId: draft.attempt.id }}
+                prUrl={detail.url}
+                prDescription={detail.body}
+              />
+            </div>
+          ) : guide.isPending ||
+            drafts.isPending ||
+            reviewed.status === "pending" ||
+            manualCheckTicks.status === "pending" ||
+            asks.state._tag === "loading" ? (
+            <GuideSkeleton />
+          ) : guide.isError ? (
             <ReviewAlert
-              title="Couldn't load your pending comments"
-              message={drafts.error.message}
-              retry={() => void drafts.refetch()}
+              title="Couldn't load the guide"
+              message={guide.error.message}
+              retry={() => void guide.refetch()}
             />
+          ) : (
+            <>
+              {drafts.isError && (
+                <ReviewAlert
+                  title="Couldn't load your pending comments"
+                  message={drafts.error.message}
+                  retry={() => void drafts.refetch()}
+                />
+              )}
+              {guide.data.normalized.guidanceNote !== null && (
+                <GuidanceNoteLine note={guide.data.normalized.guidanceNote} />
+              )}
+              <GuideView
+                key={revision.revision}
+                revision={revision.revision}
+                guide={guide.data.normalized}
+                snapshot={guide.data.snapshot}
+                source={{ _tag: "attempt", key: detail.key, attemptId: revision.attemptId }}
+                prUrl={detail.url}
+                prDescription={detail.body}
+                comments={comments}
+                aside={aside}
+                {...(current ? { loadContents } : {})}
+                reviewed={reviewed.status === "ready" ? reviewed : undefined}
+                manualCheckTicks={manualCheckTicks}
+                count={<ReviewedCount reviewed={reviewed} files={guide.data.snapshot.files} />}
+                preflight={
+                  shown === undefined || shown.normalized.preflight === null
+                    ? undefined
+                    : {
+                        note: descriptionNote(detail, shown.config),
+                        action: (
+                          <DescriptionFromGuide
+                            detail={detail}
+                            guide={shown.normalized}
+                            open={describing !== null}
+                            onOpenChange={(open) => setDescribing(open ? revision.revision : null)}
+                          />
+                        ),
+                      }
+                }
+              />
+            </>
           )}
-          {guide.data.normalized.guidanceNote !== null && (
-            <GuidanceNoteLine note={guide.data.normalized.guidanceNote} />
-          )}
-          <GuideView
-            key={revision.revision}
-            guide={guide.data.normalized}
-            snapshot={guide.data.snapshot}
-            source={{ _tag: "attempt", key: detail.key, attemptId: revision.attemptId }}
-            prUrl={detail.url}
-            prDescription={detail.body}
-            comments={comments}
-            {...(current ? { loadContents } : {})}
-            reviewed={reviewed.status === "ready" ? reviewed : undefined}
-            manualCheckTicks={manualCheckTicks}
-            count={<ReviewedCount reviewed={reviewed} files={guide.data.snapshot.files} />}
-            preflight={
-              shown === undefined || shown.normalized.preflight === null
-                ? undefined
-                : {
-                    note: descriptionNote(detail, shown.config),
-                    action: (
-                      <DescriptionFromGuide
-                        detail={detail}
-                        guide={shown.normalized}
-                        open={describing !== null}
-                        onOpenChange={(open) => setDescribing(open ? revision.revision : null)}
-                      />
-                    ),
-                  }
-            }
-          />
-        </>
-      )}
+        </div>
+        {!showingDraft && <AskDock target={target} />}
+      </AskTargetContext>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import type { DiffLineRef } from "@prkit/contracts";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import type { ReactNode } from "react";
 
 import { GuideNote } from "~/components/diff/GuideNote";
 import { InlineMarkdown } from "~/components/diff/InlineMarkdown";
@@ -25,6 +26,7 @@ export function ChapterNarration({
   onFile,
   prUrl,
   review,
+  action,
 }: {
   chapter: GuideChapter;
   index: number;
@@ -38,6 +40,7 @@ export function ChapterNarration({
   onFile: (path: string) => void;
   prUrl?: string | undefined;
   review: ChapterReviewedControl | null;
+  action?: ReactNode;
 }) {
   const ref = useStickyNarration();
   const risk = chapterRisk(chapter, rated);
@@ -100,6 +103,7 @@ export function ChapterNarration({
                 </li>
               ))}
             </ul>
+            {action !== undefined && action !== null && <div data-chapter-action="">{action}</div>}
           </>
         )}
       </div>

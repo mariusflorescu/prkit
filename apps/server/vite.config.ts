@@ -48,8 +48,12 @@ export default defineConfig({
     onSuccess: () => {
       writeFileSync(new URL("./dist/build.json", import.meta.url), JSON.stringify({ buildId }));
     },
-    // Read at runtime next to the bundle (Reviews.ts and Fixers.ts load them from their own directory).
-    copy: ["src/reviews/instructions.md", "src/fixers/fix-instructions.md"],
+    // Read at runtime next to the bundle (Reviews.ts, Fixers.ts and Asks.ts load them from their own directory).
+    copy: [
+      "src/reviews/instructions.md",
+      "src/fixers/fix-instructions.md",
+      "src/asks/ask-instructions.md",
+    ],
     // Everything but Node's builtins is inlined, so the packaged app ships one self-contained
     // server with no node_modules. The Claude Agent SDK finds its platform binary with a
     // runtime resolve the bundler never follows; prkit always passes the user's own claude.

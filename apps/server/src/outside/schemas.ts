@@ -2,6 +2,7 @@ import {
   AccountId,
   AgentInstanceId,
   AgentProviderKind,
+  AskScope,
   DEFAULT_INBOX_SORT,
   FixerTurnId,
   GitHubLimit,
@@ -22,13 +23,15 @@ import {
   PullRequestKey,
   PullRequestSize,
   PullRequestSummary,
+  QUESTION_MAX_LENGTH,
+  QuestionId,
   ReviewCommentId,
   ReviewWait,
 } from "@prkit/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { ResponseFields } from "./responseSchemas.ts";
-import { PageFields, PageInfo } from "./pageSchemas.ts";
+import { PageFields, PageInfo, pageSchema } from "./pageSchemas.ts";
 
 /** What every outside tool fails with: a code a client can act on and a plain sentence. */
 export class OutsideToolFailure extends Schema.TaggedError<OutsideToolFailure>()(
@@ -478,10 +481,84 @@ export const StopFixResult = Schema.Struct({
   ),
 });
 
+// read_pull_request_questions / ask_about_pull_request / stop_question / pin_answer
+export const OutsideQuestion = Schema.Struct({
+  id: QuestionId,
+  revision: Schema.Int,
+  scope: AskScope,
+  text: Schema.String,
+  askedBy: Schema.NullOr(Schema.String),
+  askedAt: Schema.String,
+  state: Schema.Literals(["starting", "waiting", "answering", "answered", "stopped", "failed"]),
+  basis: describe(
+    Schema.NullOr(Schema.String),
+    "Which conversation answers or answered it, in plain words; null before an agent takes it.",
+  ),
+  message: describe(
+    Schema.NullOr(Schema.String),
+    "Why it failed, in the words the app shows; null otherwise.",
+  ),
+  answer: describe(
+    Schema.String,
+    "The answer so far while it is being written, the whole answer once answered, and what was written before a stop or failure.",
+  ),
+  pinned: Schema.Boolean,
+});
+export type OutsideQuestion = typeof OutsideQuestion.Type;
+export const ReadQuestionsInput = Schema.Struct({
+  ...TargetFields,
+  ...PageFields,
+  revision: Schema.optionalKey(
+    describe(
+      Schema.Int.check(Schema.isGreaterThan(0)),
+      "Only the questions asked on this guide revision; every revision's when omitted.",
+    ),
+  ),
+});
+export const QuestionsResult = pageSchema(OutsideQuestion);
+export const AskAboutInput = Schema.Struct({
+  ...TargetFields,
+  revision: Schema.optionalKey(
+    describe(
+      Schema.Int.check(Schema.isGreaterThan(0)),
+      "The guide revision to ask about, from list_guide_revisions; the latest accepted one when omitted.",
+    ),
+  ),
+  scope: Schema.optionalKey(
+    describe(
+      AskScope,
+      `What the question is about, the whole pull request when omitted: {"_tag":"pull-request"}, {"_tag":"chapter","chapterId":"<id from read_guide>"}, or {"_tag":"lines","anchor":{"path":"src/a.ts","start":{"side":"new","line":3},"end":{"side":"new","line":5}}} for diff rows, side new (the pull request's version) or old (the base's).`,
+    ),
+  ),
+  question: describe(
+    Schema.String.check(Schema.isPattern(/\S/), Schema.isMaxLength(QUESTION_MAX_LENGTH)),
+    "The question, in plain words.",
+  ),
+  clientRequestId: ClientRequestId,
+});
+export const AskedQuestion = Schema.Struct({
+  key: PullRequestKey,
+  questionId: QuestionId,
+  revision: Schema.Int,
+  state: OutsideQuestion.fields.state,
+});
+export type AskedQuestion = typeof AskedQuestion.Type;
+export const QuestionInput = Schema.Struct({
+  ...TargetFields,
+  questionId: describe(QuestionId, "A question's id, from read_pull_request_questions."),
+});
+export const PinInput = Schema.Struct({
+  ...QuestionInput.fields,
+  pinned: describe(
+    Schema.Boolean,
+    "true pins the answer to its chapter in the guide, false unpins it. Only an answered question can be pinned.",
+  ),
+});
+
 // wait_for
 export const WaitInput = Schema.Struct({
   ...TargetFields,
-  what: describe(Schema.Literals(["guide", "fix"]), "What to wait for."),
+  what: describe(Schema.Literals(["guide", "fix", "question"]), "What to wait for."),
   timeoutSeconds: Schema.optionalKey(
     describe(
       Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 600 })),
@@ -493,6 +570,10 @@ export const WaitResult = Schema.Struct({
   finished: Schema.Boolean,
   guide: Schema.NullOr(GuideStatus),
   fix: Schema.NullOr(FixResult),
+  question: describe(
+    Schema.NullOr(OutsideQuestion),
+    "The pull request's newest question, for what: question.",
+  ),
 });
 export type WaitResult = typeof WaitResult.Type;
 

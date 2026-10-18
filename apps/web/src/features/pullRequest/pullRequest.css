@@ -69,6 +69,13 @@
   scroll-padding-bottom: var(--pr-covered-bottom, 0px);
   scrollbar-gutter: stable;
 }
+/* What the Ask dock covers at the bottom of the guide; a diff line scrolled to stops above it. */
+[data-pr-scroll]:has([data-ask-dock="closed"]) {
+  --pr-covered-bottom: 56px;
+}
+[data-pr-scroll]:has([data-ask-dock="open"]) {
+  --pr-covered-bottom: max(45dvh, 15rem);
+}
 [data-pr-content] :where([data-file-diff-header]) {
   top: var(--pr-pinned-height);
 }

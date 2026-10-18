@@ -87,6 +87,9 @@ const handlers = (toolkit: OutsideToolkit) =>
         read_review_diff: reads((input) =>
           respond("read_review_diff", input, () => work.reviewDiff(input)),
         ),
+        read_pull_request_questions: reads((input) =>
+          respond("read_pull_request_questions", input, () => work.questions(input)),
+        ),
         read_guide_duration: reads((input) =>
           respond("read_guide_duration", input, () => work.duration(input)),
         ),
@@ -131,6 +134,15 @@ const handlers = (toolkit: OutsideToolkit) =>
         ),
         stop_guide: startsWork((input) =>
           respond("stop_guide", input, () => work.stopGuide(input)),
+        ),
+        ask_about_pull_request: startsWork((input) =>
+          respond("ask_about_pull_request", input, () => work.askQuestion(input)),
+        ),
+        stop_question: startsWork((input) =>
+          respond("stop_question", input, () => work.stopQuestion(input)),
+        ),
+        pin_answer: startsWork((input) =>
+          respond("pin_answer", input, () => work.pinAnswer(input)),
         ),
         add_review_comment: startsWork((input) =>
           respond("add_review_comment", input, () => work.addComment(input)),

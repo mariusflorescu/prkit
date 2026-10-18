@@ -11,11 +11,16 @@
  *       through prkit's own MCP server, reports progress and submits a guide with one chapter
  *       holding every file the prompt lists, and ends the turn. Asked for fixes, it adds
  *       `stand-in.md` and reports every comment fixed; asked to resolve conflicts, it keeps the
- *       first side of every conflict in each file and reports the files resolved.
+ *       first side of every conflict in each file and reports the files resolved. Asked a
+ *       question (a `<prkit-ask>` prompt), it tries `submit_guide` with the turn's token, then
+ *       streams an answer in a few `text_delta` chunks: whether it got `--resume` and
+ *       `--fork-session`, the first changed line of the numbered diff as `path:line`, and the
+ *       refusal prkit gave it.
  *
- * In FAKE_CLAUDE_DIR, a `hold` file keeps the turn writing until the file is removed, a
- * `fail` file ends the turn with an error instead of a guide, and a `split` file gives every
- * file a chapter of its own, titled after the file. A `notes` file, JSON of
+ * In FAKE_CLAUDE_DIR, a `hold` file keeps a guide, fix or resolution writing until the file is
+ * removed, a `hold-ask` file holds an answer after its first chunk the same way, a `fail` file
+ * ends the turn with an error instead, and a `split` file gives every file a chapter of its own,
+ * titled after the file. A `notes` file, JSON of
  * `{ [path]: [{ line, side, tone, text }] }`, gives those files line notes in the guide,
  * read when the guide is submitted; without it the guide has none. A `file-notes` file,
  * `{ [path]: note }`, gives those files a file note. A `chapters` file, JSON of
@@ -37,11 +42,12 @@
  *   linger    a `sleep` that a command left in the background; the command runs in a session
  *             of its own for a second, as Claude Code runs commands. Its PID goes in `linger.pid`
  *
- * Every turn appends `{configDir, session, resumed}` to `runs.log` there, and its prompt to
- * `prompts.jsonl` with a copy of the context file the prompt names (`context-<turn>.json`).
- * With CLAUDE_CONFIG_DIR set to a folder under `.e2e/`, it also saves the session as Claude Code
- * does, under `projects/`, so prkit can resume it with `--resume`. Any other folder is the user's
- * own: it saves nothing.
+ * Every turn appends `{configDir, session, resumed, forked}` to `runs.log` there, and its prompt
+ * to `prompts.jsonl` with a copy of the context file the prompt names (`context-<turn>.json`). A
+ * fork (`--fork-session`) gets a new session, as Claude Code's does. With CLAUDE_CONFIG_DIR set to
+ * a folder under `.e2e/`, it also saves the session as Claude Code does, under `projects/` in the
+ * folder of the directory it ran in, so prkit can resume or fork it. Any other folder is the
+ * user's own: it saves nothing.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
@@ -164,7 +170,14 @@ const ManualCheckJson = Schema.fromJsonString(
 );
 const McpReply = Schema.fromJsonString(
   Schema.Struct({
-    result: Schema.optionalKey(Schema.Struct({ isError: Schema.optionalKey(Schema.Boolean) })),
+    result: Schema.optionalKey(
+      Schema.Struct({
+        isError: Schema.optionalKey(Schema.Boolean),
+        content: Schema.optionalKey(
+          Schema.Array(Schema.Struct({ text: Schema.optionalKey(Schema.String) })),
+        ),
+      }),
+    ),
     error: Schema.optionalKey(Schema.Struct({ message: Schema.String })),
   }),
 );
@@ -173,13 +186,14 @@ const McpReply = Schema.fromJsonString(
 const resumed =
   args.find((arg) => arg.startsWith("--resume="))?.slice("--resume=".length) ??
   (args.includes("--resume") ? (args[args.indexOf("--resume") + 1] ?? null) : null);
-const sessionId = resumed ?? NodeCrypto.randomUUID();
+const forked = args.includes("--fork-session");
+const sessionId = resumed !== null && !forked ? resumed : NodeCrypto.randomUUID();
 /** Which folder this turn ran with, and the session it saved there as Claude Code would. */
 const record = () => {
   if (control !== "")
     NodeFS.appendFileSync(
       NodePath.join(control, "runs.log"),
-      `${JSON.stringify({ configDir, session: sessionId, resumed: resumed !== null })}\n`,
+      `${JSON.stringify({ configDir, session: sessionId, resumed: resumed !== null, forked })}\n`,
     );
   const scratch = NodePath.resolve(import.meta.dirname, "..", ".e2e") + NodePath.sep;
   if (configDir === null || !NodePath.resolve(configDir).startsWith(scratch)) return;
@@ -230,7 +244,16 @@ const mcp = async (method: string, params: Schema.Json, notification = false) =>
     Option.isSome(reply) &&
     reply.value.error === undefined &&
     reply.value.result?.isError !== true;
-  return { ok, text: body };
+  /** What the tool said, as the agent would read it. */
+  const said = Option.match(reply, {
+    onNone: () => body,
+    onSome: (value) =>
+      value.error?.message ??
+      (value.result?.content ?? [])
+        .flatMap((part) => (part.text === undefined ? [] : [part.text]))
+        .join("\n"),
+  });
+  return { ok, text: body, said };
 };
 
 const changedFiles = (prompt: string) => {
@@ -385,6 +408,55 @@ const keepPrompt = (prompt: string) => {
   );
 };
 
+/** The first changed line of the numbered diff the prompt names, as `path:line` with its new line number. */
+const firstChangedLine = (prompt: string) => {
+  const file = /(\S+\/pull-request\.diff)/.exec(prompt)?.[1];
+  if (file === undefined || !NodeFS.existsSync(file)) return null;
+  let path: string | null = null;
+  for (const line of NodeFS.readFileSync(file, "utf8").split("\n")) {
+    const header = /^### (.+?)(?: \(renamed from .+\))? \[/.exec(line);
+    if (header !== null) path = header[1] ?? null;
+    const row = /^.{6} (.{6}) [+ ]/.exec(line);
+    const number = row?.[1]?.trim() ?? "";
+    if (path !== null && number !== "") return `${path}:${number}`;
+  }
+  return null;
+};
+
+/** Answers a question in `text_delta` chunks, as Claude Code streams a reply, then the whole message. */
+const answer = async (prompt: string) => {
+  const refused = await mcp("tools/call", {
+    name: "submit_guide",
+    arguments: { summary: "Not a guide.", chapters: [{ title: "Nothing", files: [] }] },
+  });
+  const cited = firstChangedLine(prompt);
+  const chunks = [
+    "The stand-in agent answers. ",
+    `It got ${resumed === null ? "no --resume" : `--resume ${resumed}`} and ${forked ? "--fork-session" : "no --fork-session"}. `,
+    cited === null ? "It found no changed line to cite. " : `The change starts at \`${cited}\`. `,
+    refused.ok ? "prkit let it call submit_guide." : `prkit refused submit_guide: ${refused.said}`,
+  ];
+  for (const [index, text] of chunks.entries()) {
+    write({
+      type: "stream_event",
+      event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } },
+      parent_tool_use_id: null,
+      uuid: NodeCrypto.randomUUID(),
+      session_id: sessionId,
+    });
+    if (index === 0)
+      while (flagged("hold-ask")) await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  write({
+    type: "assistant",
+    message: { role: "assistant", content: [{ type: "text", text: chunks.join("") }] },
+    parent_tool_use_id: null,
+    uuid: NodeCrypto.randomUUID(),
+    session_id: sessionId,
+  });
+  return finish(null);
+};
+
 const turn = async (prompt: string) => {
   record();
   keepPrompt(prompt);
@@ -408,6 +480,8 @@ const turn = async (prompt: string) => {
     clientInfo: { name: "fake-claude", version: "0" },
   });
   await mcp("notifications/initialized", {}, true);
+  if (/^<prkit-ask>$/m.test(prompt))
+    return flagged("fail") ? finish("The stand-in agent was told to fail.") : answer(prompt);
   await mcp("tools/call", {
     name: "report_progress",
     arguments: { message: "Reading the change with a stand-in agent" },

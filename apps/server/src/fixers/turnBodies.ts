@@ -309,7 +309,7 @@ export const makeTurnBodies = (
           // Put the checkout back at the ready commit, rebuilding it if its git metadata
           // drifted, so this behaves like ensureWorktree rather than giving up.
           const co = yield* repo
-            .ensureFixCheckout(ref, fixer.id, commitSha)
+            .ensureCheckout({ _tag: "pull-request", ref }, repo.fixerPath(fixer.id), commitSha)
             .pipe(Effect.catchTag("RepoError", () => Effect.succeed(null)));
           if (co === null) return yield* keepEarlier("prkit's checkout of this result is gone.");
           // A change request runs under the decision its turn made; a turn from before prkit

@@ -487,7 +487,7 @@ export const make = Effect.fn("CursorAgent.make")(function* (
               case "session":
                 return Stream.make({ _tag: "session", sessionId: event.sessionId });
               case "text":
-                return Stream.make({ _tag: "text", text: event.text });
+                return Stream.make({ _tag: "text", delta: event.text });
               case "tool":
                 // The runner fails such a turn itself; this holds even if its error line is lost.
                 return event.tool === "other" || event.tool === "mcp"
@@ -549,6 +549,8 @@ export const make = Effect.fn("CursorAgent.make")(function* (
     models,
     hasSession,
     runTurn,
+    // Cursor's SDK has no way to copy an agent's conversation, only to resume it.
+    forkTurn: null,
     ownLogin: { signIn, signOut },
   } satisfies AgentProvider;
 });

@@ -83,6 +83,11 @@ import {
   type PushAccess,
   type RepositoryFixerSettings,
   type ScriptAccess,
+  type AskInput,
+  type AskWatchEvent,
+  type Question,
+  type QuestionId,
+  type ReviewId,
   WS_METHODS,
   WsRpcGroup,
 } from "@prkit/contracts";
@@ -550,6 +555,55 @@ export const watchReview = (
     current.runFork(Fiber.interrupt(fiber));
   };
 };
+
+/**
+ * Follows a review's questions until the returned function is called. Every subscription
+ * opens with a snapshot, so a resubscribe after a failure replaces what the caller had.
+ * `onError` hears each failure, in words for the user, before the next try.
+ */
+export const watchAsks = (
+  reviewId: ReviewId,
+  onEvent: (event: AskWatchEvent) => void,
+  onError: (message: string) => void,
+): (() => void) => {
+  const current = getRuntime();
+  if (current === null) {
+    onError(new MissingSessionTokenError().message);
+    return () => {};
+  }
+  const fiber = current.runFork(
+    WsClient.use((client) =>
+      client[WS_METHODS.asksWatch]({ reviewId }).pipe(
+        Stream.runForEach((event) => Effect.sync(() => onEvent(event))),
+      ),
+    ).pipe(
+      Effect.tapError((error) =>
+        Effect.sync(() =>
+          onError(
+            isRpcClientError(error)
+              ? new ServerUnreachableError({ cause: error }).message
+              : error.message,
+          ),
+        ),
+      ),
+      Effect.ignore,
+      Effect.andThen(Effect.sleep("2 seconds")),
+      Effect.forever,
+    ),
+  );
+  return () => {
+    current.runFork(Fiber.interrupt(fiber));
+  };
+};
+/** Stores the question and returns at once; its answer arrives on `watchAsks`. */
+export const askQuestion = (input: AskInput): Promise<Question> =>
+  call((client) => client[WS_METHODS.asksAsk](input));
+export const stopQuestion = (questionId: QuestionId): Promise<Question> =>
+  call((client) => client[WS_METHODS.asksStop]({ questionId }));
+export const retryQuestion = (questionId: QuestionId): Promise<Question> =>
+  call((client) => client[WS_METHODS.asksRetry]({ questionId }));
+export const pinAnswer = (questionId: QuestionId, pinned: boolean): Promise<Question> =>
+  call((client) => client[WS_METHODS.asksPin]({ questionId, pinned }));
 
 /**
  * Hears what changed on the server's GitHub caches until the returned function is

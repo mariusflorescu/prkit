@@ -10,6 +10,7 @@ const Run = Schema.fromJsonString(
     configDir: Schema.NullOr(Schema.String),
     session: Schema.String,
     resumed: Schema.Boolean,
+    forked: Schema.Boolean,
   }),
 );
 
@@ -40,16 +41,16 @@ const Prompt = Schema.fromJsonString(
 
 /**
  * The stand-in Claude Code of scripts/fake-claude.ts, in a folder of its own: pass `file` to
- * `verify-app start --claude`. `hold` keeps its next turns writing until `release`,
- * `failing` makes them end with an error instead of a guide, `notes` gives its guides line
- * notes, `fileNotes` file notes, `manualCheck` their plan for checking the change by hand,
- * `split` gives each file of their guides a chapter of its own, `chapters` splits them into
- * named chapters (with a kind and level when given), `preflight` is the author's pre-flight
- * their guides send when the prompt asks for one, `flow` is their guides' before/after,
- * `drafting` has them draft first and wait after the overview and after the first chapter until
- * `releaseDraft` lets each step go, `edits` has its next fixes write files, and
- * `plant` has its next fixes and resolutions leave something behind (scripts/fake-claude.ts
- * lists what).
+ * `verify-app start --claude`. `hold` keeps its next guides, fixes and resolutions writing until
+ * `release`, `holdAnswers` keeps its next answers after their first chunk until `releaseAnswers`,
+ * `failing` makes them end with an error instead, `notes` gives its guides line notes,
+ * `fileNotes` file notes, `manualCheck` their plan for checking the change by hand, `split`
+ * gives each file of their guides a chapter of its own, `chapters` splits them into named
+ * chapters (with a kind and level when given), `preflight` is the author's pre-flight their
+ * guides send when the prompt asks for one, `flow` is their guides' before/after, `drafting` has
+ * them draft first and wait after the overview and after the first chapter until `releaseDraft`
+ * lets each step go, `edits` has its next fixes write files, and `plant` has its next fixes and
+ * resolutions leave something behind (scripts/fake-claude.ts lists what).
  */
 export const setUpFakeClaude = (name: string) => {
   const dir = NodePath.join(repoRoot, ".e2e", "fake", `${name}-claude`);
@@ -63,7 +64,7 @@ export const setUpFakeClaude = (name: string) => {
     { mode: 0o755 },
   );
   const flag = (
-    name: "hold" | "fail" | "split" | "draft" | "draft-hold" | "chapter-hold",
+    name: "hold" | "hold-ask" | "fail" | "split" | "draft" | "draft-hold" | "chapter-hold",
     on: boolean,
   ) =>
     on
@@ -73,6 +74,8 @@ export const setUpFakeClaude = (name: string) => {
     file,
     hold: () => flag("hold", true),
     release: () => flag("hold", false),
+    holdAnswers: () => flag("hold-ask", true),
+    releaseAnswers: () => flag("hold-ask", false),
     failing: (on: boolean) => flag("fail", on),
     notes: (notes: Record<string, ReadonlyArray<FakeNote>>) =>
       NodeFS.writeFileSync(NodePath.join(dir, "notes"), JSON.stringify(notes)),
@@ -129,7 +132,7 @@ export const setUpFakeClaude = (name: string) => {
           };
         });
     },
-    /** Every turn so far: the config folder it ran with, its session, and whether it resumed. */
+    /** Every turn so far: the config folder it ran with, its session, and whether it resumed or forked. */
     runs: () => {
       const file = NodePath.join(dir, "runs.log");
       if (!NodeFS.existsSync(file)) return [];

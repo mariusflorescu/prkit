@@ -255,7 +255,9 @@ describe("Agents", () => {
           'claude_work')`;
 
         const refused = yield* agents.remove(id("claude_work")).pipe(Effect.flip);
-        expect(refused.message).toBe("Work is busy with a guide or fix. Try again when it's done.");
+        expect(refused.message).toBe(
+          "Work is busy with a guide, a fix or an answer. Try again when it's done.",
+        );
         expect(yield* agents.get(id("claude_work"))).not.toBeNull();
 
         yield* sql`UPDATE review_attempts SET finished_at = 'now' WHERE id = 'a1'`;

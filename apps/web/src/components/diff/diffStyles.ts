@@ -99,6 +99,9 @@ export const DIFF_CSS = `
 :is([data-separator="line-info"], [data-separator="line-info-basic"])[data-expand-index]:is(:hover, :focus-within) [data-scope] {
   color: color-mix(in srgb, var(--code-foreground) 76%, var(--code-background));
 }
+[data-gutter] > [data-column-number] {
+  scroll-margin-bottom: var(--pr-covered-bottom, 0px);
+}
 [data-gutter] > [data-column-number]:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -2px;

@@ -1,6 +1,6 @@
 # Outside agents
 
-Settings > Outside agents lets the owner's own MCP client (Claude Code, Codex, Cursor, anything that starts a server over stdio) use prkit from a terminal session: see the inbox, open a PR in the app, start and read a guide, add draft comments and send them to the fix agent, follow its progress, and have a guide written of a repository's local changes before a pull request exists. It is off by default. Anything that reaches GitHub stays a click in the app: pushing, merging, posting a review, replying to or resolving a thread.
+Settings > Outside agents lets the owner's own MCP client (Claude Code, Codex, Cursor, anything that starts a server over stdio) use prkit from a terminal session: see the inbox, open a PR in the app, start and read a guide, ask its agent a question about the PR, add draft comments and send them to the fix agent, follow its progress, and have a guide written of a repository's local changes before a pull request exists. It is off by default. Anything that reaches GitHub stays a click in the app: pushing, merging, posting a review, replying to or resolving a thread.
 
 ## Setup
 
@@ -47,6 +47,10 @@ The inventory covers every WebSocket RPC and the app's local presentation action
 | Current guide/progress and review feed | reviews.get, reviews.feed | `read_guide`, `read_guide_progress`, `list_reviews` | Read |
 | Guide revision switcher and saved diff | guides.get, reviews.diff, guides.draft | `list_guide_revisions`, `read_guide_revision`, `read_review_diff`; `read_guide_progress` includes the draft | Read |
 | Typical guide duration | reviews.typicalDuration | `read_guide_duration` | Read |
+| Questions about a guide and their answers | the questions asks.watch opens with | `read_pull_request_questions`: revision, cursor, limit | Read |
+| Ask about a guide, and retry an answer | asks.ask, asks.retry | `ask_about_pull_request`: revision (the latest by default), scope (whole PR, chapter or lines), question and `clientRequestId`; a retry is asking again | Work |
+| Stop an answer | asks.stop | `stop_question`, which keeps the answer so far | Work |
+| Pin an answer to its chapter | asks.pin | `pin_answer` with `pinned` | Work |
 | Guide defaults and auto mode | guideSettings.get | `read_settings` | Read |
 | Change default agent or auto mode | guideSettings.update | Excluded B | Excluded |
 | Resolved guide settings and preview | guideConfig.pullRequest | `read_guide_settings`: scope versions, active guidance/focus/ignore rules/look-closely paths, skipped files | Read |
@@ -79,7 +83,7 @@ The inventory covers every WebSocket RPC and the app's local presentation action
 | Open/close a local guide's tab | workspace.openLocal, workspace.closeLocal | `generate_local_guide` opens the tab without focus; closing it is app only | Work / App |
 | Retry a local guide's failed run | localReviews.retry | App only: `generate_local_guide` again takes a fresh snapshot instead | App |
 | Remove a local guide | localReviews.remove | Excluded C | Excluded |
-| Live updates and waiting | github.events, workspace.changes, reviewedFiles.changes, manualCheckTicks.changes, reviews.watch, fixers.watch, localReviews.watch, localReviews.feed | Finite snapshot reads above plus `wait_for` and `wait_for_local_guide`; no outside background subscriptions or polling loop | Read |
+| Live updates and waiting | github.events, workspace.changes, reviewedFiles.changes, manualCheckTicks.changes, reviews.watch, fixers.watch, asks.watch, localReviews.watch, localReviews.feed | Finite snapshot reads above plus `wait_for`, whose `what: "question"` waits for an answer, and `wait_for_local_guide`; no outside background subscriptions or polling loop | Read |
 | Desktop updater: channel/automatic checks, check/download/install/restart | Electron update bridge | Changes excluded B (installation and trust). Native updater status has no server service and is outside this unit’s server-only build scope; release notes and What’s new are presentation. | Excluded / Presentation |
 | Navigation, inner tabs, scrolling, collapses, keyboard shortcuts, text selection, copy/open links | Presentation only | Read the corresponding data or use the workspace tool; these have no separate domain operation | Presentation |
 
@@ -110,6 +114,7 @@ When a complete result is too large, the success value is a typed `_tag: "respon
 | `list_guide_revisions` | Read | `PagedTargetInput` schema |
 | `read_guide_revision` | Read | `RevisionInput` schema |
 | `read_guide_progress` | Read | `PagedTargetInput` schema |
+| `read_pull_request_questions` | Read | `ReadQuestionsInput` schema |
 | `read_review_diff` | Read | `ReviewDiffInput` schema |
 | `read_guide_duration` | Read | `DurationInput` schema (no PR target) |
 | `read_guide_settings` | Read | `TargetInput` schema |
@@ -125,6 +130,8 @@ When a complete result is too large, the success value is a typed `_tag: "respon
 | `close_pull_request_tab` | Work | `TargetInput` schema |
 | `focus_pull_request_tab` | Work | `TargetInput` schema |
 | `reorder_pull_request_tabs` | Work | `ReorderInput` schema |
+| `stop_question` | Work | `QuestionInput` schema |
+| `pin_answer` | Work | `PinInput` schema |
 | `save_inbox_filters` | Work | `SaveInboxFiltersInput` schema |
 | `save_pull_request_guide_settings` | Work | `SaveGuideSettingsInput` schema |
 | `edit_review_comment` | Work | `EditCommentInput` schema |
@@ -145,9 +152,11 @@ When a complete result is too large, the success value is a typed `_tag: "respon
 
 A guide's `manualCheck` is the agent's suggestion of how to see the change working by hand: `{_tag: "steps", setup, steps: [{action, expect, watchFor, chapter}]}`, `{_tag: "nothing", reason}` when there is nothing to check by hand, or null on a guide written before plans. `read_guide` and `read_guide_revision` add `manualCheckTicked`, the numbers of the steps the owner ticked. `tick_manual_check_steps` names a revision and its steps by number and sets them ticked or, with `ticked: false`, not ticked. A tick belongs to what the step asks and expects, so it carries into later revisions whose step reads the same. Repeating a call changes nothing, a step number the revision doesn't have fails the whole call, and a revision whose guide was written through another account is refused.
 
+`ask_about_pull_request` adds `revision` (the latest accepted one when omitted), `scope` and `question`, and takes a `clientRequestId`. `scope` is `{"_tag":"pull-request"}` (the default), `{"_tag":"chapter","chapterId":"<id from read_guide>"}` or `{"_tag":"lines","anchor":{"path","start":{"side","line"},"end":{"side","line"}}}`, with sides `new` or `old` as in `move_review_comment`. It answers at once with the question's id. The agent that wrote the guide answers in a read-only fork of its conversation, one question at a time, and a second question while one is being answered is refused with `conflict`. Call `wait_for` with `what: "question"`, which returns when none of the PR's questions is starting, waiting or answering, and then `read_pull_request_questions`. A stopped or failed question is retried by asking again. A PR with no guide answers `not-found`: "This pull request has no guide yet." `stop_question` keeps the answer written so far, and `pin_answer` pins an answered question to its chapter in the guide, in prkit only. Both take the `questionId` from `read_pull_request_questions` and refuse an id from another PR.
+
 `list_open_pull_requests` continues to mean open **app tabs**. `list_repository_pull_requests` lists a repository's open PRs. `read_guide_revision` returns the guide and frozen settings; use the revision's `attemptId` from `list_guide_revisions` with `read_review_diff` for its exact saved diff. `read_fix_turn` returns the full per-comment/per-file report and script decision. Neither read starts an agent.
 
-The CLI uses one command map in `apps/server/src/cli/commands.ts`. Its parity check compares the map with all 60 tools exactly, and its flags come from the same parameter schemas. The public skill and CLI documentation are checked against that map too.
+The CLI uses one command map in `apps/server/src/cli/commands.ts`. Its parity check compares the map with all 64 tools exactly, and its flags come from the same parameter schemas. The public skill and CLI documentation are checked against that map too.
 
 Each tool is declared once with its level (`apps/server/src/mcp/outside/tools.ts`): `reads` or `startsWork` wraps the handler, and the server refuses to start when a handler's level differs from its tool's. A tool above the client's level is hidden from `tools/list` and unknown to `tools/call`, checked again on every call, so lowering the level takes effect at once. Other failures come back as tool errors with a code (`invalid`, `not-found`, `account-needed`, `not-allowed`, `not-ready`, `conflict`, `github`, `failed`) and a plain message.
 
@@ -155,7 +164,7 @@ Never offered: pushing, merging or any other pull request action, submitting a r
 
 One case reaches GitHub without a click, and it is the owner's own opt-in. In a repository with both "Resolve conflicts automatically" and "Push fixes automatically" on, the watcher resolves a conflicting PR it watches (an open tab, a watched guide or an active fix session) and pushes the result (`FixerWatcher`, `conflictTurn`). So `open_pull_request`, `generate_guide`, `send_to_fix_agent` or `resolve_conflicts` on such a PR can lead to that push, exactly as doing the same in the app does. Opening tabs or using `generate_guide` for several stack layers makes each of those PRs one the watcher may resolve and push, just as doing the same in the app does. The turn is the watcher's, not the client's, and there is no extra guard: the two settings are what the owner chose for that repository.
 
-`add_review_comment`, `send_to_fix_agent` and `ask_fix_agent_to_change` take a `clientRequestId`. A request is the tool, the client, the pull request and that id (`outside_requests`, kept a day): a retry gets the first answer, looked up before anything else, instead of doing it twice; the same id with other input answers `conflict`. Each key has its own lock, so one slow call holds back only its own retries.
+`add_review_comment`, `send_to_fix_agent`, `ask_fix_agent_to_change` and `ask_about_pull_request` take a `clientRequestId`. A request is the tool, the client, the pull request and that id (`outside_requests`, kept a day): a retry gets the first answer, looked up before anything else, instead of doing it twice; the same id with other input answers `conflict`. Each key has its own lock, so one slow call holds back only its own retries.
 
 ## Local changes
 
@@ -167,7 +176,7 @@ A PR is named by URL or by host, owner, repo and number, each held to GitHub's n
 
 ## What a client starts
 
-Calls from outside count as clicks, like the app's own: reads use the cache, and `refresh: true` on `list_inbox` or `read_pull_request` spends budget for a fresh read. The client's name is whatever it reports in `initialize` (the bridge passes it as `x-prkit-client`, with a random id per bridge for the connected-clients list): a label, not an identity. It is stored on the guide attempt or fix turn it starts (`started_by`), and the activity says "Started from Claude Code". A fix turn a client started never pushes by itself, even in a repository set to push automatically: it waits for Push in the app. A retry or a redo after the branch moved keeps the client's name, even when the owner clicks Retry, since it runs the client's request again. A change a client asks for (`ask_fix_agent_to_change`) makes the turn the client's too, even an owner's turn, and the activity says "Claude Code asked: …" (`startedByFor`, `pushesItself` in `fixers/turnRules.ts`). `open_pull_request` opens the tab and, unless `focus: false`, every window switches to it and the desktop app comes forward (`workspace.changes`). With `focus: false` the tab joins the end of the strip and the active PR stays, on the server too, so a relaunch shows the same PR.
+Calls from outside count as clicks, like the app's own: reads use the cache, and `refresh: true` on `list_inbox` or `read_pull_request` spends budget for a fresh read. The client's name is whatever it reports in `initialize` (the bridge passes it as `x-prkit-client`, with a random id per bridge for the connected-clients list): a label, not an identity. It is stored on the guide attempt or fix turn it starts (`started_by`), and the activity says "Started from Claude Code". A fix turn a client started never pushes by itself, even in a repository set to push automatically: it waits for Push in the app. A retry or a redo after the branch moved keeps the client's name, even when the owner clicks Retry, since it runs the client's request again. A change a client asks for (`ask_fix_agent_to_change`) makes the turn the client's too, even an owner's turn, and the activity says "Claude Code asked: …" (`startedByFor`, `pushesItself` in `fixers/turnRules.ts`). A question a client asks is stored with its name (`askedBy`). `open_pull_request` opens the tab and, unless `focus: false`, every window switches to it and the desktop app comes forward (`workspace.changes`). With `focus: false` the tab joins the end of the strip and the active PR stays, on the server too, so a relaunch shows the same PR.
 
 ## Discovery and tokens
 
@@ -183,4 +192,4 @@ The bridge reads the file only when it is a regular file of the current user's w
 
 ## Timeouts
 
-Guides and fixes take minutes. `wait_for` returns when the guide or fix settles, or after `timeoutSeconds` (50 by default, at most 600), under Codex's 60-second default tool timeout. For longer waits, raise the client's: `tool_timeout_sec` under `[mcp_servers.prkit]` in Codex's `config.toml`, or `MCP_TOOL_TIMEOUT` (milliseconds) for Claude Code.
+Guides, fixes and answers take minutes. `wait_for` returns when the guide or fix settles, when no question is being answered, or after `timeoutSeconds` (50 by default, at most 600), under Codex's 60-second default tool timeout. For longer waits, raise the client's: `tool_timeout_sec` under `[mcp_servers.prkit]` in Codex's `config.toml`, or `MCP_TOOL_TIMEOUT` (milliseconds) for Claude Code.

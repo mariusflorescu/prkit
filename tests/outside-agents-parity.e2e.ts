@@ -9,9 +9,12 @@ import { ResponseFragment } from "../apps/server/src/outside/responseSchemas.ts"
 import * as Results from "../apps/server/src/outside/paritySchemas.ts";
 import {
   AddedComment,
+  AskedQuestion,
   InboxListResult,
   OpenPullRequestsResult,
+  OutsideQuestion,
   PullRequestResult,
+  QuestionsResult,
   WaitResult,
 } from "../apps/server/src/outside/schemas.ts";
 import { repoRoot } from "../scripts/verify-run.ts";
@@ -221,6 +224,12 @@ test(
           edit: { _tag: "guidance", text: "Hidden", mode: "append" },
         }),
       ).toMatchObject({ rpcError: expect.stringContaining("not found") });
+      expect(await client.tools()).toContain("read_pull_request_questions");
+      for (const hidden of ["ask_about_pull_request", "stop_question", "pin_answer"])
+        expect(await client.tools()).not.toContain(hidden);
+      expect(
+        await client.call("ask_about_pull_request", { ...pr, question: "Hidden at Read only" }),
+      ).toMatchObject({ rpcError: expect.stringContaining("not found") });
       await screen.getByRole("radio", "Read and start work").tap();
       await expect(screen.getByText("Outside agents can read and start work")).toBeVisible();
       await expect
@@ -331,6 +340,149 @@ test(
         if (fragments > 100) throw new Error("Diff paging did not finish");
       }
       expect(fragments).toBeGreaterThan(1);
+
+      // Questions to the guide's agent: refused where they can't be answered, held mid-answer,
+      // refused while busy, stopped, asked again, paged and pinned.
+      const chapter = written.content.chapters[0];
+      if (chapter === undefined) throw new Error("The stand-in guide has no chapter");
+      await refusal("ask_about_pull_request", { ...ninth, question: "Anything?" }, "no guide yet");
+      await refusal("read_pull_request_questions", ninth, "no guide yet");
+      await refusal(
+        "ask_about_pull_request",
+        { ...pr, revision: 99, question: "Anything?" },
+        "no guide revision 99",
+      );
+      await refusal(
+        "ask_about_pull_request",
+        {
+          ...pr,
+          scope: {
+            _tag: "lines",
+            anchor: {
+              path: "missing.ts",
+              start: { side: "new", line: 1 },
+              end: { side: "new", line: 1 },
+            },
+          },
+          question: "Anything?",
+        },
+        "aren't inside one part",
+      );
+      await refusal(
+        "stop_question",
+        { ...pr, questionId: "missing" },
+        "isn't on this pull request",
+      );
+      claude.holdAnswers();
+      const ask = { ...pr, question: "Why do these files change?", clientRequestId: "parity-ask" };
+      const asked = Schema.decodeUnknownSync(AskedQuestion)(
+        await ok("ask_about_pull_request", ask),
+      );
+      expect(asked.revision).toBe(revision.revision);
+      expect(
+        Schema.decodeUnknownSync(AskedQuestion)(await ok("ask_about_pull_request", ask)),
+      ).toEqual(asked);
+      await refusal(
+        "ask_about_pull_request",
+        { ...ask, question: "Another question under the same id" },
+        "different request",
+      );
+      await refusal(
+        "ask_about_pull_request",
+        { ...pr, question: "Asked while the first is answered", clientRequestId: "parity-ask-2" },
+        "Wait for this answer",
+      );
+      const unfinished = Schema.decodeUnknownSync(WaitResult)(
+        await ok("wait_for", { ...pr, what: "question", timeoutSeconds: 1 }),
+      );
+      expect(unfinished.finished).toBe(false);
+      expect(unfinished.question?.id).toBe(asked.questionId);
+      await expect
+        .poll(
+          async () =>
+            Schema.decodeUnknownSync(QuestionsResult)(
+              await ok("read_pull_request_questions", pr),
+            ).items[0]?.answer.includes("The stand-in agent answers."),
+          { timeout: 60_000 },
+        )
+        .toBe(true);
+      const answering = Schema.decodeUnknownSync(QuestionsResult)(
+        await ok("read_pull_request_questions", pr),
+      ).items[0];
+      expect(answering?.state).toBe("answering");
+      expect(answering?.askedBy).toBe("parity client");
+      expect(typeof answering?.basis).toBe("string");
+      const stopped = Schema.decodeUnknownSync(OutsideQuestion)(
+        await ok("stop_question", { ...pr, questionId: asked.questionId }),
+      );
+      expect(stopped.state).toBe("stopped");
+      expect(stopped.answer).toContain("The stand-in agent answers.");
+      expect(
+        Schema.decodeUnknownSync(OutsideQuestion)(
+          await ok("stop_question", { ...pr, questionId: asked.questionId }),
+        ).state,
+      ).toBe("stopped");
+      expect(
+        Schema.decodeUnknownSync(WaitResult)(
+          await ok("wait_for", { ...pr, what: "question", timeoutSeconds: 5 }),
+        ),
+      ).toMatchObject({ finished: true, question: { id: asked.questionId, state: "stopped" } });
+      await refusal(
+        "pin_answer",
+        { ...pr, questionId: asked.questionId, pinned: true },
+        "Only an answered question can be pinned",
+      );
+      claude.releaseAnswers();
+      const again = Schema.decodeUnknownSync(AskedQuestion)(
+        await ok("ask_about_pull_request", {
+          ...pr,
+          scope: { _tag: "chapter", chapterId: chapter.id },
+          question: "Why do these files change?",
+          clientRequestId: "parity-ask-again",
+        }),
+      );
+      expect(again.questionId).not.toBe(asked.questionId);
+      const finished = Schema.decodeUnknownSync(WaitResult)(
+        await ok("wait_for", { ...pr, what: "question", timeoutSeconds: 50 }),
+      );
+      expect(finished).toMatchObject({
+        finished: true,
+        question: { id: again.questionId, state: "answered", pinned: false },
+      });
+      const firstPage = Schema.decodeUnknownSync(QuestionsResult)(
+        await ok("read_pull_request_questions", { ...pr, limit: 1 }),
+      );
+      expect(firstPage.total).toBe(2);
+      expect(firstPage.items.map((item) => item.id)).toEqual([asked.questionId]);
+      if (firstPage.nextCursor === null) throw new Error("Expected a second page of questions");
+      const secondPage = Schema.decodeUnknownSync(QuestionsResult)(
+        await ok("read_pull_request_questions", { ...pr, limit: 1, cursor: firstPage.nextCursor }),
+      );
+      const secondQuestion = secondPage.items[0];
+      expect(secondQuestion).toMatchObject({
+        id: again.questionId,
+        revision: revision.revision,
+        scope: { _tag: "chapter", chapterId: chapter.id },
+        state: "answered",
+        askedBy: "parity client",
+      });
+      expect(secondQuestion?.answer).toContain("The stand-in agent answers.");
+      expect(typeof secondQuestion?.basis).toBe("string");
+      expect(secondPage.nextCursor).toBe(null);
+      expect(
+        Schema.decodeUnknownSync(QuestionsResult)(
+          await ok("read_pull_request_questions", { ...pr, revision: revision.revision }),
+        ).total,
+      ).toBe(2);
+      const pinned = Schema.decodeUnknownSync(OutsideQuestion)(
+        await ok("pin_answer", { ...pr, questionId: again.questionId, pinned: true }),
+      );
+      expect(pinned.pinned).toBe(true);
+      expect(
+        Schema.decodeUnknownSync(OutsideQuestion)(
+          await ok("pin_answer", { ...pr, questionId: again.questionId, pinned: false }),
+        ).pinned,
+      ).toBe(false);
       await ok("stop_guide", pr);
       await ok("generate_guide", {
         ...pr,

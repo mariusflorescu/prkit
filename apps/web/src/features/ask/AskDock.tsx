@@ -1,0 +1,46 @@
+import { ReviewAlert } from "~/components/review/ReviewAlert";
+import { cn } from "~/lib/utils";
+
+import { AskComposer } from "./AskComposer";
+import { AskHistory } from "./AskHistory";
+import { isActive, stateWords } from "./askPresentation";
+import { useDock } from "./askStore";
+import type { AskTarget } from "./askTarget";
+import { useAskActions } from "./useAskActions";
+import { useAsks } from "./useAsks";
+
+/**
+ * Ask, held at the bottom of the Guide tab while the guide scrolls under it. Closed it is
+ * one row of fixed height, so the guide never moves when an answer arrives; open, the
+ * history takes a fixed share of the window above it.
+ */
+export function AskDock({ target }: { target: AskTarget }) {
+  const open = useDock(target.key, "open");
+  const { state, retry } = useAsks(target.reviewId);
+  const actions = useAskActions(target.reviewId);
+  const questions = state._tag === "ready" ? state.questions : [];
+  const newest = questions.at(-1);
+  return (
+    <section
+      aria-label="Ask about this pull request"
+      data-ask-dock={open ? "open" : "closed"}
+      className={cn(
+        "sticky bottom-0 z-10 flex shrink-0 flex-col border-t border-border bg-background",
+        open && "h-[45dvh] min-h-60",
+      )}
+    >
+      {open && state._tag === "ready" && state.problem !== null && (
+        <ReviewAlert
+          title="Couldn't keep your questions up to date"
+          message={state.problem}
+          retry={retry}
+        />
+      )}
+      {open && <AskHistory target={target} state={state} retry={retry} actions={actions} />}
+      <AskComposer target={target} open={open} busy={questions.some(isActive)} ask={actions.ask} />
+      <p className="sr-only" aria-live="polite">
+        {newest === undefined ? "" : stateWords(newest, { step: false })}
+      </p>
+    </section>
+  );
+}

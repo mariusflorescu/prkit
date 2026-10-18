@@ -21,6 +21,7 @@ import {
   CursorSdkInstallProgress,
 } from "./agent.ts";
 import { AgentInstanceConfig, AgentInstanceError, AgentInstanceId } from "./agentInstance.ts";
+import { AskError, AskInput, AskWatchEvent, Question, QuestionId } from "./ask.ts";
 import { DiffSnapshot } from "./diffSnapshot.ts";
 import { DIFF_TEXT_BATCH, DiffSource, DiffTexts, DiffTextsError } from "./diffTexts.ts";
 import {
@@ -53,6 +54,7 @@ import {
   LocalReviewKey,
   PullRequestKey,
   ReviewCommentId,
+  ReviewId,
   ReviewKey,
   ReviewSubject,
 } from "./ids.ts";
@@ -179,6 +181,11 @@ export const WS_METHODS = {
   localReviewsRetry: "localReviews.retry",
   localReviewsRemove: "localReviews.remove",
   localReviewsFileContents: "localReviews.fileContents",
+  asksWatch: "asks.watch",
+  asksAsk: "asks.ask",
+  asksStop: "asks.stop",
+  asksRetry: "asks.retry",
+  asksPin: "asks.pin",
   reviewCommentsList: "reviewComments.list",
   reviewCommentsAdd: "reviewComments.add",
   reviewCommentsAddFromNote: "reviewComments.addFromNote",
@@ -590,6 +597,30 @@ export const WsRpcGroup = RpcGroup.make(
     }),
     success: FileContents,
     error: Schema.Union([ReviewError, GuideNotFoundError]),
+  }),
+  // Questions about a guide, keyed by review (apps/server/src/asks/Asks.ts).
+  Rpc.make(WS_METHODS.asksWatch, {
+    payload: Schema.Struct({ reviewId: ReviewId }),
+    success: AskWatchEvent,
+    error: AskError,
+    stream: true,
+  }),
+  /** Returns at once with the stored question; its answer arrives on `asks.watch`. */
+  Rpc.make(WS_METHODS.asksAsk, { payload: AskInput, success: Question, error: AskError }),
+  Rpc.make(WS_METHODS.asksStop, {
+    payload: Schema.Struct({ questionId: QuestionId }),
+    success: Question,
+    error: AskError,
+  }),
+  Rpc.make(WS_METHODS.asksRetry, {
+    payload: Schema.Struct({ questionId: QuestionId }),
+    success: Question,
+    error: AskError,
+  }),
+  Rpc.make(WS_METHODS.asksPin, {
+    payload: Schema.Struct({ questionId: QuestionId, pinned: Schema.Boolean }),
+    success: Question,
+    error: AskError,
   }),
   Rpc.make(WS_METHODS.guideSettingsGet, {
     payload: Schema.Struct({}),

@@ -3,7 +3,7 @@ import type * as FileSystem from "effect/FileSystem";
 import type * as Path from "effect/Path";
 
 import { isShim } from "../executables.ts";
-import type { TurnInput } from "./AgentProvider.ts";
+import type { TurnSetup } from "./AgentProvider.ts";
 
 /**
  * The system's own directories, where commands, their libraries and the developer
@@ -90,7 +90,7 @@ const pathDirs = (path: Path.Path) =>
  * reads (docs/internals/architecture.md "Repository access"). Its paths come from the
  * `Checkout` prkit computed, never from the checkout's own `.git`.
  */
-export const commandReads = (fs: FileSystem.FileSystem, path: Path.Path, input: TurnInput) =>
+export const commandReads = (fs: FileSystem.FileSystem, path: Path.Path, input: TurnSetup) =>
   Effect.gen(function* () {
     const scripts = input.access._tag === "write" && input.access.scripts._tag === "allowed";
     const tools = scripts

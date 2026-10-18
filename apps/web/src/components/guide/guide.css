@@ -687,6 +687,9 @@ button[data-line-link] {
   font: 11px/1.5 var(--font-mono);
   overflow-wrap: anywhere;
 }
+[data-chapter-action] {
+  margin-top: 12px;
+}
 [data-chapter-diffs] {
   display: flex;
   min-width: 0;

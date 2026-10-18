@@ -23,10 +23,14 @@ import {
   AgentError,
   type AgentEvent,
   type AgentProvider,
+  type ForkTurnInput,
   type InstanceSetup,
   QUIET_TOOLS,
+  startOf,
   TOOL_LABELS,
   type TurnInput,
+  type TurnSetup,
+  type TurnStart,
 } from "./AgentProvider.ts";
 import {
   claudePermissions,
@@ -75,9 +79,22 @@ const oneLine = (text: string, max = 80) => {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 };
 
+/** The SDK's options for `start`. A fork reads the saved session and writes a new one, from any folder. */
+const sessionOptions = (start: TurnStart): Pick<Options, "resume" | "forkSession"> => {
+  switch (start._tag) {
+    case "new":
+      return {};
+    case "resume":
+      return { resume: start.id };
+    case "fork":
+      return { resume: start.from, forkSession: true };
+  }
+};
+
 /**
  * Whether Claude Code saved session `sessionId` for `cwd` under `configDir`
- * (`projects/<cwd's folder>/<id>.jsonl`): a resume only finds the sessions of its own folder.
+ * (`projects/<cwd's folder>/<id>.jsonl`). A session is saved under the folder it was made in,
+ * so `cwd` is that folder: a fork from another folder still finds it there.
  */
 export const sessionFile = Effect.fn("ClaudeAgent.sessionFile")(function* (
   configDir: string,
@@ -223,7 +240,7 @@ export const make = Effect.fn("ClaudeAgent.make")(function* (setup: InstanceSetu
       Effect.provideService(Path.Path, path),
     );
 
-  const runTurn = (input: TurnInput): Stream.Stream<AgentEvent, AgentError> =>
+  const turn = (input: TurnSetup, start: TurnStart): Stream.Stream<AgentEvent, AgentError> =>
     Stream.unwrap(
       Effect.gen(function* () {
         const claudePath = yield* binary;
@@ -313,7 +330,7 @@ export const make = Effect.fn("ClaudeAgent.make")(function* (setup: InstanceSetu
             },
           },
           includePartialMessages: true,
-          ...(input.resumeSessionId === null ? {} : { resume: input.resumeSessionId }),
+          ...sessionOptions(start),
           spawnClaudeCodeProcess: (spawn) => {
             // Its own process group, so stopping the turn also stops commands the agent started.
             const started = NodeChildProcess.spawn(spawn.command, spawn.args, {
@@ -329,7 +346,11 @@ export const make = Effect.fn("ClaudeAgent.make")(function* (setup: InstanceSetu
             });
             log(
               Effect.logInfo("Claude started").pipe(
-                Effect.annotateLogs({ pid: started.pid ?? null, cwd: input.cwd }),
+                Effect.annotateLogs({
+                  pid: started.pid ?? null,
+                  cwd: input.cwd,
+                  start: start._tag,
+                }),
               ),
             );
             return started;
@@ -426,10 +447,9 @@ export const make = Effect.fn("ClaudeAgent.make")(function* (setup: InstanceSetu
                   }),
                 );
               if (message.parent_tool_use_id !== null) return Effect.succeed([]);
+              // Its text already arrived as `text_delta` stream events.
               const events: Array<AgentEvent> = [];
-              for (const block of message.message.content) {
-                if (block.type === "text" && block.text.trim() !== "")
-                  events.push({ _tag: "text", text: block.text });
+              for (const block of message.message.content)
                 if (
                   block.type === "tool_use" &&
                   !QUIET_TOOLS.has(block.name.replace(MCP_PREFIX, ""))
@@ -439,7 +459,6 @@ export const make = Effect.fn("ClaudeAgent.make")(function* (setup: InstanceSetu
                     id: block.id,
                     ...describeTool(block.name, block.input),
                   });
-              }
               return Effect.succeed(events);
             }
             case "user": {
@@ -465,6 +484,10 @@ export const make = Effect.fn("ClaudeAgent.make")(function* (setup: InstanceSetu
                 guideCalls.set(event.index, event.content_block.id);
                 return Effect.succeed([{ _tag: "composing-guide" }]);
               }
+              if (event.type === "content_block_delta" && event.delta.type === "text_delta")
+                return Effect.succeed(
+                  event.delta.text === "" ? [] : [{ _tag: "text", delta: event.delta.text }],
+                );
               if (event.type === "content_block_delta" && event.delta.type === "input_json_delta") {
                 const id = guideCalls.get(event.index);
                 return Effect.succeed(
@@ -601,7 +624,8 @@ export const make = Effect.fn("ClaudeAgent.make")(function* (setup: InstanceSetu
     check,
     models,
     hasSession,
-    runTurn,
+    runTurn: (input: TurnInput) => turn(input, startOf(input)),
+    forkTurn: (input: ForkTurnInput) => turn(input, { _tag: "fork", from: input.forkFrom }),
     // Claude Code's login works from any folder, so prkit always uses the user's.
     ownLogin: null,
   } satisfies AgentProvider;

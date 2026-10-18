@@ -1,4 +1,4 @@
-import type { AttemptId, FixerId, FixerTurnId, ReviewId } from "@prkit/contracts";
+import type { AttemptId, FixerId, FixerTurnId, QuestionId, ReviewId } from "@prkit/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -6,10 +6,11 @@ import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 import { Base64Url, Hex } from "effect/encoding";
 
-/** Who an `/mcp` request speaks for: a guide attempt's turn, or a fix turn. */
+/** Who an `/mcp` request speaks for: a guide attempt's turn, a fix turn, or an answer to a question. */
 export type McpCaller =
   | { readonly _tag: "guide"; readonly attemptId: AttemptId; readonly reviewId: ReviewId }
-  | { readonly _tag: "fixer"; readonly turnId: FixerTurnId; readonly fixerId: FixerId };
+  | { readonly _tag: "fixer"; readonly turnId: FixerTurnId; readonly fixerId: FixerId }
+  | { readonly _tag: "ask"; readonly questionId: QuestionId; readonly reviewId: ReviewId };
 
 /**
  * Bearer tokens for `/mcp`, one per agent turn. Only their SHA-256 digests are kept,

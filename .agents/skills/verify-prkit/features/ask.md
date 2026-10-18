@@ -1,0 +1,49 @@
+# Ask about this PR
+
+At the bottom of the Guide tab, held in view while the guide scrolls under it, is the Ask dock: one row with what the question is about (`Whole PR`, `Chapter 1: Every change`, `src/limits.ts 2-3`), the question field and `Ask`. Asking opens the dock upward into the PR's questions, oldest first, in a scroll region of its own that takes 45% of the window. The review's agent answers in a fork of the guide's conversation (or of the answer before it), so its answer header says where it came from: "From the session that wrote this guide", "Continues your earlier question", or "New session: ..." with the reason. The answer streams in as markdown; `path:line` references to the guide's files are links that open the diff at that line. One question per PR is answered at a time: the field waits with "Wait for this answer or stop it to ask another." and the active card has Stop. Answers can be pinned to their chapter (or the overview for a whole-PR question), where they show above the chapter's diffs on the revision they were asked on. Questions and pins are stored by the server, so they come back after a relaunch.
+
+## Sub-features
+
+- `dock` is `region "Ask about this pull request"`: closed it is one row with `textbox "Your question"`, `button "Ask"` and `button "Show questions"`; focusing the field opens it, Escape closes it, `button "Hide questions"` collapses it. The history is `region "Your questions"`. The words typed stay when the Guide tab unmounts or the revision changes.
+- `scopes` are `Whole PR` by default; `button "Ask about this chapter"` under each chapter's narration; `button "Ask about these lines"` in the review-comment composer that a gutter click or drag opens, shown only on the Guide tab. A picked scope is a chip with `button "Ask about the whole PR instead"`. The field's placeholder follows the scope.
+- `cards` are `article "<question>"`: the scope chip, `Asked on r1` on another revision than the one shown (`Asked on r3, newer` on an older one), the question, then the answer: `<Agent> answered` with the basis, the text parts in order with each run of tool calls as one muted line, and one status line whose height is kept in every state: `Getting revision N's code ready`, `Waiting for a free agent. prkit runs two at a time and both are busy.`, the latest tool call or `Answering`, `Stopped`, or the server's failure message. Actions: Stop, Retry, `Pin to chapter` or `Pin to overview`, `Unpin`, Copy.
+- `links` turn `path:line` and `path:start-end`, in text or inline code, into links when the path is one of the revision's chapter files. A click switches to the question's revision if needed, opens its chapter and file, scrolls the line's gutter cell above the dock, highlights and focuses it. A line the diff doesn't show toasts `Line 42 of src/a.ts isn't in this diff.`
+- `pins` are `complementary "Pinned answer: <question>"` labelled `Pinned from Ask · Claude · r1`, cut to a few lines with `Show all` when long, with `Unpin`. Never inside a diff.
+- `states` are two skeleton cards while the first snapshot loads, `Ask the agent that wrote this guide. It already read the whole pull request.` when there are none, `Couldn't load your questions` with Retry when the first load fails, and `Couldn't keep your questions up to date` with Retry above the cards when the stream drops later. A refused ask shows the server's words under the field.
+
+## How to get to it (user POV)
+
+- Open a PR with a guide, choose `Guide`, and click the question field at the bottom.
+- Click `Ask about this chapter` under a chapter's narration.
+- Click or drag across line numbers in a chapter's diff, then `Ask about these lines` in the comment composer.
+
+## Driving it with e2e
+
+Preconditions:
+
+- `pnpm build` ran after the last change. `tests/ask.e2e.ts` starts its own instances on the fake GitHub (`tests/fakeGitHub.ts`) with the stand-in Claude (`tests/fakeClaude.ts`) and the local git fixture (`tests/outsideGit.ts`), so it needs no fixture repository, spends no subscription and needs no fixture lock.
+- The stand-in saves sessions only in a config folder under `.e2e/`. The journey launches with `CLAUDE_CONFIG_DIR=<fake home>/.claude`, or every answer reads `New session: the agent no longer has the guide's session`.
+- The stand-in answers a `<prkit-ask>` prompt in four chunks: `The stand-in agent answers.`, the `--resume` and `--fork-session` it got, the first changed line it cites (`src/change-0.ts:1`), and the refusal prkit gave its `submit_guide` call. `claude.holdAnswers()` holds after the first chunk until `claude.releaseAnswers()`, and `claude.failing(true)` makes it fail.
+
+- **Ask.** Tap `textbox "Your question"`, fill it, press Meta+Enter. `article "<question>"` reads `Claude answered`, `From the session that wrote this guide` and `prkit refused submit_guide: Questions have no prkit tools. Answer in your reply.` `claude.runs()` has a run with `resumed: true, forked: true`.
+- **Stream.** With `holdAnswers()`, the card shows the first chunk and `Answering`, the field is disabled with the busy placeholder.
+- **Link.** Tap `link "src/change-0.ts:1"`. The focused element, read through the diff's shadow root, is the `data-column-number="1"` cell of `src/change-0.ts`, and its box ends above `[data-ask-dock]`.
+- **Chapter.** `button "Ask about this chapter"` puts `Chapter 1: Every change` in the dock and focus in the field. The answer reads `Continues your earlier question`.
+- **Lines.** Hide the questions first, so the dock doesn't cover the diff. `dragTo` from `[data-path="src/limits.ts"] [data-column-number="2"][data-line-type="change-addition"]` to line 3, then `button "Ask about these lines"`: the comment composer goes and the chip reads `src/limits.ts 2-3`.
+- **Stop.** Hold, ask, tap `Stop` on the card: `Stopped`, the first chunk stays, the rest never comes. `sqlite3 -readonly <home>/prkit.sqlite "SELECT agent_pid FROM ask_questions"` names a process that is gone. Release, `Retry` answers in place.
+- **Fail.** `claude.failing(true)`, ask: the card shows `The stand-in agent was told to fail.` and Retry.
+- **Pin.** `Pin to chapter` on the chapter's card. `complementary "Pinned answer: <question>"` shows above the chapter's diffs and `pinned_at` is set.
+- **Relaunch.** `stopFakeInstance(name, { keepHome: true })` while the page is open shows `Couldn't keep your questions up to date`. Clear storage, start again, open the Guide tab: the pin is back, `Show questions` lists every question. `Unpin` removes it and clears `pinned_at`.
+- **New revision.** `fake.gitHead(9, git.commit(9, {...}))`: the watcher writes r2 and the earlier cards read `Asked on r1`. Their `link "src/change-0.ts:1"` switches `combobox "Guide revision"` back to `r1 · ` and focuses the line.
+- **Waiting.** `claude.hold()`, `Generate guide` on PRs 1 and 2 until each attempt has an `agent_pid`, then ask on PR 9: the card reads the waiting copy with Stop. `claude.release()` and it answers.
+- **Journey.** `pnpm e2e run tests/ask.e2e.ts` runs both journeys and copies its screenshots to `.e2e/evidence/ask/` (`01-dock-closed` to `25-waited-answered`, light and dark as `17-dock-*`, 900 px wide as `18-narrow`).
+- **Real agents.** `tests/ask-agents.e2e.ts` writes a real guide on the fixture PR, then asks at each scope, stops a walkthrough mid-answer, asks the agent to write `made-by-agent.txt`, pins, and relaunches. It passes only when the write was refused by prkit, not just declined in words: a `canUseTool ... decision: 'deny'` line (Claude) or a `Codex approval ... decision: 'decline'` line (Codex) in the instance's log, no such file in the Ask checkout or the review worktree, `reviews.session_id` unchanged, and for Claude the guide's session file with the same sha256 before and after. It writes to the fixture, so run it through the lock, one agent at a time: `/tmp/prkit-cos/with-fixture-lock.sh <branch> env PRKIT_E2E_AGENT=1 pnpm e2e run tests/ask-agents.e2e.ts --tag agent`, or `PRKIT_E2E_CODEX=1 ... --tag codex`. Frames and the evidence summary go to `.e2e/evidence/ask-agents/`.
+
+## Gotchas
+
+- e2e's `scrollIntoView` counts an element under the open dock as in view. To show a pin, hide the questions or scroll it to the top with `element.scrollIntoView({ block: "start" })`.
+- The dock is sticky inside the PR's scroll area, so a gutter drag or tap under it lands on the dock. Hide the questions before driving a diff near the bottom.
+- In the unified diff an old and a new line can share a number; pick cells by `data-line-type` too.
+- A freshly written revision's diffs draw a moment after the revision switcher changes; wait for a gutter cell before a screenshot.
+- Run the Ask journeys without `--output`: their screenshots are copied from `.e2e/results/`, and the helper refuses a frame it can't find there fresh.
+- The loading skeleton shows only until the first snapshot, which a local server sends at once; no journey catches it.

@@ -16,6 +16,7 @@ export function CommentForm({
   pending,
   onSubmit,
   onCancel,
+  aside,
 }: {
   label: string;
   submitLabel: string;
@@ -25,10 +26,13 @@ export function CommentForm({
   pending: boolean;
   onSubmit: (body: string) => void;
   onCancel: () => void;
+  /** Another way out, beside Cancel, told what has been typed so far. */
+  aside?: { label: string; onClick: (body: string) => void };
 }) {
   const {
     register,
     handleSubmit,
+    getValues,
     formState: { errors },
   } = useForm({ defaultValues: { body: defaultValue } });
   const send = handleSubmit(({ body }) => onSubmit(body.trim()));
@@ -89,6 +93,17 @@ export function CommentForm({
       )}
       <div className="flex items-center justify-end gap-2">
         <span className="mr-auto text-3xs text-muted-foreground">Cmd+Enter to send</span>
+        {aside !== undefined && (
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            onClick={() => aside.onClick(getValues("body"))}
+            disabled={pending}
+          >
+            {aside.label}
+          </Button>
+        )}
         <Button type="button" size="xs" variant="ghost" onClick={onCancel} disabled={pending}>
           Cancel
         </Button>

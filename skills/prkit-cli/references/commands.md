@@ -1,6 +1,6 @@
 # Command reference
 
-Read this when you need a less common read, a local tab or draft action, or the JSON shapes for guide settings. `prkit --help` and `prkit <command> --help` are the source of truth for the installed version's flags.
+Read this when you need a less common read, a local tab or draft action, a question's scope, or the JSON shapes for guide settings. `prkit --help` and `prkit <command> --help` are the source of truth for the installed version's flags.
 
 Every command accepts `--json`. `<pr>` means an HTTPS PR URL or `owner/repo#number`; add `--host` for an Enterprise short form and `--account host/login` when needed. Repository targets use `owner/repo` and accept the same host and account selection.
 
@@ -91,6 +91,28 @@ Scope reads accept `{"_tag":"repository","repositoryId":"<id>"}` or `{"_tag":"pu
 
 `prkit local guide` takes `--path` for another folder, `--branch <name>` for that branch's last commit alone, `--base <branch>` for the base, `--description` for the author's words, `--regenerate` to write the guide again with nothing changed, and `--agent`, `--model` and `--option` as guide generation does. Read, wait and stop name the review by `--key local:<16 hex>`, by `--path`, or by the working directory, with `--branch` for a branch-tip review. Without `--key` or `--path` every local command sends the working directory.
 
+## Questions about a guide
+
+| Command                                                                       | What it returns or changes                                                                                                                   |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prkit questions list <pr> --json`                                            | Paged questions, oldest first, with their state, answer, pin and the conversation that answered. `--revision` narrows to one guide revision. |
+| `prkit questions ask <pr> --question 'Why this default?' --request-id ask-42` | Asks the guide's agent and returns the question's id at once. Optional `--revision` (the latest accepted one by default) and `--scope`.      |
+| `prkit questions stop <pr> --question-id <question-id>`                       | Stops a question being answered; the text so far stays as its answer.                                                                        |
+| `prkit questions pin <pr> --question-id <question-id> --pinned`               | Pins an answered question to its chapter in the guide, in prkit only. `--no-pinned` unpins it.                                               |
+| `prkit wait <pr> --for question --timeout 600 --json`                         | Waits until none of the PR's questions is starting, waiting or answering, and returns the newest one.                                        |
+
+`--scope` takes one of three tagged JSON shapes. Without it the question is about the whole pull request:
+
+```sh
+prkit questions ask <pr> --scope '{"_tag":"pull-request"}' --question 'What is the riskiest change?'
+prkit questions ask <pr> --scope '{"_tag":"chapter","chapterId":"<chapter-id>"}' --question 'Why this order?'
+prkit questions ask <pr> --scope '{"_tag":"lines","anchor":{"path":"src/a.ts","start":{"side":"new","line":12},"end":{"side":"new","line":18}}}' --question 'What happens here?'
+```
+
+Chapter ids come from the guide's chapters in `prkit guide read <pr> --json`. A lines scope uses the same anchor as a draft comment's placement: `side` is `new` (the PR's version) or `old` (the base's), and the lines must be inside one part of the revision's diff. A PR without a guide has nothing to ask about.
+
+A question's `state` is `starting`, `waiting` (for a free agent), `answering`, `answered`, `stopped` or `failed`, and `message` says why it failed. The `answer` grows while it is written. Only one question per PR is answered at a time, so a second `ask` fails until the first ends or is stopped. Asking again retries a stopped or failed question. Take the `--question-id` from `questions list`.
+
 ## Comments and fixes
 
 | Command                                                                                                                         | What it returns or changes                                                                                                                           |
@@ -114,7 +136,7 @@ Scope reads accept `{"_tag":"repository","repositoryId":"<id>"}` or `{"_tag":"pu
 
 A move names lines the way an add does, as GitHub numbers them in the PR's diff now. `--head-sha` is the `headSha` that `prkit pr read <pr> --json` returned, the head those numbers are on. If the PR moved since, nothing is added or moved and the command fails with `conflict`. Read it again. prkit keeps the rows around them, so the draft follows its code when commits land. `comments list` reports where each draft sits now and whether it is outdated; read it and the PR files before moving a comment.
 
-Only comments add, fix send and fix change take `--request-id`. Reuse it after an uncertain response to avoid starting the same action twice. Other work commands aren't automatically replayed; read their current state before retrying. Fix commits started here wait for Push in the app.
+Only comments add, fix send, fix change and questions ask take `--request-id`. Reuse it after an uncertain response to avoid starting the same action twice. Other work commands aren't automatically replayed; read their current state before retrying. Fix commits started here wait for Push in the app.
 
 ## Reviewed files
 
@@ -144,4 +166,4 @@ Read `prkit pr reviewed <pr> --json` first for the paths and its `headSha`. If t
 | `prkit tabs focus <pr>`                                                                | Focuses an already open tab.                                                           |
 | `prkit tabs reorder --keys github.com/owner/repo#123 --keys github.com/owner/repo#124` | Saves the complete tab order; stale or incomplete lists fail. Read the tab list first. |
 
-All reads work at Read only, `prkit local read`, `wait` and `list` included. Local changes, guide/fix work, `prkit local guide` and `stop`, and PR settings saves require Read and start work, enforced by the server. There are no GitHub write commands. `prkit --version` and `prkit --completions zsh` also work offline.
+All reads work at Read only, `prkit local read`, `wait` and `list` included. Local changes, guide/fix work, questions, `prkit local guide` and `stop`, and PR settings saves require Read and start work, enforced by the server. There are no GitHub write commands. `prkit --version` and `prkit --completions zsh` also work offline.

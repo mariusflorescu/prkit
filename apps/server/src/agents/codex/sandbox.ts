@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect";
 import type * as FileSystem from "effect/FileSystem";
 import type * as Path from "effect/Path";
 
-import type { TurnInput } from "../AgentProvider.ts";
+import type { TurnSetup } from "../AgentProvider.ts";
 import { commandReads, openPath, ownFolder, realPaths } from "../commandReach.ts";
 
 /** The name prkit's sandbox has in the turn's Codex config. */
@@ -23,7 +23,7 @@ export const PROFILE = "prkit";
 export const codexSandbox = (
   fs: FileSystem.FileSystem,
   path: Path.Path,
-  input: TurnInput,
+  input: TurnSetup,
   executable: string,
 ) =>
   Effect.gen(function* () {

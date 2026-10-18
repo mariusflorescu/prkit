@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import type * as FileSystem from "effect/FileSystem";
 import type * as Path from "effect/Path";
 
-import type { TurnInput } from "./AgentProvider.ts";
+import type { TurnSetup } from "./AgentProvider.ts";
 import { commandReads, openPath, realPaths } from "./commandReach.ts";
 
 /**
@@ -77,7 +77,7 @@ export const claudeSandbox = (reach: ClaudeReach): SandboxSettings => ({
  * a PATH of only the folders it opens, and Xcode's developer folder. A guide's commands
  * are also judged by `canUseTool`; the sandbox holds them if that rule has a gap.
  */
-export const claudeTurnSandbox = (fs: FileSystem.FileSystem, path: Path.Path, input: TurnInput) =>
+export const claudeTurnSandbox = (fs: FileSystem.FileSystem, path: Path.Path, input: TurnSetup) =>
   Effect.gen(function* () {
     const tmpDir = input.access.tmpDir;
     const reads = yield* commandReads(fs, path, input);

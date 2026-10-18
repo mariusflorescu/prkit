@@ -134,6 +134,10 @@ const PrkitToolkit = Toolkit.make(
 const NO_CALLER = "This call carries no prkit attempt. End your turn.";
 const NOT_A_GUIDE =
   "This tool is for writing guides, not this turn. Use the tools the prompt names.";
+const NOT_FOR_ASK = "Questions have no prkit tools. Answer in your reply.";
+/** What a tool tells a caller it isn't for: an answer to a question may call none of them. */
+const refusal = (caller: McpCaller | null, otherwise: string) =>
+  caller?._tag === "ask" ? NOT_FOR_ASK : otherwise;
 
 const layerHandlers = PrkitToolkit.toLayer(
   Effect.gen(function* () {
@@ -145,7 +149,7 @@ const layerHandlers = PrkitToolkit.toLayer(
           const caller = yield* CurrentCaller;
           if (caller === null) return yield* new SubmitGuideRejected({ message: NO_CALLER });
           if (caller._tag !== "guide")
-            return yield* new SubmitGuideRejected({ message: NOT_A_GUIDE });
+            return yield* new SubmitGuideRejected({ message: refusal(caller, NOT_A_GUIDE) });
           return yield* reviews.submitGuide(caller.attemptId, guide);
         }),
       revise_guide: (patch) =>
@@ -153,47 +157,56 @@ const layerHandlers = PrkitToolkit.toLayer(
           const caller = yield* CurrentCaller;
           if (caller === null) return yield* new SubmitGuideRejected({ message: NO_CALLER });
           if (caller._tag !== "guide")
-            return yield* new SubmitGuideRejected({ message: NOT_A_GUIDE });
+            return yield* new SubmitGuideRejected({ message: refusal(caller, NOT_A_GUIDE) });
           return yield* reviews.reviseGuide(caller.attemptId, patch);
         }),
       submit_draft: (draft) =>
         Effect.gen(function* () {
           const caller = yield* CurrentCaller;
           if (caller === null) return yield* new ToolRejected({ message: NO_CALLER });
-          if (caller._tag !== "guide") return yield* new ToolRejected({ message: NOT_A_GUIDE });
+          if (caller._tag !== "guide")
+            return yield* new ToolRejected({ message: refusal(caller, NOT_A_GUIDE) });
           return yield* reviews.submitDraft(caller.attemptId, draft);
         }),
       note_file: ({ path, note }) =>
         Effect.gen(function* () {
           const caller = yield* CurrentCaller;
           if (caller === null) return yield* new ToolRejected({ message: NO_CALLER });
-          if (caller._tag !== "guide") return yield* new ToolRejected({ message: NOT_A_GUIDE });
+          if (caller._tag !== "guide")
+            return yield* new ToolRejected({ message: refusal(caller, NOT_A_GUIDE) });
           return yield* reviews.noteFile(caller.attemptId, path, note);
         }),
       report_progress: ({ message }) =>
         Effect.gen(function* () {
           const caller = yield* CurrentCaller;
           if (caller === null) return yield* new ToolRejected({ message: NO_CALLER });
-          if (caller._tag === "fixer")
-            return yield* fixers
-              .reportProgress(caller.turnId, message)
-              .pipe(
-                Effect.catchTag("FixToolRejected", (error) =>
-                  Effect.fail(new ToolRejected({ message: error.message })),
-                ),
-              );
-          return yield* reviews.reportProgress(caller.attemptId, message);
+          switch (caller._tag) {
+            case "fixer":
+              return yield* fixers
+                .reportProgress(caller.turnId, message)
+                .pipe(
+                  Effect.catchTag("FixToolRejected", (error) =>
+                    Effect.fail(new ToolRejected({ message: error.message })),
+                  ),
+                );
+            case "guide":
+              return yield* reviews.reportProgress(caller.attemptId, message);
+            case "ask":
+              return yield* new ToolRejected({ message: NOT_FOR_ASK });
+          }
         }),
       finish_fixes: (report) =>
         Effect.gen(function* () {
           const caller = yield* CurrentCaller;
-          if (caller?._tag !== "fixer") return yield* new FixToolRejected({ message: NO_CALLER });
+          if (caller?._tag !== "fixer")
+            return yield* new FixToolRejected({ message: refusal(caller, NO_CALLER) });
           return yield* fixers.finishFixes(caller.turnId, report);
         }),
       finish_conflicts: (report) =>
         Effect.gen(function* () {
           const caller = yield* CurrentCaller;
-          if (caller?._tag !== "fixer") return yield* new FixToolRejected({ message: NO_CALLER });
+          if (caller?._tag !== "fixer")
+            return yield* new FixToolRejected({ message: refusal(caller, NO_CALLER) });
           return yield* fixers.finishConflicts(caller.turnId, report);
         }),
     });
