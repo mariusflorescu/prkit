@@ -73,9 +73,11 @@ const normalizeChapterRisk = (
       continue;
     }
     if (!chapter.files.some((file) => file.path === reason.file)) {
-      report.errors.push(
-        `${where}: \`${reason.file}\` is not a file of this chapter. Its files: ${fileList(chapter)}.`,
-      );
+      // A chapter left with no files already has its own error; this one would only repeat it.
+      if (chapter.files.length > 0)
+        report.errors.push(
+          `${where}: \`${reason.file}\` is not a file of this chapter. Its files: ${fileList(chapter)}.`,
+        );
       continue;
     }
     if (reason.line !== undefined)

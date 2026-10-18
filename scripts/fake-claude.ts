@@ -203,6 +203,18 @@ const changedFiles = (prompt: string) => {
   });
 };
 
+/** The risk the stand-in's guide needs. A file under the reviewer's look-closely paths makes it at least medium. */
+const riskOf = (prompt: string) => {
+  const level = prompt.includes("- Look closely:") ? "medium" : "low";
+  return {
+    chapter: (paths: ReadonlyArray<string>) => ({
+      level,
+      reasons: [{ text: "The stand-in agent rates every change alike.", file: paths[0] ?? "" }],
+    }),
+    guide: { level, reasons: [{ text: "The stand-in agent read the first chapter.", chapter: 1 }] },
+  };
+};
+
 const finish = (error: string | null) => {
   write({
     type: "result",
@@ -362,6 +374,7 @@ const turn = async (prompt: string) => {
   if (prompt.includes("`finish_fixes`")) return fix(prompt);
   if (prompt.includes("`finish_conflicts`")) return resolve(prompt);
   const files = changedFiles(prompt);
+  const risk = riskOf(prompt);
   const notes = flagged("notes")
     ? Schema.decodeUnknownSync(Notes)(NodeFS.readFileSync(NodePath.join(control, "notes"), "utf8"))
     : {};
@@ -373,9 +386,15 @@ const turn = async (prompt: string) => {
     name: "submit_guide",
     arguments: {
       summary: "A guide written by the stand-in agent.",
-      chapters: flagged("split")
-        ? files.map((path) => ({ title: `Change in ${path}`, files: [entryOf(path)] }))
-        : [{ title: "Every change", files: files.map(entryOf) }],
+      chapters: (flagged("split")
+        ? files.map((path) => ({ title: `Change in ${path}`, paths: [path] }))
+        : [{ title: "Every change", paths: files }]
+      ).map(({ title, paths }) => ({
+        title,
+        files: paths.map(entryOf),
+        risk: risk.chapter(paths),
+      })),
+      risk: risk.guide,
       focusAreas: [...prompt.matchAll(/^- `([^`]+)` .+: .+$/gm)].map((match) => ({
         id: match[1] ?? "",
         verdict: "nothing-notable",
