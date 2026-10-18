@@ -3,7 +3,9 @@ import * as Schema from "effect/Schema";
 import { ThemePreference } from "./appearance.ts";
 
 /**
- * The single JSON line the server prints on stdout once it listens.
+ * The single JSON line the server prints on stdout once it serves, has written the discovery
+ * file and has tried to write the launchers that outside agents and the CLI read. By then,
+ * `/health` answers 200.
  * apps/desktop and scripts/dev-runner.ts parse it; all logs go to stderr.
  * `theme` is the stored appearance, so Electron can set it before the first window exists.
  */
