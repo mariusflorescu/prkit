@@ -21,7 +21,7 @@ The draft keeps a `note_key`, the note's file, side, diff row and words as `note
 
 A note is numbered by its revision's local diff, which can be for an older head than GitHub's. `reviewComments.addFromNote` takes where the note is and the user's words, never a placement. The server finds the note, reads GitHub's head and files as a submission does, and places it with `placeNote`. The note's row and up to three rows on each side, inside its hunk, must read the same at the note's own numbers, or else in exactly one place within one hunk, and the side stays the note's. Otherwise the add is refused. The rows around it count because a one-row snippet like `+}` can read the same at the same numbers on another line. The browser runs `placeNote` on the click, so a line that changed is refused before anyone types, but the server's run is the one stored, at GitHub's head, and the draft is an ordinary one from then on.
 
-While a note's composer is open, the Guide tab keeps that revision on screen, so a revision the watcher accepts meanwhile doesn't remount the diff and take the user's words. Once it closes, the tab follows the newest revision again.
+While a note's composer is open, the Guide tab keeps that revision on screen, so a revision the watcher accepts meanwhile doesn't remount the diff and take the user's words. Once it closes, the tab follows the newest revision again. Leaving the Guide tab closes a note's composer, because its words go with the tab and the hold would protect nothing.
 
 ## Finishing a review
 

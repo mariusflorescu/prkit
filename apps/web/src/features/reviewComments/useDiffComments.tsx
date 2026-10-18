@@ -7,8 +7,6 @@ import {
   diffRows,
   findSnippet,
   type LinePoint,
-  noteKey,
-  notePoint,
   type PendingComment,
   type PullRequestKey,
   rangeRows,
@@ -23,11 +21,9 @@ import { toastManager } from "~/components/ui/toast";
 import { movePendingComment } from "~/rpc/client";
 import { pendingCommentsQuery, reviewThreadsQuery } from "~/rpc/queries";
 import { CommentPin } from "./CommentPin";
-import { NoteCommentButton } from "./NoteCommentButton";
-import { NoteCommentStatus } from "./NoteCommentStatus";
+import { NoteCommentFooter } from "./NoteCommentFooter";
 import { OutdatedComments } from "./OutdatedComments";
 import { storePending } from "./reviewCommentsCache";
-import { COMMENTABLE } from "./reviewCommentPresentation";
 import { type NoteDraft, useReviewCommentsStore } from "./reviewCommentsStore";
 
 export type CommentScope = {
@@ -207,38 +203,21 @@ export function useDiffComments(
         noteFooter:
           guideRevision === null
             ? undefined
-            : (note, index) => {
-                if (!COMMENTABLE[note.tone]) return null;
-                const id = noteKey(file.path, rows, note);
-                const comment = id === null ? undefined : byNote.get(id);
-                if (comment === undefined)
-                  return (
-                    <NoteCommentButton
-                      pr={owner}
-                      path={file.path}
-                      rows={rows}
-                      revision={guideRevision}
-                      note={note}
-                      index={index}
-                      composing={
-                        visibleComposer?.note?.ref.path === file.path &&
-                        visibleComposer.note.ref.index === index
-                      }
-                    />
-                  );
-                const point = notePoint(note);
-                const { end } = comment.anchor;
-                return (
-                  <NoteCommentStatus
-                    comment={comment}
-                    underNote={
-                      end.side === point.side &&
-                      end.line === point.line &&
-                      anchorHolds(rows, comment.anchor, comment.snippet)
-                    }
-                  />
-                );
-              },
+            : (note, index) => (
+                <NoteCommentFooter
+                  pr={owner}
+                  path={file.path}
+                  rows={rows}
+                  revision={guideRevision}
+                  note={note}
+                  index={index}
+                  fromNotes={byNote}
+                  composing={
+                    visibleComposer?.note?.ref.path === file.path &&
+                    visibleComposer.note.ref.index === index
+                  }
+                />
+              ),
       };
     };
     const layers = new Map(files.map((file) => [file.path, build(file)]));

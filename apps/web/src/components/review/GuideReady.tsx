@@ -6,7 +6,7 @@ import type {
   RevisionSummary,
 } from "@prkit/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type { LoadContents } from "~/components/diff";
 import { GuideView } from "~/components/guide";
@@ -57,6 +57,14 @@ export function GuideReady({
     state.composer?.key === detail.key ? (state.composer.note?.ref.revision ?? null) : null,
   );
   const closeComposer = useReviewCommentsStore((state) => state.closeComposer);
+  // Leaving the guide takes a note's half-written words with it, so the hold goes too.
+  useEffect(
+    () => () => {
+      const { composer } = useReviewCommentsStore.getState();
+      if (composer?.key === detail.key && composer.note !== null) closeComposer();
+    },
+    [detail.key, closeComposer],
+  );
   const revision =
     revisions.find((entry) => entry.revision === picked) ??
     revisions.find((entry) => entry.revision === composingRevision) ??

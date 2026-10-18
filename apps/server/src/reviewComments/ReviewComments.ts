@@ -6,6 +6,7 @@ import {
   FileSide,
   type GuideRevision,
   NoteKey,
+  NOTE_LOST,
   type NoteRef,
   noteKey,
   notePoint,
@@ -74,11 +75,6 @@ const EVENTS = {
   "request-changes": { request: "REQUEST_CHANGES", state: "CHANGES_REQUESTED" },
 } as const satisfies Record<ReviewEvent, { request: string; state: string }>;
 const GITHUB_SIDE = { old: "LEFT", new: "RIGHT" } as const;
-const LOST = {
-  file: "GitHub shows no diff for this file now, so prkit can't place a comment on it.",
-  lines:
-    "This line changed after the guide was written, and prkit won't guess where the comment goes. Comment on the latest code in Files.",
-} as const;
 /** How far before a submission started GitHub's clock may put the review it created. */
 const CLOCK_SKEW_MS = 10 * 60_000;
 
@@ -312,7 +308,10 @@ export const make = Effect.gen(function* () {
           writtenRows: found.rows,
           files: yield* pullRequests.files(key, accountId),
         });
-        if (placed._tag === "lost") return yield* fail(LOST[placed.reason]);
+        if (placed._tag === "lost") {
+          const { title, description } = NOTE_LOST[placed.reason];
+          return yield* fail(`${title}. ${description}`);
+        }
         yield* insert(key, accountId, placed.placement, body, note);
         return yield* read(key, accountId);
       }).pipe(

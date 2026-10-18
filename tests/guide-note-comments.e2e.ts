@@ -298,6 +298,32 @@ test(
         .tap();
       await expect(slug.getByRole("button", "Add as comment, question on line 3")).toBeVisible();
       expect(draftRows(run.home)).toEqual([]);
+
+      const tabs = screen.getByRole("navigation", "Pull request tabs");
+      await slug.getByRole("button", "Add as comment, question on line 3").tap();
+      await field.fill("Words left behind with the Guide tab");
+      await tabs.getByRole("link", "Files").tap();
+      await tabs.getByRole("link", "Guide").tap();
+      await slug.scrollIntoView({ timeout: 30_000 });
+      await expect(field).toBeHidden();
+      await expect(slug.getByRole("button", "Add as comment, question on line 3")).toBeEnabled();
+
+      await slug.getByRole("button", "Add as comment, question on line 3").tap();
+      await field.fill("Words the server refuses");
+      const pushed = git.commit(9, {
+        [LIMITS]:
+          'export const limits = {\n  url: 2048,\n  slug: 80,\n  title: 120,\n};\n\nexport const schemes = ["http", "https"];\n',
+      });
+      await fake.files(9, [servedLimits(git.patch(9, LIMITS))]);
+      await fake.gitHead(9, pushed);
+      await screen.getByRole("button", "Add review comment").tap();
+      await expect(
+        screen.getByText(
+          "This line changed after the guide was written. prkit won't guess where the comment goes. Comment on the latest code in Files.",
+        ),
+      ).toBeVisible({ timeout: 30_000 });
+      await expect(field).toHaveValue("Words the server refuses");
+      expect(draftRows(run.home)).toEqual([]);
       expect(await fake.writes()).toEqual([]);
     } finally {
       await other.close();
@@ -371,9 +397,7 @@ test(
       await generated.scrollIntoView();
       await generated.getByRole("button", "Add as comment, question on line 1").tap();
       await expect(
-        screen.getByText(
-          "GitHub shows no diff for this file now, so prkit can't place a comment on it.",
-        ),
+        screen.getByText("prkit can only place a comment on a line GitHub shows in the diff."),
       ).toBeVisible();
       expect(draftRows(run.home)).toHaveLength(2);
 

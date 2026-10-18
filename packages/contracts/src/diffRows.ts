@@ -117,10 +117,22 @@ export const noteKey = (
 /** Rows on each side of a note's row that must read the same for the note to land. */
 const CONTEXT_ROWS = 3;
 
+/** Why a note can't land in GitHub's diff now, as the user reads it. */
+export const NOTE_LOST = {
+  file: {
+    title: "GitHub shows no diff for this file now",
+    description: "prkit can only place a comment on a line GitHub shows in the diff.",
+  },
+  lines: {
+    title: "This line changed after the guide was written",
+    description: "prkit won't guess where the comment goes. Comment on the latest code in Files.",
+  },
+} as const;
+
 export type NotePlacement =
   | { _tag: "placed"; placement: CommentPlacement; moved: boolean }
   /** `file`: GitHub shows no text diff for it now. `lines`: its code changed, or reads the same in two places. */
-  | { _tag: "lost"; reason: "file" | "lines" };
+  | { _tag: "lost"; reason: keyof typeof NOTE_LOST };
 
 /**
  * Where a note written on one diff goes in GitHub's diff now, or why it can't go anywhere.

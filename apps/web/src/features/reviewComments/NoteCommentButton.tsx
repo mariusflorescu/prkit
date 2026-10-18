@@ -1,6 +1,7 @@
 import {
   type AccountId,
   type DiffRow,
+  NOTE_LOST,
   notePoint,
   placeNote,
   type PullRequestKey,
@@ -14,11 +15,6 @@ import { toastManager } from "~/components/ui/toast";
 import { getPullRequestFiles } from "~/rpc/client";
 import { rangeLabel } from "./reviewCommentPresentation";
 import { useReviewCommentsStore } from "./reviewCommentsStore";
-
-const LOST = {
-  file: "GitHub shows no diff for this file now, so prkit can't place a comment on it.",
-  lines: "prkit won't guess where the comment goes. Comment on the latest code in Files.",
-} as const;
 
 /**
  * Opens the composer under a question or risk note, holding the note's words. The click
@@ -51,11 +47,7 @@ export function NoteCommentButton({
     onSuccess: (files) => {
       const placed = placeNote({ path, point, writtenRows: rows, files });
       if (placed._tag === "lost")
-        toastManager.add({
-          type: "warning",
-          title: "This line changed after the guide was written",
-          description: LOST[placed.reason],
-        });
+        toastManager.add({ type: "warning", ...NOTE_LOST[placed.reason] });
       else
         compose({
           key: pr.key,
