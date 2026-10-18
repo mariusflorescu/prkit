@@ -47,6 +47,8 @@ const checkedAt = row(
 
 /** The fake GitHub with PR 9 seeded, its git behind it and an instance that runs `claude`. */
 const bringUp = async (name: string, claude: string, seeded: Parameters<typeof seed>[0] = {}) => {
+  // An instance's log outlives it and later runs append to it: the journeys read only their own.
+  NodeFS.rmSync(NodePath.join(repoRoot, ".e2e", "logs", `${name}.log`), { force: true });
   const fake = await startFakeGitHub(name);
   const git = await cliFixture(fake, FILES);
   await fake.context(9, seed(seeded));
@@ -336,11 +338,13 @@ describe("a real Claude guide on the fake GitHub", { tags: ["agent"] }, () => {
           .poll(
             () => {
               keepContext(run.home, NodePath.join(EVIDENCE, "context-r1.json"));
-              return reviewState(run.home);
+              const state = reviewState(run.home)[0]?.state;
+              return state === "watching" || state === "failed" ? state : "running";
             },
             { timeout: 600_000, interval: 500 },
           )
-          .toEqual([{ revision: 1, state: "watching" }]);
+          .not.toBe("running");
+        expect(reviewState(run.home)).toEqual([{ revision: 1, state: "watching" }]);
 
         const stored = readRows(
           run.home,
