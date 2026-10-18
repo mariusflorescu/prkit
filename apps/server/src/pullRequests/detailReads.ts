@@ -1,5 +1,6 @@
 import {
   type AccountId,
+  BlobId,
   type Freshness,
   FileContents,
   type FileSide,
@@ -109,6 +110,7 @@ const RawFile = Schema.Struct({
   additions: Schema.Int,
   deletions: Schema.Int,
   patch: Schema.optionalKey(Schema.String),
+  sha: Schema.optionalKey(Schema.String),
 });
 const toAuthor = (user: typeof User.Type | null) =>
   user === null ? null : { login: user.login, avatarUrl: user.avatar_url };
@@ -570,6 +572,9 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
             : file.additions + file.deletions === 0
               ? { _tag: "binary" as const }
               : { _tag: "too-large" as const, lines: file.additions + file.deletions },
+      ...(file.status === "removed" || file.sha === undefined || file.sha === ""
+        ? {}
+        : { blob: BlobId.make(file.sha) }),
     })),
   });
   /**

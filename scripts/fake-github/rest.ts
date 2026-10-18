@@ -5,6 +5,7 @@ import { seededCheckRuns, seeds } from "./context.ts";
 import {
   BASE,
   encodeJson,
+  fileChanges,
   head,
   headRef,
   iso,
@@ -26,6 +27,7 @@ const user = { login: LOGIN, avatar_url: "" };
 /** PR 9's one file: a hunk with context, a deletion and two additions. */
 const LIMITS_FILE = {
   filename: "src/limits.ts",
+  sha: sha("9-limits"),
   status: "modified",
   additions: 2,
   deletions: 1,
@@ -143,13 +145,21 @@ export const rest = (
             : (servedFiles.get(pull.number) ??
               (pull.number === 9
                 ? [LIMITS_FILE]
-                : pull.heads.map((commit, index) => ({
-                    filename: `src/change-${index}.ts`,
-                    status: "added",
-                    additions: 1,
-                    deletions: 0,
-                    patch: `@@ -0,0 +1 @@\n+export const change${index} = "${commit.message}";`,
-                  })))),
+                : pull.heads.map((commit, index) => {
+                    const { edits, shifts } = fileChanges.get(`${pull.number}:${index}`) ?? {
+                      edits: 0,
+                      shifts: 0,
+                    };
+                    const line = `export const change${index} = "${commit.message}${edits === 0 ? "" : ` (edit ${edits})`}";`;
+                    return {
+                      filename: `src/change-${index}.ts`,
+                      sha: sha(`${pull.number}:${index}:${line}:${shifts}`),
+                      status: "added",
+                      additions: 1,
+                      deletions: 0,
+                      patch: `@@ -0,0 +${1 + shifts} @@\n+${line}`,
+                    };
+                  }))),
       };
     if (tail === "reviews" && method === "POST") {
       const input = decodeBody(text || "{}");

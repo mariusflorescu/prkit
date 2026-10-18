@@ -32,6 +32,7 @@ import {
   getPullRequestTimeline,
   getFileContents,
   getReview,
+  getReviewedFiles,
   getWorkspace,
   listAccounts,
   listInbox,
@@ -115,6 +116,14 @@ export const pullRequestDetailQuery = (key: PullRequestKey, accountId: AccountId
     queryFn: () => getPullRequestDetail(key, accountId),
     staleTime: Infinity,
     gcTime: Infinity,
+    retry: false,
+  });
+/** Every reviewed-files decision on the PR as `accountId` reads it; `useReviewedFilesChanges` refetches it. */
+export const reviewedFilesQuery = (key: PullRequestKey, accountId: AccountId) =>
+  queryOptions({
+    queryKey: ["reviewedFiles", accountId, key],
+    queryFn: () => getReviewedFiles(key, accountId),
+    staleTime: Infinity,
     retry: false,
   });
 /** The PR's stack, bottom to top, or null; refetched on the server's `stack` events. */

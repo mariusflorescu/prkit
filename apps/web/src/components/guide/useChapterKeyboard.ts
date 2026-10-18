@@ -1,5 +1,7 @@
 import { useEffect, type RefObject } from "react";
 
+import { readingLine } from "~/components/diff/readingLine";
+
 export function useChapterKeyboard(
   viewportRef: RefObject<HTMLDivElement | null>,
   onChapter: (id: string) => void,
@@ -27,7 +29,10 @@ export function useChapterKeyboard(
           !viewport.contains(event.target))
       )
         return;
-      const top = viewport.getBoundingClientRect().top + 16;
+      const line = readingLine(viewport);
+      if (line === null) return;
+      // A chapter scrolled to sits its scroll margin below the reading line.
+      const top = line.top + 16;
       const chapters = Array.from(viewport.querySelectorAll<HTMLElement>("[data-guide-chapter]"));
       const target =
         event.key === "j"

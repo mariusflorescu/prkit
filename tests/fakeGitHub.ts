@@ -114,6 +114,10 @@ export const startFakeGitHub = async (
         patch: string;
       }>,
     ) => fetch(`${url}/__fake/files?pr=${pr}`, { method: "POST", body: JSON.stringify(files) }),
+    /** A push that also rewrites `src/change-<file>.ts`: new text, new sha. Every other file stays. */
+    pushEdit: (pr: number, file: number) => post(`push?pr=${pr}&edit=${file}`),
+    /** A push that moves only `src/change-<file>.ts`'s hunk to other lines, like a merged base: same text, new sha. */
+    pushShift: (pr: number, file: number) => post(`push?pr=${pr}&shift=${file}`),
     conflict: (pr: number) => post(`conflict?pr=${pr}`),
     checking: (pr: number) => post(`checking?pr=${pr}`),
     require: (pr: number) => post(`require?pr=${pr}`),

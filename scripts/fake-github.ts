@@ -37,6 +37,10 @@
  *   POST reset-stats
  *   POST comment?pr=<n>                 a new issue comment (bumps updatedAt)
  *   POST push?pr=<n>                    a new head commit (bumps updatedAt)
+ *   POST push?pr=<n>&edit=<i>           a new head commit that also rewrites src/change-<i>.ts
+ *                                       (new text, new sha); every other file keeps both
+ *   POST push?pr=<n>&shift=<i>          a new head commit that moves only src/change-<i>.ts's hunk
+ *                                       to other line numbers (same text, new sha), like a merged base
  *   POST git-head?pr=<n>&sha=<sha>      a local commit is its one head (bumps updatedAt)
  *   POST files?pr=<n>                   its files answer from then on: the JSON list of files in the body
  *   POST checks?pr=<n>&status=<s>       check run status: queued, in_progress or completed
@@ -69,6 +73,7 @@ import { graphql } from "./fake-github/graphql.ts";
 import {
   archived,
   encodeJson,
+  fileChanges,
   head,
   iso,
   LOGIN,
@@ -209,6 +214,33 @@ const control = (url: URL, method: string, text: string, response: NodeHttp.Serv
     return answer({ ok: true, resource, remaining: remaining(resource) });
   }
   if (name === "push" && pull !== undefined) {
+    const edit = url.searchParams.get("edit");
+    const shift = url.searchParams.get("shift");
+    const which = edit ?? shift;
+    if (which !== null) {
+      const index = Number(which);
+      if (
+        (edit !== null && shift !== null) ||
+        pull.number === 9 ||
+        !Number.isInteger(index) ||
+        index < 0 ||
+        index >= pull.heads.length
+      ) {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(
+          encodeJson({ message: "Use edit or shift once, with the index of a file the PR has." }),
+        );
+        return;
+      }
+      const key = `${pull.number}:${index}`;
+      const changed = fileChanges.get(key) ?? { edits: 0, shifts: 0 };
+      fileChanges.set(
+        key,
+        edit === null
+          ? { ...changed, shifts: changed.shifts + 1 }
+          : { ...changed, edits: changed.edits + 1 },
+      );
+    }
     const commit = {
       sha: sha(`${pull.number}-${pull.heads.length}`),
       at: Date.now(),

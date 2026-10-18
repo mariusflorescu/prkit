@@ -299,6 +299,8 @@ test(
       await expect(line("Comment on line 1")).toBeVisible({ timeout: 30_000 });
       await file.getByRole("button", "src/limits.ts").focus();
       await browser.keyboard.press("Tab");
+      await expect(file.getByRole("checkbox", "Reviewed src/limits.ts")).toBeFocused();
+      await browser.keyboard.press("Tab");
       await expect(line("Comment on line 1")).toBeFocused();
       expect(
         await browser.evaluate(() => {
@@ -338,6 +340,8 @@ test(
       await screen.getByRole("button", "Split").tap();
       await expect(line("Comment on old line 1")).toBeVisible();
       await file.getByRole("button", "src/limits.ts").focus();
+      await browser.keyboard.press("Tab");
+      await expect(file.getByRole("checkbox", "Reviewed src/limits.ts")).toBeFocused();
       await browser.keyboard.press("Tab");
       await expect(line("Comment on old line 1")).toBeFocused();
       await browser.keyboard.press("ArrowDown");

@@ -44,7 +44,7 @@ Repository commands take `owner/repo`; inbox filters use `--repo owner/repo`. Ac
 
 Anything that writes to GitHub stays a click in the app: pushing, merging, posting or resolving comments and reviews, reviewers, labels, closing a PR. So do account and agent setup, Global or Repository settings changes, and discarding or reverting fix work. This is on purpose: an agent reading PR content can be steered by it, so nothing it says can reach GitHub without the user seeing it first. A repository where the user enabled both automatic conflict resolution and automatic push is an existing exception: prkit's watcher can resolve and push conflicts on watched PRs.
 
-Reading settings is allowed. At Read and start work you can also open, close, focus or reorder local tabs, save the app's inbox filters, edit or move local draft comments, and save PR-scope guide settings. These stay on the machine. Closing a tab doesn't close the PR on GitHub.
+Reading settings is allowed. At Read and start work you can also open, close, focus or reorder local tabs, save the app's inbox filters, edit or move local draft comments, mark files reviewed, and save PR-scope guide settings. These stay on the machine. Closing a tab doesn't close the PR on GitHub.
 
 When the user asks for an excluded action, tell them it's waiting for them in prkit (and open the PR there with `prkit pr open <pr>` if that helps). Only do it another way, such as with `gh`, if the user explicitly asks you to.
 
@@ -72,7 +72,7 @@ prkit pr threads <pr> --json
 prkit pr checks <pr> --json
 ```
 
-`prkit pr files <pr>` gives the current PR's changed files and patches. Read old or new file contents when the patch isn't enough. To explain an accepted guide's exact snapshot, get its attempt id from `prkit guide revisions <pr> --json`, then use `prkit pr diff <pr> --attempt-id <attempt-id> --json`. Don't assume today's diff is the one the guide reviewed.
+`prkit pr files <pr>` gives the current PR's changed files and patches. `prkit pr reviewed <pr> --json` says which of those files the user already marked reviewed in prkit (`changed` means the file changed after they reviewed it, so it needs another look), so you can start with what they haven't seen. Mark files reviewed with `prkit pr reviewed set <pr> --head-sha <headSha> --paths <path>`, passing the `headSha` that read returned, only when the user asks: a mark is their judgment that they read the change. Read old or new file contents when the patch isn't enough. To explain an accepted guide's exact snapshot, get its attempt id from `prkit guide revisions <pr> --json`, then use `prkit pr diff <pr> --attempt-id <attempt-id> --json`. Don't assume today's diff is the one the guide reviewed.
 
 ### Write a guide and report back
 

@@ -2,9 +2,10 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { GuideNote } from "~/components/diff/GuideNote";
 import { InlineMarkdown } from "~/components/diff/InlineMarkdown";
+import { ReviewedToggle } from "~/components/diff/ReviewedToggle";
 
 import { KindTag } from "./KindTag";
-import type { GuideChapter } from "./types";
+import type { ChapterReviewedControl, GuideChapter } from "./types";
 import { useStickyNarration } from "./useStickyNarration";
 import { keyedItems } from "./keyedItems";
 
@@ -16,6 +17,7 @@ export function ChapterNarration({
   onToggle,
   onFile,
   prUrl,
+  review,
 }: {
   chapter: GuideChapter;
   index: number;
@@ -25,6 +27,7 @@ export function ChapterNarration({
   onToggle: () => void;
   onFile: (path: string) => void;
   prUrl?: string | undefined;
+  review: ChapterReviewedControl | null;
 }) {
   const ref = useStickyNarration();
   return (
@@ -42,6 +45,16 @@ export function ChapterNarration({
             {total === null ? null : ` / ${String(total).padStart(2, "0")}`}
           </span>
           <KindTag kind={chapter.kind} />
+          {review !== null && (
+            <span className="ml-auto font-sans">
+              <ReviewedToggle
+                name={`chapter ${chapter.title}`}
+                state={review.review.state}
+                title={`${review.review.progress.reviewed} of ${review.review.progress.total} files reviewed`}
+                onChange={review.onChange}
+              />
+            </span>
+          )}
         </div>
         {open && (
           <>

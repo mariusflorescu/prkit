@@ -1,4 +1,5 @@
 import type { DiffFile, DiffSnapshot } from "./diffSnapshot.ts";
+import { fnv1a64 } from "./textHash.ts";
 import type {
   EffectiveFocusArea,
   EffectiveGuidance,
@@ -63,23 +64,13 @@ const handleOf = (label: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "area";
 
-/** FNV-1a, 64 bits: a stable fingerprint for "did the settings change", not a secret. */
-const fingerprint = (text: string) => {
-  let hash = 0xcbf29ce484222325n;
-  for (const byte of new TextEncoder().encode(text)) {
-    hash ^= BigInt(byte);
-    hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
-  }
-  return hash.toString(16).padStart(16, "0");
-};
-
 /** Only what reaches the guide counts: items switched off and dropped guidance don't. */
 const hashOf = (
   ignore: ReadonlyArray<EffectiveIgnoreRule>,
   focusAreas: ReadonlyArray<EffectiveFocusArea>,
   guidance: ReadonlyArray<EffectiveGuidance>,
 ) =>
-  fingerprint(
+  fnv1a64(
     JSON.stringify([
       ignore.filter((rule) => rule.active).map((rule) => rule.pattern),
       focusAreas

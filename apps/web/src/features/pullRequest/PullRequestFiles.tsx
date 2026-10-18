@@ -10,10 +10,13 @@ import {
   FileTree,
   type LoadContents,
 } from "~/components/diff";
+import { useReviewedKey } from "~/components/diff/useReviewedKey";
 import { Skeleton } from "~/components/ui/skeleton";
 import { TabActions } from "~/components/TabActions";
 import { ToolbarIconButton } from "~/components/ToolbarIconButton";
 import { ListError } from "~/components/ListError";
+import { ReviewedCount } from "~/features/reviewedFiles/ReviewedCount";
+import { useReviewedFiles, versionOf } from "~/features/reviewedFiles/useReviewedFiles";
 import { ReviewCommentsAlerts } from "~/features/reviewComments/ReviewCommentsAlerts";
 import { useDiffComments } from "~/features/reviewComments/useDiffComments";
 import {
@@ -61,6 +64,9 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
   // Drafts and threads load with the files, so comments never push the diff down later.
   const pending = useQuery(pendingCommentsQuery(detail.key, detail.accountId));
   const threads = useQuery(reviewThreadsQuery(detail.key, detail.accountId));
+  // Marks load with the files too, so a reviewed file never opens and then folds.
+  const reviewed = useReviewedFiles(detail.key, detail.accountId);
+  useReviewedKey(root, reviewed.status === "ready" ? "[data-file-diff-card]" : null);
   const commentsFor = useDiffComments(detail, files, {
     commitSha: query.data?.headSha ?? detail.headSha,
     threads: true,
@@ -72,7 +78,7 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
     if (viewport && query.isSuccess)
       viewport.scrollTop = readViewMemory(detail.key)?.scroll.files ?? 0;
   }, [detail.key, query.isSuccess]);
-  if (query.isPending || pending.isPending || threads.isPending)
+  if (query.isPending || pending.isPending || threads.isPending || reviewed.status === "pending")
     return (
       <div aria-busy="true" aria-label="Loading files" className="space-y-4 p-4">
         <Skeleton className="h-7 w-64" />
@@ -132,6 +138,7 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
   return (
     <div data-pr-files="" className="flex min-h-0 flex-col" ref={root}>
       <TabActions>
+        <ReviewedCount reviewed={reviewed} files={files} />
         <DiffControls />
         <ToolbarIconButton
           label={showTree ? "Hide file tree" : "Show file tree"}
@@ -167,12 +174,22 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
             <DiffWorkerPoolProvider>
               {files.map((file, index) => (
                 <FileDiffCard
-                  key={`${snapshot.baseSha}:${file.path}`}
+                  // A new version of a file is a new card, so a file reviewed before a push
+                  // opens as changed; one whose hunks only moved keeps how the user left it.
+                  key={`${snapshot.baseSha}:${file.path}:${versionOf(file)?.hunks ?? versionOf(file)?.end ?? ""}`}
                   file={file}
                   id={`pr-file-${index}`}
                   loadContents={loadContents}
                   prUrl={detail.url}
                   comments={commentsFor(file)}
+                  reviewed={
+                    reviewed.status === "ready"
+                      ? {
+                          state: reviewed.stateOf(file),
+                          onChange: (next) => reviewed.set([file], next),
+                        }
+                      : undefined
+                  }
                 />
               ))}
             </DiffWorkerPoolProvider>

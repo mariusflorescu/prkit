@@ -73,6 +73,12 @@ import {
   ReviewThreads,
 } from "./reviewComments.ts";
 import { AppearanceSettings, AppearanceSettingsError, ThemePreference } from "./appearance.ts";
+import {
+  ReviewedDecision,
+  ReviewedFilesChange,
+  ReviewedFilesError,
+  ReviewedMarks,
+} from "./reviewedFiles.ts";
 import { PullRequestStack, StackGuidesResult } from "./stack.ts";
 import {
   InboxFilters,
@@ -129,6 +135,9 @@ export const WS_METHODS = {
   workspaceReorder: "workspace.reorder",
   workspaceSaveInboxFilters: "workspace.saveInboxFilters",
   workspaceChanges: "workspace.changes",
+  reviewedFilesGet: "reviewedFiles.get",
+  reviewedFilesSet: "reviewedFiles.set",
+  reviewedFilesChanges: "reviewedFiles.changes",
   reviewsGet: "reviews.get",
   reviewsGenerate: "reviews.generate",
   reviewsGenerateStack: "reviews.generateStack",
@@ -349,6 +358,27 @@ export const WsRpcGroup = RpcGroup.make(
   Rpc.make(WS_METHODS.workspaceChanges, {
     payload: Schema.Struct({}),
     success: WorkspaceChange,
+    stream: true,
+  }),
+  // The files the user marked reviewed (docs/internals/architecture.md "Reviewed files").
+  Rpc.make(WS_METHODS.reviewedFilesGet, {
+    payload: Schema.Struct({ key: PullRequestKey, accountId: AccountId }),
+    success: ReviewedMarks,
+    error: ReviewedFilesError,
+  }),
+  Rpc.make(WS_METHODS.reviewedFilesSet, {
+    payload: Schema.Struct({
+      key: PullRequestKey,
+      accountId: AccountId,
+      decision: ReviewedDecision,
+    }),
+    success: ReviewedMarks,
+    error: ReviewedFilesError,
+  }),
+  // Decisions saved by anything, an outside agent included, so open windows read them again.
+  Rpc.make(WS_METHODS.reviewedFilesChanges, {
+    payload: Schema.Struct({}),
+    success: ReviewedFilesChange,
     stream: true,
   }),
   // Reviews, guides and agents (docs/internals/architecture.md "The review lifecycle").

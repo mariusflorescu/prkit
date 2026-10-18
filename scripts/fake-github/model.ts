@@ -52,6 +52,11 @@ export const servedFiles = new Map<
     patch?: string;
   }>
 >();
+/**
+ * What pushes did to a file after the commit that added it, keyed `<pr>:<file index>`:
+ * `edits` rewrote its text, `shifts` moved its hunk to other line numbers like a merged base.
+ */
+export const fileChanges = new Map<string, { edits: number; shifts: number }>();
 for (let number = 1; number <= 6; number++)
   pulls.set(number, {
     number,

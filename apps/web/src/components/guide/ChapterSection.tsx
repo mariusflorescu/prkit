@@ -3,7 +3,7 @@ import type { DiffFile } from "@prkit/contracts";
 import { FileDiffCard, type DiffComments, type LoadContents } from "~/components/diff";
 
 import { ChapterNarration } from "./ChapterNarration";
-import type { GuideChapter, LineJump } from "./types";
+import type { ChapterReviewedControl, GuideChapter, LineJump, ReviewedBinding } from "./types";
 
 export function ChapterSection({
   chapter,
@@ -11,6 +11,7 @@ export function ChapterSection({
   total,
   files,
   id,
+  reopened,
   fileId,
   open,
   onToggle,
@@ -19,12 +20,16 @@ export function ChapterSection({
   loadContents,
   comments,
   prUrl,
+  reviewed,
+  review,
 }: {
   chapter: GuideChapter;
   index: number;
   total: number | null;
   files: ReadonlyMap<string, DiffFile>;
   id: string;
+  /** Changes when the chapter is unticked, so its cards open again like unticked files. */
+  reopened: number;
   fileId: (path: string) => string;
   open: boolean;
   onToggle: () => void;
@@ -33,6 +38,9 @@ export function ChapterSection({
   loadContents?: LoadContents | undefined;
   comments?: ((file: DiffFile) => DiffComments | undefined) | undefined;
   prUrl?: string | undefined;
+  reviewed?: ReviewedBinding | undefined;
+  /** The chapter's Reviewed checkbox; null when nothing in it can be marked. */
+  review: ChapterReviewedControl | null;
 }) {
   return (
     <section data-guide-chapter="" data-chapter-id={chapter.id} id={id} tabIndex={-1}>
@@ -44,6 +52,7 @@ export function ChapterSection({
         onToggle={onToggle}
         onFile={onFile}
         prUrl={prUrl}
+        review={review}
       />
       {open && (
         <div data-chapter-diffs="">
@@ -53,6 +62,7 @@ export function ChapterSection({
             return (
               <FileDiffCard
                 key={entry.path}
+                reopened={reopened}
                 file={file}
                 id={fileId(entry.path)}
                 note={entry.note}
@@ -62,6 +72,12 @@ export function ChapterSection({
                 comments={comments?.(file)}
                 prUrl={prUrl}
                 reveal={jump?.path === entry.path ? jump.reveal : null}
+                reviewed={
+                  reviewed && {
+                    state: reviewed.stateOf(file),
+                    onChange: (next) => reviewed.set([file], next),
+                  }
+                }
               />
             );
           })}

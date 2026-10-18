@@ -1,5 +1,12 @@
-import type { DiffFile, DiffLineRef, DiffSnapshot, NormalizedGuide } from "@prkit/contracts";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  chapterReview,
+  type DiffFile,
+  type DiffLineRef,
+  type DiffSnapshot,
+  type NormalizedGuide,
+} from "@prkit/contracts";
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 
 import {
   DiffControls,
@@ -7,13 +14,15 @@ import {
   type DiffComments,
   type LoadContents,
 } from "~/components/diff";
+import { alignIfAbove } from "~/components/diff/readingLine";
 import { RenderBoundary } from "~/components/diff/RenderBoundary";
+import { useReviewedKey } from "~/components/diff/useReviewedKey";
 import { TabActions, useHasTabActions } from "~/components/TabActions";
 
 import { ChapterSection } from "./ChapterSection";
 import { GuideOverview } from "./GuideOverview";
 import { PendingChapter } from "./PendingChapter";
-import type { LineJump } from "./types";
+import type { GuideChapter, LineJump, ReviewedBinding } from "./types";
 import { useChapterKeyboard } from "./useChapterKeyboard";
 import "./guide.css";
 
@@ -32,6 +41,10 @@ export type GuideViewProps = {
    * `growing` while it is still adding chapters: their count is not a total yet.
    */
   draft?: { readonly growing: boolean };
+  /** Reviewed checkboxes on files and chapters; without it there are none. */
+  reviewed?: ReviewedBinding | undefined;
+  /** Shown before the diff controls, such as how many files are reviewed. */
+  count?: ReactNode;
 };
 
 const noPending: ReadonlySet<string> = new Set();
@@ -58,13 +71,38 @@ export function GuideView({
   comments,
   pendingChapterIds = noPending,
   draft,
+  reviewed,
+  count,
 }: GuideViewProps) {
   const prefix = useId();
   const inTabRow = useHasTabActions();
   const viewportRef = useRef<HTMLDivElement>(null);
   const cleanupScroll = useRef<(() => void) | null>(null);
   const files = useMemo(() => new Map(snapshot.files.map((file) => [file.path, file])), [snapshot]);
-  const [collapsed, setCollapsed] = useState<ReadonlyMap<string, boolean>>(() => new Map());
+  const filesOf = useCallback(
+    (chapter: GuideChapter) =>
+      chapter.files.flatMap((entry) => {
+        const file = files.get(entry.path);
+        return file === undefined ? [] : [file];
+      }),
+    [files],
+  );
+  // Chapters already reviewed start closed. Marks that arrive later never fold or unfold one.
+  const [collapsed, setCollapsed] = useState<ReadonlyMap<string, boolean>>(
+    () =>
+      new Map(
+        reviewed === undefined
+          ? []
+          : guide.chapters
+              .filter(
+                (chapter) =>
+                  chapterReview(filesOf(chapter), reviewed.stateOf)?.state === "reviewed",
+              )
+              .map((chapter): [string, boolean] => [chapter.id, true]),
+      ),
+  );
+  // Bumped when a chapter is unticked, so its open cards open their files like unticked files.
+  const [reopened, setReopened] = useState<ReadonlyMap<string, number>>(() => new Map());
   const chapterId = useCallback((id: string) => `${prefix}-chapter-${id}`, [prefix]);
   const fileId = useCallback((path: string) => `${prefix}-file-${path}`, [prefix]);
   const owners = useMemo(() => {
@@ -135,7 +173,23 @@ export function GuideView({
     },
     [owners, fileId, scrollTo],
   );
+  const reviewChapter = async (chapter: GuideChapter, next: boolean) => {
+    if (reviewed === undefined) return false;
+    const saved = await reviewed.set(filesOf(chapter), next);
+    if (!saved) return false;
+    flushSync(() => {
+      setCollapsed((previous) => new Map(previous).set(chapter.id, next));
+      if (!next)
+        setReopened((previous) =>
+          new Map(previous).set(chapter.id, (previous.get(chapter.id) ?? 0) + 1),
+        );
+    });
+    const section = document.getElementById(chapterId(chapter.id));
+    if (next && section) alignIfAbove(section);
+    return true;
+  };
   useChapterKeyboard(viewportRef, onChapter);
+  useReviewedKey(viewportRef, reviewed === undefined ? null : "[data-guide-chapter]");
   useEffect(() => () => cleanupScroll.current?.(), []);
 
   return (
@@ -143,14 +197,22 @@ export function GuideView({
       <div data-guide-view="">
         <div data-guide-toolbar="">
           <span>
-            Guided review <small>j / k to move between chapters</small>
+            Guided review{" "}
+            <small>
+              j / k to move between chapters
+              {reviewed === undefined ? null : " · r to mark reviewed"}
+            </small>
           </span>
           {inTabRow ? (
             <TabActions>
+              {count}
               <DiffControls />
             </TabActions>
           ) : (
-            <DiffControls />
+            <div className="flex items-center">
+              {count}
+              <DiffControls />
+            </div>
           )}
         </div>
         <div ref={viewportRef} data-guide-scroll="">
@@ -178,6 +240,8 @@ export function GuideView({
                   />
                 );
               const isCollapsed = collapsed.get(chapter.id) ?? chapter.kind === "generated";
+              const review =
+                reviewed === undefined ? null : chapterReview(filesOf(chapter), reviewed.stateOf);
               return (
                 <RenderBoundary key={chapter.id} title={`Chapter ${index + 1}`}>
                   <ChapterSection
@@ -186,6 +250,7 @@ export function GuideView({
                     total={draft?.growing === true ? null : guide.chapters.length}
                     files={files}
                     id={chapterId(chapter.id)}
+                    reopened={reopened.get(chapter.id) ?? 0}
                     fileId={fileId}
                     open={!isCollapsed}
                     onToggle={() =>
@@ -196,6 +261,12 @@ export function GuideView({
                     loadContents={loadContents}
                     comments={comments}
                     prUrl={prUrl}
+                    reviewed={reviewed}
+                    review={
+                      review === null
+                        ? null
+                        : { review, onChange: (next) => reviewChapter(chapter, next) }
+                    }
                   />
                 </RenderBoundary>
               );

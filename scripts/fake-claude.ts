@@ -13,8 +13,9 @@
  *       `stand-in.md` and reports every comment fixed; asked to resolve conflicts, it keeps the
  *       first side of every conflict in each file and reports the files resolved.
  *
- * In FAKE_CLAUDE_DIR, a `hold` file keeps the turn writing until the file is removed, and a
- * `fail` file ends the turn with an error instead of a guide. A `notes` file, JSON of
+ * In FAKE_CLAUDE_DIR, a `hold` file keeps the turn writing until the file is removed, a
+ * `fail` file ends the turn with an error instead of a guide, and a `split` file gives every
+ * file a chapter of its own, titled after the file. A `notes` file, JSON of
  * `{ [path]: [{ line, side, tone, text }] }`, gives those files line notes in the guide,
  * read when the guide is submitted; without it the guide has none. Before a fix or resolution
  * reports, it also plants what these files ask for, as something outside prkit's sandboxes
@@ -364,19 +365,17 @@ const turn = async (prompt: string) => {
   const notes = flagged("notes")
     ? Schema.decodeUnknownSync(Notes)(NodeFS.readFileSync(NodePath.join(control, "notes"), "utf8"))
     : {};
+  const entryOf = (path: string) => {
+    const annotations = notes[path];
+    return annotations === undefined ? path : { path, annotations };
+  };
   const submitted = await mcp("tools/call", {
     name: "submit_guide",
     arguments: {
       summary: "A guide written by the stand-in agent.",
-      chapters: [
-        {
-          title: "Every change",
-          files: files.map((path) => {
-            const annotations = notes[path];
-            return annotations === undefined ? path : { path, annotations };
-          }),
-        },
-      ],
+      chapters: flagged("split")
+        ? files.map((path) => ({ title: `Change in ${path}`, files: [entryOf(path)] }))
+        : [{ title: "Every change", files: files.map(entryOf) }],
       focusAreas: [...prompt.matchAll(/^- `([^`]+)` .+: .+$/gm)].map((match) => ({
         id: match[1] ?? "",
         verdict: "nothing-notable",

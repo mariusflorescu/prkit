@@ -54,6 +54,9 @@ const handlers = (toolkit: OutsideToolkit) =>
         read_pull_request_files: reads((input) =>
           respond("read_pull_request_files", input, () => work.files(input)),
         ),
+        read_reviewed_files: reads((input) =>
+          respond("read_reviewed_files", input, () => work.reviewedFiles(input)),
+        ),
         read_file_contents: reads((input) =>
           respond("read_file_contents", input, () => work.fileContents(input)),
         ),
@@ -154,6 +157,9 @@ const handlers = (toolkit: OutsideToolkit) =>
         ),
         move_review_comment: startsWork((input) =>
           respond("move_review_comment", input, () => work.moveComment(input)),
+        ),
+        mark_files_reviewed: startsWork((input) =>
+          respond("mark_files_reviewed", input, () => work.markFilesReviewed(input)),
         ),
       };
     }),

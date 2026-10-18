@@ -45,6 +45,7 @@ const READS = [
   "list_repository_pull_requests",
   "list_agents",
   "read_pull_request_files",
+  "read_reviewed_files",
   "read_file_contents",
   "read_timeline",
   "read_threads",
@@ -86,6 +87,7 @@ const STARTS_WORK = [
   "save_pull_request_guide_settings",
   "edit_review_comment",
   "move_review_comment",
+  "mark_files_reviewed",
 ];
 
 const Answer = Schema.Struct({
