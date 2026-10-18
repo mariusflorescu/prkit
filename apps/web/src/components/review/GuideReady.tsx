@@ -107,6 +107,8 @@ export function GuideReady({
   );
   const aside = useMemo(() => askAside(target), [target]);
   const showingDraft = picked === "draft" && draft !== null;
+  // Answers can repeat the author's pre-flight, so like it they are the review's own account's.
+  const askable = !showingDraft && review.accountId === detail.accountId;
   const guide = useQuery(guideQuery(detail.key, revision.revision));
   const shown = useMemo(
     () =>
@@ -147,7 +149,7 @@ export function GuideReady({
   });
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <AskTargetContext value={showingDraft ? null : target}>
+      <AskTargetContext value={askable ? target : null}>
         <GuideStatusBar
           detail={detail}
           review={review}
@@ -187,7 +189,7 @@ export function GuideReady({
             drafts.isPending ||
             reviewed.status === "pending" ||
             manualCheckTicks.status === "pending" ||
-            asks.state._tag === "loading" ? (
+            (askable && asks.state._tag === "loading") ? (
             <GuideSkeleton />
           ) : guide.isError ? (
             <ReviewAlert
@@ -216,7 +218,7 @@ export function GuideReady({
                 prUrl={detail.url}
                 prDescription={detail.body}
                 comments={comments}
-                aside={aside}
+                {...(askable ? { aside } : {})}
                 {...(current ? { loadContents } : {})}
                 reviewed={reviewed.status === "ready" ? reviewed : undefined}
                 manualCheckTicks={manualCheckTicks}
@@ -240,7 +242,7 @@ export function GuideReady({
             </>
           )}
         </div>
-        {!showingDraft && <AskDock target={target} />}
+        {askable && <AskDock target={target} />}
       </AskTargetContext>
     </div>
   );

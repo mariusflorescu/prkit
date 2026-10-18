@@ -90,6 +90,13 @@ export const makeOutsideAsks = (
         const target = yield* resolve(input);
         const review = (yield* reviews.get(target.key)).review;
         if (review === null) return yield* fail("not-found", NO_GUIDE);
+        // Answers come from the conversation that wrote the guide, author's pre-flight and all,
+        // so like the pre-flight (forReader) they are only the review's own account's.
+        if (review.accountId !== target.accountId)
+          return yield* fail(
+            "account-needed",
+            `Questions about this guide go through ${review.accountId}, the account it was written for. Pass that accountId.`,
+          );
         return { target, review };
       });
 

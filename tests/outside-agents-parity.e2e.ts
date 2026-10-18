@@ -483,6 +483,14 @@ test(
           await ok("pin_answer", { ...pr, questionId: again.questionId, pinned: false }),
         ).pinned,
       ).toBe(false);
+      // Answers come from the guide's own conversation, so only the review's account asks or reads them.
+      const elsewhere = { ...pr, accountId: second.accountId };
+      await refusal("read_pull_request_questions", elsewhere, `go through ${accountId}`);
+      await refusal(
+        "ask_about_pull_request",
+        { ...elsewhere, question: "Asked through the other account" },
+        `go through ${accountId}`,
+      );
       await ok("stop_guide", pr);
       await ok("generate_guide", {
         ...pr,
@@ -559,6 +567,20 @@ test(
       await ok("close_pull_request_tab", pr);
       await expect(screen.getByRole("heading", "Inbox")).toBeVisible();
       await app.screenshot("outside-parity-closed-last-tab");
+      const docksThrough = async (account: string) => {
+        await app.open(
+          `${run.url}/pr/github.com/budget/fixtures/1?account=${encodeURIComponent(account)}&tab=guide`,
+        );
+        await expect(screen.getByRole("combobox", "Guide revision")).toBeVisible({
+          timeout: 30_000,
+        });
+        return browser.evaluate(() => document.querySelectorAll("[data-ask-dock]").length);
+      };
+      expect(await docksThrough(second.accountId)).toBe(0);
+      await app.screenshot("outside-parity-guide-other-account");
+      await ok("close_pull_request_tab", pr);
+      expect(await docksThrough(accountId)).toBe(1);
+      await ok("close_pull_request_tab", pr);
       lines.push(`## Fake GitHub writes\n${JSON.stringify(await fake.writes())}`);
       await app.open(`${run.url}/settings/outside-agents`);
       await app.screenshot("outside-parity-complete");
