@@ -184,6 +184,7 @@ export function GuideView({
       const owner = owners.get(path);
       if (owner === undefined) return;
       setCollapsed((previous) => new Map(previous).set(owner, false));
+      setJump({ path, reveal: { line: null } });
       scrollTo(byId(fileId(path)));
     },
     [owners, fileId, scrollTo],

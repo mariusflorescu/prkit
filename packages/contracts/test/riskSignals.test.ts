@@ -124,6 +124,69 @@ describe("risk signals", () => {
       tag: "untested",
       fires: false,
     },
+    {
+      name: "a change next to an existing inline Rust test",
+      files: [
+        change("src/lib.rs", [
+          " #[cfg(test)]",
+          " mod tests {",
+          "-    assert_eq!(a(), 1);",
+          "+    assert_eq!(a(), 2);",
+        ]),
+      ],
+      tag: "untested",
+      fires: false,
+    },
+    {
+      name: "the package's own version in Cargo.toml",
+      files: [change("Cargo.toml", [" [package]", '-version = "1.0.0"', '+version = "1.0.1"'])],
+      tag: "dependencies",
+      fires: false,
+    },
+    {
+      name: "a dependency under a [dependencies] header the hunk shows",
+      files: [change("Cargo.toml", [" [dependencies]", '-serde = "1.0"', '+serde = "1.1"'])],
+      tag: "dependencies",
+      fires: true,
+    },
+    {
+      name: "a package.json script that runs git",
+      files: [change("package.json", ['+    "check": "git diff --check",'])],
+      tag: "dependencies",
+      fires: false,
+    },
+    {
+      name: "a local package in a dependencies block",
+      files: [change("package.json", ['   "dependencies": {', '+    "shared": "file:../shared",'])],
+      tag: "dependencies",
+      fires: true,
+    },
+    {
+      name: "versioned docs",
+      files: [change("docs/versions/v2.0.md")],
+      tag: "migration",
+      fires: false,
+    },
+    {
+      name: "an Alembic revision",
+      files: [change("alembic/versions/3f2a9c_add_users.py")],
+      tag: "migration",
+      fires: true,
+    },
+    {
+      name: "assertions joined onto one line",
+      files: [
+        change("src/a.test.ts", [
+          "-expect(a).toBe(1);",
+          "-expect(b).toBe(2);",
+          "-expect(c).toBe(3);",
+          "-expect(d).toBe(4);",
+          "+expect(a).toBe(1); expect(b).toBe(2); expect(c).toBe(3); expect(d).toBe(4);",
+        ]),
+      ],
+      tag: "fewer-checks",
+      fires: false,
+    },
     { name: "docs only", files: [change("README.md")], tag: "untested", fires: false },
     { name: "400 changed lines", files: [sized("src/a.ts", 400)], tag: "large", fires: true },
     {

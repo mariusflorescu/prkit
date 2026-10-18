@@ -1,6 +1,6 @@
 # Risk at a glance
 
-A guide says how carefully to read the pull request and each chapter: low (nothing here needs a careful read), medium or high, never whether it is safe to merge. Every level comes with reasons, and every reason opens its evidence: a pull request reason opens the chapter that explains it and may open one line, a chapter reason opens one of the chapter's files or a line of it. Next to the level, "From the diff" shows prkit's own signals for the reviewed files (look-closely paths, migration, dependencies, CI config, fewer checks, no test changes, large). "Always look closely at" paths are a guide setting at Global, Repository and pull request scope; a chapter holding a matching file is never rated low. Guides written before risk show none of it.
+A guide says how carefully to read the pull request and each chapter: low (nothing here needs a careful read), medium or high, never whether it is safe to merge. Every level comes with reasons, and every reason opens its evidence: a pull request reason opens the chapter that explains it and may open one line, a chapter reason opens one of the chapter's files or a line of it. Next to the level, "From the diff" shows prkit's own signals for the reviewed files (look-closely paths, migration, dependencies, CI config, fewer checks, no test files changed, large). "Always look closely at" paths are a guide setting at Global, Repository and pull request scope; a chapter holding a matching file is never rated low. Guides written before risk show none of it.
 
 ## Sub-features
 

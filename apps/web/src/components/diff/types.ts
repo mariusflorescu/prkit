@@ -17,6 +17,8 @@ export type ContentsState =
 export type LineRange = { start: LinePoint; end: LinePoint };
 
 export type RevealLine = { readonly line: number; readonly onCell: (cell: HTMLElement) => void };
+/** Opens a file's card without pointing at a line, as for a deleted or binary file. */
+export type RevealFile = { readonly line: null };
 
 /** Review comments on one file's diff, opted into by the caller. */
 export type DiffComments = {

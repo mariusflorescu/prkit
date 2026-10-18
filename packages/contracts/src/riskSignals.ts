@@ -78,13 +78,10 @@ const GENERATED =
   /(^|\/)(generated|__generated__|dist|build|vendor|node_modules)\/|\.(gen|generated|min)\.[a-z]+$|\.pb\.go$|_pb2\.py$|\.d\.ts$/iu;
 const isCode = (path: string) => CODE.test(path) && !GENERATED.test(path);
 
-const MIGRATION_FOLDERS = new Set([
-  "migrations",
-  "migration",
-  "migrate",
-  "post_migrate",
-  "versions",
-]);
+const MIGRATION_FOLDERS = new Set(["migrations", "migration", "migrate", "post_migrate"]);
+// Alembic keeps its migrations in `versions/` below its own folder; elsewhere `versions/` is docs.
+const ALEMBIC_VERSIONS = /(^|\/)(alembic|migrations)\/versions\/[^/]+$/iu;
+const MIGRATION_FILE = /\.(sql|py|rb|ts|js|mjs|cjs|go|ex|exs|cs|java|kt|php|xml|ya?ml)$/iu;
 const SCHEMA_FILES = new Set(["schema.prisma", "schema.rb", "structure.sql"]);
 const MIGRATION_PREFIX = /^(v?\d+[_.-]|\d{8,})/iu;
 const isMigration = (path: string) => {
@@ -92,6 +89,8 @@ const isMigration = (path: string) => {
   const parts = path.split("/");
   const name = basename(path).toLowerCase();
   if (SCHEMA_FILES.has(name) || /(^|\/)prisma\/schema\/[^/]+\.prisma$/u.test(path)) return true;
+  if (!MIGRATION_FILE.test(name)) return false;
+  if (ALEMBIC_VERSIONS.test(path)) return true;
   const folder = parts.findIndex((part) => MIGRATION_FOLDERS.has(part.toLowerCase()));
   if (folder === -1 || folder === parts.length - 1)
     return name.endsWith(".sql") && MIGRATION_PREFIX.test(name);
@@ -115,50 +114,96 @@ const changedLines = (file: DiffFile) => {
   return { added, removed };
 };
 
-const MANIFESTS: ReadonlyArray<{ readonly name: RegExp; readonly entry: RegExp }> = [
+/**
+ * A dependency manifest and how to tell its dependency lines from the rest: a line inside
+ * a dependency section the hunk shows, or a line that can only be a dependency (`entry`).
+ * Anything else stays unclassified, so a changed script or version field doesn't count.
+ */
+interface Manifest {
+  readonly name: RegExp;
+  readonly entry: RegExp;
+  readonly section: { readonly open: RegExp; readonly close: RegExp } | null;
+}
+const JSON_SECTION = {
+  open: /^\s*"(dependencies|devDependencies|peerDependencies|optionalDependencies|overrides|resolutions|require|require-dev)"\s*:\s*\{\s*$/u,
+  close: /^\s*\},?\s*$/u,
+};
+const TOML_SECTION = {
+  open: /^\s*\[((.+\.)?(dev-|build-)?dependencies|dependency-groups|project\.optional-dependencies)\]\s*$/u,
+  close: /^\s*\[/u,
+};
+const MANIFESTS: ReadonlyArray<Manifest> = [
   {
     name: /^(package|composer)\.json$/u,
     entry:
-      /^\s*"(?!version"|name"|description"|main"|types"|module")[^"]+"\s*:\s*"(\^|~|>|<|=|\d|workspace:|catalog:|npm:|file:|link:|git|github:|latest$|\*)/u,
+      /^\s*"(?!version"|name"|description"|main"|types"|module")[^"]+"\s*:\s*"(\^|~|>=|workspace:|catalog:|npm:|\d+\.\d+\.\d+)/u,
+    section: JSON_SECTION,
   },
   {
     name: /^pnpm-workspace\.yaml$/u,
     entry: /^\s*['"]?[@\w./-]+['"]?\s*:\s*['"]?(\^|~|>|<|=|\d|npm:)/u,
+    section: null,
   },
   {
     name: /^(Cargo|pyproject)\.toml$/u,
-    entry: /^\s*[\w.-]+\s*=\s*(\{.*version|"(\^|~|>|<|=|\d))|^\s*"[\w.[\]-]+\s*(>=|==|~=|<|>|\^)/u,
+    entry:
+      /^\s*[\w.-]+\s*=\s*\{[^}]*\b(version|path|git)\s*=|^\s*"[A-Za-z0-9_.[\]-]+\s*(>=|==|~=|<=|!=|<|>)/u,
+    section: TOML_SECTION,
   },
-  { name: /\.gemspec$/u, entry: /add_(runtime_|development_)?dependency/u },
-  { name: /^pom\.xml$/u, entry: /<(version|artifactId)>/u },
+  { name: /\.gemspec$/u, entry: /add_(runtime_|development_)?dependency/u, section: null },
+  { name: /^pom\.xml$/u, entry: /<(version|artifactId)>/u, section: null },
   {
     name: /^build\.gradle(\.kts)?$/u,
     entry: /(implementation|api|compileOnly|runtimeOnly|testImplementation)\s*\(?["']/u,
+    section: null,
   },
-  { name: /^Package\.swift$/u, entry: /\.package\(/u },
-  { name: /^mix\.exs$/u, entry: /\{:\w+,\s*"/u },
-  { name: /\.csproj$|^Directory\.Packages\.props$/u, entry: /PackageReference|PackageVersion/u },
+  { name: /^Package\.swift$/u, entry: /\.package\(/u, section: null },
+  { name: /^mix\.exs$/u, entry: /\{:\w+,\s*"/u, section: null },
+  {
+    name: /\.csproj$|^Directory\.Packages\.props$/u,
+    entry: /PackageReference|PackageVersion/u,
+    section: null,
+  },
 ];
 /** Files that list nothing but dependencies, so any change to them is one. */
 const DEPENDENCY_LISTS =
   /^(go\.mod|Gemfile|Pipfile|Podfile|requirements[^/]*\.txt|constraints[^/]*\.txt)$/u;
+
+/** Whether a changed line of the patch is a dependency line of `manifest`. */
+const changesDependencyLines = (file: DiffFile, manifest: Manifest) => {
+  if (file.patch._tag !== "text") return false;
+  let inside = false;
+  for (const raw of file.patch.patch.split("\n")) {
+    if (raw.startsWith("@@")) {
+      inside = false;
+      continue;
+    }
+    if (raw.startsWith("+++") || raw.startsWith("---")) continue;
+    const changed = raw.startsWith("+") || raw.startsWith("-");
+    const line = raw.slice(1);
+    if (manifest.section?.open.test(line)) {
+      if (changed) return true;
+      inside = true;
+    } else if (manifest.section?.close.test(line)) inside = false;
+    else if (changed && line.trim() !== "" && (inside || manifest.entry.test(line))) return true;
+  }
+  return false;
+};
 const changesDependencies = (file: DiffFile) => {
   if (isLockfile(file.path) || DEPENDENCY_LISTS.test(basename(file.path))) return true;
   const manifest = MANIFESTS.find((candidate) => candidate.name.test(basename(file.path)));
-  if (manifest === undefined) return false;
-  const { entry } = manifest;
-  const { added, removed } = changedLines(file);
-  return [...added, ...removed].some((line) => entry.test(line));
+  return manifest !== undefined && changesDependencyLines(file, manifest);
 };
 
 const ASSERTION =
-  /\b(expect|assert\w*|assert_eq!|assert_ne!|assert!|XCTAssert\w*|require\.\w+)\s*[(!.]|\.should\b|\bt\.(Error|Errorf|Fatal|Fatalf|Fail|FailNow)\(|\bself\.assert\w+\(|\bassertThat\(/u;
+  /\b(expect|assert\w*|assert_eq!|assert_ne!|assert!|XCTAssert\w*|require\.\w+)\s*[(!.]|\.should\b|\bt\.(Error|Errorf|Fatal|Fatalf|Fail|FailNow)\(|\bself\.assert\w+\(|\bassertThat\(/gu;
 const SKIP =
-  /\b(it|test|describe|context|suite)\.(skip|todo|only)\(|\bx(it|describe|test)\(|@(Disabled|Ignore)\b|pytest\.mark\.(skip|xfail)|@unittest\.skip|\bt\.Skip(Now|f)?\(|#\[ignore\]|\bskip\s*:\s*true/u;
-const INLINE_RUST_TEST = /#\[(test|cfg\(test\))\]/u;
+  /\b(it|test|describe|context|suite)\.(skip|todo|only)\(|\bx(it|describe|test)\(|@(Disabled|Ignore)\b|pytest\.mark\.(skip|xfail)|@unittest\.skip|\bt\.Skip(Now|f)?\(|#\[ignore\]|\bskip\s*:\s*true/gu;
+const INLINE_TESTS = /#\[(test|cfg\(test\))\]|\bmod tests\b/u;
 
+/** Occurrences, not lines, so joining or splitting lines doesn't change a count. */
 const countMatching = (lines: ReadonlyArray<string>, pattern: RegExp) =>
-  lines.filter((line) => pattern.test(line)).length;
+  lines.reduce((total, line) => total + (line.match(pattern)?.length ?? 0), 0);
 
 const LARGE_LINES = 400;
 const LARGE_FILES = 30;
@@ -215,7 +260,8 @@ const untested = (
   );
   if (code.length === 0) return null;
   if ([...files, ...skipped].some((file) => isTest(file.path))) return null;
-  if (code.some((file) => changedLines(file).added.some((line) => INLINE_RUST_TEST.test(line))))
+  // A change next to inline tests may be a test change, so absence can't be claimed there.
+  if (code.some((file) => file.patch._tag === "text" && INLINE_TESTS.test(file.patch.patch)))
     return null;
   return { _tag: "untested", files: code.map((file) => file.path) };
 };
@@ -305,7 +351,7 @@ export const describeSignal = (
     }
     case "untested":
       return {
-        label: "No test changes",
+        label: "No test files changed",
         text: `Changes code in ${plural(signal.files.length, "file")} and no test file.`,
       };
     case "large":

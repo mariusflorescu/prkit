@@ -8,7 +8,7 @@ const CHECKED: Record<RiskSignal["_tag"], string> = {
   dependencies: "dependency and lockfile changes",
   ci: "CI config",
   "fewer-checks": "removed or skipped tests",
-  untested: "code changed with no test changed",
+  untested: "code changed with no test file changed",
   large: "a large change",
 };
 

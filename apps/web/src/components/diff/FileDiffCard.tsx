@@ -13,6 +13,7 @@ import type {
   DiffAnnotation,
   DiffComments,
   LoadContents,
+  RevealFile,
   RevealLine,
   ReviewedControl,
 } from "./types";
@@ -31,7 +32,7 @@ export type FileDiffCardProps = {
   id?: string;
   prUrl?: string | undefined;
   trailingLines?: number | undefined;
-  reveal?: RevealLine | null | undefined;
+  reveal?: RevealLine | RevealFile | null | undefined;
   /** The Reviewed checkbox; a reviewed file starts closed. */
   reviewed?: ReviewedControl | undefined;
   /** Changes when the card should open again as it first would, such as a chapter unticked. */
@@ -148,7 +149,7 @@ export function FileDiffCard({
               loadContents={loadContents}
               trailingLines={trailingLines}
               prUrl={prUrl}
-              reveal={reveal}
+              reveal={reveal?.line === null ? null : reveal}
             />
           </RenderBoundary>
           {comments?.footer}
