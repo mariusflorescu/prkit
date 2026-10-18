@@ -3,7 +3,7 @@ import type { DiffFile, DiffLineRef } from "@prkit/contracts";
 import { FileDiffCard, type DiffComments, type LoadContents } from "~/components/diff";
 
 import { ChapterNarration } from "./ChapterNarration";
-import type { ChapterReviewedControl, GuideChapter, LineJump, ReviewedBinding } from "./types";
+import type { ChapterReviewedControl, GuideChapter, ReviewedBinding } from "./types";
 
 export function ChapterSection({
   chapter,
@@ -18,7 +18,6 @@ export function ChapterSection({
   onToggle,
   onLine,
   onFile,
-  jump,
   loadContents,
   comments,
   prUrl,
@@ -38,7 +37,6 @@ export function ChapterSection({
   onToggle: () => void;
   onLine: (at: DiffLineRef) => void;
   onFile: (path: string) => void;
-  jump: LineJump | null;
   loadContents?: LoadContents | undefined;
   comments?: ((file: DiffFile) => DiffComments | undefined) | undefined;
   prUrl?: string | undefined;
@@ -77,7 +75,6 @@ export function ChapterSection({
                 loadContents={loadContents}
                 comments={comments?.(file)}
                 prUrl={prUrl}
-                reveal={jump?.path === entry.path ? jump.reveal : null}
                 reviewed={
                   reviewed && {
                     state: reviewed.stateOf(file),

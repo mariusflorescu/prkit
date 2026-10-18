@@ -1,14 +1,16 @@
 import type { AttemptFile, AttemptId, DiffFile, PullRequestKey } from "@prkit/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
-import { DiffWorkerPoolProvider, FileDiffCard } from "~/components/diff";
+import { DiffList, FileDiffCard } from "~/components/diff";
 import { DiffSkeleton } from "~/components/diff/DiffSkeleton";
 import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
 import { attemptDiffQuery } from "~/rpc/queries";
 
 import { AttemptFileRow } from "./AttemptFileRow";
+
+const noFiles: ReadonlyArray<DiffFile> = [];
 
 /** The PR's changed files, each checked off as the agent reads it; any row opens its diff. */
 export function AttemptFileList({
@@ -25,6 +27,16 @@ export function AttemptFileList({
 }) {
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
   const diff = useQuery({ ...attemptDiffQuery(reviewKey, attemptId), enabled: opened.size > 0 });
+  const snapshotFiles = diff.data?.files ?? noFiles;
+  const byPath = useMemo(
+    () => new Map<string, DiffFile>(snapshotFiles.map((file) => [file.path, file])),
+    [snapshotFiles],
+  );
+  const locate = useCallback(
+    (path: string) =>
+      byPath.has(path) ? () => setOpened((previous) => new Set(previous).add(path)) : null,
+    [byPath],
+  );
   if (files.length === 0)
     return (
       <div aria-busy="true" aria-label="Loading changed files" className="space-y-3 px-1 py-2">
@@ -33,11 +45,12 @@ export function AttemptFileList({
         ))}
       </div>
     );
-  const byPath = new Map<string, DiffFile>(
-    (diff.data?.files ?? []).map((file) => [file.path, file]),
-  );
   return (
-    <DiffWorkerPoolProvider>
+    <DiffList
+      files={snapshotFiles}
+      source={{ _tag: "attempt", key: reviewKey, attemptId }}
+      locate={locate}
+    >
       <ul aria-label="Changed files" className="px-1">
         {files.map((file) => {
           const snapshotFile = byPath.get(file.path);
@@ -74,6 +87,6 @@ export function AttemptFileList({
           );
         })}
       </ul>
-    </DiffWorkerPoolProvider>
+    </DiffList>
   );
 }

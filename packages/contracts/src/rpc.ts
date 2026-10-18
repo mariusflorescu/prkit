@@ -22,6 +22,7 @@ import {
 } from "./agent.ts";
 import { AgentInstanceConfig, AgentInstanceError, AgentInstanceId } from "./agentInstance.ts";
 import { DiffSnapshot } from "./diffSnapshot.ts";
+import { DIFF_TEXT_BATCH, DiffSource, DiffTexts, DiffTextsError } from "./diffTexts.ts";
 import {
   FindRepositoryInput,
   GuidanceEdit,
@@ -126,6 +127,7 @@ export const WS_METHODS = {
   pullRequestsFiles: "pullRequests.files",
   pullRequestsTimeline: "pullRequests.timeline",
   pullRequestsFileContents: "pullRequests.fileContents",
+  diffsTexts: "diffs.texts",
   pullRequestsExecute: "pullRequests.execute",
   pullRequestsCandidates: "pullRequests.candidates",
   workspaceGet: "workspace.get",
@@ -323,6 +325,14 @@ export const WsRpcGroup = RpcGroup.make(
     }),
     success: FileContents,
     error: PullRequestReadError,
+  }),
+  Rpc.make(WS_METHODS.diffsTexts, {
+    payload: Schema.Struct({
+      source: DiffSource,
+      paths: Schema.Array(Schema.String).check(Schema.isMaxLength(DIFF_TEXT_BATCH)),
+    }),
+    success: DiffTexts,
+    error: DiffTextsError,
   }),
   Rpc.make(WS_METHODS.workspaceGet, {
     payload: Schema.Struct({}),

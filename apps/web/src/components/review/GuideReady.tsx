@@ -156,6 +156,7 @@ export function GuideReady({
             key={revision.revision}
             guide={guide.data.normalized}
             snapshot={guide.data.snapshot}
+            source={{ _tag: "attempt", key: detail.key, attemptId: revision.attemptId }}
             prUrl={detail.url}
             prDescription={detail.body}
             comments={comments}

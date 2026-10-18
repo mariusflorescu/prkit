@@ -12,10 +12,15 @@ import { Button } from "~/components/ui/button";
 
 import { DIFF_THEMES } from "./DiffWorkerPoolProvider";
 import { GuideNote } from "./GuideNote";
+import { MoveChip } from "./MoveChip";
+import { useFileMoves, useFileReveal, useFileScopes } from "./diffListContext";
 import { useDiffPrefs } from "./diffPrefs";
 import { DIFF_CSS } from "./diffStyles";
-import { buildFileDiff, labelTrailingSeparator } from "./fileDiff";
+import { buildFileDiff, fileRows, labelTrailingSeparator } from "./fileDiff";
 import { cellAt, makeLineKeys } from "./lineKeys";
+import { movedCss } from "./movedCss";
+import { chipLine, type Move } from "./moves";
+import { paintScopes } from "./paintScopes";
 import type {
   ContentsState,
   DiffAnnotation,
@@ -23,12 +28,13 @@ import type {
   DiffContents,
   LineRange,
   LoadContents,
-  RevealLine,
+  RevealLines,
 } from "./types";
 
 type Pin =
   | { kind: "note"; note: DiffAnnotation; index: number }
-  | { kind: "comment"; point: LinePoint };
+  | { kind: "comment"; point: LinePoint }
+  | { kind: "move"; end: "cut" | "landed"; move: Move };
 
 const toPierreSide = (side: LinePoint["side"]): AnnotationSide =>
   side === "old" ? "deletions" : "additions";
@@ -44,10 +50,11 @@ const fromPierre = (range: SelectedLineRange): LineRange => ({
     line: range.end,
   },
 });
-const reportCell = (rendered: HTMLElement | null, reveal: RevealLine | null | undefined) => {
+const reportCell = (rendered: HTMLElement | null, reveal: RevealLines | null) => {
   const root = rendered?.shadowRoot;
-  const cell = reveal && root ? cellAt(root, { side: "new", line: reveal.line }) : undefined;
-  if (reveal && cell) reveal.onCell(cell);
+  if (!root || reveal?.range == null) return;
+  const cell = cellAt(root, reveal.range.start);
+  if (cell) reveal.onCell(cell);
 };
 
 export function DiffBody({
@@ -57,7 +64,6 @@ export function DiffBody({
   loadContents,
   trailingLines,
   prUrl,
-  reveal,
 }: {
   file: DiffFile;
   annotations: ReadonlyArray<DiffAnnotation>;
@@ -65,9 +71,11 @@ export function DiffBody({
   loadContents?: LoadContents | undefined;
   trailingLines?: number | undefined;
   prUrl?: string | undefined;
-  reveal?: RevealLine | null | undefined;
 }) {
   const { diffStyle, wrap } = useDiffPrefs();
+  const moves = useFileMoves(file.path);
+  const scopes = useFileScopes(file.path);
+  const reveal = useFileReveal(file.path);
   const built = useMemo(() => buildFileDiff(file), [file]);
   // A push hands this body the new head's file without remounting it, so what the
   // last expansion said stays with the file it was about.
@@ -81,9 +89,9 @@ export function DiffBody({
   // identity, which also drops the hovered line's comment button until the pointer
   // moves. So the handlers it calls are read through a ref, and pins are keyed by the
   // lines they sit on. Only a file whose comments moved renders again.
-  const latest = useRef({ comments, loadContents, reveal });
+  const latest = useRef({ comments, loadContents, reveal, scopes });
   useLayoutEffect(() => {
-    latest.current = { comments, loadContents, reveal };
+    latest.current = { comments, loadContents, reveal, scopes };
   });
   const loadFiles = useCallback<FileDiffContentsLoader>(async () => {
     const load = latest.current.loadContents;
@@ -130,10 +138,11 @@ export function DiffBody({
       lineDiffType: "word-alt",
       expansionLineCount: 20,
       loadDiffFiles: loadFiles,
-      unsafeCSS: DIFF_CSS,
+      unsafeCSS: DIFF_CSS + movedCss(file, moves),
       onPostRender: (rendered, instance, phase) => {
         trailing?.(rendered, instance, phase);
         host.current = phase === "unmount" ? null : rendered;
+        if (host.current?.shadowRoot) paintScopes(host.current.shadowRoot, latest.current.scopes);
         reportCell(host.current, latest.current.reveal);
         if (!commentable) return;
         if (phase === "unmount") lineKeys.detach();
@@ -151,7 +160,22 @@ export function DiffBody({
           }
         : {}),
     };
-  }, [diffStyle, wrap, loadFiles, trailingLines, commentable, lineKeys]);
+  }, [diffStyle, wrap, loadFiles, trailingLines, commentable, lineKeys, file, moves]);
+  const chips = useMemo<Array<DiffLineAnnotation<Pin>>>(() => {
+    const rows = fileRows(file);
+    return [
+      ...moves.landed.map((move) => ({
+        side: "additions" as const,
+        lineNumber: chipLine(rows, move.to),
+        metadata: { kind: "move" as const, end: "landed" as const, move },
+      })),
+      ...moves.cut.map((move) => ({
+        side: "deletions" as const,
+        lineNumber: chipLine(rows, move.from),
+        metadata: { kind: "move" as const, end: "cut" as const, move },
+      })),
+    ];
+  }, [file, moves]);
   const pinKeys = (comments?.pins ?? []).map(pointKey).join(",");
   const lineAnnotations = useMemo<Array<DiffLineAnnotation<Pin>>>(
     () => [
@@ -168,24 +192,23 @@ export function DiffBody({
           metadata: { kind: "comment" as const, point },
         };
       }),
+      // Last, so a chip sits right above its block, under anything about the line above.
+      ...chips,
     ],
-    [annotations, pinKeys],
+    [annotations, pinKeys, chips],
   );
   const renderComment = comments?.render;
   const noteFooter = comments?.noteFooter;
   const renderAnnotation = useCallback(
-    (annotation: DiffLineAnnotation<Pin>) =>
-      annotation.metadata.kind === "note" ? (
-        <GuideNote
-          text={annotation.metadata.note.text}
-          tone={annotation.metadata.note.tone}
-          prUrl={prUrl}
-          pinned
-        >
-          {noteFooter?.(annotation.metadata.note, annotation.metadata.index)}
+    ({ metadata }: DiffLineAnnotation<Pin>) =>
+      metadata.kind === "note" ? (
+        <GuideNote text={metadata.note.text} tone={metadata.note.tone} prUrl={prUrl} pinned>
+          {noteFooter?.(metadata.note, metadata.index)}
         </GuideNote>
+      ) : metadata.kind === "move" ? (
+        <MoveChip move={metadata.move} end={metadata.end} />
       ) : (
-        renderComment?.(annotation.metadata.point)
+        renderComment?.(metadata.point)
       ),
     [prUrl, renderComment, noteFooter],
   );
@@ -195,10 +218,11 @@ export function DiffBody({
     if (composing === "") lineKeys.restore();
   }, [composing, lineKeys]);
   useLayoutEffect(() => reportCell(host.current, reveal), [reveal]);
-  const revealed: LineRange | null = reveal
-    ? { start: { side: "new", line: reveal.line }, end: { side: "new", line: reveal.line } }
-    : null;
-  const shown = keyRange ?? selection ?? revealed;
+  useLayoutEffect(() => {
+    const root = host.current?.shadowRoot;
+    if (root) paintScopes(root, scopes);
+  }, [scopes]);
+  const shown = keyRange ?? selection ?? reveal?.range ?? null;
   const selectionKey = shown ? `${pointKey(shown.start)},${pointKey(shown.end)}` : "";
   const selectedLines = useMemo<SelectedLineRange | null>(() => {
     if (selectionKey === "") return null;

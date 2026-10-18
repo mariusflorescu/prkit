@@ -3,6 +3,7 @@ import {
   type DiffFile,
   type DiffLineRef,
   type DiffSnapshot,
+  type DiffSource,
   type NormalizedGuide,
 } from "@prkit/contracts";
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -10,10 +11,12 @@ import { flushSync } from "react-dom";
 
 import {
   DiffControls,
-  DiffWorkerPoolProvider,
+  DiffList,
   type DiffComments,
+  type DiffListHandle,
   type LoadContents,
 } from "~/components/diff";
+import { alignScroll, type ScrollTarget } from "~/components/diff/alignScroll";
 import { alignIfAbove } from "~/components/diff/readingLine";
 import { RenderBoundary } from "~/components/diff/RenderBoundary";
 import { useReviewedKey } from "~/components/diff/useReviewedKey";
@@ -22,13 +25,15 @@ import { TabActions, useHasTabActions } from "~/components/TabActions";
 import { ChapterSection } from "./ChapterSection";
 import { GuideOverview } from "./GuideOverview";
 import { PendingChapter } from "./PendingChapter";
-import type { GuideChapter, LineJump, ReviewedBinding } from "./types";
+import type { GuideChapter, ReviewedBinding } from "./types";
 import { useChapterKeyboard } from "./useChapterKeyboard";
 import "./guide.css";
 
 export type GuideViewProps = {
   guide: NormalizedGuide;
   snapshot: DiffSnapshot;
+  /** Where the snapshot's new side is read for the scope lines; null reads nothing. */
+  source: DiffSource | null;
   prUrl?: string;
   prDescription?: string;
   loadContents?: LoadContents;
@@ -49,12 +54,6 @@ export type GuideViewProps = {
 
 const noPending: ReadonlySet<string> = new Set();
 
-type ScrollTarget = () => {
-  readonly element: Element;
-  readonly block: ScrollLogicalPosition;
-  readonly focus: HTMLElement;
-} | null;
-
 const byId =
   (id: string): ScrollTarget =>
   () => {
@@ -65,6 +64,7 @@ const byId =
 export function GuideView({
   guide,
   snapshot,
+  source,
   prUrl,
   prDescription,
   loadContents,
@@ -77,7 +77,7 @@ export function GuideView({
   const prefix = useId();
   const inTabRow = useHasTabActions();
   const viewportRef = useRef<HTMLDivElement>(null);
-  const cleanupScroll = useRef<(() => void) | null>(null);
+  const stopScroll = useRef<(() => void) | null>(null);
   const files = useMemo(() => new Map(snapshot.files.map((file) => [file.path, file])), [snapshot]);
   const filesOf = useCallback(
     (chapter: GuideChapter) =>
@@ -112,7 +112,6 @@ export function GuideView({
         if (!owners.has(file.path)) owners.set(file.path, chapter.id);
     return owners;
   }, [guide.chapters]);
-  const [jump, setJump] = useState<LineJump | null>(null);
   // A draft shows the risk card from the start, so nothing moves when the agent rates it.
   const rated =
     draft !== undefined ||
@@ -121,34 +120,9 @@ export function GuideView({
     guide.chapters.some((chapter) => chapter.risk !== null);
 
   const scrollTo = useCallback((target: ScrollTarget) => {
-    cleanupScroll.current?.();
     const viewport = viewportRef.current;
-    if (!viewport) return () => {};
-    let aligning = true;
-    const realign = () => {
-      const found = aligning ? target() : null;
-      found?.element.scrollIntoView({ block: found.block, behavior: "instant" });
-    };
-    const observer = new ResizeObserver(realign);
-    const stop = () => {
-      aligning = false;
-      observer.disconnect();
-      window.clearTimeout(timeout);
-      window.cancelAnimationFrame(frame);
-      for (const event of ["wheel", "touchstart", "keydown", "mousedown"])
-        viewport.removeEventListener(event, stop);
-    };
-    // Keep the target aligned while deferred diffs replace their estimated heights.
-    const timeout = window.setTimeout(stop, 3000);
-    const frame = window.requestAnimationFrame(() => {
-      if (viewport.firstElementChild) observer.observe(viewport.firstElementChild);
-      realign();
-      target()?.focus.focus({ preventScroll: true });
-    });
-    for (const event of ["wheel", "touchstart", "keydown", "mousedown"])
-      viewport.addEventListener(event, stop, { passive: true });
-    cleanupScroll.current = stop;
-    return realign;
+    if (viewport)
+      stopScroll.current = alignScroll(viewport, viewport.firstElementChild, target).stop;
   }, []);
 
   const onChapter = useCallback(
@@ -158,36 +132,24 @@ export function GuideView({
     },
     [chapterId, scrollTo],
   );
+  const list = useRef<DiffListHandle>(null);
   const onLine = useCallback(
-    (at: DiffLineRef) => {
-      const owner = owners.get(at.path);
-      if (owner === undefined) return;
-      setCollapsed((previous) => new Map(previous).set(owner, false));
-      let cell: HTMLElement | null = null;
-      const realign = scrollTo(() => {
-        const card = document.getElementById(fileId(at.path));
-        if (!card) return null;
-        return cell?.isConnected
-          ? { element: cell, block: "center", focus: card }
-          : { element: card, block: "start", focus: card };
-      });
-      const onCell = (found: HTMLElement) => {
-        cell = found;
-        realign();
-      };
-      setJump({ path: at.path, reveal: { line: at.line, onCell } });
-    },
-    [owners, fileId, scrollTo],
+    (at: DiffLineRef) =>
+      list.current?.goTo({
+        path: at.path,
+        range: { start: { side: "new", line: at.line }, end: { side: "new", line: at.line } },
+      }),
+    [],
   );
-  const onFile = useCallback(
+  const onFile = useCallback((path: string) => list.current?.goTo({ path, range: null }), []);
+  const locate = useCallback(
     (path: string) => {
       const owner = owners.get(path);
-      if (owner === undefined) return;
-      setCollapsed((previous) => new Map(previous).set(owner, false));
-      setJump({ path, reveal: { line: null } });
-      scrollTo(byId(fileId(path)));
+      return owner === undefined
+        ? null
+        : () => setCollapsed((previous) => new Map(previous).set(owner, false));
     },
-    [owners, fileId, scrollTo],
+    [owners],
   );
   const reviewChapter = async (chapter: GuideChapter, next: boolean) => {
     if (reviewed === undefined) return false;
@@ -206,33 +168,33 @@ export function GuideView({
   };
   useChapterKeyboard(viewportRef, onChapter);
   useReviewedKey(viewportRef, reviewed === undefined ? null : "[data-guide-chapter]");
-  useEffect(() => () => cleanupScroll.current?.(), []);
+  useEffect(() => () => stopScroll.current?.(), []);
 
   return (
-    <DiffWorkerPoolProvider>
-      <div data-guide-view="">
-        <div data-guide-toolbar="">
-          <span>
-            Guided review{" "}
-            <small>
-              j / k to move between chapters
-              {reviewed === undefined ? null : " · r to mark reviewed"}
-            </small>
-          </span>
-          {inTabRow ? (
-            <TabActions>
-              {count}
-              <DiffControls />
-            </TabActions>
-          ) : (
-            <div className="flex items-center">
-              {count}
-              <DiffControls />
-            </div>
-          )}
-        </div>
-        <div ref={viewportRef} data-guide-scroll="">
-          <div data-guide-content="">
+    <div data-guide-view="">
+      <div data-guide-toolbar="">
+        <span>
+          Guided review{" "}
+          <small>
+            j / k to move between chapters
+            {reviewed === undefined ? null : " · r to mark reviewed"}
+          </small>
+        </span>
+        {inTabRow ? (
+          <TabActions>
+            {count}
+            <DiffControls />
+          </TabActions>
+        ) : (
+          <div className="flex items-center">
+            {count}
+            <DiffControls />
+          </div>
+        )}
+      </div>
+      <div ref={viewportRef} data-guide-scroll="">
+        <div data-guide-content="">
+          <DiffList ref={list} files={snapshot.files} source={source} locate={locate}>
             <RenderBoundary title="The guide overview">
               <GuideOverview
                 guide={guide}
@@ -277,7 +239,6 @@ export function GuideView({
                     }
                     onLine={onLine}
                     onFile={onFile}
-                    jump={jump && owners.get(jump.path) === chapter.id ? jump : null}
                     loadContents={loadContents}
                     comments={comments}
                     prUrl={prUrl}
@@ -291,19 +252,19 @@ export function GuideView({
                 </RenderBoundary>
               );
             })}
-            <footer data-guide-footer="">
-              {draft !== undefined || pendingChapterIds.size > 0 ? (
-                "The agent is still writing the rest of this guide."
-              ) : (
-                <>
-                  That is the whole guide. {snapshot.files.length} changed file
-                  {snapshot.files.length === 1 ? "" : "s"}.
-                </>
-              )}
-            </footer>
-          </div>
+          </DiffList>
+          <footer data-guide-footer="">
+            {draft !== undefined || pendingChapterIds.size > 0 ? (
+              "The agent is still writing the rest of this guide."
+            ) : (
+              <>
+                That is the whole guide. {snapshot.files.length} changed file
+                {snapshot.files.length === 1 ? "" : "s"}.
+              </>
+            )}
+          </footer>
         </div>
       </div>
-    </DiffWorkerPoolProvider>
+    </div>
   );
 }

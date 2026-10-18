@@ -4,19 +4,13 @@ import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
 import { DiffStat } from "./DiffStat";
+import { useFileReveal } from "./diffListContext";
 import { InlineMarkdown } from "./InlineMarkdown";
 import { LazyDiffBody } from "./LazyDiffBody";
 import { alignIfAbove } from "./readingLine";
 import { RenderBoundary } from "./RenderBoundary";
 import { ReviewedToggle } from "./ReviewedToggle";
-import type {
-  DiffAnnotation,
-  DiffComments,
-  LoadContents,
-  RevealFile,
-  RevealLine,
-  ReviewedControl,
-} from "./types";
+import type { DiffAnnotation, DiffComments, LoadContents, ReviewedControl } from "./types";
 import "./diff.css";
 
 const noAnnotations: ReadonlyArray<DiffAnnotation> = [];
@@ -32,7 +26,6 @@ export type FileDiffCardProps = {
   id?: string;
   prUrl?: string | undefined;
   trailingLines?: number | undefined;
-  reveal?: RevealLine | RevealFile | null | undefined;
   /** The Reviewed checkbox; a reviewed file starts closed. */
   reviewed?: ReviewedControl | undefined;
   /** Changes when the card should open again as it first would, such as a chapter unticked. */
@@ -49,10 +42,10 @@ export function FileDiffCard({
   id,
   prUrl,
   trailingLines,
-  reveal = null,
   reviewed,
   reopened = 0,
 }: FileDiffCardProps) {
+  const reveal = useFileReveal(file.path);
   const [open, setOpen] = useState(
     (!defaultCollapsed && reviewed?.state !== "reviewed") || reveal !== null,
   );
@@ -149,7 +142,6 @@ export function FileDiffCard({
               loadContents={loadContents}
               trailingLines={trailingLines}
               prUrl={prUrl}
-              reveal={reveal?.line === null ? null : reveal}
             />
           </RenderBoundary>
           {comments?.footer}

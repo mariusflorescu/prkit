@@ -1,11 +1,11 @@
 import type { DiffFile, PullRequestDetail, PullRequestFiles as Files } from "@prkit/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderTreeIcon } from "lucide-react";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import {
   DiffControls,
-  DiffWorkerPoolProvider,
+  DiffList,
   FileDiffCard,
   FileTree,
   type LoadContents,
@@ -30,7 +30,7 @@ import { usePrViewStore } from "./prViewStore";
 import { orderDiffFiles } from "./pullRequestFileOrder";
 import "./pullRequest.css";
 
-const diffFiles = (files: Files["files"]): DiffFile[] =>
+const toDiffFiles = (files: Files["files"]): DiffFile[] =>
   files.map((file) => {
     const oldPath = JSON.stringify(`a/${file.previousPath ?? file.path}`);
     const newPath = JSON.stringify(`b/${file.path}`);
@@ -52,6 +52,19 @@ const diffFiles = (files: Files["files"]): DiffFile[] =>
     };
   });
 
+const converted = new WeakMap<Files, ReadonlyArray<DiffFile>>();
+const noFiles: ReadonlyArray<DiffFile> = [];
+/** One files array per answer, so coming back to a PR finds its moves already worked out. */
+const diffFiles = (snapshot: Files | undefined) => {
+  if (snapshot === undefined) return noFiles;
+  let files = converted.get(snapshot);
+  if (!files) {
+    files = orderDiffFiles(toDiffFiles(snapshot.files));
+    converted.set(snapshot, files);
+  }
+  return files;
+};
+
 export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
   const query = useQuery(
     pullRequestFilesQuery(detail.key, detail.accountId, detail.headSha, detail.baseSha),
@@ -60,7 +73,7 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
   const { showTree, toggleTree } = usePrViewStore();
   const [activePath, setActivePath] = useState<string>();
   const root = useRef<HTMLDivElement>(null);
-  const files = useMemo(() => orderDiffFiles(diffFiles(query.data?.files ?? [])), [query.data]);
+  const files = diffFiles(query.data);
   // Drafts and threads load with the files, so comments never push the diff down later.
   const pending = useQuery(pendingCommentsQuery(detail.key, detail.accountId));
   const threads = useQuery(reviewThreadsQuery(detail.key, detail.accountId));
@@ -171,7 +184,15 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
       ) : (
         <div className="flex min-h-0 flex-1 items-start">
           <div data-pr-files-scroll="" className="min-w-0 flex-1">
-            <DiffWorkerPoolProvider>
+            <DiffList
+              files={files}
+              source={{
+                _tag: "pullRequest",
+                key: detail.key,
+                accountId: detail.accountId,
+                sha: snapshot.headSha,
+              }}
+            >
               {files.map((file, index) => (
                 <FileDiffCard
                   // A new version of a file is a new card, so a file reviewed before a push
@@ -192,7 +213,7 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
                   }
                 />
               ))}
-            </DiffWorkerPoolProvider>
+            </DiffList>
           </div>
           {showTree && (
             <aside

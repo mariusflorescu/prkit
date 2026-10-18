@@ -124,6 +124,9 @@ export const startFakeGitHub = async (
     pushEdit: (pr: number, file: number) => post(`push?pr=${pr}&edit=${file}`),
     /** A push that moves only `src/change-<file>.ts`'s hunk to other lines, like a merged base: same text, new sha. */
     pushShift: (pr: number, file: number) => post(`push?pr=${pr}&shift=${file}`),
+    /** The head's file texts the diff viewer reads, by path; any other path reads `export {};`. */
+    texts: (pr: number, texts: Record<string, string>) =>
+      fetch(`${url}/__fake/texts?pr=${pr}`, { method: "POST", body: JSON.stringify(texts) }),
     conflict: (pr: number) => post(`conflict?pr=${pr}`),
     checking: (pr: number) => post(`checking?pr=${pr}`),
     require: (pr: number) => post(`require?pr=${pr}`),

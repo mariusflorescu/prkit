@@ -22,6 +22,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
@@ -53,6 +54,10 @@ import { makeTurnBodies } from "./turnBodies.ts";
 import { makeTurnLeftovers } from "./turnLeftovers.ts";
 import { makeTurnQueue, type TurnBody } from "./turnQueue.ts";
 import { makeTurnSteps } from "./turnSteps.ts";
+
+const decodeCommits = Schema.decodeUnknownEffect(
+  Schema.Array(Schema.Struct({ commit_sha: Schema.NullOr(Schema.String) })),
+);
 
 const WORKING: ReadonlyArray<FixerTurnState> = ["queued", "preparing", "running", "pushing"];
 
@@ -459,6 +464,37 @@ export const make = Effect.gen(function* () {
       return stored;
     }).pipe(Effect.catchTags(dbFailures));
 
+  /**
+   * The new side of paths at a turn's commit, from prkit's own copy, where the commit stays until
+   * Push. The caller names the commit it shows, and a turn that has moved on refuses.
+   */
+  const texts = (
+    key: PullRequestKey,
+    turnId: FixerTurnId,
+    sha: string,
+    paths: ReadonlyArray<string>,
+  ) =>
+    Effect.gen(function* () {
+      const rows = yield* sql`
+        SELECT t.commit_sha FROM fixer_turns t
+        JOIN fixers f ON f.id = t.fixer_id WHERE t.id = ${turnId} AND f.pr_key = ${key}`.pipe(
+        Effect.flatMap(decodeCommits),
+      );
+      const ref = refFromKey(key);
+      if (rows[0] === undefined || ref === null)
+        return yield* new FixerError({ message: "This fix is no longer there. Refresh." });
+      if (rows[0].commit_sha !== sha)
+        return yield* new FixerError({
+          message: "This fix changed. Open it again to read its code.",
+        });
+      return yield* repo.readTexts(ref, sha, paths);
+    }).pipe(
+      Effect.catchTags({
+        ...dbFailures,
+        RepoError: (error) => Effect.fail(new FixerError({ message: error.message })),
+      }),
+    );
+
   /** The changes as a patch, for an account that can't push to the branch. */
   const patch = (key: PullRequestKey, turnId: FixerTurnId) =>
     Effect.gen(function* () {
@@ -575,6 +611,7 @@ export const make = Effect.gen(function* () {
     stop,
     diff,
     patch,
+    texts,
     pushAccess,
     scriptAccess: access.forPullRequest,
     finishFixes,

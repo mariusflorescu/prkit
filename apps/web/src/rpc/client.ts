@@ -20,6 +20,8 @@ import {
   type PullRequestDetail,
   type PullRequestCommand,
   type PullRequestFiles,
+  type DiffSource,
+  type DiffTexts,
   type PullRequestStack,
   type PullRequestTimeline,
   type InboxFilters,
@@ -426,6 +428,11 @@ export const getFileContents = (
   side: FileSide,
 ): Promise<FileContents> =>
   call((client) => client[WS_METHODS.pullRequestsFileContents]({ key, accountId, path, side }));
+
+export const getDiffTexts = (
+  source: DiffSource,
+  paths: ReadonlyArray<string>,
+): Promise<DiffTexts> => call((client) => client[WS_METHODS.diffsTexts]({ source, paths }));
 
 // Pending review comments and GitHub review threads, always through the PR's account.
 export const listPendingComments = (

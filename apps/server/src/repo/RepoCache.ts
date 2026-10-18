@@ -2,6 +2,7 @@ import {
   type AccountId,
   childEnv,
   type DiffSnapshot,
+  type DiffTexts,
   type FixerId,
   type LocalReviewKey,
   type PullRequestRef,
@@ -16,12 +17,14 @@ import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { Base64 } from "effect/encoding";
+import type { PlatformError } from "effect/PlatformError";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import { GitHubAccounts } from "../accounts/GitHubAccounts.ts";
 import { makeKeyedGate } from "../github/keyedGate.ts";
 import * as ServerConfig from "../config.ts";
 import { foreignConfigKeys } from "./cacheConfig.ts";
+import { isTreePath, parseBatch, parseTree, readableOids, textAt } from "./blobTexts.ts";
 import { buildDiffSnapshot } from "./diffSnapshot.ts";
 import { denied, fetchFailure } from "./fetchFailure.ts";
 import {
@@ -158,13 +161,16 @@ export const make = Effect.gen(function* () {
    * steer it (docs/internals/architecture.md "Repository access"). Integrity is a separate,
    * explicit check (`verifyCheckout`), so the command builder stays free of its error.
    */
-  const run = (
+  const runWith = <S>(
     args: ReadonlyArray<string>,
     options: {
       readonly target: GitTarget;
       readonly env?: Readonly<Record<string, string>>;
       readonly input?: string;
     },
+    readStdout: (
+      stdout: Stream.Stream<Uint8Array, PlatformError>,
+    ) => Effect.Effect<S, PlatformError>,
   ) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -186,7 +192,7 @@ export const make = Effect.gen(function* () {
         );
         const [stdout, stderr, code] = yield* Effect.all(
           [
-            child.stdout.pipe(Stream.decodeText(), Stream.mkString),
+            readStdout(child.stdout),
             child.stderr.pipe(Stream.decodeText(), Stream.mkString),
             child.exitCode,
           ],
@@ -204,7 +210,11 @@ export const make = Effect.gen(function* () {
         ),
       ),
     );
-
+  const run = (args: ReadonlyArray<string>, options: Parameters<typeof runWith>[1]) =>
+    runWith(args, options, (stdout) => stdout.pipe(Stream.decodeText(), Stream.mkString));
+  /** For output that holds file bytes, which a string would mangle. */
+  const runBytes = (args: ReadonlyArray<string>, options: Parameters<typeof runWith>[1]) =>
+    runWith(args, options, Stream.mkUint8Array);
   const git = (
     args: ReadonlyArray<string>,
     options: Parameters<typeof run>[1] & { readonly failure?: string },
@@ -1185,6 +1195,52 @@ export const make = Effect.gen(function* () {
   const listFixers = () =>
     fs.readDirectory(fixesDir).pipe(Effect.catchTag("PlatformError", () => Effect.succeed([])));
 
+  /** The bytes of each blob, null for one the cache lacks, from one `git cat-file --batch` run. */
+  const readBlobs = (target: GitTarget, oids: ReadonlyArray<string>, failure: string) =>
+    Effect.gen(function* () {
+      if (oids.length === 0) return new Map<string, Uint8Array | null>();
+      const batch = yield* runBytes(["cat-file", "--batch"], {
+        target,
+        input: `${oids.join("\n")}\n`,
+      });
+      const blobs = batch.code === 0 ? parseBatch(batch.stdout, oids) : null;
+      if (blobs === null) {
+        yield* Effect.logWarning("git cat-file failed").pipe(
+          Effect.annotateLogs({ stderr: batch.stderr.trim() }),
+        );
+        return yield* new RepoError({ reason: "repository", message: failure });
+      }
+      return blobs;
+    });
+
+  /**
+   * The new side of each path at a commit, from prkit's copy alone: GIT_NO_LAZY_FETCH stays on,
+   * so a blob the cache lacks reads as missing. `git ls-tree` names each blob and its size, so a
+   * file over the cap is never read; the rest come back from one `git cat-file --batch` run. It
+   * takes no repository gate: reading objects is safe beside a fetch.
+   */
+  const readTexts = (ref: PullRequestRef, sha: string, paths: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const target = bare(repoPath(ref));
+      const failure = `prkit couldn't read this commit from its copy of ${repoName(ref)}.`;
+      const asked = paths.filter(isTreePath);
+      const listing =
+        asked.length === 0
+          ? ""
+          : // Literal, so a path that looks like pathspec magic (`:(icase)`) is just a name.
+            yield* git(["ls-tree", "-z", "-l", sha, "--", ...asked], {
+              target,
+              env: { GIT_LITERAL_PATHSPECS: "1" },
+              failure,
+            });
+      const tree = parseTree(listing);
+      const oids = [...readableOids(tree.values())];
+      const blobs = yield* readBlobs(target, oids, failure);
+      return {
+        files: paths.map((path) => ({ path, text: textAt(tree.get(path), blobs) })),
+      } satisfies DiffTexts;
+    });
+
   return {
     isolatedGitEnv,
     checkout,
@@ -1216,6 +1272,7 @@ export const make = Effect.gen(function* () {
     pushFix,
     removeFixer,
     listFixers,
+    readTexts,
   };
 });
 

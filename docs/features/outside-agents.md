@@ -31,6 +31,7 @@ The inventory covers every WebSocket RPC and the app's local presentation action
 | Changed files and diff | pullRequests.files | `read_pull_request_files` | Read |
 | Expand file contents | pullRequests.fileContents | `read_file_contents` | Read |
 | Files marked reviewed, and their progress | reviewedFiles.get, reviewedFiles.set | `read_reviewed_files` (current files, or one guide revision with its chapters), `mark_files_reviewed` (sets or clears the mark on files of the current diff; local, never reaches GitHub) | Read / Work |
+| Code around each change in the diff viewer | diffs.texts | Presentation: the viewer reads the new side of the changed files to show the function or class around each change. Outside tools read file text with `read_file_contents` | Presentation |
 | Conversation comments/reviews, checks, timeline | pullRequests.timeline | `read_conversation`, `read_checks`, `read_timeline` | Read |
 | Stack strip and layers | pullRequests.stack | `read_stack` | Read |
 | Available reviewers, teams and labels | pullRequests.candidates | `read_pull_request_action_candidates` | Read |

@@ -216,6 +216,7 @@ GitHub's limits are per user (5,000 GraphQL points and 5,000 REST requests an ho
 - `detail(key)` - title, body, state, draft, author, branches, head and base SHAs, mergeability, review decision, requested reviewers and latest reviews, checks (each with GitHub's short summary of its result), labels, issue comments, and its freshness (`fetchedAt`, `problem`).
 - `files(key)` - `GET /pulls/{n}/files`, paginated, for the head the detail shows. It checks the head SHA after paging and reads once more if it moved. When `changedFiles` exceeds what the API returns, the tab says so.
 - `fileContents(key, path, side)` - for expanding unchanged lines. The old side is `previousPath ?? path` at the merge-base, the new side is `path` at the head SHA, both read from the base repository (which can see fork heads through `refs/pull/<n>/head`). A side that does not exist (added or removed file) is empty.
+- `texts(key, sha, paths)` - the new side of up to 50 changed files at one commit, one aliased `object(expression:)` per path in one GraphQL request, in the background, so the diff viewer can name the function or class around each hunk. A guide attempt's and a fix turn's texts are read from the repository cache instead (`RepoCache.readTexts`), with no request; the one `diffs.texts` RPC sends each kind of source to the service that owns its commit.
 - `timeline(key)`, `threads(key)` - GraphQL, paginated. Threads are kept only for the head the detail shows.
 - `stack(key)` - the layers of the stack the detail says the PR is in, one GraphQL read (`pullRequest { stack { entries } }`, about one point) cached per stack, so every layer shares it (see Stacks).
 - `context(key, accountId, headSha)` - what an attempt hands its agent besides the diff (see What the agent sees): the detail's failing and pending checks, the threads nobody resolved, and the issues the PR closes (`closingIssuesReferences`, the first 10, one GraphQL read cached per PR and read only here). It never fails: each part answers on its own, with what was read or why it couldn't be.
@@ -229,7 +230,7 @@ GitHub's limits are per user (5,000 GraphQL points and 5,000 REST requests an ho
 | Inbox and its review waits, per account | 10 minutes | answered from cache at once, read again in the background (both requests) | Refresh (every account), Retry (that account), a prkit write to one of its PRs |
 | Detail, timeline, threads, files, linked issues | 10 minutes | answered from cache at once, read again in the background | its fingerprint changed, a prkit write to it, the PR page's Refresh |
 | Checks of the active PR | while a check is pending and a window is visible | REST with `If-None-Match` every 15 seconds, in a loop of its own; a 304 is free | a changed ETag, or a first answer for a head that differs from what the detail shows, marks the detail stale |
-| File contents | forever (keyed by commit) | - | - |
+| File contents and texts | forever (keyed by commit) | - | - |
 | Repository list, per account | 24 hours | answered from cache at once, read again in the background | the repository filter's Refresh list |
 | Open PRs of one repository | 10 minutes | answered from cache at once, read again in the background | - |
 
