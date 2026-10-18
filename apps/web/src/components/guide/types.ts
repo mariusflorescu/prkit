@@ -1,4 +1,10 @@
-import type { ChapterReview, DiffFile, FileReviewState, NormalizedGuide } from "@prkit/contracts";
+import type {
+  ChapterReview,
+  DiffFile,
+  FileReviewState,
+  ManualCheckStep,
+  NormalizedGuide,
+} from "@prkit/contracts";
 import type { ReactNode } from "react";
 
 export type GuideChapter = NormalizedGuide["chapters"][number];
@@ -12,6 +18,19 @@ export type ReviewedBinding = {
   stateOf: (file: DiffFile) => FileReviewState;
   set: (files: ReadonlyArray<DiffFile>, reviewed: boolean) => Promise<boolean>;
 };
+
+/**
+ * The reader's ticks on the manual check steps. A checkbox can only exist once the ticks
+ * are here: `ready` is the only state with `set`, which resolves true once saved.
+ */
+export type ManualCheckBinding =
+  | { readonly status: "pending" }
+  | { readonly status: "error"; readonly message: string; readonly retry: () => void }
+  | {
+      readonly status: "ready";
+      readonly isTicked: (step: ManualCheckStep) => boolean;
+      readonly set: (steps: ReadonlyArray<ManualCheckStep>, ticked: boolean) => Promise<boolean>;
+    };
 
 /** A chapter's Reviewed checkbox, derived from its files. */
 export type ChapterReviewedControl = {

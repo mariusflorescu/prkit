@@ -14,6 +14,7 @@ import type { LoadContents } from "~/components/diff";
 import { GuideView } from "~/components/guide";
 import { useReviewCommentsStore } from "~/features/reviewComments/reviewCommentsStore";
 import { useDiffComments } from "~/features/reviewComments/useDiffComments";
+import { useManualCheckTicks } from "~/features/manualCheck/useManualCheckTicks";
 import { useNoteComposerHold } from "~/features/reviewComments/useNoteComposerHold";
 import { ReviewedCount } from "~/features/reviewedFiles/ReviewedCount";
 import { useReviewedFiles } from "~/features/reviewedFiles/useReviewedFiles";
@@ -87,6 +88,11 @@ export function GuideReady({
   const drafts = useQuery(pendingCommentsQuery(detail.key, detail.accountId));
   const { retry } = useReviewActions(detail.key);
   const reviewed = useReviewedFiles(detail.key, detail.accountId);
+  const manualCheckTicks = useManualCheckTicks({
+    _tag: "pull-request",
+    key: detail.key,
+    accountId: detail.accountId,
+  });
   const loadContents = useCallback<LoadContents>(
     async (file) => {
       const read = (path: string, side: "old" | "new") =>
@@ -147,7 +153,10 @@ export function GuideReady({
             prDescription={detail.body}
           />
         </div>
-      ) : guide.isPending || drafts.isPending || reviewed.status === "pending" ? (
+      ) : guide.isPending ||
+        drafts.isPending ||
+        reviewed.status === "pending" ||
+        manualCheckTicks.status === "pending" ? (
         <GuideSkeleton />
       ) : guide.isError ? (
         <ReviewAlert
@@ -177,6 +186,7 @@ export function GuideReady({
             comments={comments}
             {...(current ? { loadContents } : {})}
             reviewed={reviewed.status === "ready" ? reviewed : undefined}
+            manualCheckTicks={manualCheckTicks}
             count={<ReviewedCount reviewed={reviewed} files={guide.data.snapshot.files} />}
             preflight={
               shown === undefined || shown.normalized.preflight === null

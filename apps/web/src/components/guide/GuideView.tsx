@@ -27,7 +27,7 @@ import { railTicks } from "./railTicks";
 import { ChapterSection } from "./ChapterSection";
 import { GuideOverview } from "./GuideOverview";
 import { PendingChapter } from "./PendingChapter";
-import type { GuideChapter, PreflightView, ReviewedBinding } from "./types";
+import type { GuideChapter, ManualCheckBinding, PreflightView, ReviewedBinding } from "./types";
 import { useChapterKeyboard } from "./useChapterKeyboard";
 import { useReadingPin } from "./useReadingPin";
 import "./guide.css";
@@ -51,6 +51,8 @@ export type GuideViewProps = {
   draft?: { readonly growing: boolean };
   /** Reviewed checkboxes on files and chapters; without it there are none. */
   reviewed?: ReviewedBinding | undefined;
+  /** Tick boxes on the "How to check it" steps; without it the steps have none. */
+  manualCheckTicks?: ManualCheckBinding | undefined;
   /** Shown before the diff controls, such as how many files are reviewed. */
   count?: ReactNode;
   /** The author's pre-flight; without it the guide shows none. */
@@ -77,6 +79,7 @@ export function GuideView({
   pendingChapterIds = noPending,
   draft,
   reviewed,
+  manualCheckTicks,
   count,
   preflight,
 }: GuideViewProps) {
@@ -229,6 +232,7 @@ export function GuideView({
                 prDescription={prDescription}
                 pendingChapterIds={pendingChapterIds}
                 preflight={preflight}
+                manualCheckTicks={manualCheckTicks}
               />
             </RenderBoundary>
             {guide.chapters.map((chapter, index) => {

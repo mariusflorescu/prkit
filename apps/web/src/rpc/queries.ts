@@ -11,6 +11,7 @@ import {
   type PullRequestStatus,
   type ReviewFeedEntry,
   type ReviewKey,
+  type ReviewSubject,
   type FixerFeedEntry,
   type FixerTurnId,
   type LocalReviewKey,
@@ -37,6 +38,7 @@ import {
   getDiffTexts,
   getReview,
   getReviewedFiles,
+  getManualCheckTicks,
   getWorkspace,
   listAccounts,
   listInbox,
@@ -129,6 +131,14 @@ export const reviewedFilesQuery = (key: PullRequestKey, accountId: AccountId) =>
   queryOptions({
     queryKey: ["reviewedFiles", accountId, key],
     queryFn: () => getReviewedFiles(key, accountId),
+    staleTime: Infinity,
+    retry: false,
+  });
+/** Every manual check tick on the subject; `useManualCheckTicksChanges` refetches it. */
+export const manualCheckTicksQuery = (subject: ReviewSubject) =>
+  queryOptions({
+    queryKey: ["manualCheckTicks", subject],
+    queryFn: () => getManualCheckTicks(subject),
     staleTime: Infinity,
     retry: false,
   });
