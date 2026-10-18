@@ -4,7 +4,7 @@ import {
   resolveGuideConfig,
 } from "@prkit/contracts";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
-import { IgnoreRulesEditor } from "~/features/settings/guides/IgnoreRulesEditor";
+import { PathRulesEditor } from "~/features/settings/guides/PathRulesEditor";
 
 import { ComposerControl } from "../agent/ComposerControl";
 import { IgnorePreviewList } from "./IgnorePreviewList";
@@ -36,7 +36,8 @@ export function IgnoreChip({
           className="max-h-[70vh] space-y-5 overflow-y-auto p-4"
         >
           <IgnorePreviewList preview={preview} />
-          <IgnoreRulesEditor
+          <PathRulesEditor
+            kind="ignore"
             scope={{ _tag: "pull-request", key: pullRequest }}
             scopeLabel="This pull request"
             section={config.pullRequest.ignore}

@@ -16,6 +16,7 @@ import { IGNORE_PRESETS } from "./guidePresets";
 import { InheritedItemRow } from "./InheritedItemRow";
 import { InheritedItems } from "./InheritedItems";
 import type { OverrideChoice } from "./OverrideControl";
+import { PATH_RULE_COPY, type PathRuleKind } from "./pathRuleCopy";
 import { SaveProblem } from "./SaveProblem";
 import { useSaveGuideSection } from "./useSaveGuideSection";
 
@@ -34,27 +35,30 @@ const toValues = (section: IgnoreSection): Values => ({
 });
 
 /**
- * One scope's ignore rules: its own patterns in order, and inherit/on/off for the
- * rules it inherits. The last matching rule decides; `!` keeps a file.
+ * One scope's ignore rules, or its look-closely paths, which share the shape: its own
+ * patterns in order, and inherit/on/off for the ones it inherits. The last matching
+ * pattern decides; `!` leaves a file out.
  */
-export function IgnoreRulesEditor({
+export function PathRulesEditor({
+  kind,
   scope,
   scopeLabel,
   section,
   inherited,
-  presets = false,
   onReload,
 }: {
+  kind: PathRuleKind;
   scope: GuideScope;
   /** "Global", "Repository" or "This pull request", for names and messages. */
   scopeLabel: string;
   section: IgnoreSection;
   /** Rules from less specific scopes, as they stand above this one. */
   inherited: ReadonlyArray<EffectiveIgnoreRule>;
-  presets?: boolean;
   onReload: () => void;
 }) {
-  const save = useSaveGuideSection("Ignore rules");
+  const copy = PATH_RULE_COPY[kind];
+  const presets = kind === "ignore" && scope._tag === "global";
+  const save = useSaveGuideSection(copy.saved);
   const form = useForm<Values>({ defaultValues: toValues(section) });
   const rules = useFieldArray({ control: form.control, name: "rules" });
   const { isDirty, errors } = form.formState;
@@ -82,14 +86,14 @@ export function IgnoreRulesEditor({
         scope,
         expectedVersion: values.version,
         edit: {
-          _tag: "ignore",
+          _tag: kind,
           rules: values.rules.map((rule) => ({ id: rule.itemId, pattern: rule.pattern.trim() })),
           overrides: Object.entries(values.overrides).flatMap(([itemId, value]) =>
             value === "on" || value === "off" ? [{ itemId: GuideItemId.make(itemId), value }] : [],
           ),
         },
       },
-      { onSuccess: (saved) => form.reset(toValues(saved.ignore)) },
+      { onSuccess: (saved) => form.reset(toValues(saved[kind])) },
     ),
   );
   const reload = () => {
@@ -101,7 +105,7 @@ export function IgnoreRulesEditor({
   return (
     <form
       noValidate
-      aria-label={`${scopeLabel} ignore rules`}
+      aria-label={copy.form(scopeLabel)}
       onSubmit={(event) => {
         // In the composer this form sits in a popover inside the composer's own form;
         // React bubbles submit through portals, which would start a guide.
@@ -111,9 +115,9 @@ export function IgnoreRulesEditor({
       className="space-y-3"
     >
       <div>
-        <h4 className="text-sm">Ignore rules</h4>
+        <h4 className="text-sm">{copy.title}</h4>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          Skipped files stay out of the guide; prkit lists them in a chapter of their own.{" "}
+          {copy.intro}{" "}
           {scope._tag === "repository" ? (
             "Patterns work as in Global."
           ) : (
@@ -121,13 +125,14 @@ export function IgnoreRulesEditor({
               <code>name</code> matches a file or folder at any depth, <code>folder/</code>{" "}
               everything inside folders with that name, a pattern with a <code>/</code> in it starts
               at the repository root, <code>*</code> stays in one folder and <code>**</code> crosses
-              folders. <code>!pattern</code> keeps files an earlier rule skipped.
+              folders. <code>!pattern</code> {copy.negation}
             </>
           )}{" "}
-          The last rule that matches decides: Global first, then Repository, then the pull request.
+          The last {copy.order} that matches decides: Global first, then Repository, then the pull
+          request.
         </p>
       </div>
-      <InheritedItems noun="ignore rules" total={inherited.length} off={offCount}>
+      <InheritedItems noun={copy.noun} total={inherited.length} off={offCount}>
         {inherited.map((rule) => (
           <Controller
             key={rule.id}
@@ -149,16 +154,16 @@ export function IgnoreRulesEditor({
       </InheritedItems>
       <DanglingOverrides
         ids={dangling}
-        noun="rules"
+        noun={copy.danglingNoun}
         disabled={save.isPending}
         onRemove={(id) => form.setValue(`overrides.${id}`, "inherit", { shouldDirty: true })}
       />
       {rules.fields.length === 0 ? (
         <p role="status" className="text-xs text-muted-foreground">
-          {scope._tag === "global" ? "No rules yet." : "No rules of its own yet."}
+          {scope._tag === "global" ? copy.emptyGlobal : copy.emptyOwn}
         </p>
       ) : (
-        <ul aria-label={`${scopeLabel} rules`} className="space-y-1.5">
+        <ul aria-label={copy.list(scopeLabel)} className="space-y-1.5">
           {rules.fields.map((field, index) => {
             const error = errors.rules?.[index]?.pattern;
             return (
@@ -168,8 +173,8 @@ export function IgnoreRulesEditor({
                     type="text"
                     autoComplete="off"
                     spellCheck={false}
-                    placeholder="dist/"
-                    aria-label={`Rule ${index + 1}`}
+                    placeholder={copy.placeholder}
+                    aria-label={copy.input(index + 1)}
                     aria-invalid={error !== undefined}
                     disabled={save.isPending}
                     className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2.5 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring aria-invalid:border-error"
@@ -188,7 +193,9 @@ export function IgnoreRulesEditor({
                   <Button
                     size="icon-xs"
                     variant="ghost-muted"
-                    aria-label={`Remove rule ${field.pattern === "" ? index + 1 : field.pattern}`}
+                    aria-label={copy.remove(
+                      field.pattern === "" ? String(index + 1) : field.pattern,
+                    )}
                     disabled={save.isPending}
                     onClick={() => rules.remove(index)}
                   >
@@ -213,7 +220,7 @@ export function IgnoreRulesEditor({
           onClick={() => rules.append({ itemId: null, pattern: "" })}
         >
           <PlusIcon />
-          Add rule
+          {copy.add}
         </Button>
         {presets &&
           IGNORE_PRESETS.map((preset) => {
@@ -239,7 +246,7 @@ export function IgnoreRulesEditor({
       {isDirty && (
         <div className="flex items-center gap-2">
           <Button type="submit" size="sm" disabled={save.isPending}>
-            {save.isPending ? "Saving…" : "Save ignore rules"}
+            {save.isPending ? "Saving…" : copy.save}
           </Button>
           <Button
             size="sm"

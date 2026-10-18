@@ -7,9 +7,9 @@ import {
 
 import { FocusAreasEditor } from "./FocusAreasEditor";
 import { GuidanceEditor } from "./GuidanceEditor";
-import { IgnoreRulesEditor } from "./IgnoreRulesEditor";
+import { PathRulesEditor } from "./PathRulesEditor";
 
-/** The three sections of one scope, with what it inherits from the scopes above it. */
+/** The four sections of one scope, with what it inherits from the scopes above it. */
 export function ScopeEditors({
   scope,
   scopeLabel,
@@ -27,12 +27,20 @@ export function ScopeEditors({
   const inherited = above === null ? null : resolveGuideConfig(above);
   return (
     <div className="space-y-6">
-      <IgnoreRulesEditor
+      <PathRulesEditor
+        kind="ignore"
         scope={scope}
         scopeLabel={scopeLabel}
         section={config.ignore}
         inherited={inherited?.ignore ?? []}
-        presets={scope._tag === "global"}
+        onReload={onReload}
+      />
+      <PathRulesEditor
+        kind="sensitive"
+        scope={scope}
+        scopeLabel={scopeLabel}
+        section={config.sensitive}
+        inherited={inherited?.sensitive ?? []}
         onReload={onReload}
       />
       <FocusAreasEditor
