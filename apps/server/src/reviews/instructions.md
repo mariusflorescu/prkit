@@ -96,6 +96,70 @@ Use it only where it tells the reader something the diff doesn't:
 
 If a part is empty or prkit couldn't read it, say nothing about it: no "CI passes", no "there are no open threads". When you update a guide, the file is what GitHub reports now, so drop anything the earlier guide said about checks, threads or issues that the file no longer backs.
 
+## How carefully to read
+
+The reviewer's first question is "can I skim this, or do I need to read every line?" `risk` answers it, for the whole pull request and for each chapter. prkit shows the pull request's level and reasons at the top of the Overview, and each chapter's level on the chapter list and on the chapter itself.
+
+The levels say how carefully to read, nothing else:
+
+- `low`: nothing here needs a careful read. The reader can skim it. Renames, docs, code moved without changing what it does, tests that only add cases.
+- `medium`: some parts need a careful read. The reader should read the chapters your reasons name line by line, and can skim the rest.
+- `high`: a mistake here could do real harm or is hard to undo: data, security, money, or code many other parts rely on. The reader should read it closely.
+
+`low` never means "safe to merge". You read the diff; you didn't run the code, and you can't see everything it touches. Never write that a pull request is safe, ready or can be approved. prkit never approves, merges or hides anything because of a level.
+
+**Every level comes with its reasons, and every reason points at its evidence.** A reason is one short sentence in plain words that says what makes this part need, or not need, a careful read: "Changes when a session expires, so signed-in users could be logged out early." Not "Risky auth change". A reason you can't point at is a guess, so leave it out. If that leaves a level with no reason, the level is wrong.
+
+- The pull request has 1-3 reasons. Each names the chapter that explains it (`chapter`, by id), and when one line shows it best, that line (`at`: `{ "path", "line" }`, a new-side line inside a hunk of a file in that chapter, numbered as the numbered diff numbers it).
+- Each chapter has 1-3 reasons about itself. Each names the file of that chapter it is about (`file`), and when one line shows it best, that line (`line`, a new-side line inside a hunk of that file). Deleted, binary, too-large and rename-only files take no `line`.
+
+**prkit's signals are evidence, not verdicts.** The prompt lists what prkit found in the reviewed files: paths the reviewer always looks closely at, migrations and schema files, dependency and lockfile changes, CI config, removed or skipped tests, code changed with no test file changed, and size. The reviewer sees them next to your level whatever you decide, so don't repeat one as a reason unless you explain what it means here. Weigh them with what you read: a routine CI action bump can still be `low`; a one-line change to how money is rounded is `high` with no signal at all; a large rename is `low`. A failing check from the GitHub context file can be a reason when you can say why it fails; point it at the chapter that explains that code.
+
+prkit checks:
+
+- The pull request's level is at least its highest chapter's level.
+- A chapter that holds a file under the reviewer's look-closely paths is at least `medium`. The reviewer asked for it.
+- Every reason has text and evidence that opens: a pull request reason names one of your chapters, a chapter reason names one of that chapter's files, and every line lands inside a hunk.
+- prkit's own "Skipped by your ignore rules" chapter takes no `risk`, and no reason can name it: you didn't read those files.
+
+`risk` is not `tone: "risk"`. A line note, callout or focus item with `tone: "risk"` is one specific way the code could break, pinned where it lives. `risk` is how carefully to read. Don't restate a `focus` item as a reason.
+
+Write each chapter's `risk` with the chapter, and the pull request's `risk` right after the chapters, once you have judged every chapter. For the password reset example above:
+
+```json
+{
+  "id": "reset-links-expire",
+  "title": "Reset links expire after an hour",
+  "kind": "core",
+  "files": ["src/tokens.js", "src/reset.js"],
+  "risk": {
+    "level": "medium",
+    "reasons": [
+      {
+        "text": "An expired link now gets a 410, so a link in an old email stops working.",
+        "file": "src/tokens.js",
+        "line": 21
+      }
+    ]
+  }
+}
+```
+
+```json
+{
+  "risk": {
+    "level": "medium",
+    "reasons": [
+      {
+        "text": "Reset links stop working after an hour, which changes what people with old emails see.",
+        "chapter": "reset-links-expire",
+        "at": { "path": "src/tokens.js", "line": 21 }
+      }
+    ]
+  }
+}
+```
+
 ## Line notes
 
 `annotations` pin a note under a line in the diff. Use them only on lines carrying a decision that isn't obvious from the code ("encoded by hand because `encodeURIComponent` leaves `)` alone", not "imports the helper"): usually 0-3 per file, a few more on a file that holds several of the PR's ideas. Keep each under about 45 words, since they sit inside the diff. Take line numbers straight from the numbered diff: `"side": "additions"` uses the new number (on `+` and unchanged lines), `"side": "deletions"` uses the old number (on `-` lines). A line note must land inside a hunk, and binary, too-large and rename-only files can't take any.
@@ -169,11 +233,12 @@ Top level:
 - `steps` (string[], optional): how the change works, in order.
 - `flow` (object, optional but recommended for code changes): the before/after, a graph or a behavior diff.
 - `chapters` (object[], required, at least one): in reading order.
+- `risk` (object, required): how carefully to read the whole pull request, written right after the chapters. `{ "level": "low" | "medium" | "high", "reasons": [{ "text", "chapter", "at" }] }`: 1-3 reasons, each with the `chapter` that explains it (an id or a 1-based number) and optionally `at`, `{ "path", "line" }`.
 - `focus` (object[], optional): "Worth a closer look" items.
 - `focusAreas` (object[], only when the prompt lists the reviewer's focus areas): exactly one entry per listed area, `{ "id", "verdict": "notable" | "nothing-notable" | "not-assessed", "text", "chapter" }`. A notable answer names the chapter where the reader finds it; a not-assessed one says why in `text`. These are the reviewer's own questions, so answer them plainly, and don't invent concerns to fill one.
 - `guidanceNote` (string, optional): when the prompt's guidance blocks pull in different directions, one sentence on how you settled it. Leave it out otherwise.
 
-**Markdown.** These fields take inline markdown (`` `code` ``, `**bold**`, `[label](https://...)`): `summary`, `background`, `steps`, chapter `body`, callouts, line notes, file `note`, `focus`, `flow.subtitle` and flow row `text`. Everything else is plain text, so don't put backticks in titles, labels, `detail` or `pseudocode`.
+**Markdown.** These fields take inline markdown (`` `code` ``, `**bold**`, `[label](https://...)`): `summary`, `background`, `steps`, chapter `body`, callouts, line notes, file `note`, `focus`, `flow.subtitle`, flow row `text` and risk reason `text`. Everything else is plain text, so don't put backticks in titles, labels, `detail` or `pseudocode`.
 
 A chapter:
 
@@ -183,6 +248,7 @@ A chapter:
 - `body` (string[]): paragraphs of chapter text, one string per paragraph.
 - `pseudocode` (optional): plain text in a monospace block under the body.
 - `callouts` (optional): `{ "tone": "note" | "question" | "risk", "text": "..." }`.
+- `risk` (object, required): how carefully to read this chapter. `{ "level": "low" | "medium" | "high", "reasons": [{ "text", "file", "line" }] }`: 1-3 reasons, each with a `file` of this chapter and optionally a `line` of it.
 - `files` (required): paths exactly as the diff lists them, or globs (`*`, `?`, `[...]`). An entry is a path string or `{ "path", "note", "annotations", "collapsed" }`, where an annotation is `{ "line": 42, "side": "additions" | "deletions", "tone": "note" | "question" | "risk", "text": "..." }` (`side` defaults to `additions`, `tone` to `note`).
 
 Globs match only files that no explicit entry already claimed, in diff order. `*` matches across `/`. A leading `**/` needs at least one folder in front, so `"**/*.test.ts"` misses test files at the repo root.
@@ -193,4 +259,4 @@ Globs match only files that no explicit entry already claimed, in diff order. `*
 
 ## Submitting
 
-Call `submit_guide` once the guide covers every changed file. prkit checks it the way the visualize-pr build does: every file in exactly one chapter, every reference resolves, every line note and every flow row's `at` lands on a line inside a hunk. If the call fails, it lists every problem in plain words ("`src/a.ts`: additions line 12 is outside the diff hunks. Visible additions lines: 40-58"). Fix them all with `revise_guide`: send only the top-level fields and chapters you change, each chapter whole with its `id` and `files`. prkit applies them to the guide it rejected and checks the whole guide again. To drop a field the rejected guide has, like a `flow` that doesn't help, or when the call never reached prkit (Claude Code couldn't read its input as JSON), send the whole guide with `submit_guide` again. Warnings don't block the guide, but fix them if you can. Once a call succeeds, prkit ends your turn.
+Call `submit_guide` once the guide covers every changed file. prkit checks it the way the visualize-pr build does: every file in exactly one chapter, every reference resolves, every line note and every flow row's `at` lands on a line inside a hunk, and the pull request and every chapter have a `risk` whose reasons point at evidence that opens. If the call fails, it lists every problem in plain words ("`src/a.ts`: additions line 12 is outside the diff hunks. Visible additions lines: 40-58"). Fix them all with `revise_guide`: send only the top-level fields and chapters you change, each chapter whole with its `id` and `files`. prkit applies them to the guide it rejected and checks the whole guide again. To drop a field the rejected guide has, like a `flow` that doesn't help, or when the call never reached prkit (Claude Code couldn't read its input as JSON), send the whole guide with `submit_guide` again. Warnings don't block the guide, but fix them if you can. Once a call succeeds, prkit ends your turn.

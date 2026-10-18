@@ -1,6 +1,8 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
+import { RiskSignal } from "./guideConfig.ts";
+
 export const GuideKind = Schema.Literals([
   "core",
   "supporting",
@@ -22,6 +24,11 @@ export const GuideRowDepth = Schema.Literals([0, 1, 2, 3]);
  */
 export const FocusVerdict = Schema.Literals(["notable", "nothing-notable", "not-assessed"]);
 export type FocusVerdict = typeof FocusVerdict.Type;
+/** How carefully the reviewer should read. Never whether it is safe to merge. */
+export const RiskLevel = Schema.Literals(["low", "medium", "high"]);
+export type RiskLevel = typeof RiskLevel.Type;
+/** low < medium < high, from the literal order. */
+export const riskRank = (level: RiskLevel) => RiskLevel.literals.indexOf(level);
 
 const Paragraphs = Schema.Union([Schema.String, Schema.Array(Schema.String)]);
 const ChapterReference = Schema.Union([Schema.String, Schema.Int]);
@@ -49,6 +56,36 @@ const FileEntry = Schema.Union([
 export const DiffLineRef = Schema.Struct({ path: Schema.String, line: Schema.Int });
 export type DiffLineRef = typeof DiffLineRef.Type;
 
+// The evidence keys are optional so that a guide missing one gets a plain-word error from
+// `normalize` and stays available to `revise_guide`.
+const PullRequestRisk = Schema.Struct({
+  level: RiskLevel,
+  reasons: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        text: Schema.String,
+        chapter: Schema.optionalKey(ChapterReference),
+        /** A new-side line of a file in that chapter. */
+        at: Schema.optionalKey(DiffLineRef),
+      }),
+    ),
+  ),
+});
+const ChapterRisk = Schema.Struct({
+  level: RiskLevel,
+  reasons: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        text: Schema.String,
+        /** A file of this chapter. */
+        file: Schema.optionalKey(Schema.String),
+        /** A new-side line of that file inside a hunk. */
+        line: Schema.optionalKey(Schema.Int),
+      }),
+    ),
+  ),
+});
+
 const chapterFields = {
   id: Schema.optionalKey(Schema.String),
   title: Schema.String,
@@ -56,6 +93,7 @@ const chapterFields = {
   body: Schema.optionalKey(Paragraphs),
   pseudocode: Schema.optionalKey(Schema.String),
   callouts: Schema.optionalKey(Schema.Array(Callout)),
+  risk: Schema.optionalKey(ChapterRisk),
 };
 const FlowNode = Schema.Struct({
   id: Schema.String,
@@ -116,6 +154,7 @@ export const Guide = Schema.Struct({
   background: Schema.optionalKey(Paragraphs),
   steps: Schema.optionalKey(Schema.Array(Schema.String)),
   chapters: Schema.NonEmptyArray(GuideChapter),
+  risk: Schema.optionalKey(PullRequestRisk),
   flow: Schema.optionalKey(Flow),
   focus: Schema.optionalKey(Focus),
   /** One entry per focus area the prompt lists, by its id. Leave out when it lists none. */
@@ -139,6 +178,7 @@ export const DraftGuide = Schema.Struct({
       Schema.Struct({ ...chapterFields, files: Schema.optionalKey(Schema.Array(FileEntry)) }),
     ),
   ),
+  risk: Schema.optionalKey(PullRequestRisk),
   flow: Schema.optionalKey(Flow),
   focus: Schema.optionalKey(Focus),
 });
@@ -153,6 +193,7 @@ export const GuidePatch = Schema.Struct({
   background: Schema.optionalKey(Paragraphs),
   steps: Schema.optionalKey(Schema.Array(Schema.String)),
   chapters: Schema.optionalKey(Schema.Array(GuideChapter)),
+  risk: Schema.optionalKey(PullRequestRisk),
   flow: Schema.optionalKey(Flow),
   focus: Schema.optionalKey(Focus),
   focusAreas: Schema.optionalKey(FocusAreaAnswers),
@@ -227,8 +268,37 @@ export const NormalizedGuide = Schema.Struct({
           ),
         }),
       ),
+      /** Null on prkit's skipped chapter and in revisions written before risk. */
+      risk: Schema.NullOr(
+        Schema.Struct({
+          level: RiskLevel,
+          reasons: Schema.Array(
+            Schema.Struct({
+              text: Schema.String,
+              file: Schema.String,
+              line: Schema.NullOr(Schema.Int),
+            }),
+          ),
+        }),
+      ).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
     }),
   ),
+  /** Null in revisions written before risk, and while a draft has no level yet. */
+  risk: Schema.NullOr(
+    Schema.Struct({
+      level: RiskLevel,
+      reasons: Schema.Array(
+        Schema.Struct({
+          text: Schema.String,
+          /** Null only in a streamed draft, until its chapter is written. */
+          chapter: Schema.NullOr(Schema.String),
+          at: Schema.NullOr(DiffLineRef),
+        }),
+      ),
+    }),
+  ).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
+  /** prkit's facts about the reviewed files, frozen with the attempt. Never the agent's. */
+  signals: Schema.Array(RiskSignal).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   flow: Schema.NullOr(Schema.Union([NormalizedFlowGraph, NormalizedBehaviorDiff])),
   focus: Schema.Array(
     Schema.Struct({

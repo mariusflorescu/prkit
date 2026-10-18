@@ -1,4 +1,4 @@
-import type { DiffFile } from "@prkit/contracts";
+import type { DiffFile, DiffLineRef } from "@prkit/contracts";
 
 import { FileDiffCard, type DiffComments, type LoadContents } from "~/components/diff";
 
@@ -14,7 +14,9 @@ export function ChapterSection({
   reopened,
   fileId,
   open,
+  rated,
   onToggle,
+  onLine,
   onFile,
   jump,
   loadContents,
@@ -32,7 +34,9 @@ export function ChapterSection({
   reopened: number;
   fileId: (path: string) => string;
   open: boolean;
+  rated: boolean;
   onToggle: () => void;
+  onLine: (at: DiffLineRef) => void;
   onFile: (path: string) => void;
   jump: LineJump | null;
   loadContents?: LoadContents | undefined;
@@ -49,7 +53,9 @@ export function ChapterSection({
         index={index}
         total={total}
         open={open}
+        rated={rated}
         onToggle={onToggle}
+        onLine={onLine}
         onFile={onFile}
         prUrl={prUrl}
         review={review}

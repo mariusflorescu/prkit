@@ -1,9 +1,7 @@
 import * as Schema from "effect/Schema";
 
 import type { DiffSnapshot } from "./diffSnapshot.ts";
-import { describeRule } from "./guideConfigResolve.ts";
 import {
-  type DiffLineRef,
   type Guide,
   GuideFlowStatus,
   GuideRowDepth,
@@ -14,9 +12,7 @@ import {
   type GuideCheckContext,
   type Mode,
   type Report,
-  didYouMean,
-  hunkRanges,
-  listRanges,
+  checkDiffLine,
   repr,
   resolveChapter,
   trim,
@@ -52,54 +48,6 @@ const outsideHints: Record<typeof GuideRowStatus.Type, string> = {
   removed: " A removed row points at the new-side line next to its `-` lines.",
   unchanged:
     " A context row points at a line of its code the diff shows; leave the row out if the diff doesn't show it.",
-};
-
-const checkDiffLine = (
-  at: DiffLineRef,
-  where: string,
-  hint: string,
-  snapshot: DiffSnapshot,
-  context: GuideCheckContext | null,
-  report: Report,
-) => {
-  const { path, line } = at;
-  const file = snapshot.files.find((candidate) => candidate.path === path);
-  if (file === undefined) {
-    const left = context?.skipped.find((candidate) => candidate.path === path);
-    report.errors.push(
-      left === undefined
-        ? `${where}: \`${path}\` is not a file in this PR.${didYouMean(path, snapshot)}`
-        : `${where}: \`${path}\` is skipped by the reviewer's ignore rules (${left.reasons.map(describeRule).join(", ")}). Point the row at a reviewed file.`,
-    );
-    return;
-  }
-  if (line < 1) {
-    report.errors.push(`${where}: \`at.line\` must be a positive line number, got ${line}.`);
-    return;
-  }
-  if (file.patch._tag !== "text") {
-    report.errors.push(
-      `${where}: \`${path}\` has a \`${file.patch._tag}\` patch, so \`at\` can't point into it. Point at a line of a text diff.`,
-    );
-    return;
-  }
-  const ranges = hunkRanges(file.patch.patch);
-  if (ranges.additions.length === 0 && ranges.deletions.length === 0) {
-    report.errors.push(
-      `${where}: \`${path}\` has no diff hunks (a rename only), so \`at\` can't point into it. Point at a file with changed lines.`,
-    );
-    return;
-  }
-  if (ranges.additions.length === 0) {
-    report.errors.push(
-      `${where}: \`${path}\` is deleted, so it has no new-side lines. Point the row at a file that still exists, such as the code that used to call it.`,
-    );
-    return;
-  }
-  if (!ranges.additions.some(([low, high]) => low <= line && line <= high))
-    report.errors.push(
-      `${where}: \`${path}\` line ${line} is not a new-side line inside the diff hunks, so it can't open. New-side lines: ${listRanges(ranges.additions)}.${hint}`,
-    );
 };
 
 const normalizeBehavior = (

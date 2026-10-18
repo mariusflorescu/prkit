@@ -6,11 +6,13 @@ import { GuideSetupProblem } from "../GuideSetupProblem";
 import { FocusChip } from "./FocusChip";
 import { GuidanceChip } from "./GuidanceChip";
 import { IgnoreChip } from "./IgnoreChip";
+import { SensitiveChip } from "./SensitiveChip";
 import type { GuideConfigPreview } from "./useGuideConfigPreview";
 
 /**
  * One muted line of what the guide will skip, answer and be told:
- * "No files skipped · 2 focus areas · Guidance: Global". Each item opens this PR's settings.
+ * "No files skipped · Look closely: none · 2 focus areas · Guidance: Global". Each item opens
+ * this PR's settings.
  */
 export function GuideSettingsLine({
   pullRequest,
@@ -43,6 +45,7 @@ export function GuideSettingsLine({
         className="flex h-6 items-center gap-3 px-1.5"
       >
         <Skeleton className="h-3 w-24" />
+        <Skeleton className="h-3 w-28" />
         <Skeleton className="h-3 w-20" />
         <Skeleton className="h-3 w-24" />
       </div>
@@ -55,6 +58,8 @@ export function GuideSettingsLine({
   return (
     <div role="group" aria-label="Guide settings" className="flex min-w-0 flex-wrap items-center">
       <IgnoreChip pullRequest={pullRequest} preview={preview} config={config.data} />
+      {dot}
+      <SensitiveChip pullRequest={pullRequest} preview={preview} config={config.data} />
       {dot}
       <FocusChip
         pullRequest={pullRequest}

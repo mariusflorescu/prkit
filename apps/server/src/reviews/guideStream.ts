@@ -10,6 +10,7 @@ const DRAFT_FIELDS: ReadonlySet<string> = new Set([
   "background",
   "steps",
   "flow",
+  "risk",
   "focus",
 ]);
 

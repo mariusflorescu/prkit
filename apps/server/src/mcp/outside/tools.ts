@@ -344,7 +344,7 @@ const ReadGuideDuration = read(
 const ReadGuideSettings = read(
   Tool.make("read_guide_settings", {
     description:
-      "All three scopes and their versions, resolved focus/guidance/ignore rules, and files that would be skipped.",
+      "All three scopes and their versions, resolved focus, guidance, ignore rules and look-closely paths, and files that would be skipped.",
     parameters: TargetInput,
     success: limited(Parity.GuideSettingsResult),
     failure: OutsideToolFailure,
@@ -616,7 +616,7 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
   const SavePullRequestGuideSettings = work(
     Tool.make("save_pull_request_guide_settings", {
       description:
-        "Save one PR-scope ignore, focus or guidance section with expectedVersion. Read read_guide_settings first. Cannot edit Global or Repository settings.",
+        "Save one PR-scope ignore, sensitive (look-closely paths), focus or guidance section with expectedVersion. Read read_guide_settings first. Cannot edit Global or Repository settings.",
       parameters: Parity.SaveGuideSettingsInput,
       success: limited(Parity.ScopeResult),
       failure: OutsideToolFailure,

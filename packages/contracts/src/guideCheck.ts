@@ -1,5 +1,7 @@
+import type { DiffLineRef } from "./guide.ts";
 import type { DiffSnapshot } from "./diffSnapshot.ts";
-import type { SkippedFile } from "./guideConfig.ts";
+import type { RiskSignal, SkippedFile } from "./guideConfig.ts";
+import { describeRule } from "./guideConfigResolve.ts";
 
 export type Report = { errors: Array<string>; warnings: Array<string> };
 /** `draft` skips the checks a guide can only pass once it is finished: coverage and empty chapters. */
@@ -19,6 +21,8 @@ export interface GuideCheckContext {
   }>;
   /** Files the ignore rules skip. They are not in the snapshot the guide is checked against. */
   readonly skipped: ReadonlyArray<SkippedFile>;
+  /** What prkit found in the reviewed files. Null when the guide doesn't have to rate `risk`. */
+  readonly signals: ReadonlyArray<RiskSignal> | null;
 }
 
 export const slugify = (text: string) =>
@@ -26,6 +30,8 @@ export const slugify = (text: string) =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "chapter";
+export const chapterKey = (chapter: { readonly id?: string; readonly title: string }) =>
+  slugify(chapter.id || chapter.title);
 export const asList = (value: string | ReadonlyArray<string> | undefined): ReadonlyArray<string> =>
   value === undefined ? [] : typeof value === "string" ? [value] : value;
 const whitespace =
@@ -94,4 +100,61 @@ export const resolveChapter = (
     `${where}: chapter \`${value}\` doesn't exist. Chapter ids: ${chapterIds.join(", ")}.`,
   );
   return null;
+};
+
+/**
+ * Checks that a reference opens a new-side line inside a hunk. `field` is how the guide
+ * names it: `at` can move to another file, while a `line` belongs to a file already chosen,
+ * so its fix is to leave it out.
+ */
+export const checkDiffLine = (
+  at: DiffLineRef,
+  where: string,
+  hint: string,
+  snapshot: DiffSnapshot,
+  context: GuideCheckContext | null,
+  report: Report,
+  field: "at" | "line" = "at",
+) => {
+  const { path, line } = at;
+  const elsewhere = (advice: string) => (field === "line" ? " Leave `line` out." : ` ${advice}`);
+  const file = snapshot.files.find((candidate) => candidate.path === path);
+  if (file === undefined) {
+    const left = context?.skipped.find((candidate) => candidate.path === path);
+    report.errors.push(
+      left === undefined
+        ? `${where}: \`${path}\` is not a file in this PR.${didYouMean(path, snapshot)}`
+        : `${where}: \`${path}\` is skipped by the reviewer's ignore rules (${left.reasons.map(describeRule).join(", ")}). Point it at a reviewed file.`,
+    );
+    return;
+  }
+  if (line < 1) {
+    report.errors.push(
+      `${where}: \`${field === "at" ? "at.line" : "line"}\` must be a positive line number, got ${line}.`,
+    );
+    return;
+  }
+  if (file.patch._tag !== "text") {
+    report.errors.push(
+      `${where}: \`${path}\` has a \`${file.patch._tag}\` patch, so \`${field}\` can't point into it.${elsewhere("Point at a line of a text diff.")}`,
+    );
+    return;
+  }
+  const ranges = hunkRanges(file.patch.patch);
+  if (ranges.additions.length === 0 && ranges.deletions.length === 0) {
+    report.errors.push(
+      `${where}: \`${path}\` has no diff hunks (a rename only), so \`${field}\` can't point into it.${elsewhere("Point at a file with changed lines.")}`,
+    );
+    return;
+  }
+  if (ranges.additions.length === 0) {
+    report.errors.push(
+      `${where}: \`${path}\` is deleted, so it has no new-side lines.${elsewhere("Point it at a file that still exists, such as the code that used to call it.")}`,
+    );
+    return;
+  }
+  if (!ranges.additions.some(([low, high]) => low <= line && line <= high))
+    report.errors.push(
+      `${where}: \`${path}\` line ${line} is not a new-side line inside the diff hunks, so it can't open. New-side lines: ${listRanges(ranges.additions)}.${hint}`,
+    );
 };

@@ -3,16 +3,21 @@ import type { DiffFile } from "@prkit/contracts";
 import { DiffStat } from "~/components/diff/DiffStat";
 
 import { KindTag } from "./KindTag";
+import { RiskTag } from "./RiskTag";
+import { chapterRisk } from "./riskLevels";
 import type { GuideChapter } from "./types";
 
 export function ChapterRoadmap({
   chapters,
   files,
+  rated,
   onChapter,
   pendingChapterIds,
 }: {
   chapters: ReadonlyArray<GuideChapter>;
   files: ReadonlyMap<string, DiffFile>;
+  /** The guide rates risk: every row keeps a cell for it, so the columns line up. */
+  rated: boolean;
   onChapter: (id: string) => void;
   pendingChapterIds: ReadonlySet<string>;
 }) {
@@ -23,7 +28,7 @@ export function ChapterRoadmap({
       </p>
     );
   return (
-    <section data-guide-roadmap="">
+    <section data-guide-roadmap="" data-rated={rated || undefined}>
       <h2>
         Chapters <span>{chapters.length}</span>
       </h2>
@@ -38,6 +43,7 @@ export function ChapterRoadmap({
             0,
           );
           const pending = pendingChapterIds.has(chapter.id);
+          const risk = chapterRisk(chapter, rated);
           return (
             <li key={chapter.id}>
               <button
@@ -53,6 +59,9 @@ export function ChapterRoadmap({
                 ) : (
                   <>
                     <KindTag kind={chapter.kind} />
+                    {rated && (
+                      <span data-roadmap-risk="">{risk !== null && <RiskTag level={risk} />}</span>
+                    )}
                     <span data-roadmap-files="">
                       {chapter.files.length} file{chapter.files.length === 1 ? "" : "s"}
                     </span>

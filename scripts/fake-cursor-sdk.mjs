@@ -188,6 +188,17 @@ const changedFiles = (prompt) => {
   });
 };
 
+const riskOf = (prompt, files) => {
+  const level = prompt.includes("- Look closely:") ? "medium" : "low";
+  return {
+    chapter: {
+      level,
+      reasons: [{ text: "The stand-in Cursor rates every change alike.", file: files[0] }],
+    },
+    guide: { level, reasons: [{ text: "The stand-in Cursor read one chapter.", chapter: 1 }] },
+  };
+};
+
 class StandInAgent {
   constructor(agentId, options) {
     this.agentId = agentId;
@@ -311,9 +322,11 @@ class StandInAgent {
       }
       if (await flagged("builtin-overlap")) {
         const files = changedFiles(message);
+        const risk = riskOf(message, files);
         const args = {
           summary: "A guide finishing while Cursor's own tool runs.",
-          chapters: [{ title: "Every change", files }],
+          chapters: [{ title: "Every change", files, risk: risk.chapter }],
+          risk: risk.guide,
         };
         const callId = NodeCrypto.randomUUID();
         const toolCall = {
@@ -383,9 +396,11 @@ class StandInAgent {
       }
       const files = changedFiles(message);
       if (files[0] !== undefined) await call("read_file", { path: files[0] });
+      const risk = riskOf(message, files);
       const submitted = await call("submit_guide", {
         summary: "A guide written by the stand-in Cursor.",
-        chapters: [{ title: "Every change", files }],
+        chapters: [{ title: "Every change", files, risk: risk.chapter }],
+        risk: risk.guide,
       });
       return { status: submitted.ok ? "finished" : "error" };
     };

@@ -113,6 +113,12 @@ export function GuideView({
     return owners;
   }, [guide.chapters]);
   const [jump, setJump] = useState<LineJump | null>(null);
+  // A draft shows the risk card from the start, so nothing moves when the agent rates it.
+  const rated =
+    draft !== undefined ||
+    guide.risk !== null ||
+    guide.signals.length > 0 ||
+    guide.chapters.some((chapter) => chapter.risk !== null);
 
   const scrollTo = useCallback((target: ScrollTarget) => {
     cleanupScroll.current?.();
@@ -173,6 +179,16 @@ export function GuideView({
     },
     [owners, fileId, scrollTo],
   );
+  const onFile = useCallback(
+    (path: string) => {
+      const owner = owners.get(path);
+      if (owner === undefined) return;
+      setCollapsed((previous) => new Map(previous).set(owner, false));
+      setJump({ path, reveal: { line: null } });
+      scrollTo(byId(fileId(path)));
+    },
+    [owners, fileId, scrollTo],
+  );
   const reviewChapter = async (chapter: GuideChapter, next: boolean) => {
     if (reviewed === undefined) return false;
     const saved = await reviewed.set(filesOf(chapter), next);
@@ -221,8 +237,10 @@ export function GuideView({
               <GuideOverview
                 guide={guide}
                 files={files}
+                rated={rated}
                 onChapter={onChapter}
                 onLine={onLine}
+                onFile={onFile}
                 prUrl={prUrl}
                 prDescription={prDescription}
                 pendingChapterIds={pendingChapterIds}
@@ -253,10 +271,12 @@ export function GuideView({
                     reopened={reopened.get(chapter.id) ?? 0}
                     fileId={fileId}
                     open={!isCollapsed}
+                    rated={rated}
                     onToggle={() =>
                       setCollapsed((previous) => new Map(previous).set(chapter.id, !isCollapsed))
                     }
-                    onFile={(path) => scrollTo(byId(fileId(path)))}
+                    onLine={onLine}
+                    onFile={onFile}
                     jump={jump && owners.get(jump.path) === chapter.id ? jump : null}
                     loadContents={loadContents}
                     comments={comments}

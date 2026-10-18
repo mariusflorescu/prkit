@@ -402,7 +402,8 @@ button[data-line-link] {
 [data-roadmap-row][data-pending] [data-roadmap-files] {
   grid-column: 3 / -1;
 }
-[data-kind-tag] {
+[data-kind-tag],
+[data-risk-tag] {
   padding: 1px 7px;
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
@@ -643,4 +644,176 @@ button[data-line-link]:focus-visible,
 }
 [data-focus-area-text] {
   font-size: 13px;
+}
+
+[data-risk-tag][data-risk="medium"] {
+  border-color: color-mix(in srgb, var(--warning) 30%, var(--border));
+  background: var(--warning-surface);
+  color: var(--warning-foreground);
+}
+[data-risk-tag][data-risk="high"] {
+  border-color: color-mix(in srgb, var(--error) 30%, var(--border));
+  background: var(--error-surface);
+  color: var(--error-foreground);
+}
+[data-risk-tag][data-risk="not-reviewed"] {
+  border-style: dashed;
+}
+[data-risk-tag] {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+[data-risk-meter] {
+  display: inline-flex;
+  gap: 2px;
+}
+[data-risk-meter] > span {
+  width: 4px;
+  height: 4px;
+  border-radius: var(--radius-xl);
+  background: currentColor;
+}
+[data-risk="low"] [data-risk-meter] > span:nth-child(n + 2),
+[data-risk="medium"] [data-risk-meter] > span:nth-child(3) {
+  opacity: 0.3;
+}
+[data-guide-risk] {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 32px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  font-size: 13px;
+  line-height: 1.55;
+}
+[data-risk-head] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-height: 22px;
+}
+[data-risk-head] h2 {
+  font-size: 13px;
+  font-weight: 600;
+}
+[data-risk-quiet] {
+  color: var(--muted-foreground);
+}
+[data-risk-reasons] {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+[data-risk-reasons] li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+}
+[data-risk-reasons] li > :first-child {
+  width: 100%;
+  margin: 0;
+  text-align: center;
+}
+[data-risk-unlinked] {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+[data-risk-reasons] [data-line-link],
+[data-chapter-risk-reasons] [data-line-link] {
+  margin-left: 6px;
+}
+[data-risk-signals] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+[data-risk-signals] > span:first-child {
+  margin-right: 4px;
+  color: var(--muted-foreground);
+}
+[data-risk-signal] {
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--muted);
+  color: var(--foreground);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+button[data-risk-signal] {
+  cursor: pointer;
+}
+[data-risk-signal-popup] {
+  max-height: 320px;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.55;
+}
+[data-risk-signal-popup] p {
+  margin-bottom: 6px;
+}
+[data-risk-signal-popup] > div + div {
+  margin-top: 6px;
+}
+[data-risk-signal-popup] button {
+  padding: 4px 0;
+  cursor: pointer;
+  text-align: left;
+  font: 11px/1.5 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+[data-risk-signal-popup] button:disabled {
+  color: var(--muted-foreground);
+  cursor: default;
+}
+[data-risk-signal-popup] small {
+  display: block;
+  padding-top: 4px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+[data-chapter-risk-reasons] {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: -6px 0 18px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.6;
+}
+[data-guide-roadmap][data-rated] [data-roadmap-row] {
+  grid-template-columns: 28px minmax(0, 1fr) auto 92px 56px 90px;
+}
+[data-roadmap-risk] {
+  display: flex;
+}
+button[data-risk-signal]:focus-visible,
+[data-risk-signal-popup] button:focus-visible {
+  outline: 2px solid var(--ring);
+}
+@media (hover: hover) {
+  button[data-risk-signal]:hover {
+    border-color: var(--primary);
+  }
+  [data-risk-signal-popup] button:enabled:hover {
+    text-decoration: underline;
+  }
+}
+@media (max-width: 700px) {
+  [data-guide-roadmap][data-rated] [data-roadmap-row] {
+    grid-template-columns: 24px minmax(0, 1fr) 92px auto;
+  }
 }

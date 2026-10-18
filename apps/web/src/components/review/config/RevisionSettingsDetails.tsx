@@ -93,6 +93,23 @@ export function RevisionSettingsDetails({ config }: { config: AttemptConfig }) {
           </ul>
         )}
       </section>
+      <section aria-label="Always look closely at" className="space-y-1.5">
+        <h4 className="font-medium">Always look closely at, in the order they apply</h4>
+        {config.sensitive.length === 0 ? (
+          <p className="text-muted-foreground">None.</p>
+        ) : (
+          <ol className="space-y-0.5">
+            {config.sensitive.map((rule) => (
+              <li key={rule.id} className={rule.active ? "" : "text-muted-foreground line-through"}>
+                <code>{rule.pattern}</code> ({SCOPE_LABELS[rule.scope]})
+                {rule.decidedBy === null
+                  ? ""
+                  : ` · ${rule.active ? "on" : "off"} at ${SCOPE_LABELS[rule.decidedBy]}`}
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
       {config.dangling.length > 0 && (
         <p role="status" className="text-warning-foreground">
           {config.dangling.length === 1

@@ -26,6 +26,7 @@ export * from "./pullRequestActionPolicy.ts";
 export * from "./pullRequestTimeline.ts";
 export * from "./repositories.ts";
 export * from "./reviewComments.ts";
+export * from "./riskSignals.ts";
 export * from "./stack.ts";
 export * from "./textHash.ts";
 export * from "./workspace.ts";

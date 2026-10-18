@@ -1,10 +1,14 @@
+import type { DiffLineRef } from "@prkit/contracts";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { GuideNote } from "~/components/diff/GuideNote";
 import { InlineMarkdown } from "~/components/diff/InlineMarkdown";
 import { ReviewedToggle } from "~/components/diff/ReviewedToggle";
 
+import { ChapterRiskReasons } from "./ChapterRiskReasons";
 import { KindTag } from "./KindTag";
+import { RiskTag } from "./RiskTag";
+import { chapterRisk } from "./riskLevels";
 import type { ChapterReviewedControl, GuideChapter } from "./types";
 import { useStickyNarration } from "./useStickyNarration";
 import { keyedItems } from "./keyedItems";
@@ -14,7 +18,9 @@ export function ChapterNarration({
   index,
   total,
   open,
+  rated,
   onToggle,
+  onLine,
   onFile,
   prUrl,
   review,
@@ -24,12 +30,16 @@ export function ChapterNarration({
   /** Null while a draft is still adding chapters, so there is no total to show yet. */
   total: number | null;
   open: boolean;
+  /** The guide rates risk, so prkit's skipped chapter says it wasn't reviewed. */
+  rated: boolean;
   onToggle: () => void;
+  onLine: (at: DiffLineRef) => void;
   onFile: (path: string) => void;
   prUrl?: string | undefined;
   review: ChapterReviewedControl | null;
 }) {
   const ref = useStickyNarration();
+  const risk = chapterRisk(chapter, rated);
   return (
     <aside data-chapter-narration="">
       <div ref={ref} data-chapter-narration-inner="">
@@ -45,6 +55,7 @@ export function ChapterNarration({
             {total === null ? null : ` / ${String(total).padStart(2, "0")}`}
           </span>
           <KindTag kind={chapter.kind} />
+          {risk !== null && <RiskTag level={risk} />}
           {review !== null && (
             <span className="ml-auto font-sans">
               <ReviewedToggle
@@ -58,6 +69,14 @@ export function ChapterNarration({
         </div>
         {open && (
           <>
+            {chapter.risk !== null && chapter.risk.reasons.length > 0 && (
+              <ChapterRiskReasons
+                reasons={chapter.risk.reasons}
+                onLine={onLine}
+                onFile={onFile}
+                prUrl={prUrl}
+              />
+            )}
             {keyedItems(chapter.body, (text) => text).map(({ key, value: text }) => (
               <p key={key}>
                 <InlineMarkdown text={text} prUrl={prUrl} />

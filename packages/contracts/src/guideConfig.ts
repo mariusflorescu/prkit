@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { AccountId, PullRequestKey } from "./ids.ts";
@@ -68,6 +69,8 @@ export type GuidanceSection = typeof GuidanceSection.Type;
 /** One scope's own settings. A scope nobody saved yet is all empty at version 0. */
 export const ScopeConfig = Schema.Struct({
   ignore: IgnoreSection,
+  /** The paths the reviewer always looks closely at: patterns with the ignore rules' shape. */
+  sensitive: IgnoreSection,
   focus: FocusSection,
   guidance: GuidanceSection,
 });
@@ -75,6 +78,7 @@ export type ScopeConfig = typeof ScopeConfig.Type;
 
 export const emptyScopeConfig: ScopeConfig = {
   ignore: { version: 0, rules: [], overrides: [] },
+  sensitive: { version: 0, rules: [], overrides: [] },
   focus: { version: 0, areas: [], overrides: [] },
   guidance: { version: 0, text: "", mode: "append" },
 };
@@ -99,12 +103,15 @@ export const PullRequestGuideConfig = Schema.Struct({
 });
 export type PullRequestGuideConfig = typeof PullRequestGuideConfig.Type;
 
+const pathRulesEdit = {
+  rules: Schema.Array(Schema.Struct({ id: Schema.NullOr(GuideItemId), pattern: Schema.String })),
+  overrides: Schema.Array(GuideOverride),
+};
+
 /** A new item has no id yet; the server gives it one. */
 export const GuideSectionEdit = Schema.Union([
-  Schema.TaggedStruct("ignore", {
-    rules: Schema.Array(Schema.Struct({ id: Schema.NullOr(GuideItemId), pattern: Schema.String })),
-    overrides: Schema.Array(GuideOverride),
-  }),
+  Schema.TaggedStruct("ignore", pathRulesEdit),
+  Schema.TaggedStruct("sensitive", pathRulesEdit),
   Schema.TaggedStruct("focus", {
     areas: Schema.Array(
       Schema.Struct({
@@ -174,7 +181,7 @@ export type EffectiveGuidance = typeof EffectiveGuidance.Type;
 /** An override whose item was deleted. It does nothing and never attaches to a new item. */
 export const DanglingOverride = Schema.Struct({
   scope: GuideScopeName,
-  kind: Schema.Literals(["ignore", "focus"]),
+  kind: Schema.Literals(["ignore", "sensitive", "focus"]),
   itemId: GuideItemId,
 });
 export type DanglingOverride = typeof DanglingOverride.Type;
@@ -182,6 +189,10 @@ export type DanglingOverride = typeof DanglingOverride.Type;
 export const ResolvedGuideConfig = Schema.Struct({
   /** Every rule in effective order: Global, Repository, then PR, each in list order. */
   ignore: Schema.Array(EffectiveIgnoreRule),
+  /** In the same order. Attempts from before look-closely paths decode with none. */
+  sensitive: Schema.Array(EffectiveIgnoreRule).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+  ),
   focusAreas: Schema.Array(EffectiveFocusArea),
   guidance: Schema.Array(EffectiveGuidance),
   dangling: Schema.Array(DanglingOverride),
@@ -208,6 +219,31 @@ export const SkippedFile = Schema.Struct({
 export type SkippedFile = typeof SkippedFile.Type;
 
 /**
+ * A fact prkit found in the reviewed files, shown next to the agent's risk level.
+ * Accepted guides store these, so a tag is only ever added, never renamed or removed.
+ */
+export const RiskSignal = Schema.Union([
+  Schema.TaggedStruct("sensitive", {
+    files: Schema.Array(
+      Schema.Struct({ path: Schema.String, pattern: Schema.String, scope: GuideScopeName }),
+    ),
+  }),
+  Schema.TaggedStruct("migration", { files: Schema.Array(Schema.String) }),
+  Schema.TaggedStruct("dependencies", { files: Schema.Array(Schema.String) }),
+  Schema.TaggedStruct("ci", { files: Schema.Array(Schema.String) }),
+  Schema.TaggedStruct("fewer-checks", {
+    files: Schema.Array(Schema.String),
+    deletedTests: Schema.Int,
+    assertionsRemoved: Schema.Int,
+    assertionsAdded: Schema.Int,
+    skipsAdded: Schema.Int,
+  }),
+  Schema.TaggedStruct("untested", { files: Schema.Array(Schema.String) }),
+  Schema.TaggedStruct("large", { lines: Schema.Int, fileCount: Schema.Int }),
+]);
+export type RiskSignal = typeof RiskSignal.Type;
+
+/**
  * What one attempt ran with, resolved once when it started and never changed:
  * snapshot filtering, the prompt, validation and acceptance all read this.
  */
@@ -216,6 +252,10 @@ export const AttemptConfig = Schema.Struct({
   /** Null for attempts from before repository settings existed. */
   repository: Schema.NullOr(GuideRepository),
   skipped: Schema.Array(SkippedFile),
+  /** Null for attempts from before risk, which don't have to rate it; empty when nothing fired. */
+  signals: Schema.NullOr(Schema.Array(RiskSignal)).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+  ),
 });
 export type AttemptConfig = typeof AttemptConfig.Type;
 

@@ -32,7 +32,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import { GitHubApi } from "../github/GitHubApi.ts";
 
-const IgnoreValue = Schema.Struct({
+const PathRulesValue = Schema.Struct({
   rules: Schema.Array(IgnoreRule),
   overrides: Schema.Array(GuideOverride),
 });
@@ -41,13 +41,13 @@ const FocusValue = Schema.Struct({
   overrides: Schema.Array(GuideOverride),
 });
 const GuidanceValue = Schema.Struct({ text: Schema.String, mode: GuidanceMode });
-const IgnoreJson = Schema.fromJsonString(IgnoreValue);
+const PathRulesJson = Schema.fromJsonString(PathRulesValue);
 const FocusJson = Schema.fromJsonString(FocusValue);
 const GuidanceJson = Schema.fromJsonString(GuidanceValue);
 
 const SectionRow = Schema.Struct({
   scope: Schema.String,
-  section: Schema.Literals(["ignore", "focus", "guidance"]),
+  section: Schema.Literals(["ignore", "sensitive", "focus", "guidance"]),
   version: Schema.Int,
   value: Schema.String,
 });
@@ -58,7 +58,7 @@ const RepositoryRow = Schema.Struct({
   name: Schema.String,
 });
 const decodeSections = Schema.decodeUnknownEffect(Schema.Array(SectionRow));
-const decodeIgnore = Schema.decodeEffect(IgnoreJson);
+const decodePathRules = Schema.decodeEffect(PathRulesJson);
 const decodeFocus = Schema.decodeEffect(FocusJson);
 const decodeGuidance = Schema.decodeEffect(GuidanceJson);
 const decodeRepositories = Schema.decodeUnknownEffect(Schema.Array(RepositoryRow));
@@ -91,8 +91,10 @@ const scopeKey = (scope: GuideScope) => {
 const editProblem = (scope: GuideScope, edit: GuideSectionEdit): string | null => {
   const inherits = scope._tag !== "global";
   switch (edit._tag) {
-    case "ignore": {
-      if (edit.rules.length > MAX_RULES) return `Keep it to ${MAX_RULES} rules.`;
+    case "ignore":
+    case "sensitive": {
+      if (edit.rules.length > MAX_RULES)
+        return `Keep it to ${MAX_RULES} ${edit._tag === "ignore" ? "rules" : "paths"}.`;
       const seen = new Set<string>();
       for (const rule of edit.rules) {
         const problem = ignorePatternProblem(rule.pattern);
@@ -138,6 +140,7 @@ const editProblem = (scope: GuideScope, edit: GuideSectionEdit): string | null =
 const trimmed = (edit: GuideSectionEdit): GuideSectionEdit => {
   switch (edit._tag) {
     case "ignore":
+    case "sensitive":
       return {
         ...edit,
         rules: edit.rules.map((rule) => ({ ...rule, pattern: rule.pattern.trim() })),
@@ -161,7 +164,7 @@ const CONFLICT =
 
 /**
  * Guide settings (docs/internals/architecture.md "Guide settings"): each scope's ignore
- * rules, focus areas and guidance, saved per section with a version check.
+ * rules, look-closely paths, focus areas and guidance, saved per section with a version check.
  */
 export class GuideConfigStore extends Context.Service<
   GuideConfigStore,
@@ -186,15 +189,16 @@ export const make = Effect.gen(function* () {
   const encodeEdit = (edit: GuideSectionEdit, current: ScopeConfig) =>
     Effect.gen(function* () {
       switch (edit._tag) {
-        case "ignore": {
-          const known = new Set(current.ignore.rules.map((rule) => rule.id));
+        case "ignore":
+        case "sensitive": {
+          const known = new Set(current[edit._tag].rules.map((rule) => rule.id));
           const rules: Array<IgnoreRule> = [];
           for (const rule of edit.rules) {
             if (rule.id !== null && !known.has(rule.id))
               return yield* new GuideConfigConflict({ message: CONFLICT });
             rules.push({ id: rule.id ?? (yield* newId), pattern: rule.pattern });
           }
-          return yield* Schema.encodeEffect(IgnoreJson)({ rules, overrides: edit.overrides });
+          return yield* Schema.encodeEffect(PathRulesJson)({ rules, overrides: edit.overrides });
         }
         case "focus": {
           const known = new Set(current.focus.areas.map((area) => area.id));
@@ -232,13 +236,18 @@ export const make = Effect.gen(function* () {
       const configs = new Map<string, ScopeConfig>();
       for (const key of keys) {
         const ignore = row(key, "ignore");
+        const sensitive = row(key, "sensitive");
         const focus = row(key, "focus");
         const guidance = row(key, "guidance");
         configs.set(key, {
           ignore:
             ignore === undefined
               ? emptyScopeConfig.ignore
-              : { version: ignore.version, ...(yield* decodeIgnore(ignore.value)) },
+              : { version: ignore.version, ...(yield* decodePathRules(ignore.value)) },
+          sensitive:
+            sensitive === undefined
+              ? emptyScopeConfig.sensitive
+              : { version: sensitive.version, ...(yield* decodePathRules(sensitive.value)) },
           focus:
             focus === undefined
               ? emptyScopeConfig.focus

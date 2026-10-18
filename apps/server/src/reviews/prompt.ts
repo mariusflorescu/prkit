@@ -4,11 +4,13 @@ import {
   type EffectiveFocusArea,
   type EffectiveGuidance,
   type PullRequestStack,
+  type RiskSignal,
   SCOPE_LABELS,
 } from "@prkit/contracts";
 
 import type { PullRequestContext } from "../pullRequests/pullRequestContext.ts";
 import { contextLines, contextSection } from "./contextFile.ts";
+import { riskSignalLines } from "./riskPrompt.ts";
 import type { ReviewTarget } from "./reviewTarget.ts";
 
 /** What the guide is about. */
@@ -36,6 +38,8 @@ export interface PromptInput {
     /** Active areas only. */
     readonly focusAreas: ReadonlyArray<EffectiveFocusArea>;
   };
+  /** What prkit found in the reviewed files, from the attempt's frozen facts. */
+  readonly signals: ReadonlyArray<RiskSignal>;
   /** The last accepted revision, when its head or base is not what this attempt writes for. */
   readonly previous:
     | {
@@ -137,12 +141,12 @@ const handOverLines = (streamsGuideInput: boolean) => [
   "1. While you read, call `report_progress` when your focus moves, and `note_file` once for each changed file.",
   ...(streamsGuideInput
     ? [
-        "2. Once you understand the change, write the whole guide in one `submit_guide` call. The reviewer sees it while you write it: the overview as soon as its fields are done, then each chapter the moment you close it. So write the fields in this order: `summary`, `flow` (the before/after in its one form, or left out when neither helps), `background`, `steps`, then `chapters` in reading order, then `focus`, `focusAreas` and `guidanceNote`.",
+        "2. Once you understand the change, write the whole guide in one `submit_guide` call. The reviewer sees it while you write it: the overview as soon as its fields are done, then each chapter the moment you close it. So write the fields in this order: `summary`, `flow` (the before/after in its one form, or left out when neither helps), `background`, `steps`, then `chapters` in reading order, each with its own `risk`, then `risk` for the whole pull request, then `focus`, `focusAreas` and `guidanceNote`.",
         "3. If `submit_guide` reports problems, fix every one with `revise_guide`, sending only the chapters and fields you change. Once prkit accepts the guide, end your turn.",
       ]
     : [
         "2. Always draft before you submit, even for a small PR. Before you write any chapter, call `submit_draft` with the overview (`summary`, `flow`, `background`, `steps`) and every planned chapter's `id` and `title`, without files. The reviewer starts reading it right away.",
-        "3. Write the chapters in order. After each one, call `submit_draft` with just that chapter (same `id`, with body and files).",
+        "3. Write the chapters in order. After each one, call `submit_draft` with just that chapter (same `id`, with body, files and its `risk`). Once every chapter is written, call `submit_draft` with the pull request's `risk`.",
         "4. Call `submit_guide` with the whole guide, the same content as your drafts. If it reports problems, fix every one with `revise_guide`, sending only the chapters and fields you change. Once prkit accepts the guide, end your turn.",
       ]),
 ];
@@ -184,6 +188,7 @@ export const buildPrompt = (input: PromptInput) => {
   const { target } = input.subject;
   const body = target.body.trim();
   const stack = stackContext(input.subject.stack, target.ref.number, target.baseRef);
+  const risk = riskSignalLines(input.signals);
   const sections = [
     `task:${input.previous?._tag ?? "first"}`,
     `files:${snapshot.files.length}`,
@@ -195,6 +200,7 @@ export const buildPrompt = (input: PromptInput) => {
     ...(settings.focusAreas.length > 0
       ? [`focus-areas:${settings.focusAreas.map((area) => area.handle ?? "").join(",")}`]
       : []),
+    risk.label,
   ];
   const text = [
     taskFor(input.previous),
@@ -227,6 +233,7 @@ export const buildPrompt = (input: PromptInput) => {
     ...(stack?.lines ?? []),
     ...guidanceLines(settings.guidance),
     ...focusLines(settings.focusAreas),
+    ...risk.lines,
     ...handOverLines(input.streamsGuideInput),
   ].join("\n");
   return { text, sections };

@@ -2,6 +2,7 @@ import * as NodeFS from "node:fs";
 
 import { type Browser, describe, test } from "@e2e-dev/web";
 import { expect, type Locator, type TestFixtures } from "e2e";
+import { chromium } from "playwright";
 
 import { runForUrl } from "../scripts/verify-run.ts";
 import {
@@ -14,6 +15,7 @@ import {
   readRows,
 } from "./fixturePr.ts";
 import { openInbox } from "./openInbox.ts";
+import { emulateOsColorScheme, screenshotLightAndDark } from "./osColorScheme.ts";
 import { pickGuideRepository } from "./pickers.ts";
 
 const FIXTURE_KEY = `github.com/${FIXTURE_REPO}#1`;
@@ -50,18 +52,41 @@ const pickRepository = async ({ screen }: Pick<Fixtures, "screen">) => {
   });
 };
 
-const addRule = async (form: Locator, pattern: string) => {
-  const count = await form.getByRole("textbox", /^Rule \d+$/).count();
-  await form.getByRole("button", "Add rule").tap();
-  await form.getByRole("textbox", `Rule ${count + 1}`).fill(pattern);
-  await form.getByRole("button", "Save ignore rules").tap();
-  await expect(form.getByRole("button", "Save ignore rules")).toBeHidden({ timeout: 15_000 });
+const EDITOR_WORDS = {
+  ignore: { item: "Rule", add: "Add rule", save: "Save ignore rules" },
+  sensitive: { item: "Path", add: "Add path", save: "Save look-closely paths" },
+} as const;
+
+const addRule = async (
+  form: Locator,
+  pattern: string,
+  kind: keyof typeof EDITOR_WORDS = "ignore",
+) => {
+  const words = EDITOR_WORDS[kind];
+  const count = await form.getByRole("textbox", new RegExp(`^${words.item} \\d+$`)).count();
+  await form.getByRole("button", words.add).tap();
+  await form.getByRole("textbox", `${words.item} ${count + 1}`).fill(pattern);
+  await form.getByRole("button", words.save).tap();
+  await expect(form.getByRole("button", words.save)).toBeHidden({ timeout: 15_000 });
+};
+
+const atNarrowWidth = async (browser: Browser, capture: () => Promise<void>) => {
+  const size = await browser.evaluate(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }));
+  await browser.setViewport({ width: 640, height: 900 });
+  await capture();
+  await browser.setViewport(size);
 };
 
 const ignoreChip = (screen: Fixtures["screen"]) =>
   screen
     .getByRole("group", "Guide settings")
     .getByRole("button", /^(No files skipped|Skipping \d+ files?)$/);
+
+const closelyChip = (screen: Fixtures["screen"]) =>
+  screen.getByRole("group", "Guide settings").getByRole("button", /^Look closely/);
 
 describe("guide settings", { serial: true, skip: NEEDS_FIXTURE }, () => {
   test("a repository negation keeps a file a Global rule skips, and the preview says why", async ({
@@ -176,6 +201,173 @@ describe("guide settings", { serial: true, skip: NEEDS_FIXTURE }, () => {
     ).toBeVisible();
   });
 
+  test("look-closely paths layer like ignore rules, and the composer names the changed files they match", async ({
+    app,
+    screen,
+    browser,
+  }) => {
+    await emulateOsColorScheme(browser, "light");
+    await openSettings({ app, screen, browser });
+    const global = screen.getByRole("form", "Global look-closely paths");
+    await expect(global.getByRole("status")).toHaveText("No paths yet.");
+    await expect(
+      screen.getByRole("form", "Global ignore rules").getByRole("button", "Add the Tests preset"),
+    ).toBeVisible();
+    await expect(global.getByRole("button", /preset$/)).toHaveCount(0);
+
+    await addRule(global, "src/server.js", "sensitive");
+    await global.getByRole("button", "Add path").tap();
+    await global.getByRole("textbox", "Path 2").fill("src/[");
+    await global.getByRole("button", "Save look-closely paths").tap();
+    await expect(global.getByRole("alert")).toHaveText("Close the `[` with a `]`.");
+    await global.getByRole("textbox", "Path 2").fill("src/server.js");
+    await global.getByRole("button", "Save look-closely paths").tap();
+    await expect(global.getByRole("alert")).toHaveText([
+      "This pattern is already in the list.",
+      "This pattern is already in the list.",
+    ]);
+    await global.getByRole("button", "Discard").tap();
+    await expect(global.getByRole("textbox", /^Path \d+$/)).toHaveCount(1);
+    await expect(global.getByRole("alert")).toHaveCount(0);
+    await global.scrollIntoView();
+    await screenshotLightAndDark(app, browser, "risk-settings-global");
+
+    await pickRepository({ screen });
+    const repository = screen.getByRole("form", "Repository look-closely paths");
+    await addRule(repository, "src/validate.js", "sensitive");
+    await repository.getByRole("button", "1 inherited, all on").tap();
+    await expect(repository.getByRole("listitem", "src/server.js, from Global")).toContainText(
+      "Global · On",
+    );
+    await repository
+      .getByRole("radiogroup", "src/server.js: inherit, on or off")
+      .getByRole("radio", "Off")
+      .tap();
+    await repository.getByRole("button", "Save look-closely paths").tap();
+    await expect(repository.getByRole("button", "1 inherited, 1 off")).toBeVisible();
+    await repository.scrollIntoView();
+    await screenshotLightAndDark(app, browser, "risk-settings-repository");
+    await atNarrowWidth(browser, async () => {
+      await repository.scrollIntoView();
+      await screenshotLightAndDark(app, browser, "risk-settings-repository-narrow");
+    });
+
+    await openFixtureGuide({ app, screen });
+    await expect(closelyChip(screen)).toHaveText("Look closely: 1 file", { timeout: 45_000 });
+    await closelyChip(screen).tap();
+    const popover = screen.getByRole("group", "Look-closely paths for this pull request");
+    const matches = popover.getByRole("list", "Files that match look-closely paths");
+    await expect(matches.getByRole("listitem")).toHaveText([
+      "src/validate.js · src/validate.js (Repository)",
+    ]);
+
+    const own = popover.getByRole("form", "This pull request look-closely paths");
+    await own.getByRole("button", "2 inherited, 1 off").tap();
+    await expect(own.getByRole("listitem", "src/server.js, from Global")).toContainText(
+      "Global · Off from Repository",
+    );
+    await own
+      .getByRole("radiogroup", "src/server.js: inherit, on or off")
+      .getByRole("radio", "On")
+      .tap();
+    await own.getByRole("button", "Save look-closely paths").tap();
+    await expect(closelyChip(screen)).toHaveText("Look closely: 2 files");
+    await expect(matches.getByRole("listitem", "src/server.js: look closely")).toContainText(
+      "src/server.js (Global)",
+    );
+
+    await addRule(own, "test/", "sensitive");
+    await expect(closelyChip(screen)).toHaveText("Look closely: 3 files");
+    const tests = matches.getByRole("listitem", "test/validate.test.js: look closely");
+    await expect(tests).toContainText("test/ (This pull request)");
+    await expect(tests).toContainText("Your ignore rules skip it, so the guide won't look at it.");
+    await expect(matches.getByRole("listitem", "src/server.js: look closely")).not.toContainText(
+      "Your ignore rules skip it",
+    );
+    await matches.scrollIntoView();
+    await screenshotLightAndDark(app, browser, "risk-settings-composer-popover");
+    await atNarrowWidth(browser, async () => {
+      await matches.scrollIntoView();
+      await screenshotLightAndDark(app, browser, "risk-settings-composer-popover-narrow");
+    });
+
+    const home = runForUrl(app.baseUrl).home;
+    const stored = (version: number, pattern: string, overrides = "") => ({
+      version,
+      value: expect.stringMatching(
+        new RegExp(
+          `^\\{"rules":\\[\\{"id":"[^"]+","pattern":"${pattern}"\\}\\],"overrides":\\[${overrides}\\]\\}$`,
+        ),
+      ),
+    });
+    const override = (value: string) => `\\{"itemId":"[^"]+","value":"${value}"\\}`;
+    expect(
+      readRows(
+        home,
+        "SELECT scope, version, value FROM guide_config WHERE section = 'sensitive' ORDER BY scope",
+      ),
+    ).toEqual([
+      { scope: "global", ...stored(1, "src/server\\.js") },
+      { scope: `pull-request:${FIXTURE_KEY}`, ...stored(2, "test/", override("on")) },
+      {
+        scope: expect.stringMatching(/^repository:github\.com\/\d+$/),
+        ...stored(2, "src/validate\\.js", override("off")),
+      },
+    ]);
+
+    await browser.reload();
+    await expect(closelyChip(screen)).toHaveText("Look closely: 3 files", { timeout: 45_000 });
+    await openSettings({ app, screen, browser });
+    await expect(global.getByRole("textbox", "Path 1")).toHaveValue("src/server.js");
+    await pickRepository({ screen });
+    await expect(repository.getByRole("textbox", "Path 1")).toHaveValue("src/validate.js");
+    await expect(repository.getByRole("button", "1 inherited, 1 off")).toBeVisible();
+  });
+
+  test("a look-closely save from a form another window already changed is refused, and Reload shows the latest", async ({
+    app,
+    screen,
+    browser,
+  }) => {
+    const run = runForUrl(app.baseUrl);
+    await emulateOsColorScheme(browser, "light");
+    await openSettings({ app, screen, browser });
+    const global = screen.getByRole("form", "Global look-closely paths");
+    await global.getByRole("button", "Add path").tap();
+    await global.getByRole("textbox", "Path 2").fill("docs/");
+
+    const other = await chromium.launch({ headless: true, args: ["--use-mock-keychain"] });
+    try {
+      const page = await other.newPage();
+      await page.goto(run.openUrl);
+      await page.getByRole("link", { name: "Inbox", exact: true }).waitFor({ timeout: 30_000 });
+      await page.goto(`${run.url}/settings/guides`);
+      const form = page.getByRole("form", { name: "Global look-closely paths" });
+      const save = form.getByRole("button", { name: "Save look-closely paths" });
+      await form.getByRole("button", { name: "Add path" }).click({ timeout: 30_000 });
+      await form.getByRole("textbox", { name: "Path 2" }).fill("migrations/");
+      await save.click();
+      await save.waitFor({ state: "hidden", timeout: 15_000 });
+    } finally {
+      await other.close();
+    }
+
+    await global.getByRole("button", "Save look-closely paths").tap();
+    const problem = global.getByRole("alert");
+    await expect(problem).toContainText("These settings changed since you opened them");
+    await screenshotLightAndDark(app, browser, "risk-settings-conflict");
+    await problem.getByRole("button", "Reload").tap();
+    await expect(global.getByRole("textbox", /^Path \d+$/)).toHaveCount(2);
+    await expect(global.getByRole("textbox", "Path 2")).toHaveValue("migrations/");
+    await expect(global.getByRole("button", "Save look-closely paths")).toBeHidden();
+    expect(
+      readRows(
+        run.home,
+        "SELECT version FROM guide_config WHERE scope = 'global' AND section = 'sensitive'",
+      ),
+    ).toEqual([{ version: 2 }]);
+  });
+
   test("a rename is reviewed while either of its paths is kept", async ({
     app,
     screen,
@@ -265,7 +457,7 @@ describe("guide settings", { serial: true, skip: NEEDS_FIXTURE }, () => {
         home,
         `SELECT section, value FROM guide_config WHERE scope = 'pull-request:${FIXTURE_KEY}' ORDER BY section`,
       ).map((row) => row.section),
-    ).toEqual(["focus", "ignore"]);
+    ).toEqual(["focus", "ignore", "sensitive"]);
   });
 });
 
@@ -390,8 +582,8 @@ describe("guide settings with the user's agent", { tags: ["agent"], skip: NEEDS_
         (match) => match[1],
       );
       expect(composed).toEqual([
-        "task:first files:4 hand-over:streamed skipped:1 guidance:global guidance:pull-request focus-areas:security",
-        "task:first files:4 hand-over:streamed skipped:1 guidance:pull-request focus-areas:security",
+        "task:first files:4 hand-over:streamed skipped:1 guidance:global guidance:pull-request focus-areas:security signals:none",
+        "task:first files:4 hand-over:streamed skipped:1 guidance:pull-request focus-areas:security signals:none",
       ]);
       expect(log).toContain(
         "Guide settings changed since the last revision; starting a fresh session",

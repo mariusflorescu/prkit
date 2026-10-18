@@ -67,7 +67,7 @@ Generation accepts `--agent <instance> --model <slug>` and repeated `--option ke
 prkit guide generate <pr> --stack chosen-layers --layers 1 --layers 3
 ```
 
-Read `prkit guide settings <pr> --json` before editing settings. `scopes.pullRequest` contains `ignore`, `focus` and `guidance`, each with its own `version`. The `expectedVersion` must be the current version of the section being edited; the numbers below illustrate the shape, not a version to assume. Preserve existing ids and overrides unless changing them is the user's intent. New focus or ignore items have `id: null`.
+Read `prkit guide settings <pr> --json` before editing settings. `scopes.pullRequest` contains `ignore`, `sensitive` (the paths the reviewer always looks closely at), `focus` and `guidance`, each with its own `version`. The `expectedVersion` must be the current version of the section being edited; the numbers below illustrate the shape, not a version to assume. Preserve existing ids and overrides unless changing them is the user's intent. New focus, ignore or look-closely items have `id: null`.
 
 ```sh
 prkit guide generate <pr> --guidance '{"expectedVersion":3,"text":"Check migration safety","mode":"append"}'
@@ -75,7 +75,7 @@ prkit guide generate <pr> --focus '{"expectedVersion":2,"areas":[{"id":null,"lab
 prkit guide settings save <pr> --expected-version 3 --edit '{"_tag":"guidance","text":"Check migration safety","mode":"append"}'
 ```
 
-The first two save the PR's section as part of generation. The standalone save accepts one tagged `--edit`: guidance with `text` and `mode` (`append` or `replace`); focus with `areas` and `overrides`; or ignore with `rules` and `overrides`. An ignore rule is `{"id":null,"pattern":"vendor/**"}`; an override is `{"itemId":"<existing-item-id>","value":"off"}` or `"on"`. A conflict means read again and reconcile, not force an overwrite.
+The first two save the PR's section as part of generation. The standalone save accepts one tagged `--edit`: guidance with `text` and `mode` (`append` or `replace`); focus with `areas` and `overrides`; ignore with `rules` and `overrides`; or sensitive, the look-closely paths, with the same `rules` and `overrides`. An ignore rule is `{"id":null,"pattern":"vendor/**"}`; an override is `{"itemId":"<existing-item-id>","value":"off"}` or `"on"`. A conflict means read again and reconcile, not force an overwrite.
 
 Scope reads accept `{"_tag":"repository","repositoryId":"<id>"}` or `{"_tag":"pull-request","key":"github.com/owner/repo#123"}` as well as global. Only PR-scope writes exist in the CLI. Changing global defaults, repository settings or agent setup remains an app action.
 

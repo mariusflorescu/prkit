@@ -123,7 +123,17 @@
             }
           ]
         }
-      ]
+      ],
+      "risk": {
+        "level": "low",
+        "reasons": [
+          {
+            "text": "Adds an optional field and two small helpers. Nothing that exists changes shape.",
+            "file": "packages/contracts/src/environment.ts",
+            "line": 253
+          }
+        ]
+      }
     },
     {
       "id": "resolver-origin",
@@ -149,7 +159,17 @@
             }
           ]
         }
-      ]
+      ],
+      "risk": {
+        "level": "low",
+        "reasons": [
+          {
+            "text": "`origin` is left out whenever it names the canonical repository, so plain clones keep their identity.",
+            "file": "apps/server/src/project/RepositoryIdentityResolver.ts",
+            "line": 83
+          }
+        ]
+      }
     },
     {
       "id": "client-grouping",
@@ -179,7 +199,17 @@
             }
           ]
         }
-      ]
+      ],
+      "risk": {
+        "level": "low",
+        "reasons": [
+          {
+            "text": "Swaps the key the sidebar groups by, and labels follow the same key.",
+            "file": "packages/client-runtime/src/state/projectGrouping.ts",
+            "line": 105
+          }
+        ]
+      }
     },
     {
       "id": "mobile-matching",
@@ -208,7 +238,17 @@
             }
           ]
         }
-      ]
+      ],
+      "risk": {
+        "level": "low",
+        "reasons": [
+          {
+            "text": "Matches machines by the same grouping key, in three places.",
+            "file": "apps/mobile/src/features/threads/new-task-project-selection.ts",
+            "line": 59
+          }
+        ]
+      }
     },
     {
       "id": "tests",
@@ -234,7 +274,16 @@
             }
           ]
         }
-      ]
+      ],
+      "risk": {
+        "level": "low",
+        "reasons": [
+          {
+            "text": "Only adds cases for the fork setup.",
+            "file": "apps/server/src/project/RepositoryIdentityResolver.test.ts"
+          }
+        ]
+      }
     },
     {
       "id": "docs",
@@ -243,9 +292,32 @@
       "body": [
         "Four lines saying that `canonicalKey` follows `upstream` for pull requests, while clients group and label by a fork's own `origin`."
       ],
-      "files": ["docs/internals/remote.md"]
+      "files": ["docs/internals/remote.md"],
+      "risk": {
+        "level": "low",
+        "reasons": [
+          {
+            "text": "Records the split between the two keys.",
+            "file": "docs/internals/remote.md"
+          }
+        ]
+      }
     }
   ],
+  "risk": {
+    "level": "low",
+    "reasons": [
+      {
+        "text": "The new key only decides grouping and labels. Pull request code still reads the upstream identity.",
+        "chapter": "identity-origin",
+        "at": { "path": "packages/contracts/src/environment.ts", "line": 259 }
+      },
+      {
+        "text": "A checkout with no `upstream`, or whose remotes name the same repository, gets the same data as before.",
+        "chapter": "resolver-origin"
+      }
+    ]
+  },
   "focus": [
     {
       "tone": "note",

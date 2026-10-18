@@ -16,7 +16,16 @@ const input = JSON.stringify({
     edges: [{ from: "post", to: "check" }],
   },
   chapters: [
-    { id: "validate", title: "Reject bad links", kind: "core", files: ["src/validate.js"] },
+    {
+      id: "validate",
+      title: "Reject bad links",
+      kind: "core",
+      files: ["src/validate.js"],
+      risk: {
+        level: "high",
+        reasons: [{ text: "Decides what is stored", file: "src/validate.js" }],
+      },
+    },
     { id: "broken", title: 42, files: [] },
     {
       id: "tests",
@@ -26,6 +35,7 @@ const input = JSON.stringify({
       files: ["test/a.js"],
     },
   ],
+  risk: { level: "high", reasons: [{ text: "Bad links reach the store", chapter: "validate" }] },
   focus: [{ tone: "risk", text: "No length limit", chapter: "validate" }],
   focusAreas: [{ id: "x", verdict: "nothing-notable" }],
   guidanceNote: "None.",
@@ -46,7 +56,16 @@ const expected = [
   },
   {
     chapters: [
-      { id: "validate", title: "Reject bad links", kind: "core", files: ["src/validate.js"] },
+      {
+        id: "validate",
+        title: "Reject bad links",
+        kind: "core",
+        files: ["src/validate.js"],
+        risk: {
+          level: "high",
+          reasons: [{ text: "Decides what is stored", file: "src/validate.js" }],
+        },
+      },
     ],
   },
   {
@@ -59,6 +78,9 @@ const expected = [
         files: ["test/a.js"],
       },
     ],
+  },
+  {
+    risk: { level: "high", reasons: [{ text: "Bad links reach the store", chapter: "validate" }] },
   },
   { focus: [{ tone: "risk", text: "No length limit", chapter: "validate" }] },
 ];
@@ -77,7 +99,7 @@ describe("makeGuideStream", () => {
   it("says the chapter list is open from its first bracket until it closes", () => {
     const stream = makeGuideStream();
     const open = input.indexOf("[", input.indexOf('"chapters"'));
-    const close = input.indexOf('],"focus"');
+    const close = input.indexOf('],"risk"');
     stream.feed(input.slice(0, open));
     expect(stream.chaptersOpen()).toBe(false);
     stream.feed(input.slice(open, close));

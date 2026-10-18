@@ -56,6 +56,7 @@ import {
   type ReviewWatchEvent,
   refFromKey,
   reviewedSnapshot,
+  riskSignals,
   SKIPPED_CHAPTER_ID,
   selectionProblem,
   type StackGuidesResult,
@@ -77,6 +78,7 @@ import * as PubSub from "effect/PubSub";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as Struct from "effect/Struct";
 import { HttpServer } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -254,6 +256,7 @@ const CheckRow = Schema.Struct({ ...SubmitRow.fields, guide: Schema.NullOr(Schem
 const DraftRow = Schema.Struct({
   snapshot: Schema.NullOr(Schema.fromJsonString(DiffSnapshot)),
   draft: Schema.NullOr(Schema.fromJsonString(DraftGuide)),
+  config: Schema.NullOr(Schema.fromJsonString(AttemptConfig)),
   draft_version: Schema.Int,
 });
 const FeedRow = Schema.Struct({
@@ -320,7 +323,9 @@ const decodeClaimed = Schema.decodeUnknownEffect(
 const encodeStatus = Schema.encodeSync(Schema.fromJsonString(ReviewStatus));
 const encodeGuide = Schema.encodeSync(Schema.fromJsonString(NormalizedGuide));
 /** The previous guide as the agent reads it: indented, so no line is too long to read. */
-const encodeReadableGuide = Schema.encodeSync(Schema.fromJsonString(NormalizedGuide, { space: 2 }));
+const encodeReadableGuide = Schema.encodeSync(
+  Schema.fromJsonString(NormalizedGuide.mapFields(Struct.omit(["signals"])), { space: 2 }),
+);
 const encodeSnapshot = Schema.encodeSync(Schema.fromJsonString(DiffSnapshot));
 const encodeConfig = Schema.encodeSync(Schema.fromJsonString(AttemptConfig));
 const encodeDraft = Schema.encodeSync(Schema.fromJsonString(DraftGuide));
@@ -1346,7 +1351,13 @@ export const make = Effect.gen(function* () {
       )
         return yield* settleUnchanged(review, attemptId, previous);
       const { reviewed, skipped } = projectSnapshot(settings.ignore, ready.snapshot);
-      const config: AttemptConfig = { ...settings, repository: plan.repository, skipped };
+      const signals = riskSignals({ reviewed, skipped, sensitive: settings.sensitive });
+      const config: AttemptConfig = {
+        ...settings,
+        repository: plan.repository,
+        skipped,
+        signals,
+      };
       // A guide written under other settings is written again from scratch, not updated on top.
       const changedSince =
         previous !== null && previous.config_hash !== settings.hash ? previous : null;
@@ -1403,6 +1414,8 @@ export const make = Effect.gen(function* () {
         Effect.annotateLogs({
           hash: settings.hash,
           rules: settings.ignore.filter((rule) => rule.active).length,
+          lookClosely: settings.sensitive.filter((rule) => rule.active).length,
+          signals: signals.map((signal) => signal._tag).join(","),
           skipped: skipped.length,
           focusAreas: settings.focusAreas.flatMap((area) => area.handle ?? []).join(","),
           guidance: settings.guidance
@@ -1506,6 +1519,7 @@ export const make = Effect.gen(function* () {
           guidance: settings.guidance.filter((block) => block.replacedBy === null),
           focusAreas: settings.focusAreas.filter((area) => area.active),
         },
+        signals,
         previous: follows.prompt,
         streamsGuideInput: provider.streamsGuideInput,
       });
@@ -2363,16 +2377,20 @@ export const make = Effect.gen(function* () {
   const draft = (key: PullRequestKey, attemptId: AttemptId) =>
     Effect.gen(function* () {
       const rows = yield* sql`
-        SELECT a.snapshot, a.draft, a.draft_version FROM review_attempts a
+        SELECT a.snapshot, a.draft, a.config, a.draft_version FROM review_attempts a
         JOIN reviews r ON r.id = a.review_id
         WHERE a.id = ${attemptId} AND r.pr_key = ${key} AND r.local IS NULL`.pipe(
         Effect.flatMap(decodeDraft),
       );
       const row = rows[0];
       const normalized =
-        row?.draft == null || row.snapshot === null
+        row?.draft == null || row.snapshot === null || row.config === null
           ? null
-          : normalizeDraft(withoutUnwrittenChapters(row.draft), row.snapshot).normalized;
+          : normalizeDraft(
+              withoutUnwrittenChapters(row.draft),
+              reviewedSnapshot(row.snapshot, row.config.skipped),
+              checkContextOf(row.config),
+            ).normalized;
       if (row === undefined || normalized === null)
         return yield* new GuideNotFoundError({
           key,
@@ -2385,7 +2403,7 @@ export const make = Effect.gen(function* () {
   const diff = (key: PullRequestKey, attemptId: AttemptId) =>
     Effect.gen(function* () {
       const rows = yield* sql`
-        SELECT a.snapshot, a.draft, a.draft_version FROM review_attempts a
+        SELECT a.snapshot, a.draft, a.config, a.draft_version FROM review_attempts a
         JOIN reviews r ON r.id = a.review_id
         WHERE a.id = ${attemptId} AND r.pr_key = ${key} AND r.local IS NULL`.pipe(
         Effect.flatMap(decodeDraft),

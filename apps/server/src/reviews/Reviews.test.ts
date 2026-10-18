@@ -133,9 +133,14 @@ const FLOW = {
   ],
   edges: [{ from: "shorten", to: "check" }],
 };
+const rated = (file: string) => ({
+  level: "low" as const,
+  reasons: [{ text: "A plain check.", file }],
+});
 const GUIDE: Guide = {
   summary: ["Checks a link against its limits before storing it."],
   flow: FLOW,
+  risk: { level: "low", reasons: [{ text: "Plain checks, easy to follow.", chapter: "limits" }] },
   chapters: [
     {
       id: "limits",
@@ -143,6 +148,7 @@ const GUIDE: Guide = {
       kind: "core",
       body: "Three limits a link must meet.",
       files: ["src/limits.js"],
+      risk: rated("src/limits.js"),
     },
     {
       id: "server",
@@ -150,6 +156,7 @@ const GUIDE: Guide = {
       kind: "supporting",
       body: "A link is stored only when it passes.",
       files: ["src/server.js"],
+      risk: rated("src/server.js"),
     },
   ],
 };
@@ -164,6 +171,7 @@ const REJECTED: Guide = {
       kind: "core",
       body: "Three limits a link must meet.",
       files: ["src/limits.js", "src/server.js"],
+      risk: rated("src/limits.js"),
     },
     {
       id: "server",
@@ -171,6 +179,7 @@ const REJECTED: Guide = {
       kind: "supporting",
       body: "A link is stored only when it passes.",
       files: ["src/server.js"],
+      risk: rated("src/server.js"),
     },
   ],
 };
@@ -184,6 +193,7 @@ const MISPLACED_NOTE: GuidePatch = {
       kind: "core",
       body: "Three limits a link must meet.",
       files: [{ path: "src/limits.js", annotations: [{ line: 9, text: "The longest link." }] }],
+      risk: rated("src/limits.js"),
     },
   ],
 };
@@ -198,6 +208,7 @@ const MISPLACED: Guide = {
       kind: "core",
       body: "Three limits a link must meet.",
       files: [{ path: "src/limits.js", annotations: [{ line: 9, text: "The longest link." }] }],
+      risk: rated("src/limits.js"),
     },
     {
       id: "server",
@@ -205,6 +216,7 @@ const MISPLACED: Guide = {
       kind: "supporting",
       body: "A link is stored only when it passes.",
       files: ["src/server.js"],
+      risk: rated("src/server.js"),
     },
   ],
 };
@@ -216,6 +228,7 @@ const FIXED_NOTE: GuidePatch = {
       kind: "core",
       body: "Three limits a link must meet.",
       files: [{ path: "src/limits.js", annotations: [{ line: 1, text: "The longest link." }] }],
+      risk: rated("src/limits.js"),
     },
   ],
 };
@@ -442,6 +455,22 @@ const ALREADY_STORED =
 const NO_REJECTED =
   "prkit has no rejected guide from this attempt to revise. Call submit_guide with the whole guide.";
 const SECOND: Guide = { ...GUIDE, summary: ["A second guide for the same attempt."] };
+const UNRATED: Guide = {
+  summary: ["Checks a link against its limits before storing it."],
+  chapters: [
+    {
+      id: "limits",
+      title: "The limits",
+      kind: "core",
+      body: "Three limits a link must meet.",
+      files: ["src/limits.js", "src/server.js"],
+    },
+  ],
+};
+const RATING: GuidePatch = {
+  risk: { level: "low", reasons: [{ text: "A plain check.", chapter: "limits" }] },
+  chapters: [{ ...UNRATED.chapters[0], risk: rated("src/limits.js") }],
+};
 
 /** What submit_guide answers `MISPLACED`, and revise_guide the patch that makes it. */
 const MISPLACED_ANSWER =
@@ -578,6 +607,56 @@ describe("submit_guide and revise_guide", () => {
         expect(yield* revisions(harness.sql)).toEqual([
           { revision: 1, summary: "Checks a link against its limits before storing it." },
         ]);
+      }),
+    ));
+  it("holds a guide to the rating the attempt's frozen signals ask for, and revise_guide adds it", () =>
+    run((harness) =>
+      Effect.gen(function* () {
+        const { reviews } = harness;
+        const answers: Array<string> = [];
+        yield* guideWith(harness, (attemptId) =>
+          Effect.gen(function* () {
+            answers.push(yield* told(reviews.submitGuide(attemptId, UNRATED)));
+            answers.push(yield* told(reviews.reviseGuide(attemptId, RATING)));
+            return [accepted];
+          }),
+        );
+        expect(answers[0]).toContain("`risk` is missing");
+        expect(answers[1]).toContain("prkit stored the guide.");
+      }),
+    ));
+});
+
+describe("drafts", () => {
+  it("come back with the attempt's signals and the risk written so far", () =>
+    run((harness) =>
+      Effect.gen(function* () {
+        const { reviews } = harness;
+        const shown: Array<{
+          readonly signals: ReadonlyArray<string>;
+          readonly chapterRisk: ReadonlyArray<string | null>;
+        }> = [];
+        yield* guideWith(harness, (attemptId) =>
+          Effect.gen(function* () {
+            yield* reviews
+              .submitDraft(attemptId, {
+                summary: ["Checks a link against its limits."],
+                chapters: [
+                  { ...GUIDE.chapters[0], risk: rated("src/limits.js") },
+                  { id: "server", title: "The server checks them" },
+                ],
+              })
+              .pipe(Effect.orDie);
+            const draft = yield* reviews.draft(KEY, attemptId).pipe(Effect.orDie);
+            shown.push({
+              signals: draft.normalized.signals.map((signal) => signal._tag),
+              chapterRisk: draft.normalized.chapters.map((chapter) => chapter.risk?.level ?? null),
+            });
+            yield* told(reviews.submitGuide(attemptId, GUIDE));
+            return [accepted];
+          }),
+        );
+        expect(shown).toEqual([{ signals: ["untested"], chapterRisk: ["low", null] }]);
       }),
     ));
 });
