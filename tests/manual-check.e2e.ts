@@ -368,6 +368,12 @@ test(
       );
       await plan.scrollIntoView();
       await app.screenshot("manual-check-local-after-relaunch");
+
+      await screen.getByRole("button", "More local review actions").tap();
+      await screen.getByRole("menuitem", "Remove local review…").tap();
+      await screen.getByRole("alertdialog").getByRole("button", "Remove").tap();
+      await expect(tab).toHaveCount(0);
+      expect(readRows(run.home, "SELECT subject FROM manual_check_ticks")).toEqual([]);
     } finally {
       stopFakeInstance(name, { keepHome: false });
       fake.stop();
