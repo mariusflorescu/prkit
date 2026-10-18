@@ -1,6 +1,6 @@
 ---
 name: prkit-cli
-description: Use prkit, the desktop app on this Mac for reviewing GitHub pull requests, whenever the user mentions prkit, a guide or guided review, their review queue, PRs assigned to them, or asks you to prepare, summarize or follow up on pull request reviews on this machine, or to show the user a guided review of local changes, yours or theirs, before a pull request exists. Use it even if they don't mention the CLI. Read their inbox and diffs, choose an installed agent and model to write a guide, follow its progress, and hand local draft comments to prkit's fix agent. Start with prkit status; keep GitHub writes in the app for the user to approve.
+description: Use prkit, the desktop app on this Mac for reviewing GitHub pull requests, whenever the user mentions prkit, a guide or guided review, their review queue, PRs assigned to them, or asks you to prepare, summarize or follow up on pull request reviews on this machine, or to show the user a guided review of local changes, yours or theirs, before a pull request exists. Use it even if they don't mention the CLI. Read their inbox and diffs, choose an installed agent and model to write a guide, follow its progress, ask the guide's agent questions about a PR, and hand local draft comments to prkit's fix agent. Start with prkit status; keep GitHub writes in the app for the user to approve.
 ---
 
 # prkit CLI
@@ -114,6 +114,20 @@ prkit local read --json
 
 Never stash, commit, switch branches or touch the user's files to make it work: prkit reads the folder as it is. `prkit local stop` stops a guide while it is written. Removing a local guide is the user's click in prkit.
 
+### Ask the guide's agent about a PR
+
+When you or the user need something the guide doesn't say, ask the agent that wrote it. It already read the whole PR, answers read-only, and never touches GitHub.
+
+```sh
+prkit questions ask <pr> --question "Why does the retry stop after three tries?" --request-id ask-42
+prkit wait <pr> --for question --timeout 600
+prkit questions list <pr> --json
+```
+
+A PR needs a guide first, and the question goes to its latest accepted revision unless you pass `--revision`. Without `--scope` it is about the whole PR. For one chapter, pass `--scope '{"_tag":"chapter","chapterId":"<id>"}'` with an id from `prkit guide read <pr> --json`. For diff lines, pass `--scope '{"_tag":"lines","anchor":{"path":"src/a.ts","start":{"side":"new","line":12},"end":{"side":"new","line":18}}}'`, side `new` or `old`. The lines must sit inside one part of the revision's diff, or the question is refused.
+
+One question is answered at a time per PR: asking while another is being answered fails with a conflict, so wait first or stop it with `prkit questions stop <pr> --question-id <question-id>`, which keeps the text written so far. `wait --for question` returns when none is being answered; check each question's `state` in `questions list`, since `failed` carries its reason in `message`. Asking again retries a stopped or failed question. Read the `answer` and tell the user what it says, and where it cites files and lines. To keep one in the guide for the user, `prkit questions pin <pr> --question-id <question-id> --pinned` pins an answered question to its chapter in prkit; `--no-pinned` unpins it.
+
 ### Hand review comments to the fix agent
 
 ```sh
@@ -133,7 +147,7 @@ Tell the user what changed and that the commit is waiting for Push in prkit. To 
 
 ## Retries
 
-`prkit comments add <pr>`, `prkit fix send <pr>` and `prkit fix change <pr>` take `--request-id <id>`. If a call timed out and you don't know whether it went through, retry with the same id: prkit returns the first answer instead of doing it twice. A lost response isn't automatically replayed. Read the current state before retrying other work commands.
+`prkit comments add <pr>`, `prkit fix send <pr>`, `prkit fix change <pr>` and `prkit questions ask <pr>` take `--request-id <id>`. If a call timed out and you don't know whether it went through, retry with the same id: prkit returns the first answer instead of doing it twice. A lost response isn't automatically replayed. Read the current state before retrying other work commands.
 
 ## GitHub budget
 

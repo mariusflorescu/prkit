@@ -1,6 +1,8 @@
 import type { AccountId, CommentPlacement, PullRequestKey } from "@prkit/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
+import { askAbout } from "~/features/ask/askStore";
+import { useAskTarget } from "~/features/ask/askTarget";
 import { addNoteComment, addPendingComment } from "~/rpc/client";
 import { pendingCommentsQuery } from "~/rpc/queries";
 import { CommentCard } from "./CommentCard";
@@ -24,6 +26,7 @@ export function NewCommentComposer({
 }) {
   const client = useQueryClient();
   const close = useReviewCommentsStore((state) => state.closeComposer);
+  const ask = useAskTarget();
   const add = useMutation({
     mutationFn: (body: string) =>
       note === null
@@ -60,6 +63,21 @@ export function NewCommentComposer({
         pending={add.isPending}
         onSubmit={(body) => add.mutate(body)}
         onCancel={close}
+        {...(ask === null || note !== null
+          ? {}
+          : {
+              aside: {
+                label: "Ask about these lines",
+                // A comment already begun stays where it is, under its lines.
+                onClick: (body: string) => {
+                  if (body.trim() === "") close();
+                  askAbout(ask.key, {
+                    scope: { _tag: "lines", anchor: placement.anchor },
+                    revision: ask.revision,
+                  });
+                },
+              },
+            })}
       />
     </CommentCard>
   );

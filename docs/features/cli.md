@@ -1,6 +1,6 @@
 # Command line
 
-Settings > Outside agents > Command line installs the CLI for terminals, scripts and coding agents. The command palette also offers **Install command line tool**. Open prkit and turn Outside agents on before using it. Read only permits reads; Read and start work also permits guides (of pull requests and of local changes), fix turns, local tabs and drafts, reviewed-file marks, saved inbox filters and PR-scope guide settings.
+Settings > Outside agents > Command line installs the CLI for terminals, scripts and coding agents. The command palette also offers **Install command line tool**. Open prkit and turn Outside agents on before using it. Read only permits reads; Read and start work also permits guides (of pull requests and of local changes), fix turns, local tabs and drafts, reviewed-file marks, questions about a guide, saved inbox filters and PR-scope guide settings.
 
 The CLI calls the existing `/mcp/outside` tools. It uses the bridge's trusted discovery-file reader and sends **prkit CLI** as its client name. Work appears in the app as **Started from prkit CLI**. It never starts the app, opens the database or takes the home lock. The MCP bridge remains available separately.
 
@@ -49,6 +49,10 @@ prkit guide generate acme/widgets#42 --agent <instance> --model <model> --option
 prkit wait acme/widgets#42 --for guide --timeout 600
 prkit guide read acme/widgets#42 --json
 prkit guide revisions acme/widgets#42 --json
+prkit questions ask acme/widgets#42 --question 'Why does the retry stop after three tries?' --request-id ask-42
+prkit wait acme/widgets#42 --for question --timeout 600
+prkit questions list acme/widgets#42 --json
+prkit questions pin acme/widgets#42 --question-id <question-id> --pinned
 prkit pr diff acme/widgets#42 --attempt-id <attempt-id> --json
 prkit comments list acme/widgets#42 --json
 prkit comments add acme/widgets#42 --path src/a.ts --line 42 --head-sha <headSha> --body 'Handle an empty list' --request-id comment-42
@@ -66,7 +70,7 @@ prkit local read --json
 prkit local guide --path ~/code/widgets --branch feature/limits --base main
 ```
 
-The command tree covers all 60 tools: status, accounts, agents, settings, inbox (and filters save), repos list/prs, pr read/files/file/timeline/threads/checks/conversation/stack/candidates/diff/open/reviewed (and reviewed set), guide list/read/generate/stop/revisions/revision/progress/duration/settings/scope/repositories/repository/tick, guide settings save, fix list/read/turn/diff/patch/access/send/change/stop/retry/resolve, comments list/add/edit/move, tabs list/close/focus/reorder, local guide/read/wait/stop/list, and wait.
+The command tree covers all 64 tools: status, accounts, agents, settings, inbox (and filters save), repos list/prs, pr read/files/file/timeline/threads/checks/conversation/stack/candidates/diff/open/reviewed (and reviewed set), guide list/read/generate/stop/revisions/revision/progress/duration/settings/scope/repositories/repository/tick, guide settings save, questions list/ask/stop/pin, fix list/read/turn/diff/patch/access/send/change/stop/retry/resolve, comments list/add/edit/move, tabs list/close/focus/reorder, local guide/read/wait/stop/list, and wait.
 
 PRs accept HTTPS URLs or `owner/repo#number`, with `--host` for an Enterprise short form. Repository commands take `owner/repo`. `--account` selects the account when prkit asks for one; never switch accounts to work around a failure. Inbox `--repo owner/repo` selects a repository on github.com; quoted JSON with `host`, `owner` and `name` selects an Enterprise repository. Inbox also accepts reason, state, draft, checks, search and stacks selectors, and `--sort updated|waiting|size` for the order of each section (`updated` when omitted). These read filters do not change the app's saved filters. `prkit inbox filters save` replaces the saved search, account, repository and sort together, so it needs all four.
 
@@ -75,6 +79,15 @@ Pick a ready, enabled agent instance from the paged `prkit agents --json` result
 `prkit local` writes guides of a repository's changes before a pull request exists. Every local command takes the working directory unless it gets `--key` or `--path`; the folder's repository and current branch name the review, so a subfolder or another worktree of the same branch finds the same one. `prkit local guide` snapshots the working tree (commits since the base, staged, unstaged and untracked files), or with `--branch` a branch's last commit, into a copy prkit owns, and starts the guide. It reads the repository without changing it or running anything its config names. A problem with the repository (not one, nothing changed, no base, no shared history, files changing mid-read) exits 1 with the reason before anything starts, and a run with nothing new since the last revision says so and starts no agent. Plain output says what happened in a line and which command follows it. `prkit local wait` has the same long timeout as `prkit wait`.
 
 For guides, read stack layers first. `--stack this` maps to this PR, `--stack all` to the whole stack, and `--stack 1,3` to chosen layer numbers. Use `--stack` once; numbered selection cannot be combined with `--layers`. The native values `this-pr`, `whole-stack` and `chosen-layers` also work, with repeated `--layers` for the last. `--regenerate` includes layers with guides. `--guidance` and `--focus` accept versioned JSON section edits, not plain strings. Read `prkit guide settings acme/widgets#42 --json` first and use the PR section's current version as `expectedVersion`; a stale version is refused. The command reference shows the full JSON shapes and the standalone PR settings save.
+
+To ask the guide's agent about a PR, run `prkit questions ask acme/widgets#42 --question 'Why does the retry stop after three tries?'`. It answers about the whole pull request on the latest accepted guide revision, unless `--scope` names a chapter or diff lines, or `--revision` another revision. Chapter ids come from `prkit guide read acme/widgets#42 --json`.
+
+```sh
+prkit questions ask acme/widgets#42 --scope '{"_tag":"chapter","chapterId":"retries"}' --question 'Is the delay capped?'
+prkit questions ask acme/widgets#42 --revision 1 --scope '{"_tag":"lines","anchor":{"path":"src/retry.ts","start":{"side":"new","line":12},"end":{"side":"new","line":18}}}' --question 'What happens at the last attempt?'
+```
+
+It returns the question's id at once. `prkit wait acme/widgets#42 --for question` returns when no question is being answered, and `prkit questions list acme/widgets#42 --json` reads the answers. One question is answered at a time, so asking while another is being answered fails. `prkit questions stop acme/widgets#42 --question-id <question-id>` keeps the text written so far. `prkit questions pin` with `--pinned` or `--no-pinned` pins an answered question to its chapter in the guide, in prkit only. Asking again retries a stopped or failed question.
 
 `apps/server/src/cli/commands.ts` is the command map. Flags and validation come from each outside tool's parameter schema; the parity test fails when a tool has no command or a command has no tool. As outside tools acquire filters or new options, their commands acquire those flags. A new tool needs a map entry.
 
@@ -90,7 +103,7 @@ Any large answer can be an outer `response-fragment`. Keep the logical page's cu
 
 Plain output uses tables and labelled fields, without terminal color codes. `--json` returns the tool's structured result unchanged on stdout; failures go to stderr. Exit codes are 0 for success, 1 for a tool or protocol failure, 2 for invalid usage, 3 for a closed app, Outside agents off or an unreachable app (including a sandbox), 4 for insufficient access, and 130 for interruption by SIGINT or SIGTERM. Interruption cancels the HTTP request and closes the MCP session; it never stops guide or fix work. `wait` returning `finished: false` is a successful timeout, not a failed guide, and never stops work.
 
-A disconnected action is never automatically replayed, since it may already have run. Use the same `--request-id` to retry `comments add`, `fix send` or `fix change` safely. Authentication rejections before dispatch may reconnect once using the new discovery file. Each CLI invocation closes its MCP session before exiting.
+A disconnected action is never automatically replayed, since it may already have run. Use the same `--request-id` to retry `comments add`, `fix send`, `fix change` or `questions ask` safely. Authentication rejections before dispatch may reconnect once using the new discovery file. Each CLI invocation closes its MCP session before exiting.
 
 The CLI offers no push, merge, posting, thread resolution, account or agent setup, Global or Repository settings changes, discard or revert commands. Reading settings, saving inbox filters and saving PR-scope guide sections are available. Client-started fixes wait for Push in the app. The repository's existing opt-in automatic conflict watcher remains independent: when automatic resolution and automatic push are both on, the watcher may still resolve and push a conflicting PR it watches.
 

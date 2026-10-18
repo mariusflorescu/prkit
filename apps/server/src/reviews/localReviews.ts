@@ -476,7 +476,7 @@ export const makeLocalReviews = (port: LocalPort, capture: LocalCaptureService) 
       ).pipe(Effect.catchTags(dbFailures));
 
     /**
-     * Deletes the review, its revisions, the reader's ticks and prkit's copy of its snapshots. Rows first, in one
+     * Deletes the review, its revisions and questions, the reader's ticks and prkit's copy of its snapshots. Rows first, in one
      * transaction (foreign keys make a table this misses fail loudly), then the copy: a crash
      * between the two leaves a copy without a review, which startup's sweep removes.
      */
@@ -496,6 +496,7 @@ export const makeLocalReviews = (port: LocalPort, capture: LocalCaptureService) 
                 yield* sql`
                   DELETE FROM review_attempt_files WHERE attempt_id IN (
                     SELECT id FROM review_attempts WHERE review_id = ${review.id})`;
+                yield* sql`DELETE FROM ask_questions WHERE review_id = ${review.id}`;
                 yield* sql`DELETE FROM review_revisions WHERE review_id = ${review.id}`;
                 yield* sql`DELETE FROM review_attempts WHERE review_id = ${review.id}`;
                 yield* sql`DELETE FROM reviews WHERE id = ${review.id}`;

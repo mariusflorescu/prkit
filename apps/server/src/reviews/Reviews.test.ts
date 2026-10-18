@@ -281,6 +281,7 @@ const scriptedAgents = (turns: Queue.Queue<Turn>) =>
               ]);
             }),
           ),
+        forkTurn: null,
         ownLogin: null,
       } satisfies AgentProvider;
       return Agents.of({
@@ -415,6 +416,8 @@ interface Harness {
   readonly reviews: Effect.Success<typeof Reviews.make>;
   readonly turns: Queue.Queue<Turn>;
   readonly sql: SqlClient.SqlClient;
+  /** prkit's home; the review worktree mock answers with it too. */
+  readonly home: string;
 }
 
 const run = <A, E>(test: (harness: Harness) => Effect.Effect<A, E>) =>
@@ -423,7 +426,8 @@ const run = <A, E>(test: (harness: Harness) => Effect.Effect<A, E>) =>
       const turns = yield* Queue.unbounded<Turn>();
       return yield* Effect.gen(function* () {
         const reviews = yield* Reviews.Reviews;
-        return yield* test({ reviews, turns, sql: yield* SqlClient.SqlClient });
+        const { home } = yield* ServerConfig.ServerConfig;
+        return yield* test({ reviews, turns, sql: yield* SqlClient.SqlClient, home });
       }).pipe(Effect.provide(harness(turns)));
     }).pipe(Effect.scoped, Effect.provideService(References.MinimumLogLevel, "Warn")),
   );
@@ -675,6 +679,56 @@ describe("drafts", () => {
           }),
         );
         expect(shown).toEqual([{ signals: ["untested"], chapterRisk: ["low", null] }]);
+      }),
+    ));
+});
+
+describe("revisionContext", () => {
+  it("offers the guide's conversation only while no later attempt can have added to it", () =>
+    run((harness) =>
+      Effect.gen(function* () {
+        const { reviews, home } = harness;
+        const submits =
+          (guide: Guide, events: ReadonlyArray<AgentEvent> = []) =>
+          (attemptId: AttemptId) =>
+            told(reviews.submitGuide(attemptId, guide)).pipe(Effect.as([...events, accepted]));
+        yield* guideWith(harness, submits(GUIDE));
+        const review = (yield* reviews.get(KEY)).review;
+        if (review === null) return expect.fail("the guide made no review");
+        const sessionOf = (revision: number) =>
+          reviews
+            .revisionContext(review.id, revision)
+            .pipe(Effect.map((context) => context?.writer.session));
+        const guideSession = { id: "session-1", cwd: home };
+        expect(yield* sessionOf(1)).toEqual(guideSession);
+
+        // The next guide's agent ran in the same conversation, so it isn't revision 1's anymore.
+        yield* guideWith(harness, submits(SECOND, [{ _tag: "process", pid: process.pid }]));
+        expect(yield* sessionOf(1)).toBeNull();
+        expect(yield* sessionOf(2)).toEqual(guideSession);
+
+        // An attempt that hasn't finished may add to it at any moment.
+        const during: Array<typeof guideSession | null | undefined> = [];
+        yield* guideWith(harness, (attemptId) =>
+          sessionOf(2).pipe(
+            Effect.tap((session) => Effect.sync(() => during.push(session))),
+            Effect.orDie,
+            Effect.andThen(submits({ ...GUIDE, summary: ["A third guide."] })(attemptId)),
+          ),
+        );
+        expect(during).toEqual([null]);
+        expect(yield* sessionOf(4)).toBeUndefined();
+        expect(yield* sessionOf(3)).toEqual(guideSession);
+
+        // A failed turn may have added to the conversation before its process was recorded.
+        const noGuide = () => Effect.succeed([]);
+        yield* Queue.offer(harness.turns, noGuide);
+        yield* guideWith(harness, noGuide);
+        expect(
+          yield* harness.sql`SELECT phase, agent_pid, finished_at IS NOT NULL AS finished
+            FROM review_attempts ORDER BY rowid DESC LIMIT 1`,
+        ).toEqual([{ phase: "reading-change", agent_pid: null, finished: 1 }]);
+        expect(yield* sessionOf(3)).toBeNull();
       }),
     ));
 });

@@ -13,6 +13,7 @@ import { HttpRouter, HttpServer } from "effect/http";
 
 import * as ServerConfig from "./config.ts";
 import * as AppearanceStore from "./appearance/AppearanceStore.ts";
+import * as Asks from "./asks/Asks.ts";
 import * as GitHubAccounts from "./accounts/GitHubAccounts.ts";
 import * as GitHubApi from "./github/GitHubApi.ts";
 import * as GitHubHttpClient from "./github/httpClient.ts";
@@ -150,6 +151,7 @@ const layerServer = layerReadyLine.pipe(
       ReviewedFiles.layer,
       ManualCheckTicks.layer,
       AppearanceStore.layer,
+      Asks.layer,
     ),
   ),
   Layer.provideMerge(layerFixers),

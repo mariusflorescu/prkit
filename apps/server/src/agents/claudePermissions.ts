@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import { PRKIT_TOOLS, type TurnInput } from "./AgentProvider.ts";
+import { PRKIT_TOOLS, type TurnSetup } from "./AgentProvider.ts";
 import { decideTurnBash, fileArguments } from "./bashPolicy.ts";
 import { type CheckoutPaths, MAX_LISTED } from "./checkoutPaths.ts";
 
@@ -107,7 +107,7 @@ const deny = (message: string): PermissionResult => ({ behavior: "deny", message
  * on a trusted pull request, runs the repository's check scripts, inside the sandbox
  * of `claudeSandbox.ts`. Every path is judged where it really lands, links resolved.
  */
-export const claudePermissions = (input: TurnInput, paths: CheckoutPaths) => {
+export const claudePermissions = (input: TurnSetup, paths: CheckoutPaths) => {
   const writes = input.access._tag === "write";
   const ownTools = new Set(input.tools.map((tool) => `${MCP_PREFIX}${tool}`));
   /** The answer to a call whose paths were judged, naming the first that reaches outside. */

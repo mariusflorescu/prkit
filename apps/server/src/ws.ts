@@ -18,6 +18,7 @@ import { Workspace } from "./workspace/Workspace.ts";
 import { Agents } from "./agents/Agents.ts";
 import { CursorSdk } from "./agents/cursor/CursorSdk.ts";
 import { AppearanceStore } from "./appearance/AppearanceStore.ts";
+import { Asks } from "./asks/Asks.ts";
 import { buildId } from "./build.ts";
 import { GuideConfigStore } from "./reviews/GuideConfigStore.ts";
 import { GuideSettingsStore } from "./reviews/GuideSettingsStore.ts";
@@ -68,6 +69,7 @@ const layerHandlers = WsRpcGroup.toLayer(
     const github = yield* GitHubApi;
     const workspace = yield* Workspace;
     const reviews = yield* Reviews;
+    const asks = yield* Asks;
     const agents = yield* Agents;
     const cursorSdk = yield* CursorSdk;
     const reviewComments = yield* ReviewComments;
@@ -193,6 +195,11 @@ const layerHandlers = WsRpcGroup.toLayer(
       [WS_METHODS.localReviewsRetry]: ({ key }) => reviews.local.retry(key),
       [WS_METHODS.localReviewsRemove]: ({ key }) => reviews.local.remove(key).pipe(Effect.as({})),
       [WS_METHODS.localReviewsFileContents]: (input) => reviews.local.fileContents(input),
+      [WS_METHODS.asksWatch]: ({ reviewId }) => asks.watch(reviewId),
+      [WS_METHODS.asksAsk]: (input) => asks.ask(input),
+      [WS_METHODS.asksStop]: ({ questionId }) => asks.stop(questionId),
+      [WS_METHODS.asksRetry]: ({ questionId }) => asks.retry(questionId),
+      [WS_METHODS.asksPin]: ({ questionId, pinned }) => asks.pin(questionId, pinned),
       // Pending review comments and GitHub review threads.
       [WS_METHODS.reviewCommentsList]: ({ key, accountId }) => reviewComments.list(key, accountId),
       [WS_METHODS.reviewCommentsAdd]: ({ key, accountId, placement, body }) =>

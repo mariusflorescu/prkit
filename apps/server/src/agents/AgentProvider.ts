@@ -25,6 +25,8 @@ export const GUIDE_TOOLS = [
 ] as const;
 /** prkit's MCP tools for a fix turn. */
 export const FIX_TOOLS = ["finish_fixes", "finish_conflicts", "report_progress"] as const;
+/** An Ask turn answers in its reply. prkit's MCP server still connects, and refuses every tool. */
+export const ASK_TOOLS = [] as const;
 export const PRKIT_TOOLS: ReadonlyArray<string> = [...new Set([...GUIDE_TOOLS, ...FIX_TOOLS])];
 /** What the end-of-turn tools are called in the activity log. */
 export const TOOL_LABELS: Readonly<Record<string, string>> = {
@@ -71,7 +73,8 @@ export type AgentEvent =
   | { readonly _tag: "composing-guide" }
   /** More of that call's input, as JSON text, while the agent is still writing it. */
   | { readonly _tag: "guide-input"; readonly id: string; readonly json: string }
-  | { readonly _tag: "text"; readonly text: string }
+  /** More of the agent's reply, as it writes it. */
+  | { readonly _tag: "text"; readonly delta: string }
   | {
       readonly _tag: "finished";
       readonly outcome: "completed" | "failed" | "interrupted";
@@ -116,6 +119,23 @@ export interface TurnInput {
   readonly tools: ReadonlyArray<string>;
 }
 
+/** Everything a turn runs with but how it starts its conversation. */
+export type TurnSetup = Omit<TurnInput, "resumeSessionId">;
+
+/** A turn in a new copy of saved conversation `forkFrom`, which is only read, never added to. */
+export interface ForkTurnInput extends TurnSetup {
+  readonly forkFrom: string;
+}
+
+/** How a provider's turn starts its conversation: `runTurn` starts one or resumes it, `forkTurn` forks it. */
+export type TurnStart =
+  | { readonly _tag: "new" }
+  | { readonly _tag: "resume"; readonly id: string }
+  | { readonly _tag: "fork"; readonly from: string };
+
+export const startOf = (input: TurnInput): TurnStart =>
+  input.resumeSessionId === null ? { _tag: "new" } : { _tag: "resume", id: input.resumeSessionId };
+
 /** What one instance runs with, resolved by `Agents` from its settings. */
 export interface InstanceSetup {
   readonly id: AgentInstanceId;
@@ -155,6 +175,12 @@ export interface AgentProvider {
   readonly hasSession: (sessionId: string, cwd: string) => Effect.Effect<boolean>;
   /** One turn. The process lives exactly as long as the returned stream's scope. */
   readonly runTurn: (input: TurnInput) => Stream.Stream<AgentEvent, AgentError>;
+  /**
+   * One turn in a fork of a saved conversation, contained exactly as `runTurn` contains the
+   * same `access` and `tools`. Its `session` event names the fork. Null where the agent
+   * can't fork a conversation, so a fork only ever goes through an agent that can.
+   */
+  readonly forkTurn: ((input: ForkTurnInput) => Stream.Stream<AgentEvent, AgentError>) | null;
   /** prkit's own login, for when the user's can't be shared. Null when the user's always can. */
   readonly ownLogin: {
     /** The sign-in page, then the end of the stream once signed in; stopping it cancels. */

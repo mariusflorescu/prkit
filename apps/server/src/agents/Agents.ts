@@ -355,7 +355,7 @@ export const make = Effect.gen(function* () {
       yield* Effect.gen(function* () {
         if (yield* store.busy(id))
           return yield* new AgentInstanceError({
-            message: `${found?.config.label ?? id} is busy with a guide or fix. Try again when it's done.`,
+            message: `${found?.config.label ?? id} is busy with a guide, a fix or an answer. Try again when it's done.`,
           });
         if (found !== undefined)
           yield* found.provider.retire.pipe(

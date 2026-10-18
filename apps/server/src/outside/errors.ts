@@ -1,3 +1,4 @@
+import { AskError } from "@prkit/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
@@ -26,9 +27,20 @@ const PLAIN_ERRORS: Record<string, OutsideToolFailure["code"]> = {
   OutsideAgentsError: "failed",
 };
 
+const ASK_REASONS: Record<AskError["reason"], OutsideToolFailure["code"]> = {
+  "not-found": "not-found",
+  invalid: "invalid",
+  "not-ready": "not-ready",
+  state: "conflict",
+  busy: "conflict",
+  failed: "failed",
+};
+
 /** Only service errors written for the user cross the outside boundary. */
 export const asFailure = (error: { readonly _tag: string; readonly message: string }) => {
   if (Schema.is(OutsideToolFailure)(error)) return error;
+  if (Schema.is(AskError)(error))
+    return new OutsideToolFailure({ code: ASK_REASONS[error.reason], message: error.message });
   const code = PLAIN_ERRORS[error._tag];
   return new OutsideToolFailure(
     code === undefined

@@ -1,4 +1,5 @@
 import type { DiffFile, DiffLineRef } from "@prkit/contracts";
+import type { ReactNode } from "react";
 
 import { FileDiffCard, type DiffComments, type LoadContents } from "~/components/diff";
 
@@ -23,6 +24,8 @@ export function ChapterSection({
   prUrl,
   reviewed,
   review,
+  action,
+  notes,
 }: {
   chapter: GuideChapter;
   index: number;
@@ -43,6 +46,10 @@ export function ChapterSection({
   reviewed?: ReviewedBinding | undefined;
   /** The chapter's Reviewed checkbox; null when nothing in it can be marked. */
   review: ChapterReviewedControl | null;
+  /** The page's own action for the chapter, under its narration. */
+  action?: ReactNode;
+  /** The page's own notes on the chapter, above its diffs. */
+  notes?: ReactNode;
 }) {
   return (
     <section data-guide-chapter="" data-chapter-id={chapter.id} id={id} tabIndex={-1}>
@@ -57,9 +64,11 @@ export function ChapterSection({
         onFile={onFile}
         prUrl={prUrl}
         review={review}
+        action={action}
       />
       {open && (
         <div data-chapter-diffs="">
+          {notes}
           {chapter.files.map((entry) => {
             const file = files.get(entry.path);
             if (!file) throw new Error(`The snapshot does not contain ${entry.path}.`);

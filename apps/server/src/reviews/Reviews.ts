@@ -103,6 +103,7 @@ import {
   type Checkout,
   type Prepared,
   RepoCache,
+  RepoError,
   type Since,
 } from "../repo/RepoCache.ts";
 import { ContextPriority, unattended } from "./ContextPriority.ts";
@@ -278,6 +279,20 @@ const GuideRow = Schema.Struct({
   snapshot: Schema.fromJsonString(DiffSnapshot),
   config: Schema.fromJsonString(AttemptConfig),
 });
+const RevisionContextRow = Schema.Struct({
+  pr_key: ReviewKey,
+  provider: AgentProviderKind,
+  instance_id: AgentInstanceId,
+  model: Schema.NullOr(Schema.String),
+  model_options: Schema.fromJsonString(Schema.Array(ModelOptionSelection)),
+  writer_provider: AgentProviderKind,
+  writer_instance: AgentInstanceId,
+  head_sha: Schema.String,
+  guide: Schema.fromJsonString(NormalizedGuide),
+  snapshot: Schema.fromJsonString(DiffSnapshot),
+  config: Schema.fromJsonString(AttemptConfig),
+  session_id: Schema.NullOr(Schema.String),
+});
 const IdRow = Schema.Struct({ id: Schema.String });
 const StaleRow = Schema.Struct({
   id: AttemptId,
@@ -307,6 +322,8 @@ const decodeFeed = Schema.decodeUnknownEffect(Schema.Array(FeedRow));
 const decodeDurations = Schema.decodeUnknownEffect(Schema.Array(DurationRow));
 const decodeCount = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ count: Schema.Int })));
 const decodeGuides = Schema.decodeUnknownEffect(Schema.Array(GuideRow));
+const decodeRevisionContext = Schema.decodeUnknownEffect(Schema.Array(RevisionContextRow));
+const isLocalKey = Schema.is(LocalReviewKey);
 const decodeIds = Schema.decodeUnknownEffect(Schema.Array(IdRow));
 const decodeStale = Schema.decodeUnknownEffect(Schema.Array(StaleRow));
 const decodeStarted = Schema.decodeUnknownEffect(
@@ -624,6 +641,38 @@ const mergeRange = (
       else merged.push(range);
       return merged;
     }, []);
+
+/** What a question about one accepted revision needs to know (`asks/Asks.ts`), read in one call. */
+export interface RevisionContext {
+  readonly reviewId: ReviewId;
+  /** What the prompt calls the change: "acme/widgets#12" for a pull request. */
+  readonly label: string;
+  readonly revision: number;
+  readonly headSha: string;
+  readonly guide: NormalizedGuide;
+  /** The diff the guide explains: the attempt's snapshot without the files its settings skipped. */
+  readonly snapshot: DiffSnapshot;
+  /** The agent that wrote this revision. */
+  readonly writer: {
+    readonly instance: AgentInstanceId;
+    readonly kind: AgentProviderKind;
+    /**
+     * Its conversation exactly as it stood when this revision was accepted, with the folder it
+     * was made in. Null once no attempt after it can be ruled out of having added to it: one
+     * ran an agent, or one hasn't finished.
+     */
+    readonly session: { readonly id: string; readonly cwd: string } | null;
+  };
+  /** The review's agent now, which answers with the review's model choice. */
+  readonly agent: {
+    readonly instance: AgentInstanceId;
+    readonly kind: AgentProviderKind;
+    readonly model: string | null;
+    readonly options: ReadonlyArray<ModelOptionSelection>;
+  };
+  /** Checks the revision's code out at `dir`, a folder whose name no other checkout of the repository has. */
+  readonly checkout: (dir: string) => Effect.Effect<Checkout, RepoError>;
+}
 
 export class Reviews extends Context.Service<Reviews, Effect.Success<typeof make>>()(
   "@prkit/server/reviews/Reviews",
@@ -2340,6 +2389,71 @@ export const make = Effect.gen(function* () {
       } satisfies GuideRevision;
     }).pipe(Effect.catchTags(dbFailures));
 
+  /** One accepted revision as a question about it needs it, or null when the review has no such revision. */
+  const revisionContext = (reviewId: ReviewId, revision: number) =>
+    Effect.gen(function* () {
+      // rowid follows insertion, and a review's attempts run one at a time.
+      const rows = yield* sql`
+        SELECT v.pr_key, v.provider, v.instance_id, v.model, v.model_options,
+          a.provider AS writer_provider, a.instance_id AS writer_instance,
+          r.head_sha, r.guide, a.snapshot, a.config,
+          CASE WHEN NOT EXISTS (
+            SELECT 1 FROM review_attempts later
+            WHERE later.review_id = r.review_id AND later.rowid > a.rowid
+              AND (later.finished_at IS NULL OR later.agent_pid IS NOT NULL
+                OR later.phase NOT IN ('queued', 'preparing-code'))
+          ) THEN v.session_id END AS session_id
+        FROM review_revisions r JOIN reviews v ON v.id = r.review_id
+        JOIN review_attempts a ON a.id = r.attempt_id
+        WHERE r.review_id = ${reviewId} AND r.revision = ${revision}`.pipe(
+        Effect.flatMap(decodeRevisionContext),
+      );
+      const row = rows[0];
+      if (row === undefined) return null;
+      const key = row.pr_key;
+      const ref = isLocalKey(key) ? null : refFromKey(key);
+      const cache: CacheRef | null = isLocalKey(key)
+        ? { _tag: "local", key }
+        : ref === null
+          ? null
+          : { _tag: "pull-request", ref };
+      return {
+        reviewId,
+        label: isLocalKey(key)
+          ? "local changes"
+          : ref === null
+            ? key
+            : `${ref.owner}/${ref.repo}#${ref.number}`,
+        revision,
+        headSha: row.head_sha,
+        guide: row.guide,
+        snapshot: reviewedSnapshot(row.snapshot, row.config.skipped),
+        writer: {
+          instance: row.writer_instance,
+          kind: row.writer_provider,
+          session:
+            row.session_id === null
+              ? null
+              : { id: row.session_id, cwd: repo.worktreePath(reviewId) },
+        },
+        agent: {
+          instance: row.instance_id,
+          kind: row.provider,
+          model: row.model,
+          options: row.model_options,
+        },
+        checkout: (dir: string) =>
+          cache === null
+            ? Effect.fail(
+                new RepoError({
+                  reason: "repository",
+                  message: "This pull request's key can't be read.",
+                }),
+              )
+            : repo.ensureCheckout(cache, dir, row.head_sha),
+      } satisfies RevisionContext;
+    }).pipe(Effect.catchTags(dbFailures));
+
   /** The attempt a progress tool call speaks for, if it is still the one running. */
   const liveAttempt = (attemptId: AttemptId) =>
     Effect.gen(function* () {
@@ -2872,6 +2986,7 @@ export const make = Effect.gen(function* () {
     watch,
     feed,
     guide,
+    revisionContext,
     draft,
     diff,
     texts,

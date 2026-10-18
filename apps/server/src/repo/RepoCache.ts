@@ -1050,15 +1050,26 @@ export const make = Effect.gen(function* () {
     });
 
   /**
-   * Ensures the fixer's checkout exists at `sha` with the git dir prkit expects, rebuilding
+   * Ensures a detached checkout of `sha` at `dir` with the git dir prkit expects, rebuilding
    * it if the metadata drifted (the same recovery as `ensureWorktree`), and returns its
-   * layout. Used when a follow-up turn amends a ready result, so a drifted checkout is
-   * rebuilt rather than treated as gone.
+   * layout. Offline: it needs only commits and blobs the cache already holds. git names the
+   * checkout's git dir after `dir`'s last part, so no two checkouts of one repository may
+   * share it.
    */
-  const ensureFixCheckout = (ref: PullRequestRef, fixerId: FixerId, sha: string) =>
-    serialized(repoPath(ref))(ensureWorktree(repoPath(ref), fixerPath(fixerId), sha)).pipe(
-      Effect.map((worktree) => checkoutFor(path, repoPath(ref), worktree)),
-      Effect.catchTag("PlatformError", () => Effect.fail(diskFailure(ref))),
+  const ensureCheckout = (cache: CacheRef, dir: string, sha: string) =>
+    serialized(cachePath(cache))(ensureWorktree(cachePath(cache), dir, sha)).pipe(
+      Effect.map((worktree) => checkoutFor(path, cachePath(cache), worktree)),
+      Effect.catchTag("PlatformError", () =>
+        Effect.fail(
+          cache._tag === "pull-request"
+            ? diskFailure(cache.ref)
+            : new RepoError({
+                reason: "repository",
+                message:
+                  "Couldn't write prkit's copy of your local changes. Check the disk has space, then retry.",
+              }),
+        ),
+      ),
     );
 
   /** Keeps a ready commit reachable until it is pushed or discarded. */
@@ -1272,7 +1283,7 @@ export const make = Effect.gen(function* () {
     worktreePath,
     fixerPath,
     prepareFix,
-    ensureFixCheckout,
+    ensureCheckout,
     mergeBase,
     rebaseOnto,
     rebaseContinue,

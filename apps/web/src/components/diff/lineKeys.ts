@@ -31,6 +31,7 @@ const makeStop = (cell: HTMLElement, point: LinePoint) => {
   cell.ariaLabel = `Comment on ${point.side === "old" ? "old " : ""}line ${point.line}`;
 };
 
+/** The gutter cell numbering `point` inside a rendered diff, if the diff shows that line. */
 export const cellAt = (root: ParentNode, point: LinePoint) =>
   [...root.querySelectorAll<HTMLElement>(NUMBER)].find((cell) => sameLine(pointOf(cell), point));
 
@@ -167,9 +168,11 @@ export const makeLineKeys = (
     restore: () => {
       const root = host?.shadowRoot;
       const back = returnTo;
+      // Nothing opened from a line here, so a line focused since (a link's) keeps its claim.
+      if (back === null) return;
       returnTo = null;
       focused = null;
-      if (back !== null && root && document.activeElement === document.body)
+      if (root && document.activeElement === document.body)
         cellAt(root, back)?.focus({ preventScroll: true });
     },
   };

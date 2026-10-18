@@ -13,7 +13,13 @@ import {
   GuideSettingsResult,
 } from "../apps/server/src/outside/paritySchemas.ts";
 import { ResponseFragment } from "../apps/server/src/outside/responseSchemas.ts";
-import { InboxListResult, PullRequestResult } from "../apps/server/src/outside/schemas.ts";
+import {
+  AskedQuestion,
+  InboxListResult,
+  OutsideQuestion,
+  PullRequestResult,
+  QuestionsResult,
+} from "../apps/server/src/outside/schemas.ts";
 import { repoRoot } from "../scripts/verify-run.ts";
 import { cliFixture } from "./cliFixture.ts";
 import { setUpFakeClaude } from "./fakeClaude.ts";
@@ -360,6 +366,9 @@ test(
       );
       expect(conversation.items.some((item) => item.body.length > 48_000)).toBe(true);
       expect(cli(["pr", "open", "budget/fixtures#9"]).code).toBe(4);
+      expect(
+        cli(["questions", "ask", "budget/fixtures#9", "--question", "Hidden at Read only"]).code,
+      ).toBe(4);
       await screen.getByRole("radio", "Read and start work").tap();
       await expect(
         screen.getByText("Outside agents can read and start work", { exact: true }),
@@ -406,6 +415,73 @@ test(
       const guide = cli(["guide", "read", "budget/fixtures#9", "--json"]);
       expect(guide.code).toBe(0);
       expect(guide.stdout).toContain("A guide written by the stand-in agent.");
+      const askArgs = [
+        "questions",
+        "ask",
+        "budget/fixtures#9",
+        "--question",
+        "Why is the limit raised?",
+        "--request-id",
+        "cli-ask",
+        "--json",
+      ];
+      const question = cli(askArgs);
+      expect(question.code).toBe(0);
+      const started = Schema.decodeSync(Schema.fromJsonString(AskedQuestion))(question.stdout);
+      expect(started.state).toBe("starting");
+      expect(cli(askArgs).stdout).toBe(question.stdout);
+      expect(
+        cli(["wait", "budget/fixtures#9", "--for", "question", "--timeout", "60", "--json"]).code,
+      ).toBe(0);
+      const questions = cli(["questions", "list", "budget/fixtures#9", "--json"]);
+      expect(questions.code).toBe(0);
+      const answered = Schema.decodeSync(Schema.fromJsonString(QuestionsResult))(questions.stdout)
+        .items[0];
+      expect(answered).toMatchObject({
+        id: started.questionId,
+        state: "answered",
+        askedBy: "prkit CLI",
+        pinned: false,
+      });
+      expect(answered?.answer).toContain("The stand-in agent answers.");
+      const directQuestions = await bridge.call("read_pull_request_questions", {
+        owner: "budget",
+        repo: "fixtures",
+        number: 9,
+      });
+      expect("json" in directQuestions ? directQuestions.json : null).toEqual(
+        Schema.decodeSync(Json)(questions.stdout),
+      );
+      const pinArgs = [
+        "questions",
+        "pin",
+        "budget/fixtures#9",
+        "--question-id",
+        started.questionId,
+      ];
+      expect(cli(pinArgs).code).toBe(2);
+      for (const [flag, pinned] of [
+        ["--pinned", true],
+        ["--no-pinned", false],
+      ] as const) {
+        const changed = cli([...pinArgs, flag, "--json"]);
+        expect(changed.code).toBe(0);
+        expect(
+          Schema.decodeSync(Schema.fromJsonString(OutsideQuestion))(changed.stdout).pinned,
+        ).toBe(pinned);
+      }
+      const stopped = cli([
+        "questions",
+        "stop",
+        "budget/fixtures#9",
+        "--question-id",
+        started.questionId,
+        "--json",
+      ]);
+      expect(stopped.code).toBe(0);
+      expect(Schema.decodeSync(Schema.fromJsonString(OutsideQuestion))(stopped.stdout).state).toBe(
+        "answered",
+      );
       const { headSha } = Schema.decodeSync(Schema.fromJsonString(PullRequestResult))(
         cli(["pr", "read", "budget/fixtures#9", "--json"]).stdout,
       );

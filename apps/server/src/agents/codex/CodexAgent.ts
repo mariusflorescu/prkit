@@ -24,10 +24,14 @@ import {
   AgentError,
   type AgentEvent,
   type AgentProvider,
+  type ForkTurnInput,
   type InstanceSetup,
   QUIET_TOOLS,
+  startOf,
   TOOL_LABELS,
   type TurnInput,
+  type TurnSetup,
+  type TurnStart,
 } from "../AgentProvider.ts";
 import { checkoutPaths } from "../checkoutPaths.ts";
 import { describeCommand } from "../commandReads.ts";
@@ -125,6 +129,25 @@ const toModel = (model: Protocol.CodexModel): AgentModel => {
     options,
     blocked: null,
   };
+};
+
+/**
+ * The request that opens a turn's thread. Each sends the turn's whole runtime, and each answer
+ * gets the same check: a fork's carries the permission profile too (measured on Codex 0.163).
+ */
+const threadRequest = (start: TurnStart, runtime: Schema.JsonObject) => {
+  switch (start._tag) {
+    case "new":
+      return { method: "thread/start", params: runtime };
+    case "resume":
+      return { method: "thread/resume", params: { ...runtime, threadId: start.id } };
+    case "fork":
+      // Without `excludeTurns` the answer would carry every turn of the source thread.
+      return {
+        method: "thread/fork",
+        params: { ...runtime, threadId: start.from, excludeTurns: true },
+      };
+  }
 };
 
 /** How long a short `codex` command (login status, logout) may take before prkit gives up on it. */
@@ -477,10 +500,12 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
           Effect.orElseSucceed((): ReadonlyArray<AgentModel> => []),
         );
 
-  const hasSession = (sessionId: string, cwd: string) =>
+  // Codex keeps threads in its home, not per folder, and the folder a thread was made in may be
+  // gone (a done review's worktree), so the lookup doesn't run there.
+  const hasSession = (sessionId: string) =>
     Effect.scoped(
       Effect.gen(function* () {
-        const { client } = yield* open(cwd);
+        const { client } = yield* open();
         const result = yield* client.request(
           "thread/read",
           { threadId: sessionId, includeTurns: false },
@@ -490,7 +515,7 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
       }),
     ).pipe(Effect.catchTag("AgentError", () => Effect.succeed(false)));
 
-  const runTurn = (input: TurnInput): Stream.Stream<AgentEvent, AgentError> =>
+  const turn = (input: TurnSetup, start: TurnStart): Stream.Stream<AgentEvent, AgentError> =>
     Stream.unwrap(
       Effect.gen(function* () {
         // A guide, and a fix whose pull request's scripts don't run: Codex asks before every
@@ -573,14 +598,12 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
           developerInstructions: input.instructions,
           config,
         };
-        const response =
-          input.resumeSessionId === null
-            ? yield* client.request("thread/start", runtime, Protocol.ThreadRuntimeResponse)
-            : yield* client.request(
-                "thread/resume",
-                { ...runtime, threadId: input.resumeSessionId },
-                Protocol.ThreadRuntimeResponse,
-              );
+        const opening = threadRequest(start, runtime);
+        const response = yield* client.request(
+          opening.method,
+          opening.params,
+          Protocol.ThreadRuntimeResponse,
+        );
         if (
           response.modelProvider !== "openai" ||
           response.approvalPolicy !== approvalPolicy ||
@@ -594,9 +617,9 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
               "Codex didn't apply prkit's subscription, sandbox and instruction settings. Update Codex and retry.",
           });
         const threadId = response.thread.id;
-        yield* Effect.logInfo(
-          input.resumeSessionId === null ? "Codex thread started" : "Codex thread resumed",
-        ).pipe(Effect.annotateLogs({ threadId }));
+        yield* Effect.logInfo("Codex thread opened").pipe(
+          Effect.annotateLogs({ threadId, start: start._tag }),
+        );
         yield* Effect.gen(function* () {
           for (;;) {
             const status = yield* client.request(
@@ -680,7 +703,7 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
             case "item/agentMessage/delta": {
               const delta = Schema.decodeUnknownOption(Protocol.MessageDelta)(notification.params);
               return Option.isSome(delta) && delta.value.threadId === threadId
-                ? [{ _tag: "text", text: delta.value.delta }]
+                ? [{ _tag: "text", delta: delta.value.delta }]
                 : [];
             }
             case "item/started": {
@@ -813,7 +836,8 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
     check,
     models,
     hasSession,
-    runTurn,
+    runTurn: (input: TurnInput) => turn(input, startOf(input)),
+    forkTurn: (input: ForkTurnInput) => turn(input, { _tag: "fork", from: input.forkFrom }),
     ownLogin: { signIn, signOut },
   } satisfies AgentProvider;
 });

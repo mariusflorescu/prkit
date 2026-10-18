@@ -16,6 +16,8 @@ import {
   type FixerTurnId,
   type LocalReviewKey,
   newerWorkspace,
+  type Question,
+  type ReviewId,
   Workspace,
 } from "@prkit/contracts";
 import * as Schema from "effect/Schema";
@@ -190,6 +192,25 @@ export const localReviewsQuery = queryOptions({
   staleTime: Infinity,
   retry: false,
 });
+/**
+ * A review's questions as `asks.watch` last told them. `problem` says why the watch failed,
+ * until its next snapshot; the questions it already had stay on screen.
+ */
+export type AsksState =
+  | { readonly _tag: "loading" }
+  | { readonly _tag: "error"; readonly message: string }
+  | {
+      readonly _tag: "ready";
+      readonly questions: ReadonlyArray<Question>;
+      readonly problem: string | null;
+    };
+/** Written only by `asks.watch`; see `useAsks`. */
+export const asksQuery = (reviewId: ReviewId) =>
+  queryOptions<AsksState>({
+    queryKey: ["asks", reviewId],
+    queryFn: skipToken,
+    staleTime: Infinity,
+  });
 /** A revision never changes once written. */
 export const guideQuery = (key: ReviewKey, revision: number) =>
   queryOptions({

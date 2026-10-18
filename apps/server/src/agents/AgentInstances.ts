@@ -341,13 +341,16 @@ export const make = Effect.gen(function* () {
       return rows.length > 0;
     }).pipe(Effect.catchTag("SqlError", fail("prkit couldn't change that agent. Try again.")));
 
-  /** Whether a guide attempt or a fix turn is running on `id` now. */
+  /** Whether a guide attempt, a fix turn or an answer is running on `id` now. */
   const busy = (id: AgentInstanceId) =>
     sql<{ readonly found: number }>`
       SELECT 1 AS found FROM review_attempts WHERE instance_id = ${id} AND finished_at IS NULL
       UNION ALL
       SELECT 1 AS found FROM fixer_turns WHERE instance_id = ${id}
         AND json_extract(status, '$._tag') IN ('preparing', 'running')
+      UNION ALL
+      SELECT 1 AS found FROM ask_questions WHERE instance_id = ${id}
+        AND state IN ('starting', 'waiting', 'answering')
       LIMIT 1`.pipe(
       Effect.map((found) => found.length > 0),
       Effect.catchTag(

@@ -4,6 +4,8 @@ import { McpSchema, Tool, Toolkit } from "effect/ai";
 import {
   AddCommentInput,
   AddedComment,
+  AskAboutInput,
+  AskedQuestion,
   CommentsResult,
   ConflictsInput,
   FixResult,
@@ -24,10 +26,15 @@ import {
   LocalWaitResult,
   OpenInput,
   OpenPullRequestsResult,
+  OutsideQuestion,
   OutsideToolFailure,
+  PinInput,
   PullRequestResult,
   ReadLocalGuideInput,
+  QuestionInput,
+  QuestionsResult,
   ReadPullRequestInput,
+  ReadQuestionsInput,
   ReviseInput,
   SendToFixInput,
   StartedTurn,
@@ -138,12 +145,12 @@ const ReadFix = read(
 
 const WaitFor = read(
   Tool.make("wait_for", {
-    description: `Waits until a pull request's guide or fix stops running, or the timeout passes (50 seconds unless you ask for more, at most 600), and returns its state; finished says which. A timeout never stops the work: call again to keep waiting.${TARGET_HINT}`,
+    description: `Waits until a pull request's guide or fix stops running, or none of its questions is being answered, or the timeout passes (50 seconds unless you ask for more, at most 600), and returns its state (for a question, the newest one); finished says which. A timeout never stops the work: call again to keep waiting.${TARGET_HINT}`,
     parameters: WaitInput,
     success: limited(WaitResult),
     failure: OutsideToolFailure,
   }),
-  "Wait for a guide or fix",
+  "Wait for a guide, fix or question",
 );
 
 const ListAccounts = read(
@@ -338,6 +345,16 @@ const ReadReviewDiff = read(
     failure: OutsideToolFailure,
   }),
   "Read an attempt diff",
+);
+
+const ReadPullRequestQuestions = read(
+  Tool.make("read_pull_request_questions", {
+    description: `The questions asked about a pull request's guide, oldest first, and their answers. Each has its id, the guide revision it was asked on, what it is about, its state (starting, waiting, answering, answered, stopped, failed), the conversation that answered it, the answer so far or in full, and whether it is pinned to the guide. Follow nextCursor until null; revision narrows to one guide revision.${TARGET_HINT}`,
+    parameters: ReadQuestionsInput,
+    success: limited(QuestionsResult),
+    failure: OutsideToolFailure,
+  }),
+  "Read questions about a guide",
 );
 
 const ReadGuideDuration = read(
@@ -543,6 +560,39 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
       failure: OutsideToolFailure,
     }),
     "Stop the guide",
+    true,
+  );
+
+  const AskAboutPullRequest = work(
+    Tool.make("ask_about_pull_request", {
+      description: `Asks the agent that wrote a pull request's guide a question about the whole pull request, one chapter or some diff lines, on the latest accepted guide revision unless revision says. It returns at once with the question's id: call wait_for with what: question, then read_pull_request_questions. The answer is read-only and never touches the pull request or GitHub. Only one question is answered at a time; asking again after a stop or failure is how to retry.${TARGET_HINT}`,
+      parameters: AskAboutInput,
+      success: limited(AskedQuestion),
+      failure: OutsideToolFailure,
+    }),
+    "Ask about a pull request",
+    false,
+  );
+
+  const StopQuestion = work(
+    Tool.make("stop_question", {
+      description: `Stops a question that is still being answered. What the agent wrote so far stays as the answer.${TARGET_HINT}`,
+      parameters: QuestionInput,
+      success: limited(OutsideQuestion),
+      failure: OutsideToolFailure,
+    }),
+    "Stop a question",
+    true,
+  );
+
+  const PinAnswer = work(
+    Tool.make("pin_answer", {
+      description: `Pins an answered question and its answer to its chapter in the guide in prkit, or unpins it. Local to prkit: nothing goes to GitHub.${TARGET_HINT}`,
+      parameters: PinInput,
+      success: limited(OutsideQuestion),
+      failure: OutsideToolFailure,
+    }),
+    "Pin an answer to the guide",
     true,
   );
 
@@ -765,6 +815,7 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
     ReadGuideRevision,
     ReadGuideProgress,
     ReadReviewDiff,
+    ReadPullRequestQuestions,
     ReadGuideDuration,
     ReadGuideSettings,
     ReadGuideScope,
@@ -782,6 +833,9 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
     OpenPullRequest,
     GenerateGuide,
     StopGuide,
+    AskAboutPullRequest,
+    StopQuestion,
+    PinAnswer,
     AddReviewComment,
     SendToFixAgent,
     AskFixAgentToChange,

@@ -2,6 +2,7 @@ import {
   chapterReview,
   type DiffFile,
   type DiffLineRef,
+  diffRows,
   type DiffSnapshot,
   type DiffSource,
   type NormalizedGuide,
@@ -18,9 +19,11 @@ import {
 } from "~/components/diff";
 import { alignScroll, type ScrollTarget } from "~/components/diff/alignScroll";
 import { alignIfAbove } from "~/components/diff/readingLine";
+import { useLineFocus } from "~/components/diff/lineFocus";
 import { RenderBoundary } from "~/components/diff/RenderBoundary";
 import { useReviewedKey } from "~/components/diff/useReviewedKey";
 import { TabActions, useHasTabActions } from "~/components/TabActions";
+import { toastManager } from "~/components/ui/toast";
 
 import { ChapterRail } from "./ChapterRail";
 import { railTicks } from "./railTicks";
@@ -37,6 +40,8 @@ export type GuideViewProps = {
   snapshot: DiffSnapshot;
   /** Where the snapshot's new side is read for the scope lines; null reads nothing. */
   source: DiffSource | null;
+  /** The accepted revision on screen; drafts never take a line request. */
+  revision?: number;
   prUrl?: string;
   prDescription?: string;
   loadContents?: LoadContents;
@@ -57,6 +62,14 @@ export type GuideViewProps = {
   count?: ReactNode;
   /** The author's pre-flight; without it the guide shows none. */
   preflight?: PreflightView | undefined;
+  /** What the page adds to the guide: after the overview, and in each chapter. */
+  aside?: {
+    readonly overview: ReactNode;
+    readonly chapter: (chapterId: string) => {
+      readonly action: ReactNode;
+      readonly notes: ReactNode;
+    };
+  };
 };
 
 const noPending: ReadonlySet<string> = new Set();
@@ -72,6 +85,7 @@ export function GuideView({
   guide,
   snapshot,
   source,
+  revision,
   prUrl,
   prDescription,
   loadContents,
@@ -82,6 +96,7 @@ export function GuideView({
   manualCheckTicks,
   count,
   preflight,
+  aside,
 }: GuideViewProps) {
   const prefix = useId();
   const inTabRow = useHasTabActions();
@@ -186,6 +201,23 @@ export function GuideView({
     () => railTicks(guide.chapters, pendingChapterIds, reviewOf, rated),
     [guide.chapters, pendingChapterIds, reviewOf, rated],
   );
+  // A line another part of the page asked for (a link in an answer), shown like a flow's line,
+  // once this guide has drawn: a link to another revision mounts its guide first.
+  const asked = useLineFocus((state) => state.request);
+  useEffect(() => {
+    if (asked === null || asked.revision !== revision || draft !== undefined) return;
+    const frame = window.requestAnimationFrame(() => {
+      useLineFocus.getState().take(asked.nonce);
+      const patch = snapshot.files.find((file) => file.path === asked.path)?.patch;
+      if (patch?._tag !== "text" || !diffRows(patch.patch).some((row) => row.new === asked.line))
+        toastManager.add({
+          type: "warning",
+          title: `Line ${asked.line} of ${asked.path} isn't in this diff.`,
+        });
+      onLine({ path: asked.path, line: asked.line });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [asked, revision, draft, snapshot.files, onLine]);
 
   return (
     <div data-guide-view="">
@@ -235,6 +267,7 @@ export function GuideView({
                 manualCheckTicks={manualCheckTicks}
               />
             </RenderBoundary>
+            {aside?.overview}
             {guide.chapters.map((chapter, index) => {
               if (pendingChapterIds.has(chapter.id))
                 return (
@@ -249,6 +282,7 @@ export function GuideView({
                 );
               const isCollapsed = collapsed.get(chapter.id) ?? chapter.kind === "generated";
               const review = reviewOf(chapter);
+              const extra = aside?.chapter(chapter.id);
               return (
                 <RenderBoundary key={chapter.id} title={`Chapter ${index + 1}`}>
                   <ChapterSection
@@ -275,6 +309,8 @@ export function GuideView({
                         ? null
                         : { review, onChange: (next) => reviewChapter(chapter, next) }
                     }
+                    action={extra?.action}
+                    notes={extra?.notes}
                   />
                 </RenderBoundary>
               );
