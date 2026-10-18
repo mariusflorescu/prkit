@@ -23,7 +23,11 @@
  * order and with that kind and level, with every file they leave out in a last one. A
  * `manual-check` file holds the guide's `manualCheck` as JSON; without it the guide has nothing
  * to check by hand. When the prompt asks for the author's pre-flight, the guide sends the JSON a
- * `preflight` file holds as it is, or `{}` (nothing to flag) without one. An `edits` file, JSON
+ * `preflight` file holds as it is, or `{}` (nothing to flag) without one. A `flow` file holds the
+ * guide's `flow` as JSON. With a `draft` file, the turn drafts first, as an agent that can't stream
+ * its guide does: `submit_draft` with the overview and every chapter's id and title, then, once
+ * no `draft-hold` file is left, the first chapter, then, once no `chapter-hold` file is left,
+ * the guide. An `edits` file, JSON
  * of `{ [path]: content }`, has the next fixes write those files besides `stand-in.md`. Before a
  * fix or resolution reports, it also plants what these files ask for, as something outside
  * prkit's sandboxes could:
@@ -481,6 +485,41 @@ const turn = async (prompt: string) => {
     };
     return kind === undefined ? chapter : { ...chapter, kind };
   };
+  const flow = flagged("flow")
+    ? {
+        flow: Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(
+          NodeFS.readFileSync(NodePath.join(control, "flow"), "utf8"),
+        ),
+      }
+    : {};
+  const drafts = flagged("draft");
+  // A draft names its chapters before they have files, so the drafts and the guide give ids.
+  const named = chapters.map((chapter, index) => ({
+    id: `chapter-${index + 1}`,
+    ...chapterJson(chapter),
+  }));
+  const guideChapters = drafts ? named : chapters.map(chapterJson);
+  const waitWhile = async (name: string) => {
+    while (flagged(name)) await new Promise((resolve) => setTimeout(resolve, 200));
+  };
+  if (drafts) {
+    const overview = await mcp("tools/call", {
+      name: "submit_draft",
+      arguments: {
+        summary: ["A guide written by the stand-in agent."],
+        ...flow,
+        chapters: named.map(({ id, title }) => ({ id, title })),
+      },
+    });
+    if (!overview.ok) return finish(`submit_draft was refused: ${overview.text.slice(0, 300)}`);
+    await waitWhile("draft-hold");
+    const first = await mcp("tools/call", {
+      name: "submit_draft",
+      arguments: { chapters: named.slice(0, 1) },
+    });
+    if (!first.ok) return finish(`submit_draft was refused: ${first.text.slice(0, 300)}`);
+    await waitWhile("chapter-hold");
+  }
   const preflight = prompt.includes("so the guide is for its own author")
     ? {
         preflight: flagged("preflight")
@@ -494,7 +533,8 @@ const turn = async (prompt: string) => {
     name: "submit_guide",
     arguments: {
       summary: "A guide written by the stand-in agent.",
-      chapters: chapters.map(chapterJson),
+      ...flow,
+      chapters: guideChapters,
       risk: { level: guideLevel ?? risk.guide.level, reasons: risk.guide.reasons },
       manualCheck,
       focusAreas: [...prompt.matchAll(/^- `([^`]+)` .+: .+$/gm)].map((match) => ({

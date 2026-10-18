@@ -52,7 +52,7 @@ Fake GitHub and the stand-in Claude only, so no fixture lock: `pnpm e2e run test
 - **Relaunch:** `stopFakeInstance` with `keepHome: true` leaves one `open_local_reviews` row; the restarted instance shows the tab.
 - **Toast:** from Settings > Appearance, a CLI run with a change raises "Guide updated" with `widgets · feature/limits · 1 chapter`, whose Open shows the page.
 - **Remove:** ⋯ > "Remove local review…", then Remove in the `alertdialog`: the tab goes, the row goes, the palette shows no Local reviews group, and opening `/local/<key>` shows "This local review was removed" with Go to Inbox.
-- **Evidence:** every frame is saved with `app.screenshot` and copied to `.e2e/evidence/local-guides-ui/` as `local-<state>-<theme>.png`, with the CLI transcript. Frames avoid Settings > Outside agents and the Inbox footer, which print this machine's paths.
+- **Evidence:** every frame is saved with `app.screenshot` and copied to `.e2e/evidence/local-guides-ui/` as `local-<state>-<theme>.png`, with the CLI transcript. It copies only this run's frames, from `.e2e/results` or from the `--output .e2e/proof/<name>` folder the run wrote them to. Frames avoid Settings > Outside agents and the Inbox footer, which print this machine's paths.
 
 ### Scope and moved code (`tests/local-diff-scope.e2e.ts`)
 

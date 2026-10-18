@@ -45,7 +45,9 @@ const Prompt = Schema.fromJsonString(
  * notes, `fileNotes` file notes, `manualCheck` their plan for checking the change by hand,
  * `split` gives each file of their guides a chapter of its own, `chapters` splits them into
  * named chapters (with a kind and level when given), `preflight` is the author's pre-flight
- * their guides send when the prompt asks for one, `edits` has its next fixes write files, and
+ * their guides send when the prompt asks for one, `flow` is their guides' before/after,
+ * `drafting` has them draft first and wait after the overview and after the first chapter until
+ * `releaseDraft` lets each step go, `edits` has its next fixes write files, and
  * `plant` has its next fixes and resolutions leave something behind (scripts/fake-claude.ts
  * lists what).
  */
@@ -60,7 +62,10 @@ export const setUpFakeClaude = (name: string) => {
     `#!/bin/sh\nFAKE_CLAUDE_DIR='${dir}' exec '${process.execPath}' '${script}' "$@"\n`,
     { mode: 0o755 },
   );
-  const flag = (name: "hold" | "fail" | "split", on: boolean) =>
+  const flag = (
+    name: "hold" | "fail" | "split" | "draft" | "draft-hold" | "chapter-hold",
+    on: boolean,
+  ) =>
     on
       ? NodeFS.writeFileSync(NodePath.join(dir, name), "")
       : NodeFS.rmSync(NodePath.join(dir, name), { force: true });
@@ -76,6 +81,16 @@ export const setUpFakeClaude = (name: string) => {
     manualCheck: (plan: FakeManualCheck) =>
       NodeFS.writeFileSync(NodePath.join(dir, "manual-check"), JSON.stringify(plan)),
     split: (on: boolean) => flag("split", on),
+    flow: (flow: object) => NodeFS.writeFileSync(NodePath.join(dir, "flow"), JSON.stringify(flow)),
+    /** Drafts the overview, then the first chapter, then submits; each waits while its step is held. */
+    drafting: () => {
+      flag("draft", true);
+      flag("draft-hold", true);
+      flag("chapter-hold", true);
+    },
+    /** Lets the draft go past the overview, then past the first chapter. */
+    releaseDraft: (step: "overview" | "chapter") =>
+      flag(step === "overview" ? "draft-hold" : "chapter-hold", false),
     chapters: (chapters: ReadonlyArray<FakeChapter>) =>
       NodeFS.writeFileSync(NodePath.join(dir, "chapters"), JSON.stringify(chapters)),
     /** Whole files, by path in the checkout, that the next fixes write. */

@@ -10,7 +10,7 @@
  * by its URL too, changes one file in one hunk of context, a deletion and two additions.
  *
  * PRs 1-3 have a review pending from the account, with one request event at the start;
- * the rest have none. A second GraphQL request, `PrkitReviewWaits`, asks for the pending
+ * the rest have none. PR 9 joins the inbox's review requests once `request-review` asks for one. A second GraphQL request, `PrkitReviewWaits`, asks for the pending
  * reviewers and the last request and ready events of the inbox's review-requested pull
  * requests, and is counted as `graphql:review-waits`. `shape`, `request-review`, `ready`
  * and the routes next to them seed what it answers.
