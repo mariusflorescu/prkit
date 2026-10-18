@@ -1,18 +1,30 @@
 import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { test } from "@e2e-dev/web";
+import { type Browser, describe, test } from "@e2e-dev/web";
 import { expect } from "e2e";
 import * as Schema from "effect/Schema";
 
 import { TickManualCheckResult } from "../apps/server/src/outside/paritySchemas.ts";
 import { GuideResult } from "../apps/server/src/outside/schemas.ts";
+import { NormalizedGuide } from "../packages/contracts/src/guide.ts";
+import { repoRoot, runForUrl } from "../scripts/verify-run.ts";
+import { cliFixture } from "./cliFixture.ts";
 import { setUpFakeClaude } from "./fakeClaude.ts";
 import { startFakeGitHub, startFakeInstance, stopFakeInstance } from "./fakeGitHub.ts";
-import { readRows } from "./fixturePr.ts";
+import {
+  AGENT_RUNS,
+  AGENT_SKIP,
+  FIXTURE_REPO,
+  NEEDS_FIXTURE,
+  openFixtureGuide,
+  readRows,
+} from "./fixturePr.ts";
 import { emulateOsColorScheme, screenshotLightAndDark } from "./osColorScheme.ts";
 import { outsideGit } from "./outsideGit.ts";
+import { setUpRealClaude } from "./realClaude.ts";
 
 const NAME = "manual-check";
 const ACCOUNT = "github.com/budget-test";
@@ -287,3 +299,204 @@ test(
     }
   },
 );
+
+const EVIDENCE = NodePath.join(repoRoot, ".e2e", "evidence", "manual-check");
+const decodeGuide = Schema.decodeUnknownSync(Schema.fromJsonString(NormalizedGuide));
+
+/** The newest accepted guide of a pull request, kept as evidence. */
+const acceptedGuide = (home: string, key: string, evidence: string) => {
+  const [stored] = readRows(
+    home,
+    `SELECT rr.guide FROM review_revisions rr JOIN reviews r ON r.id = rr.review_id
+     WHERE r.pr_key = '${key}' ORDER BY rr.revision DESC LIMIT 1`,
+  );
+  if (typeof stored?.guide !== "string") throw new Error(`${key} has no accepted guide.`);
+  NodeFS.mkdirSync(EVIDENCE, { recursive: true });
+  NodeFS.writeFileSync(NodePath.join(EVIDENCE, `${evidence}.json`), stored.guide);
+  return decodeGuide(stored.guide);
+};
+
+const focusedChapter = (browser: Browser) =>
+  browser.evaluate(() =>
+    document.activeElement instanceof HTMLElement
+      ? (document.activeElement.dataset.chapterId ?? null)
+      : null,
+  );
+
+const LINKS = [
+  "export type Link = { readonly id: number; readonly url: string };",
+  "",
+  "const links: Array<Link> = [];",
+  "",
+  "export const addLink = (url: string): Link => {",
+  "  const link = { id: links.length + 1, url };",
+  "  links.push(link);",
+  "  return link;",
+  "};",
+  "",
+].join("\n");
+const SERVER = (name: string) =>
+  [
+    `import { ${name} } from "./links.ts";`,
+    "",
+    "export const handle = (method: string, url: URL, body: string) => {",
+    `  if (method === "POST" && url.pathname === "/links") return { status: 201, body: ${name}(body) };`,
+    '  return { status: 404, body: "not found" };',
+    "};",
+    "",
+  ].join("\n");
+const TEST = (name: string) =>
+  [
+    'import assert from "node:assert/strict";',
+    'import { test } from "node:test";',
+    "",
+    `import { ${name} } from "../src/links.ts";`,
+    "",
+    'test("a new link gets the next id", () => {',
+    `  assert.equal(${name}("https://example.com").id, 1);`,
+    "});",
+    "",
+  ].join("\n");
+
+/** Renames `addLink` and pulls the id out into a helper: nothing behaves differently. */
+const REFACTOR = {
+  base: {
+    "README.md":
+      "# Links\n\nA tiny link shortener.\n\n## Run it\n\n`npm start` serves it on port 3000.\n",
+    "package.json": '{ "scripts": { "start": "node src/main.ts", "test": "node --test" } }\n',
+    "src/links.ts": LINKS,
+    "src/server.ts": SERVER("addLink"),
+    "test/links.test.ts": TEST("addLink"),
+  },
+  head: {
+    "src/links.ts": [
+      "export type Link = { readonly id: number; readonly url: string };",
+      "",
+      "const links: Array<Link> = [];",
+      "",
+      "const nextId = () => links.length + 1;",
+      "",
+      "export const createLink = (url: string): Link => {",
+      "  const link = { id: nextId(), url };",
+      "  links.push(link);",
+      "  return link;",
+      "};",
+      "",
+    ].join("\n"),
+    "src/server.ts": SERVER("createLink"),
+    "test/links.test.ts": TEST("createLink"),
+  },
+};
+
+describe("a real Claude guide says how to check it", { tags: ["agent"] }, () => {
+  test(
+    "the fixture pull request gets concrete steps that point at its chapters",
+    { skip: NEEDS_FIXTURE, timeout: 900_000 },
+    async ({ app, screen, browser }) => {
+      test.skip(!AGENT_RUNS, AGENT_SKIP);
+      const run = runForUrl(app.baseUrl);
+      await browser.setViewport({ width: 1440, height: 900 });
+      await emulateOsColorScheme(browser, "light");
+      await openFixtureGuide({ app, screen });
+      await screen.getByRole("button", "Generate guide").tap({ timeout: 30_000 });
+      await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r1 · ", {
+        timeout: 840_000,
+      });
+      const guide = acceptedGuide(run.home, `github.com/${FIXTURE_REPO}#1`, "fixture");
+      const plan = guide.manualCheck;
+      console.info(`fixture plan: ${JSON.stringify(plan, null, 2)}`);
+      if (plan?._tag !== "steps") throw new Error("The fixture's guide has no steps to check.");
+      expect(plan.steps.length).toBeGreaterThanOrEqual(2);
+      expect(plan.steps.length).toBeLessThanOrEqual(5);
+      const chapters = new Set(guide.chapters.map((chapter) => chapter.id));
+      expect(plan.steps.some((step) => step.chapter !== null)).toBe(true);
+      for (const step of plan.steps)
+        if (step.chapter !== null) expect(chapters.has(step.chapter)).toBe(true);
+      expect(plan.steps.some((step) => step.watchFor !== null)).toBe(true);
+      const said = JSON.stringify(plan).toLowerCase();
+      expect(said).toMatch(/stats|click/);
+      expect(said).toMatch(/400|javascript:|rejected|invalid/);
+      expect(said).not.toMatch(/\bi (ran|tested|tried)\b/);
+      expect(NodeFS.readFileSync(run.log, "utf8")).toContain("manual-check");
+
+      const section = screen.getByRole("region", "How to check it");
+      await section.scrollIntoView();
+      await expect(section.getByRole("checkbox")).toHaveCount(plan.steps.length);
+      await screenshotLightAndDark(app, browser, "manual-check-agent-fixture");
+      for (const [index, step] of plan.steps.entries()) {
+        if (step.chapter === null) continue;
+        await section.scrollIntoView();
+        await section
+          .getByRole("listitem")
+          .nth(index)
+          .getByRole("button", /^Open chapter \d+: /)
+          .tap();
+        await expect.poll(() => focusedChapter(browser)).toBe(step.chapter);
+      }
+      await section.scrollIntoView();
+      await section.getByRole("checkbox", "Checked step 1").tap();
+      await expect(
+        browser.locator("[data-guide-manual-check] [data-manual-check-progress]"),
+      ).toHaveText(`1 of ${plan.steps.length} checked`);
+      await browser.setViewport({ width: 640, height: 900 });
+      await section.scrollIntoView();
+      await app.screenshot("manual-check-agent-fixture-640");
+    },
+  );
+
+  test(
+    "a refactor gets nothing to check by hand",
+    { timeout: 900_000 },
+    async ({ app, screen, browser }) => {
+      test.skip(!AGENT_RUNS, AGENT_SKIP);
+      const name = "manual-check-refactor";
+      NodeFS.rmSync(NodePath.join(repoRoot, ".e2e", "logs", `${name}.log`), { force: true });
+      const claude = setUpRealClaude(name);
+      const fake = await startFakeGitHub(name);
+      const git = await cliFixture(fake, REFACTOR);
+      const path = process.env.PATH;
+      const restorePath = () => {
+        if (path === undefined) delete process.env.PATH;
+        else process.env.PATH = path;
+      };
+      process.env.PATH = git.path;
+      try {
+        const run = startFakeInstance(name, fake, ["--claude", claude.file, "--e2e"]);
+        restorePath();
+        await emulateOsColorScheme(browser, "light");
+        await browser.setViewport({ width: 1440, height: 900 });
+        await app.open(run.openUrl);
+        await app.open(guideUrl(run.url));
+        await screen.getByRole("button", "Generate guide").tap({ timeout: 30_000 });
+        await expect
+          .poll(
+            () => {
+              const [review] = readRows(
+                run.home,
+                `SELECT json_extract(status, '$._tag') AS state FROM reviews WHERE pr_key = '${KEY}'`,
+              );
+              return review?.state === "watching" || review?.state === "failed"
+                ? review.state
+                : "running";
+            },
+            { timeout: 840_000, interval: 1_000 },
+          )
+          .toBe("watching");
+        const guide = acceptedGuide(run.home, KEY, "refactor");
+        console.info(`refactor plan: ${JSON.stringify(guide.manualCheck)}`);
+        expect(guide.manualCheck).toMatchObject({ _tag: "nothing", reason: expect.any(String) });
+        const section = screen.getByRole("region", "How to check it");
+        await expect(section.getByText(/^Nothing to check by hand\. /)).toBeVisible({
+          timeout: 30_000,
+        });
+        await expect(section.getByRole("checkbox")).toHaveCount(0);
+        await section.scrollIntoView();
+        await screenshotLightAndDark(app, browser, "manual-check-agent-refactor");
+      } finally {
+        restorePath();
+        stopFakeInstance(name, { keepHome: false });
+        fake.stop();
+      }
+    },
+  );
+});
