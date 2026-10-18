@@ -8,7 +8,7 @@ import { expect } from "e2e";
 import * as Schema from "effect/Schema";
 
 import { TickManualCheckResult } from "../apps/server/src/outside/paritySchemas.ts";
-import { GuideResult } from "../apps/server/src/outside/schemas.ts";
+import { GenerateLocalGuideResult, GuideResult } from "../apps/server/src/outside/schemas.ts";
 import { NormalizedGuide } from "../packages/contracts/src/guide.ts";
 import { repoRoot, runForUrl } from "../scripts/verify-run.ts";
 import { cliFixture } from "./cliFixture.ts";
@@ -22,6 +22,8 @@ import {
   openFixtureGuide,
   readRows,
 } from "./fixturePr.ts";
+import { cliIn, scratchRoot, switchOn } from "./localGuideSession.ts";
+import { handbook, localRepoFixture } from "./localRepoFixture.ts";
 import { emulateOsColorScheme, screenshotLightAndDark } from "./osColorScheme.ts";
 import { outsideGit } from "./outsideGit.ts";
 import { setUpRealClaude } from "./realClaude.ts";
@@ -299,6 +301,77 @@ test(
     } finally {
       stopFakeInstance(NAME, { keepHome: false });
       fake.stop();
+    }
+  },
+);
+
+test(
+  "a local review's manual check ticks survive a relaunch, kept apart from any pull request's",
+  { timeout: 300_000 },
+  async ({ app, screen, browser }) => {
+    const name = "manual-check-local";
+    const fake = await startFakeGitHub(name);
+    const claude = setUpFakeClaude(name);
+    const root = scratchRoot();
+    const start = () => startFakeInstance(name, fake, ["--claude", claude.file]);
+    try {
+      const fixture = localRepoFixture(root);
+      fixture.write("docs/handbook.md", handbook({ 15: "Limits are set per team." }));
+      claude.manualCheck({
+        steps: [
+          {
+            action: "Open `docs/handbook.md` in the docs site.",
+            expect: "Line 15 says limits are set per team.",
+            watchFor: "The old per-user line still showing.",
+            chapter: 1,
+          },
+          { action: "Search the docs for `per user`.", expect: "No page mentions it." },
+        ],
+      });
+      let run = start();
+      const cli = cliIn(NodePath.join(run.home, "bin/prkit"), fake.home, []);
+      await emulateOsColorScheme(browser, "light");
+      await browser.setViewport({ width: 1280, height: 900 });
+      await switchOn({ app, screen, browser }, run.openUrl);
+      const started = Schema.decodeSync(Schema.fromJsonString(GenerateLocalGuideResult))(
+        cli(fixture.repo, ["local", "guide", "--json"]).stdout,
+      );
+      const key = started.status.key;
+      const tab = screen.getByRole("link", "Open the local review of widgets · feature/limits");
+      await tab.tap({ timeout: 30_000 });
+      await expect(screen.getByText("A guide written by the stand-in agent.")).toBeVisible({
+        timeout: 60_000,
+      });
+      const plan = screen.getByRole("region", "How to check it");
+      const progress = browser.locator("[data-guide-manual-check] [data-manual-check-progress]");
+      await expect(progress).toHaveText("0 of 2 checked");
+      await plan.getByRole("checkbox", "Checked step 1").tap();
+      await expect(progress).toHaveText("1 of 2 checked");
+      expect(
+        readRows(run.home, "SELECT subject, ticked FROM manual_check_ticks ORDER BY seq"),
+      ).toEqual([{ subject: `local ${key}`, ticked: 1 }]);
+      await plan.scrollIntoView();
+      await screenshotLightAndDark(app, browser, "manual-check-local");
+
+      stopFakeInstance(name, { keepHome: true });
+      run = start();
+      await app.open(run.openUrl);
+      await tab.tap({ timeout: 30_000 });
+      await expect(progress).toHaveText("1 of 2 checked", { timeout: 30_000 });
+      await expect(plan.getByRole("checkbox", "Checked step 1")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      await expect(plan.getByRole("checkbox", "Checked step 2")).toHaveAttribute(
+        "aria-checked",
+        "false",
+      );
+      await plan.scrollIntoView();
+      await app.screenshot("manual-check-local-after-relaunch");
+    } finally {
+      stopFakeInstance(name, { keepHome: false });
+      fake.stop();
+      NodeFS.rmSync(root, { recursive: true, force: true });
     }
   },
 );

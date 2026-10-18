@@ -9,6 +9,7 @@ import { DraftView } from "~/components/review/DraftView";
 import { GuideSkeleton } from "~/components/review/GuideSkeleton";
 import { ReviewAlert } from "~/components/review/ReviewAlert";
 import type { GuideChoice } from "~/components/review/RevisionSwitcher";
+import { useManualCheckTicks } from "~/features/manualCheck/useManualCheckTicks";
 import { getLocalFileContents } from "~/rpc/client";
 import { guideQuery } from "~/rpc/queries";
 
@@ -41,6 +42,7 @@ export function LocalGuideReady({
   const revision = revisions.find((entry) => entry.revision === picked) ?? latest;
   const guide = useQuery(guideQuery(review.key, revision.revision));
   const { retry } = useLocalReviewActions(review.key);
+  const manualCheckTicks = useManualCheckTicks({ _tag: "local", key: review.key });
   const loadContents = useCallback<LoadContents>(
     async (file) => {
       const read = (path: string, side: "old" | "new") =>
@@ -82,7 +84,7 @@ export function LocalGuideReady({
             source={null}
           />
         </div>
-      ) : guide.isPending ? (
+      ) : guide.isPending || manualCheckTicks.status === "pending" ? (
         <GuideSkeleton />
       ) : guide.isError ? (
         <ReviewAlert
@@ -100,6 +102,7 @@ export function LocalGuideReady({
             guide={guide.data.normalized}
             snapshot={guide.data.snapshot}
             loadContents={loadContents}
+            manualCheckTicks={manualCheckTicks}
             // Scope lines read the new side through GitHub or a PR's cache; a snapshot has neither.
             source={null}
           />
