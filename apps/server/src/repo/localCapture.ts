@@ -1,7 +1,7 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- lstat: effect/FileSystem's stat follows links, and the before/after check needs nanosecond mtimes.
 import * as NodeFs from "node:fs";
 
-import type { DiffSnapshot, ReviewId } from "@prkit/contracts";
+import { type DiffSnapshot, LocalHead, LocalReviewKey, type ReviewId } from "@prkit/contracts";
 import type * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -14,15 +14,9 @@ import { Hex } from "effect/encoding";
 import { checkoutFor, type GitTarget, RepoError, type UserRepository } from "./gitRun.ts";
 import type { Prepared, Since } from "./RepoCache.ts";
 
-/** One local review: a repository's branch, or its detached HEAD in one work tree. */
-export const LocalReviewKey = Schema.NonEmptyString.check(
-  Schema.isPattern(/^local:[0-9a-f]{16}$/),
-).pipe(Schema.brand("LocalReviewKey"));
-export type LocalReviewKey = typeof LocalReviewKey.Type;
-
-/** The working tree as it is on disk, or the branch's last commit alone. */
-export const LocalHead = Schema.Literals(["working-tree", "branch"]);
-export type LocalHead = typeof LocalHead.Type;
+/** One bare repository per local review, holding only what prkit copied or hashed for it. */
+export const localCopyPath = (path: Path.Path, home: string, key: LocalReviewKey) =>
+  path.join(home, "local", `${key.slice("local:".length)}.git`);
 
 const Commit = Schema.Struct({ sha: Schema.String, subject: Schema.String });
 
@@ -250,8 +244,7 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
   const plain: GitTarget = { _tag: "plain" };
   const bare = (repo: string): GitTarget => ({ _tag: "bare", repo });
 
-  /** One bare repository per local review, holding only what prkit copied or hashed for it. */
-  const copyOf = (key: LocalReviewKey) => path.join(localDir, `${key.slice("local:".length)}.git`);
+  const copyOf = (key: LocalReviewKey) => localCopyPath(path, deps.home, key);
   /** Capture, prepare and forget of one key run one at a time, with keepRevision on its copy. */
   const gated = (key: LocalReviewKey) => deps.serialized(copyOf(key));
 

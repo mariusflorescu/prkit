@@ -40,7 +40,7 @@ import {
   RepoError,
 } from "./gitRun.ts";
 import { linksRefusal, newLinks } from "./links.ts";
-import { makeLocalCapture } from "./localCapture.ts";
+import { localCopyPath, makeLocalCapture } from "./localCapture.ts";
 import { type NestedEntry, nestedGitEntries } from "./nestedRepos.ts";
 import { rebaseStateHash } from "./rebaseState.ts";
 
@@ -122,7 +122,6 @@ export const make = Effect.gen(function* () {
   const accounts = yield* GitHubAccounts;
   const crypto = yield* Crypto.Crypto;
   const reposDir = path.join(config.home, "repos");
-  const localDir = path.join(config.home, "local");
   const worktreesDir = path.join(config.home, "worktrees");
   const fixesDir = path.join(config.home, "fixes");
   const gitconfig = path.join(config.home, "gitconfig");
@@ -240,7 +239,7 @@ export const make = Effect.gen(function* () {
   const cachePath = (cache: CacheRef) =>
     cache._tag === "pull-request"
       ? repoPath(cache.ref)
-      : path.join(localDir, `${cache.key.slice("local:".length)}.git`);
+      : localCopyPath(path, config.home, cache.key);
   const worktreePath = (reviewId: ReviewId) => path.join(worktreesDir, reviewId);
 
   /** A worktree as prkit lays it out, with its git dir and common dir computed, never read from it. */
