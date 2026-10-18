@@ -147,8 +147,8 @@
         "**`--adopt` and `--numbered`.** `--adopt` is hidden and only prints a warning. Two behaviors flip for anyone scripting it: a missing branch is now created instead of being an error, and `--adopt --prefix` is no longer rejected. `--numbered` gets its own path, and `gh stack init -p feat -n` now works without a terminal. Before, it failed with \"interactive input required\", so the \"(unchanged)\" comment on that block isn't quite true."
       ],
       "pseudocode": {
-        "before": "runInit(opts):\n  --adopt with --prefix or --numbered: error\n  no prefix given: prompt for one\n  ValidateRefName(prefix)\n  if --adopt:      all branches must exist\n  elif args:       create missing ones from trunk\n  elif --numbered: branches = [NextNumberedName(prefix)]\n  else:            use current branch, or prompt\n  AddStack(prefix, trunk, branches)",
-        "after": "runInit(opts):\n  --adopt: warn \"deprecated\", carry on\n  ValidateRefName(prefix)\n  if args:         check every name, then create\n                   prefix = --prefix or detectPrefix()\n  elif --numbered: branches = [NextNumberedName(prefix)]\n  else:            Select current or new, Y/n on prefix\n  AddStack(prefix, trunk, branches)"
+        "before": "runInit(opts):\n  --adopt with --prefix or --numbered: error\n  no prefix given: prompt for one\n  ValidateRefName(prefix)\n  if --adopt:      all branches must exist\n  elif args:       create missing ones from trunk\n  elif --numbered: branches = [NextNumberedName(prefix)]\n  else:            use current branch, or prompt\n\n  AddStack(prefix, trunk, branches)",
+        "after": "runInit(opts):\n  --adopt: warn \"deprecated\", carry on\n  ValidateRefName(prefix)\n  if args:         check every name, then create\n                   prefix = --prefix or detectPrefix()\n  elif --numbered: branches = [NextNumberedName(prefix)]\n  else:            Select current or new, Y/n on prefix\n\n  AddStack(prefix, trunk, branches)"
       },
       "callouts": [
         {

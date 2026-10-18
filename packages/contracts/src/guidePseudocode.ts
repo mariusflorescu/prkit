@@ -129,11 +129,12 @@ const checkPair = (
       );
   }
   if (pair.before === "" || pair.after === "") return;
+  const kept = new Set(pair.before.split("\n"));
   if (pair.before === pair.after)
     report.errors.push(
       `${owner}: \`pseudocode.before\` and \`pseudocode.after\` are the same, so the pair shows no change. Show what changed between them, or send \`pseudocode\` as one string.`,
     );
-  else if (!pseudocodeRows(pair).some((row) => row.before?.status === "unchanged"))
+  else if (!pair.after.split("\n").some((line) => kept.has(line)))
     report.warnings.push(
       `${owner}: \`pseudocode.before\` and \`pseudocode.after\` share no line, so every line shows as changed. Write the lines that work the same word for word, indentation included, on both sides.`,
     );

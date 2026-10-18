@@ -404,10 +404,10 @@ test("the DEV guide shows a chapter's before and after, side by side when there 
   await expect(browser.locator("[data-pseudocode-pair]")).toHaveCount(1);
   await expect(lines("before", "removed")).toHaveCount(5);
   await expect(lines("before", "added")).toHaveCount(0);
-  await expect(lines("before", "unchanged")).toHaveCount(4);
+  await expect(lines("before", "unchanged")).toHaveCount(5);
   await expect(lines("after", "added")).toHaveCount(4);
   await expect(lines("after", "removed")).toHaveCount(0);
-  await expect(lines("after", "unchanged")).toHaveCount(4);
+  await expect(lines("after", "unchanged")).toHaveCount(5);
   await expect(filler).toHaveCount(1);
   await expect(
     before.getByText("--adopt with --prefix or --numbered: error", { exact: false }),
@@ -444,7 +444,7 @@ test("the DEV guide shows a chapter's before and after, side by side when there 
       boxOf(after.getByText("ValidateRefName(prefix)")),
     ]);
     return (
-      kept.length === 4 && kept.every((top, index) => top === now[index]) && shared.y === fresh.y
+      kept.length === 5 && kept.every((top, index) => top === now[index]) && shared.y === fresh.y
     );
   };
   const fillerTakesItsRow = async () => {
@@ -470,6 +470,12 @@ test("the DEV guide shows a chapter's before and after, side by side when there 
     } else {
       await expect(filler).toBeHidden();
     }
+    const heights = await Promise.all(
+      (await browser.locator(`${initFlow} [data-pseudocode-line]`).all()).map(
+        async (line) => (await boxOf(line)).height,
+      ),
+    );
+    expect(heights.filter((height) => height < 12)).toEqual([]);
     await browser.locator(`${initFlow} [data-pseudocode-pair]`).scrollIntoView();
     if (themes) await screenshotLightAndDark(app, browser, `chapter-pair-${width}`);
     else await app.screenshot(`chapter-pair-${width}`);

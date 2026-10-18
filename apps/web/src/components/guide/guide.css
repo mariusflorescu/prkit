@@ -628,6 +628,7 @@ button[data-line-link] {
 }
 [data-pseudocode-line] {
   display: grid;
+  min-height: 1lh;
   grid-template-columns: 24px minmax(0, 1fr);
   padding-right: 14px;
 }
