@@ -37,11 +37,7 @@ export function useSavedInboxFilters(entries: ReadonlyArray<InboxEntry> | undefi
     mutationFn: saveInboxFilters,
     // One write at a time, in order, so the last change is the one kept.
     scope: { id: "inbox-filters" },
-    onSuccess: (inboxFilters) =>
-      client.setQueryData(
-        workspaceQuery.queryKey,
-        (workspace) => workspace && { ...workspace, inboxFilters },
-      ),
+    onSuccess: (workspace) => client.setQueryData(workspaceQuery.queryKey, workspace),
     onError: (error) => {
       sent.current = null;
       toastManager.add({

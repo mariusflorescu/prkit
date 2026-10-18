@@ -1,15 +1,14 @@
-import {
-  applyWorkspaceCommand,
-  type LocalReviewFeedEvent,
-  type LocalReviewKey,
-  type LocalReviewSnapshot,
-  type LocalReviewWatchEvent,
-  type ReviewId,
+import type {
+  LocalReviewFeedEvent,
+  LocalReviewKey,
+  LocalReviewSnapshot,
+  LocalReviewWatchEvent,
+  ReviewId,
 } from "@prkit/contracts";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { mergeActivity } from "~/components/review/reviewCache";
-import { localReviewQuery, localReviewsQuery, workspaceQuery } from "~/rpc/queries";
+import { localReviewQuery, localReviewsQuery } from "~/rpc/queries";
 
 /** What a removed review reads as: no review, so its page says it is gone. */
 const gone = (key: LocalReviewKey): LocalReviewSnapshot => ({
@@ -43,7 +42,10 @@ export const storeLocalSnapshot = (client: QueryClient, snapshot: LocalReviewSna
   );
 };
 
-/** Drops a removed review from the list, the strip and its page, here and in every window. */
+/**
+ * Drops a removed review from the list and its page, here and in every window. Its tab goes
+ * with the tabs the server announces after the removal, which carry their version.
+ */
 export const forgetLocalReview = (client: QueryClient, key: LocalReviewKey) => {
   const review = client.getQueryData(localReviewQuery(key).queryKey)?.review;
   if (review != null) removed.add(review.id);
@@ -54,9 +56,6 @@ export const forgetLocalReview = (client: QueryClient, key: LocalReviewKey) => {
   });
   client.setQueryData(localReviewsQuery.queryKey, (current) =>
     current?.filter((entry) => entry.key !== key),
-  );
-  client.setQueryData(workspaceQuery.queryKey, (current) =>
-    current === undefined ? current : applyWorkspaceCommand(current, { kind: "close-local", key }),
   );
   client.setQueryData(localReviewQuery(key).queryKey, gone(key));
 };

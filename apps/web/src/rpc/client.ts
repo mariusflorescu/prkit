@@ -25,7 +25,6 @@ import {
   type PullRequestStack,
   type PullRequestTimeline,
   type InboxFilters,
-  type SavedInboxFilters,
   type Workspace,
   type WorkspaceChange,
   type WorkspaceCommand,
@@ -201,9 +200,9 @@ export const getGitHubBudget = (): Promise<GitHubBudget> =>
   call((client) => client[WS_METHODS.githubBudget]({}));
 export const getWorkspace = (): Promise<Workspace> =>
   call((client) => client[WS_METHODS.workspaceGet]({}));
-export const saveInboxFilters = (filters: InboxFilters): Promise<SavedInboxFilters> =>
+export const saveInboxFilters = (filters: InboxFilters): Promise<Workspace> =>
   call((client) => client[WS_METHODS.workspaceSaveInboxFilters](filters));
-/** Hears open PRs changed elsewhere (an outside agent) until the returned function is called. */
+/** Hears the open tabs on every (re)subscription, then each change made elsewhere, until the returned function is called. */
 export const watchWorkspace = (onChange: (change: WorkspaceChange) => void): (() => void) => {
   const current = getRuntime();
   if (current === null) return () => {};

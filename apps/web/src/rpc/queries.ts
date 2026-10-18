@@ -1,4 +1,4 @@
-import { queryOptions, skipToken } from "@tanstack/react-query";
+import { queryOptions, replaceEqualDeep, skipToken } from "@tanstack/react-query";
 
 import {
   type AccountId,
@@ -15,7 +15,10 @@ import {
   type FixerFeedEntry,
   type FixerTurnId,
   type LocalReviewKey,
+  newerWorkspace,
+  Workspace,
 } from "@prkit/contracts";
+import * as Schema from "effect/Schema";
 import {
   getAgentCatalog,
   getAppearance,
@@ -112,9 +115,16 @@ export const pullRequestQueryKeys = (key: PullRequestKey, accountId: AccountId) 
   ["pullRequestFiles", accountId, key],
   ["pullRequestStack", accountId, key],
 ];
+const isWorkspace = Schema.is(Workspace);
 export const workspaceQuery = queryOptions({
   queryKey: ["workspace"],
+  // A read that lost the race to a newer copy the server pushed keeps the newer one.
   queryFn: getWorkspace,
+  // Every copy goes through here as it lands, read or pushed: an older one keeps the newer.
+  structuralSharing: (current, next) =>
+    isWorkspace(current) && isWorkspace(next)
+      ? replaceEqualDeep(current, newerWorkspace(current, next))
+      : next,
   staleTime: Infinity,
   retry: false,
 });

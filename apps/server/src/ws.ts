@@ -137,7 +137,8 @@ const layerHandlers = WsRpcGroup.toLayer(
       [WS_METHODS.workspaceOpenLocal]: ({ key }) => workspace.command({ kind: "open-local", key }),
       [WS_METHODS.workspaceCloseLocal]: ({ key }) =>
         workspace.command({ kind: "close-local", key }),
-      [WS_METHODS.workspaceSaveInboxFilters]: (filters) => workspace.saveInboxFilters(filters),
+      [WS_METHODS.workspaceSaveInboxFilters]: (filters) =>
+        workspace.saveInboxFilters(filters).pipe(Effect.map((saved) => saved.workspace)),
       [WS_METHODS.workspaceChanges]: () => workspace.changes(),
       [WS_METHODS.reviewedFilesGet]: ({ key, accountId }) =>
         reviewedFiles.marks({ key, accountId }),

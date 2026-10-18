@@ -45,6 +45,7 @@ import {
   type LocalCaptureService,
 } from "../repo/localCapture.ts";
 import { decide } from "./lifecycle.ts";
+import { Workspace } from "../workspace/Workspace.ts";
 import { subjectKey } from "./reviewSubject.ts";
 import type {
   Change,
@@ -251,6 +252,7 @@ const leftOutLine = (capture: LocalCapture) => {
 export const makeLocalReviews = (port: LocalPort, capture: LocalCaptureService) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    const workspace = yield* Workspace;
     /** Generate, retry and remove of one key run one at a time, from identify to adoption. */
     const command = makeKeyedGate<LocalReviewKey>(1);
 
@@ -501,6 +503,15 @@ export const makeLocalReviews = (port: LocalPort, capture: LocalCaptureService) 
                   DELETE FROM manual_check_ticks WHERE subject = ${subjectKey({ _tag: "local", key })}`;
               }),
             );
+            // The tab went with the rows; announcing the tabs now gives every window a copy newer
+            // than any reply that still held it.
+            yield* workspace
+              .command({ kind: "close-local", key }, { focus: false })
+              .pipe(
+                Effect.catchTag("WorkspaceError", (error) =>
+                  Effect.fail(new ReviewError({ message: error.message })),
+                ),
+              );
             yield* Effect.logInfo("Local review removed").pipe(
               Effect.annotateLogs({ reviewId: review.id }),
             );

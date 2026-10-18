@@ -46,13 +46,21 @@ export const Workspace = Schema.Struct({
   local: Schema.Array(OpenLocalReview),
   activeKey: Schema.NullOr(PullRequestKey),
   inboxFilters: SavedInboxFilters,
+  /** Grows with every change, so a window never shows an older copy over a newer one. */
+  version: Schema.Int,
 });
 export type Workspace = typeof Workspace.Type;
-/** A change to the open PRs made elsewhere; `focus` asks the window to show that PR and come forward. */
-export const WorkspaceChange = Schema.Struct({
-  workspace: Workspace,
-  focus: Schema.NullOr(Schema.Struct({ key: PullRequestKey, accountId: AccountId })),
-});
+/**
+ * `current`, the tabs as they are once the subscription is live, then one `changed` per change
+ * made elsewhere; `focus` asks the window to show that PR and come forward.
+ */
+export const WorkspaceChange = Schema.Union([
+  Schema.TaggedStruct("current", { workspace: Workspace }),
+  Schema.TaggedStruct("changed", {
+    workspace: Workspace,
+    focus: Schema.NullOr(Schema.Struct({ key: PullRequestKey, accountId: AccountId })),
+  }),
+]);
 export type WorkspaceChange = typeof WorkspaceChange.Type;
 export const WorkspaceCommand = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("open"), key: PullRequestKey, accountId: AccountId }),
@@ -75,6 +83,10 @@ export const refFromKey = (key: PullRequestKey) => {
   const ref = { host, owner, repo, number: Number(number) };
   return Schema.is(PullRequestRef)(ref) ? ref : null;
 };
+
+/** The newer of two copies of the server's tabs. */
+export const newerWorkspace = (current: Workspace | undefined, next: Workspace) =>
+  current !== undefined && current.version > next.version ? current : next;
 
 export const applyWorkspaceCommand = (current: Workspace, command: WorkspaceCommand): Workspace => {
   switch (command.kind) {

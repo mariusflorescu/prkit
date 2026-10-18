@@ -102,13 +102,7 @@ import {
   ManualCheckTicksError,
 } from "./manualCheckTicks.ts";
 import { PullRequestStack, StackGuidesResult } from "./stack.ts";
-import {
-  InboxFilters,
-  SavedInboxFilters,
-  Workspace,
-  WorkspaceChange,
-  WorkspaceError,
-} from "./workspace.ts";
+import { InboxFilters, Workspace, WorkspaceChange, WorkspaceError } from "./workspace.ts";
 import { OutsideAccess, OutsideAgentsError, OutsideAgentsState } from "./outsideAgents.ts";
 import {
   PullRequestActionError,
@@ -405,15 +399,17 @@ export const WsRpcGroup = RpcGroup.make(
     success: Workspace,
     error: WorkspaceError,
   }),
+  // The tabs with the saved filters, versioned like every other copy of them.
   Rpc.make(WS_METHODS.workspaceSaveInboxFilters, {
     payload: InboxFilters,
-    success: SavedInboxFilters,
+    success: Workspace,
     error: WorkspaceError,
   }),
-  // Open PRs changed by something other than this window, such as an outside agent.
+  // The open tabs as they are, then each change made by something other than this window.
   Rpc.make(WS_METHODS.workspaceChanges, {
     payload: Schema.Struct({}),
     success: WorkspaceChange,
+    error: WorkspaceError,
     stream: true,
   }),
   // The files the user marked reviewed (docs/internals/architecture.md "Reviewed files").
