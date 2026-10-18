@@ -14,8 +14,9 @@ import {
   NEEDS_FIXTURE,
   prPath,
 } from "./fixturePr.ts";
+import { readInboxRows } from "./inboxRows.ts";
 import { openInbox } from "./openInbox.ts";
-import { chooseOtherAccount } from "./pickers.ts";
+import { choose, chooseOtherAccount } from "./pickers.ts";
 
 test(
   "the fixture stays in Yours through its account and filters recover",
@@ -63,6 +64,42 @@ test(
     await app.screenshot("tab-separator");
   },
 );
+
+test("every row on the real accounts has a size, and every review request a wait or the reason it has none", async ({
+  app,
+  screen,
+  browser,
+}) => {
+  await openInbox({ app, screen });
+  await expect(browser.locator("main a[data-pr-number]").first()).toBeVisible({ timeout: 45_000 });
+  const groups = await readInboxRows(browser);
+  const rows = groups.flatMap((group) => group.rows);
+  for (const row of rows) {
+    expect(row.chip).toMatch(/^(XS|S|M|L|XL)$/);
+    expect(row.title).toMatch(
+      /changed lines? \(\+\d+ -\d+\) in \d+ files?\..*About \d+ minutes? to read/,
+    );
+    expect(row.reading).toMatch(/^(\d+ min|[\d.]+ h\+?)$/);
+  }
+  const waiting = groups.find((group) => group.group === "Needs your review")?.rows ?? [];
+  for (const row of waiting)
+    expect(
+      /^waiting (under a minute|\d+\+? (minute|hour|day|month)s?)$/.test(row.label) ||
+        /draft|couldn't read|doesn't say|gave nothing/.test(row.title),
+    ).toBe(true);
+  await app.screenshot("real-accounts-triage");
+
+  await choose(screen, screen.getByRole("combobox", "Sort pull requests"), "Waiting longest");
+  await expect(screen.getByRole("combobox", "Sort pull requests")).toContainText("Waiting longest");
+  const waited = (
+    (await readInboxRows(browser)).find((group) => group.group === "Needs your review")?.rows ?? []
+  ).filter((row) => row.label.startsWith("waiting") && !row.stacked);
+  expect(waited.map((row) => row.at)).toEqual(
+    waited.map((row) => row.at).toSorted((left, right) => Date.parse(left) - Date.parse(right)),
+  );
+  await app.screenshot("real-accounts-waiting-longest");
+  await choose(screen, screen.getByRole("combobox", "Sort pull requests"), "Recently updated");
+});
 
 test("Accounts validates directories and saves only user-added paths", async ({
   app,

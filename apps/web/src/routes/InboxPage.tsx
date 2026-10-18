@@ -31,6 +31,7 @@ export function InboxPage() {
   const search = useInboxStore((state) => state.search);
   const chosenAccount = useInboxStore((state) => state.account);
   const repository = useInboxStore((state) => state.repository);
+  const sort = useInboxStore((state) => state.sort);
   const clear = useInboxStore((state) => state.clear);
   useSavedInboxFilters(inbox.data?.entries);
   // With one account, its filter and each row's account say nothing, so neither shows.
@@ -139,6 +140,7 @@ export function InboxPage() {
                       key={group.reason}
                       title={group.title}
                       entries={group.entries}
+                      sort={sort}
                       showAccount={manyAccounts}
                     />
                   ))

@@ -5,8 +5,8 @@ import { choose } from "./pickers.ts";
 
 /**
  * Journeys in a run share one instance, and the app restores whichever tab was active last
- * and the Inbox's last filters, so a journey that needs the Inbox must select it and clear
- * them rather than assume either.
+ * and the Inbox's last filters and sort, so a journey that needs the Inbox must select it and
+ * clear them rather than assume either.
  */
 export const openInbox = async ({ app, screen }: Pick<TestFixtures, "app" | "screen">) => {
   await app.open(runForUrl(app.baseUrl).openUrl);
@@ -25,4 +25,7 @@ export const openInbox = async ({ app, screen }: Pick<TestFixtures, "app" | "scr
   const repository = screen.getByRole("button", /^Filter by repository: /);
   if ((await repository.getAttribute("aria-label")) !== "Filter by repository: All repositories")
     await choose(screen, repository, "All repositories");
+  const sort = screen.getByRole("combobox", "Sort pull requests");
+  if (!(await sort.textContent())?.includes("Recently updated"))
+    await choose(screen, sort, "Recently updated");
 };

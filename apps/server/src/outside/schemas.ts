@@ -2,6 +2,7 @@ import {
   AccountId,
   AgentInstanceId,
   AgentProviderKind,
+  DEFAULT_INBOX_SORT,
   FixerTurnId,
   GitHubLimit,
   GuidanceEdit,
@@ -11,13 +12,17 @@ import {
   GitHubProblem,
   InboxReason,
   InboxResult,
+  InboxSort,
   ModelOptionSelection,
   NormalizedGuide,
   OutsideAccess,
   PullRequestKey,
+  PullRequestSize,
   PullRequestSummary,
   ReviewCommentId,
+  ReviewWait,
 } from "@prkit/contracts";
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { ResponseFields } from "./responseSchemas.ts";
 import { PageFields, PageInfo } from "./pageSchemas.ts";
@@ -137,6 +142,7 @@ export const InboxInput = Schema.Struct({
   checks: Schema.optionalKey(Schema.Literals(["passing", "failing", "pending", "none"])),
   search: Schema.optionalKey(Schema.String),
   stacks: Schema.optionalKey(Schema.Literals(["all", "stacked", "unstacked"])),
+  sort: InboxSort.pipe(Schema.withDecodingDefaultKey(Effect.succeed(DEFAULT_INBOX_SORT))),
   refresh: Schema.optionalKey(
     describe(
       Schema.Boolean,
@@ -152,7 +158,10 @@ export const InboxPullRequest = Schema.Struct({
   author: Schema.NullOr(Schema.String),
   state: PullRequestSummary.fields.state,
   isDraft: Schema.Boolean,
+  createdAt: Schema.String,
   updatedAt: Schema.String,
+  size: PullRequestSize,
+  wait: Schema.NullOr(ReviewWait),
   checks: PullRequestSummary.fields.checks,
   reviewDecision: PullRequestSummary.fields.reviewDecision,
   reasons: Schema.Array(InboxReason),

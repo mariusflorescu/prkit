@@ -1,4 +1,9 @@
-import { type PullRequestSummary, pullRequestKey } from "@prkit/contracts";
+import {
+  loginOf,
+  type PullRequestSummary,
+  pullRequestKey,
+  pullRequestSize,
+} from "@prkit/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 
@@ -12,7 +17,9 @@ import { reviewFeedQuery } from "~/rpc/queries";
 
 import { InboxGuideMark } from "./InboxGuideMark";
 import { InboxStackMark } from "./InboxStackMark";
-import { relativeUpdatedTime } from "./inboxPresentation";
+import { InboxTriage } from "./InboxTriage";
+import type { RowClock } from "./inboxPresentation";
+import { sizeEvidence } from "./triageCopy";
 
 const CHECKS = {
   passing: { title: "Checks passing", tone: "bg-success" },
@@ -27,9 +34,11 @@ const REVIEWS = {
 
 export function InboxRow({
   entry,
+  clock,
   showAccount,
 }: {
   entry: PullRequestSummary;
+  clock: RowClock;
   showAccount: boolean;
 }) {
   const workspace = useWorkspace();
@@ -40,11 +49,10 @@ export function InboxRow({
     entry.state === "open" &&
     (review === undefined ||
       (review.latestRevision === null && (review.status === "failed" || review.status === "done")));
+  const size = pullRequestSize(entry);
   const { Icon, label, tone } = pullRequestState(entry);
   const checks = entry.checks === null ? null : CHECKS[entry.checks];
   return (
-    // The size column and the Generate guide action share the last grid column, so it is
-    // as wide as the wider of the two and the action replaces the sizes without a shift.
     <li className="group/row grid grid-cols-[minmax(0,1fr)_auto]">
       <Link
         to="/pr/$host/$owner/$repo/$number"
@@ -70,6 +78,7 @@ export function InboxRow({
         data-account={entry.accountId}
         data-repository={`${entry.ref.owner}/${entry.ref.repo}`}
         data-pr-number={entry.ref.number}
+        title={`${sizeEvidence(size)} ${clock.evidence}`}
         className="col-span-full row-start-1 grid min-h-14 grid-cols-subgrid items-center rounded-md px-3 py-2.5 text-left group-hover/row:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <span className="flex min-w-0 items-center gap-2">
@@ -112,7 +121,7 @@ export function InboxRow({
                   title={entry.accountId}
                   className="shrink-0 text-3xs text-muted-foreground/70"
                 >
-                  {entry.accountId.slice(entry.accountId.indexOf("/") + 1)}
+                  {loginOf(entry.accountId)}
                 </span>
               )}
               {entry.labels.slice(0, 2).map((label) => (
@@ -131,25 +140,7 @@ export function InboxRow({
             </span>
           </span>
         </span>
-        <span
-          className={cn(
-            "flex flex-col items-end pl-2 text-2xs tabular-nums",
-            canGenerate &&
-              "transition-opacity duration-150 group-focus-within/row:opacity-0 group-hover/row:opacity-0 motion-reduce:transition-none",
-          )}
-        >
-          <span className="flex h-5 items-center gap-1.5 font-mono">
-            <span className="text-diff-addition-foreground">+{entry.additions}</span>
-            <span className="text-diff-deletion-foreground">-{entry.deletions}</span>
-          </span>
-          <time
-            dateTime={entry.updatedAt}
-            title={entry.updatedAt}
-            className="mt-0.5 flex min-h-3.5 items-center whitespace-nowrap text-muted-foreground"
-          >
-            {relativeUpdatedTime(entry.updatedAt)}
-          </time>
-        </span>
+        <InboxTriage size={size} clock={clock} fades={canGenerate} />
       </Link>
       {canGenerate && (
         <span className="pointer-events-none col-start-2 row-start-1 mr-3 ml-2 self-center justify-self-end opacity-0 transition-opacity duration-150 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100 motion-reduce:transition-none">

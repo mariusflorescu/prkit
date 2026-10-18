@@ -1,16 +1,21 @@
-import type {
-  Account,
-  AccountId,
-  InboxEntry,
-  InboxFilters,
-  InboxReason,
-  PullRequestSummary,
-  Repository,
-  RepositoryFilter,
-  RepositoryList,
+import {
+  type Account,
+  type AccountId,
+  type InboxEntry,
+  type InboxFilters,
+  type InboxReason,
+  INBOX_SORTS,
+  type InboxSort,
+  type InboxTime,
+  type PullRequestSummary,
+  type Repository,
+  type RepositoryFilter,
+  type RepositoryList,
 } from "@prkit/contracts";
 
 import type { SearchPickerGroup } from "~/components/ui/search-picker";
+
+import { formatEventDate, waitEvidence } from "./triageCopy";
 
 export const INBOX_GROUPS = [
   { reason: "review-requested", title: "Needs your review" },
@@ -18,7 +23,7 @@ export const INBOX_GROUPS = [
   { reason: "involved", title: "Involved" },
 ] satisfies ReadonlyArray<{ reason: InboxReason; title: string }>;
 
-export { matchesInboxFilter, stackOrder } from "@prkit/contracts";
+export { matchesInboxFilter } from "@prkit/contracts";
 import { repositoryKey } from "@prkit/contracts";
 export { repositoryKey };
 const entryRepository = (entry: PullRequestSummary) => ({
@@ -70,6 +75,7 @@ export const withLiveAccounts = (
   const [reader, ...others] = saved.repository?.accountIds.filter((id) => live.has(id)) ?? [];
   return {
     search: saved.search,
+    sort: saved.sort,
     account: saved.account !== null && live.has(saved.account) ? saved.account : null,
     repository:
       saved.repository === null || reader === undefined
@@ -79,13 +85,56 @@ export const withLiveAccounts = (
 };
 
 const relativeTime = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+const TIME_UNITS = [
+  ["month", 2_592_000],
+  ["day", 86_400],
+  ["hour", 3_600],
+  ["minute", 60],
+] as const;
+const elapsed = (since: string) => {
+  const seconds = Math.max(0, (Date.now() - Date.parse(since)) / 1000);
+  const unit = TIME_UNITS.find(([, size]) => seconds >= size);
+  return unit === undefined ? null : { name: unit[0], count: Math.floor(seconds / unit[1]) };
+};
 export const relativeUpdatedTime = (updatedAt: string) => {
-  const seconds = Math.max(0, (Date.now() - Date.parse(updatedAt)) / 1000);
-  if (seconds < 60) return "just now";
-  if (seconds < 3600) return relativeTime.format(-Math.floor(seconds / 60), "minute");
-  if (seconds < 86400) return relativeTime.format(-Math.floor(seconds / 3600), "hour");
-  if (seconds < 2592000) return relativeTime.format(-Math.floor(seconds / 86400), "day");
-  return relativeTime.format(-Math.floor(seconds / 2592000), "month");
+  const time = elapsed(updatedAt);
+  return time === null ? "just now" : relativeTime.format(-time.count, time.name);
+};
+const waitDuration = (since: string, atLeast: boolean) => {
+  const time = elapsed(since);
+  return time === null
+    ? "under a minute"
+    : `${time.count}${atLeast ? "+" : ""} ${time.name}${time.count === 1 ? "" : "s"}`;
+};
+
+export interface RowClock {
+  readonly at: string;
+  readonly label: string;
+  readonly evidence: string;
+}
+
+const CLOCK_EVIDENCE = { waiting: "Waiting since", opened: "Opened", updated: "Last updated" };
+const clockOf = (time: InboxTime): RowClock => ({
+  at: time.at,
+  label: `${time.verb} ${relativeUpdatedTime(time.at)}`,
+  evidence: `${CLOCK_EVIDENCE[time.verb]} ${formatEventDate(time.at)}.`,
+});
+
+export const updatedClock = (pr: PullRequestSummary) =>
+  clockOf({ verb: "updated", at: pr.updatedAt });
+
+/** A running wait shows under any sort; otherwise the time the sort orders by, else when it was updated. */
+export const rowClock = (entry: InboxEntry, sort: InboxSort): RowClock => {
+  const wait = entry.wait;
+  if (wait?._tag === "waiting")
+    return {
+      at: wait.since,
+      label: `waiting ${waitDuration(wait.since, wait.atLeast)}`,
+      evidence: waitEvidence(wait),
+    };
+  const time = INBOX_SORTS[sort].time(entry);
+  const clock = time === null ? updatedClock(entry) : clockOf(time);
+  return wait === null ? clock : { ...clock, evidence: `${waitEvidence(wait)} ${clock.evidence}` };
 };
 
 /** A row of the repository filter: every repository, or one with its inbox count. */

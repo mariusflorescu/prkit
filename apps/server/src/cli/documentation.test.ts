@@ -255,7 +255,7 @@ it("reads inline commands, continuations, optional flags and quoted shell values
     '  --path "a file.ts" --line 42 # prkit nope --bad',
     "prkit guide generate <pr> [--agent <instance>] [--model <model>] --option effort=high",
     "prkit pr open <pr> --no-focus",
-    'prkit inbox filters save --search "" --account null --repo null --json',
+    'prkit inbox filters save --search "" --account null --repo null --sort updated --json',
     "prkit guide settings save <pr> --expected-version 0 --edit '{}'",
     "prkit guide generate <pr> --stack chosen-layers --layers 1 --layers 3",
     "prkit pr files --limit 20 -- <pr>",

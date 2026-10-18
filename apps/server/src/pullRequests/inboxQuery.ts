@@ -4,7 +4,7 @@ import { StackFields, stackSelection } from "./stackQuery.ts";
 
 /** What a list row shows of a pull request, as a fragment on `PullRequest`. */
 export const pullRequestRowFragment = (stacks: boolean) => `fragment PullRequestRow on PullRequest {
-  number title url state isDraft createdAt updatedAt
+  id number title url state isDraft createdAt updatedAt
   headRefName baseRefName additions deletions changedFiles reviewDecision
   author { login avatarUrl }
   repository { name owner { login } }
@@ -13,11 +13,14 @@ export const pullRequestRowFragment = (stacks: boolean) => `fragment PullRequest
   ${stackSelection(stacks)}
 }`;
 
+/** GitHub's most for one connection's `first` and for one `nodes(ids:)`, so one search's pull requests fit one waits read. */
+export const GITHUB_PAGE_LIMIT = 100;
+
 /** The account's three searches, with each PR's place in its stack where the host has stacks. */
 export const inboxQuery = (stacks: boolean) => `query PrkitInbox {
-  reviewRequested: search(query: "is:pr is:open archived:false review-requested:@me sort:updated-desc", type: ISSUE, first: 100) { ...InboxSearch }
-  authored: search(query: "is:pr is:open archived:false author:@me sort:updated-desc", type: ISSUE, first: 100) { ...InboxSearch }
-  involved: search(query: "is:pr is:open archived:false involves:@me sort:updated-desc", type: ISSUE, first: 100) { ...InboxSearch }
+  reviewRequested: search(query: "is:pr is:open archived:false review-requested:@me sort:updated-desc", type: ISSUE, first: ${GITHUB_PAGE_LIMIT}) { ...InboxSearch }
+  authored: search(query: "is:pr is:open archived:false author:@me sort:updated-desc", type: ISSUE, first: ${GITHUB_PAGE_LIMIT}) { ...InboxSearch }
+  involved: search(query: "is:pr is:open archived:false involves:@me sort:updated-desc", type: ISSUE, first: ${GITHUB_PAGE_LIMIT}) { ...InboxSearch }
 }
 fragment InboxSearch on SearchResultItemConnection {
   issueCount
@@ -27,6 +30,7 @@ ${pullRequestRowFragment(stacks)}`;
 
 export const PullRequestNode = Schema.Struct({
   ...StackFields,
+  id: Schema.String,
   number: Schema.Int,
   title: Schema.String,
   url: Schema.String,

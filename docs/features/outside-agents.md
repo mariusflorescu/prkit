@@ -25,7 +25,7 @@ The inventory covers every WebSocket RPC and the app's local presentation action
 | --- | --- | --- | --- |
 | Status and accounts | app.info, accounts.list, github.budget | `prkit_status`, `list_accounts` | Read |
 | Account discovery and config directories | accounts.refresh, accounts.addConfigDir, accounts.removeConfigDir | Excluded B: refresh identity, add/remove gh config directories | Excluded |
-| Inbox, refresh and filters | inbox.list | `list_inbox`: reason, accountId, repository, state, draft, checks, search, stacks; cursor, limit, refresh | Read |
+| Inbox, refresh and filters | inbox.list | `list_inbox`: reason, accountId, repository, state, draft, checks, search, stacks, sort; cursor, limit, refresh | Read |
 | Repository list and open repository PRs | repositories.list, repositories.pullRequests | `list_repositories`, `list_repository_pull_requests` | Read |
 | PR detail and refresh | pullRequests.detail, pullRequests.refresh | `read_pull_request`; refresh on paged PR reads | Read |
 | Changed files and diff | pullRequests.files | `read_pull_request_files` | Read |
@@ -38,7 +38,7 @@ The inventory covers every WebSocket RPC and the app's local presentation action
 | Workspace and open tabs | workspace.get | `list_open_pull_requests` (tabs, not repository PRs) | Read |
 | Open/reopen a PR tab | workspace.open | `open_pull_request` | Work |
 | Close/focus/reorder tabs | workspace.close, workspace.activate, workspace.reorder | `close_pull_request_tab`, `focus_pull_request_tab`, `reorder_pull_request_tabs` | Work |
-| Save Inbox presentation filters | workspace.saveInboxFilters | `save_inbox_filters` | Work |
+| Save Inbox presentation filters and sort | workspace.saveInboxFilters | `save_inbox_filters` | Work |
 | Generate, regenerate and retry a guide | reviews.generate, reviews.retry | `generate_guide` with instance, model, options, guidance, focus and version checks; retries use the same generation service | Work |
 | Generate stack guides | reviews.generateStack | `generate_guide` with stack this-pr / whole-stack / chosen-layers, layers and regenerate | Work |
 | Stop guide and watcher | reviews.stop | `stop_guide` | Work |
@@ -123,6 +123,8 @@ When a complete result is too large, the success value is a typed `_tag: "respon
 | `edit_review_comment` | Work | `EditCommentInput` schema |
 | `move_review_comment` | Work | `MoveCommentInput` schema |
 | `mark_files_reviewed` | Work | `MarkFilesReviewedInput` schema: `headSha` (the one `read_reviewed_files` returned), `paths` and `reviewed` (true when omitted) |
+
+`list_inbox` orders each section by `sort`: `updated` (the default, most recent activity first), `waiting` (review requests by how long they have waited on the owner, longest first, then drafts and requests with no known wait; the owner's own and involved PRs by when they were opened) or `size` (smallest size first, then fewest changed lines, then fewest files); `sort` is `updated` when omitted. The app orders its window with the same function, so a client sees the order the owner sees, and the sort is part of a cursor's identity. A read applies only to the PRs prkit holds, up to 100 per search. Each PR also carries `createdAt`, `size` and `wait`. `size` is `{bucket, additions, deletions, lines, files, readingMinutes}`: XS to XL from the larger of the changed lines (`additions + deletions`: 10, 100, 400, 1,000) and the files (2, 5, 15, 30), and a reading time of `ceil(lines / 20 + files / 2)` minutes, at least 1. `wait` is null unless the PR is a review request; otherwise `{_tag: "waiting", since, cause, via, atLeast}` (`cause` is `requested`, `requested-again` or `ready`, `via` says whether the owner or teams were asked, and `atLeast` means the wait may be longer than `since` says), `{_tag: "draft"}`, or `{_tag: "unknown", reason}` with `not-read`, `no-history` or `unreadable`. `save_inbox_filters` replaces the saved search, account, repository and sort together, so it needs all four. A window that is already open keeps its own until the next load.
 
 `generate_guide` adds `instance`, `model`, `options: [{id, value}]`, `guidance: {expectedVersion, text, mode}`, `focus: {expectedVersion, areas: [{id, label, question}], overrides}`, `stack` (`this-pr`, `whole-stack`, `chosen-layers`), `layers` and `regenerate`. New focus-area ids are null. The catalog's `selectionProblem` validates the choice; partial selections, unknown or repeated option ids are refused before work starts. Guidance and focus use the same per-section compare-and-set versions as the app. Stack generation uses `reviews.generateStack`, preserving its bottom-to-top order and skip reasons.
 

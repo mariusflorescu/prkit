@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 
 import { AccountId, PullRequestKey } from "./ids.ts";
 import { PullRequestRef } from "./inbox.ts";
+import { DEFAULT_INBOX_SORT, InboxSort } from "./inboxTriage.ts";
 
 export const OpenPullRequest = Schema.Struct({
   key: PullRequestKey,
@@ -22,9 +23,15 @@ export const InboxFilters = Schema.Struct({
   search: Schema.String,
   account: Schema.NullOr(AccountId),
   repository: Schema.NullOr(RepositoryFilter),
+  sort: InboxSort,
 });
 export type InboxFilters = typeof InboxFilters.Type;
-export const NO_INBOX_FILTERS: InboxFilters = { search: "", account: null, repository: null };
+export const NO_INBOX_FILTERS: InboxFilters = {
+  search: "",
+  account: null,
+  repository: null,
+  sort: DEFAULT_INBOX_SORT,
+};
 /** The Inbox's filters as the server keeps them; `savedAt` is null until the user sets one. */
 export const SavedInboxFilters = Schema.Struct({
   ...InboxFilters.fields,

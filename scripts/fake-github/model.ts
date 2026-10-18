@@ -16,6 +16,14 @@ export const sha = (seed: string) => NodeCrypto.createHash("sha1").update(seed).
 export const start = Date.now() - 3_600_000;
 
 type MergeMethod = "MERGE" | "SQUASH" | "REBASE";
+export type Reviewer = { kind: "user"; login: string } | { kind: "team"; slug: string };
+export const sameReviewer = (left: Reviewer, right: Reviewer) =>
+  left.kind === "user"
+    ? right.kind === "user" && left.login === right.login
+    : right.kind === "team" && left.slug === right.slug;
+export type ReviewEvent =
+  | { kind: "requested"; at: number; reviewer: Reviewer }
+  | { kind: "ready"; at: number };
 export interface Pull {
   number: number;
   title: string;
@@ -40,7 +48,22 @@ export interface Pull {
   reviews: Array<{ id: number; login: string; state: string; body: string; at: number }>;
   /** Workflow runs on the head; a fork's wait for approval until someone approves them. */
   runs: Array<{ id: number; status: string; conclusion: string | null }>;
+  createdAt: number;
+  size: { additions: number; deletions: number; files: number };
+  requested: Array<Reviewer>;
+  reviewEvents: Array<ReviewEvent>;
 }
+/** What a pull request starts with for what the inbox shows of it; each call gives it lists of its own. */
+export const pullDefaults = (): Pick<
+  Pull,
+  "createdAt" | "size" | "requested" | "reviewEvents"
+> => ({
+  createdAt: start,
+  size: { additions: 1, deletions: 0, files: 1 },
+  requested: [],
+  reviewEvents: [],
+});
+export const unreadable = new Set<number>();
 export const pulls = new Map<number, Pull>();
 export const servedFiles = new Map<
   number,
@@ -78,6 +101,12 @@ for (let number = 1; number <= 6; number++)
     autoMerge: null,
     reviews: [],
     runs: [],
+    ...pullDefaults(),
+    requested: number <= 3 ? [{ kind: "user", login: LOGIN }] : [],
+    reviewEvents:
+      number <= 3
+        ? [{ kind: "requested", at: start, reviewer: { kind: "user", login: LOGIN } }]
+        : [],
   });
 pulls.set(7, {
   number: 7,
@@ -99,6 +128,7 @@ pulls.set(7, {
   autoMerge: null,
   reviews: [],
   runs: [{ id: 7001, status: "completed", conclusion: "action_required" }],
+  ...pullDefaults(),
 });
 pulls.set(8, {
   number: 8,
@@ -120,6 +150,7 @@ pulls.set(8, {
   autoMerge: null,
   reviews: [],
   runs: [],
+  ...pullDefaults(),
 });
 pulls.set(9, {
   number: 9,
@@ -141,6 +172,7 @@ pulls.set(9, {
   autoMerge: null,
   reviews: [],
   runs: [],
+  ...pullDefaults(),
 });
 const person = (login: string) => ({ __typename: "User", login, avatarUrl: "" });
 const pullReference = (repository: string, number: number, title: string) => ({

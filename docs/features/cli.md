@@ -28,6 +28,9 @@ prkit accounts --json
 prkit agents --json
 prkit inbox --reason review-requested --account github.com/octocat --json
 prkit inbox --reason authored --repo acme/widgets --json
+prkit inbox --reason review-requested --sort waiting --json
+prkit inbox --sort size --json
+prkit inbox filters save --search "" --account null --repo null --sort waiting --json
 prkit repos list --json
 prkit repos prs acme/widgets --account github.com/octocat --json
 prkit tabs list --json
@@ -60,7 +63,7 @@ prkit tabs focus acme/widgets#42
 
 The command tree covers all 54 tools: status, accounts, agents, settings, inbox (and filters save), repos list/prs, pr read/files/file/timeline/threads/checks/conversation/stack/candidates/diff/open/reviewed (and reviewed set), guide list/read/generate/stop/revisions/revision/progress/duration/settings/scope/repositories/repository, guide settings save, fix list/read/turn/diff/patch/access/send/change/stop/retry/resolve, comments list/add/edit/move, tabs list/close/focus/reorder, and wait.
 
-PRs accept HTTPS URLs or `owner/repo#number`, with `--host` for an Enterprise short form. Repository commands take `owner/repo`. `--account` selects the account when prkit asks for one; never switch accounts to work around a failure. Inbox `--repo owner/repo` selects a repository on github.com; quoted JSON with `host`, `owner` and `name` selects an Enterprise repository. Inbox also accepts reason, state, draft, checks, search and stacks selectors. These read filters do not change the app's saved filters.
+PRs accept HTTPS URLs or `owner/repo#number`, with `--host` for an Enterprise short form. Repository commands take `owner/repo`. `--account` selects the account when prkit asks for one; never switch accounts to work around a failure. Inbox `--repo owner/repo` selects a repository on github.com; quoted JSON with `host`, `owner` and `name` selects an Enterprise repository. Inbox also accepts reason, state, draft, checks, search and stacks selectors, and `--sort updated|waiting|size` for the order of each section (`updated` when omitted). These read filters do not change the app's saved filters. `prkit inbox filters save` replaces the saved search, account, repository and sort together, so it needs all four.
 
 Pick a ready, enabled agent instance from the paged `prkit agents --json` result, an unblocked model's slug, and only the option ids and values that model advertises. Repeated `--option id=value` flags select options; `true` and `false` are booleans. Repeated `--draft-ids` and `--thread-ids` select comments for fix send. Repeated `--paths` name the files for `pr reviewed set`, which marks them reviewed or, with `--no-reviewed`, not reviewed; repeating it changes nothing. Its `--head-sha` is the `headSha` that `prkit pr reviewed --json` returned. If the PR moved since, nothing is marked and it fails with `conflict`. The marks stay in prkit and never reach GitHub.
 

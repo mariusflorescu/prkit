@@ -1,15 +1,23 @@
 import {
   type Account,
-  type InboxEntry,
+  InboxEntry,
   type InboxResult,
-  type PullRequestSummary,
+  PullRequestSummary,
   inboxReasonPriority,
   primaryInboxReason,
   pullRequestKey,
 } from "@prkit/contracts";
+import * as Schema from "effect/Schema";
 
 import type { InboxResponse, PullRequestNode } from "./inboxQuery.ts";
 import { membershipOf } from "./stackQuery.ts";
+
+export const CachedInboxEntry = Schema.Struct({
+  ...PullRequestSummary.fields,
+  reasons: InboxEntry.fields.reasons,
+  nodeId: Schema.String,
+});
+export type CachedInboxEntry = typeof CachedInboxEntry.Type;
 
 const SEARCHES = [
   ["reviewRequested", "review-requested"],
@@ -57,7 +65,7 @@ export const summaryOf = (account: Account, node: PullRequestNode): PullRequestS
 };
 
 export const accountEntries = (account: Account, response: InboxResponse) => {
-  const entries = new Map<string, InboxEntry>();
+  const entries = new Map<string, CachedInboxEntry>();
   const truncated: Array<InboxResult["truncated"][number]> = [];
   for (const [alias, reason] of SEARCHES) {
     const search = response[alias];
@@ -83,6 +91,7 @@ export const accountEntries = (account: Account, response: InboxResponse) => {
       entries.set(key, {
         ...summaryOf(account, node),
         reasons: [reason],
+        nodeId: node.id,
       });
     }
   }

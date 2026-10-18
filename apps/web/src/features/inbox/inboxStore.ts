@@ -1,6 +1,7 @@
 import {
   type AccountId,
   type InboxFilters,
+  type InboxSort,
   NO_INBOX_FILTERS,
   type RepositoryFilter,
 } from "@prkit/contracts";
@@ -16,6 +17,7 @@ export const useInboxStore = create<
     setSearch: (search: string) => void;
     setAccount: (account: AccountId | null) => void;
     setRepository: (repository: RepositoryFilter | null) => void;
+    setSort: (sort: InboxSort) => void;
     clear: () => void;
     restore: (saved: InboxFilters) => void;
   }
@@ -25,6 +27,7 @@ export const useInboxStore = create<
   setSearch: (search) => set({ search, restored: true }),
   setAccount: (account) => set({ account, restored: true }),
   setRepository: (repository) => set({ repository, restored: true }),
-  clear: () => set({ ...NO_INBOX_FILTERS, restored: true }),
+  setSort: (sort) => set({ sort, restored: true }),
+  clear: () => set((state) => ({ ...NO_INBOX_FILTERS, sort: state.sort, restored: true })),
   restore: (saved) => set((state) => (state.restored ? state : { ...saved, restored: true })),
 }));

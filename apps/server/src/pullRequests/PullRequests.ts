@@ -3,7 +3,6 @@ import {
   type AccountId,
   type GitHubEvent,
   type GitHubProblem,
-  InboxEntry,
   InboxError,
   type InboxRead,
   InboxResult,
@@ -25,20 +24,30 @@ import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import { GitHubAccounts } from "../accounts/GitHubAccounts.ts";
 import { isoAt } from "../github/budget.ts";
-import { GitHubApi, GitHubRequestError, inBackground } from "../github/GitHubApi.ts";
+import { GitHubApi, inBackground } from "../github/GitHubApi.ts";
 import { makeActions } from "./actions.ts";
 import { FRESH_MS, makeDetailReads } from "./detailReads.ts";
 import { PullRequestFingerprint, stackShape, statusOf } from "./fingerprint.ts";
-import { accountEntries, mergeAccounts } from "./inboxEntries.ts";
+import { accountEntries, CachedInboxEntry, mergeAccounts } from "./inboxEntries.ts";
 import { InboxResponse, inboxQuery } from "./inboxQuery.ts";
-import { type Cached, makeReadCache, readProblem } from "./readCache.ts";
+import { type Cached, type CacheKey, makeReadCache, readProblem } from "./readCache.ts";
+import { withDeadline } from "./readDeadline.ts";
 import { makeRepositoryReads } from "./repositoryReads.ts";
+import { makeReviewWaits, WaitsByNode, withWaits } from "./reviewWaits.ts";
 
+/** An account's inbox and the facts behind its review waits, read together so they describe one moment. */
 const AccountInbox = Schema.Struct({
-  entries: Schema.Array(InboxEntry),
+  entries: Schema.Array(CachedInboxEntry),
   truncated: InboxResult.fields.truncated,
+  waits: WaitsByNode,
 });
 type AccountInbox = typeof AccountInbox.Type;
+
+const INBOX_DEADLINE = {
+  name: "Inbox read",
+  ms: 30_000,
+  message: "GitHub took too long to refresh this account. Try refreshing.",
+};
 
 /** Persisted answers older than this are dropped at startup. */
 const KEEP_MS = 14 * 24 * 60 * 60_000;
@@ -110,40 +119,39 @@ export const make = Effect.gen(function* () {
     changed: publish({ _tag: "repositories" }),
   });
 
+  const reviewWaits = yield* makeReviewWaits;
+  const inboxKey = (account: Account): CacheKey => ({
+    accountId: account.id,
+    configDir: account.configDir,
+    key: "",
+  });
+  /** The inbox, then the waits of its review requests: one value, so a rule never sees facts from another moment. */
   const fetchAccount = (account: Account) =>
-    api.graphql(account.id, inboxQuery, InboxResponse).pipe(
-      Effect.map((response): AccountInbox => accountEntries(account, response)),
-      Effect.timeoutOrElse({
-        duration: "30 seconds",
-        orElse: () =>
-          Effect.logWarning("Inbox read reached its deadline").pipe(
-            Effect.annotateLogs({ accountId: account.id, timeoutMs: 30_000 }),
-            Effect.andThen(
-              Effect.fail(
-                new GitHubRequestError({
-                  accountId: account.id,
-                  reason: "network",
-                  status: null,
-                  message: "GitHub took too long to refresh this account. Try refreshing.",
-                }),
-              ),
-            ),
-          ),
-      }),
-    );
+    Effect.gen(function* () {
+      const found = yield* api.graphql(account.id, inboxQuery, InboxResponse).pipe(
+        Effect.map((response) => accountEntries(account, response)),
+        withDeadline(account.id, INBOX_DEADLINE),
+      );
+      const previous = (yield* inboxCache.peek(inboxKey(account)))?.value.waits ?? {};
+      const waits = yield* reviewWaits.read(account, found.entries, previous);
+      return { ...found, waits } satisfies AccountInbox;
+    });
   const row = (
     accountId: AccountId,
     cached: Cached<AccountInbox> | undefined,
     problem: GitHubProblem | null,
   ) => ({
     accountId,
-    inbox: cached?.value ?? { entries: [], truncated: [] },
+    inbox: {
+      entries: withWaits(accountId, cached?.value.entries ?? [], cached?.value.waits ?? {}),
+      truncated: cached?.value.truncated ?? [],
+    },
     fetchedAt: cached === undefined ? null : isoAt(cached.fetchedAt),
     problem,
   });
   /** One account's inbox: cached, read now, or the last answer with why it couldn't be read. */
   const readAccount = (account: Account, refresh: boolean) => {
-    const key = { accountId: account.id, configDir: account.configDir, key: "" };
+    const key = inboxKey(account);
     if (account.status._tag === "error") {
       const problem = { _tag: "account" as const, message: account.status.message };
       return inboxCache.peek(key).pipe(Effect.map((cached) => row(account.id, cached, problem)));

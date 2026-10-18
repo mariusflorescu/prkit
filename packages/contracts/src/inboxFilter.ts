@@ -1,10 +1,16 @@
 import type { AccountId } from "./ids.ts";
-import type { InboxEntry, InboxReason } from "./inbox.ts";
+import {
+  type InboxEntry,
+  InboxReason,
+  inboxReasonPriority,
+  primaryInboxReason,
+  pullRequestKey,
+} from "./inbox.ts";
+import { compareRanks, INBOX_SORTS, type InboxSort } from "./inboxTriage.ts";
 
 export const repositoryKey = (repository: { host: string; owner: string; name: string }) =>
   `${repository.host}/${repository.owner}/${repository.name}`.toLowerCase();
 
-/** The Inbox and outside readers use exactly the same matching and stack ordering. */
 export const matchesInboxFilter = (
   entry: InboxEntry,
   search: string,
@@ -48,7 +54,7 @@ const stackId = (entry: InboxEntry) =>
   entry.stack === null
     ? null
     : `${entry.ref.host}/${entry.ref.owner}/${entry.ref.repo}/${entry.stack.number}`;
-export const stackOrder = (entries: ReadonlyArray<InboxEntry>) => {
+const stackOrder = (entries: ReadonlyArray<InboxEntry>) => {
   const layers = new Map<string, Array<InboxEntry>>();
   for (const entry of entries) {
     const id = stackId(entry);
@@ -65,3 +71,30 @@ export const stackOrder = (entries: ReadonlyArray<InboxEntry>) => {
     );
   });
 };
+
+const tiebreak = (left: InboxEntry, right: InboxEntry) =>
+  right.updatedAt.localeCompare(left.updatedAt) ||
+  pullRequestKey(left.ref).localeCompare(pullRequestKey(right.ref));
+
+const REASONS_BY_PRIORITY = InboxReason.literals.toSorted(
+  (left, right) => inboxReasonPriority[left] - inboxReasonPriority[right],
+);
+
+/** One group of entries in a sort's order, with a stack at its best-ranked layer. */
+export const sortInboxGroup = (entries: ReadonlyArray<InboxEntry>, sort: InboxSort) => {
+  const ranked = entries
+    .map((entry) => ({ entry, rank: INBOX_SORTS[sort].rank(entry) }))
+    .toSorted(
+      (left, right) => compareRanks(left.rank, right.rank) || tiebreak(left.entry, right.entry),
+    );
+  return stackOrder(ranked.map((item) => item.entry));
+};
+
+/** Entries grouped by primary reason, each group in `sortInboxGroup`'s order. */
+export const orderInbox = (entries: ReadonlyArray<InboxEntry>, sort: InboxSort) =>
+  REASONS_BY_PRIORITY.flatMap((reason) =>
+    sortInboxGroup(
+      entries.filter((entry) => primaryInboxReason(entry.reasons) === reason),
+      sort,
+    ),
+  );

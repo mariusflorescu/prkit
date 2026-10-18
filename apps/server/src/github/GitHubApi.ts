@@ -1,4 +1,4 @@
-import { AccountId, type GitHubResource } from "@prkit/contracts";
+import { AccountId, type GitHubResource, loginOf } from "@prkit/contracts";
 import * as Undici from "@effect/platform-node/Undici";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -154,7 +154,6 @@ const clock = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-d
 const usedUp = (login: string, until: number) =>
   `GitHub's limit for ${login} is used up until ${clock.format(until)}.`;
 /** `AccountId` is `${host}/${login}`. */
-const loginOf = (id: AccountId) => id.slice(id.indexOf("/") + 1);
 const hostOf = (id: AccountId) => id.slice(0, id.indexOf("/"));
 
 /** A query as text, or built with or without stack fields for hosts that may lack them. */
