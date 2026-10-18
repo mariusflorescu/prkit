@@ -32,7 +32,6 @@ import { CheckRun, Status, shownCheckRuns, shownStatuses } from "../pullRequests
 import { PullRequests } from "../pullRequests/PullRequests.ts";
 import { Workspace } from "../workspace/Workspace.ts";
 import type { Observation } from "./lifecycle.ts";
-import { unattended } from "./ContextPriority.ts";
 import { Reviews } from "./Reviews.ts";
 
 /** At most this many PRs per GraphQL request. */
@@ -164,8 +163,7 @@ export const make = Effect.gen(function* () {
                 };
               }
             }
-            if (entry.review !== null)
-              yield* unattended(reviews.observed(entry.review, observation));
+            if (entry.review !== null) yield* reviews.observed(entry.review, observation);
           }).pipe(
             Effect.catchCauseIf(
               (cause) => !Cause.hasInterruptsOnly(cause),

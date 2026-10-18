@@ -1786,7 +1786,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if ((yield* findReview(key)) !== null) return false;
       const agent = yield* chooseAgent(undefined, null);
-      const { created } = yield* ensureReview(key, accountId, agent, "auto");
+      const { created } = yield* unattended(ensureReview(key, accountId, agent, "auto"));
       return created;
     }).pipe(Effect.catchTags(dbFailures));
 
@@ -1893,7 +1893,9 @@ export const make = Effect.gen(function* () {
           return yield* end(review.key, action.reason);
         case "update": {
           yield* noteProblem(review, null);
-          const started = yield* startAttempt(review, "new-commits", { from: ["watching"] });
+          const started = yield* unattended(
+            startAttempt(review, "new-commits", { from: ["watching"] }),
+          );
           if (started)
             yield* Effect.logInfo("New head; updating the guide").pipe(
               Effect.annotateLogs({ reviewId: review.id, headSha: action.headSha }),
