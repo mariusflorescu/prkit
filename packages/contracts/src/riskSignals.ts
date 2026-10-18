@@ -89,7 +89,7 @@ const isMigration = (path: string) => {
   const parts = path.split("/");
   const name = basename(path).toLowerCase();
   if (SCHEMA_FILES.has(name) || /(^|\/)prisma\/schema\/[^/]+\.prisma$/u.test(path)) return true;
-  if (!MIGRATION_FILE.test(name)) return false;
+  if (!MIGRATION_FILE.test(name) || name === "__init__.py") return false;
   if (ALEMBIC_VERSIONS.test(path)) return true;
   const folder = parts.findIndex((part) => MIGRATION_FOLDERS.has(part.toLowerCase()));
   if (folder === -1 || folder === parts.length - 1)
@@ -136,7 +136,7 @@ const MANIFESTS: ReadonlyArray<Manifest> = [
   {
     name: /^(package|composer)\.json$/u,
     entry:
-      /^\s*"(?!version"|name"|description"|main"|types"|module")[^"]+"\s*:\s*"(\^|~|>=|workspace:|catalog:|npm:|\d+\.\d+\.\d+)/u,
+      /^\s*"(?!version"|name"|description"|main"|types"|module")[^"]+"\s*:\s*"(\^|~|workspace:|catalog:|npm:)/u,
     section: JSON_SECTION,
   },
   {
@@ -169,6 +169,9 @@ const MANIFESTS: ReadonlyArray<Manifest> = [
 const DEPENDENCY_LISTS =
   /^(go\.mod|Gemfile|Pipfile|Podfile|requirements[^/]*\.txt|constraints[^/]*\.txt)$/u;
 
+/** A line that is only a comment, in the languages the detectors read. `#[` is a Rust attribute. */
+const COMMENT = /^\s*(\/\/|#(?!\[)|\/\*|\*|--)/u;
+
 /** Whether a changed line of the patch is a dependency line of `manifest`. */
 const changesDependencyLines = (file: DiffFile, manifest: Manifest) => {
   if (file.patch._tag !== "text") return false;
@@ -185,7 +188,13 @@ const changesDependencyLines = (file: DiffFile, manifest: Manifest) => {
       if (changed) return true;
       inside = true;
     } else if (manifest.section?.close.test(line)) inside = false;
-    else if (changed && line.trim() !== "" && (inside || manifest.entry.test(line))) return true;
+    else if (
+      changed &&
+      line.trim() !== "" &&
+      !COMMENT.test(line) &&
+      (inside || manifest.entry.test(line))
+    )
+      return true;
   }
   return false;
 };
@@ -203,7 +212,10 @@ const INLINE_TESTS = /#\[(test|cfg\(test\))\]|\bmod tests\b/u;
 
 /** Occurrences, not lines, so joining or splitting lines doesn't change a count. */
 const countMatching = (lines: ReadonlyArray<string>, pattern: RegExp) =>
-  lines.reduce((total, line) => total + (line.match(pattern)?.length ?? 0), 0);
+  lines.reduce(
+    (total, line) => total + (COMMENT.test(line) ? 0 : (line.match(pattern)?.length ?? 0)),
+    0,
+  );
 
 const LARGE_LINES = 400;
 const LARGE_FILES = 30;

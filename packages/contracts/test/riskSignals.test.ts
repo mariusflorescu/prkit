@@ -187,6 +187,40 @@ describe("risk signals", () => {
       tag: "fewer-checks",
       fires: false,
     },
+    {
+      name: "a Node version range in engines",
+      files: [
+        change("package.json", ['   "engines": {', '-    "node": ">=18"', '+    "node": ">=20"']),
+      ],
+      tag: "dependencies",
+      fires: false,
+    },
+    {
+      name: "a comment in a [dependencies] section",
+      files: [
+        change("Cargo.toml", [" [dependencies]", "-# pinned for now", "+# pinned until 2.0"]),
+      ],
+      tag: "dependencies",
+      fires: false,
+    },
+    {
+      name: "Alembic's package marker",
+      files: [change("alembic/versions/__init__.py")],
+      tag: "migration",
+      fires: false,
+    },
+    {
+      name: "assertions in a deleted comment",
+      files: [change("src/a.test.ts", ["-// expect(a); expect(b); expect(c);"])],
+      tag: "fewer-checks",
+      fires: false,
+    },
+    {
+      name: "an ignored Rust test",
+      files: [change("tests/api.rs", [" #[test]", "+#[ignore]", " fn slow() {}"])],
+      tag: "fewer-checks",
+      fires: true,
+    },
     { name: "docs only", files: [change("README.md")], tag: "untested", fires: false },
     { name: "400 changed lines", files: [sized("src/a.ts", 400)], tag: "large", fires: true },
     {
