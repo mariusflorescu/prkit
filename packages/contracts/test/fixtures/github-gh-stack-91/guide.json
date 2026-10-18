@@ -173,7 +173,22 @@
             }
           ]
         }
-      ]
+      ],
+      "risk": {
+        "level": "high",
+        "reasons": [
+          {
+            "text": "Every name is checked before any branch is created. Read what happens when one fails halfway.",
+            "file": "cmd/init.go",
+            "line": 282
+          },
+          {
+            "text": "The prefix is now worked out from the names, which changes what a later `add` creates.",
+            "file": "cmd/init.go",
+            "line": 154
+          }
+        ]
+      }
     },
     {
       "id": "docs",
@@ -197,7 +212,16 @@
         "docs/src/content/docs/reference/cli.md",
         "docs/src/content/docs/guides/workflows.md",
         "docs/src/content/docs/faq.md"
-      ]
+      ],
+      "risk": {
+        "level": "low",
+        "reasons": [
+          {
+            "text": "Wording only: the docs stop sending people to `--adopt`.",
+            "file": "README.md"
+          }
+        ]
+      }
     },
     {
       "id": "tests",
@@ -230,9 +254,37 @@
           "path": "internal/git/mock_ops.go",
           "note": "Whitespace only: gofmt realigned the struct fields."
         }
-      ]
+      ],
+      "risk": {
+        "level": "medium",
+        "reasons": [
+          {
+            "text": "Most of the init tests are new or rewritten with the code.",
+            "file": "cmd/init_test.go"
+          }
+        ]
+      }
     }
   ],
+  "risk": {
+    "level": "high",
+    "reasons": [
+      {
+        "text": "Scripts that pass `--adopt` now create missing branches instead of failing, and `--adopt --prefix` is accepted.",
+        "chapter": "init-flow",
+        "at": { "path": "cmd/init.go", "line": 120 }
+      },
+      {
+        "text": "Each new branch now starts on the branch before it, so a wrong order builds the wrong history.",
+        "chapter": "init-flow",
+        "at": { "path": "cmd/init.go", "line": 317 }
+      },
+      {
+        "text": "Most init tests are rewritten along with the code, so they show the new behavior, not what changed.",
+        "chapter": "tests"
+      }
+    ]
+  },
   "focus": [
     {
       "tone": "question",

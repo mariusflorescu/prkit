@@ -1,7 +1,29 @@
-import { DiffSnapshot, Guide, NormalizedGuide, normalizeGuide } from "@prkit/contracts";
+import {
+  DiffSnapshot,
+  Guide,
+  GuideItemId,
+  type GuideScopeName,
+  NormalizedGuide,
+  normalizeGuide,
+  projectSnapshot,
+  riskSignals,
+  withSkippedChapter,
+} from "@prkit/contracts";
 import * as Schema from "effect/Schema";
 
-export const fixtures = [
+type FixtureRule = { readonly pattern: string; readonly scope: GuideScopeName };
+
+export const fixtures: ReadonlyArray<{
+  readonly name: string;
+  readonly label: string;
+  readonly prUrl: string;
+  readonly dir: string;
+  readonly file: string;
+  readonly stored: boolean;
+  /** Settings the guide was written with, applied the way an attempt applies them. */
+  readonly ignore?: ReadonlyArray<FixtureRule>;
+  readonly sensitive?: ReadonlyArray<FixtureRule>;
+}> = [
   {
     name: "github-gh-stack-91",
     label: "gh-stack #91",
@@ -9,6 +31,7 @@ export const fixtures = [
     dir: "github-gh-stack-91",
     file: "guide.json",
     stored: false,
+    sensitive: [{ pattern: "cmd/", scope: "repository" }],
   },
   {
     name: "github-gh-stack-91-behavior",
@@ -33,6 +56,12 @@ export const fixtures = [
     dir: "pingdotgg-t3code-16782",
     file: "guide.json",
     stored: false,
+    ignore: [{ pattern: "**/*.integration.test.ts", scope: "repository" }],
+    sensitive: [
+      { pattern: "packages/contracts/", scope: "global" },
+      { pattern: "apps/server/src/mcp/", scope: "repository" },
+      { pattern: "!**/*.test.ts", scope: "repository" },
+    ],
   },
   {
     name: "vercel-ai-22182",
@@ -50,7 +79,7 @@ export const fixtures = [
     file: "stored.json",
     stored: true,
   },
-] as const;
+];
 
 const sources = import.meta.glob<string>(
   "../../../../../packages/contracts/test/fixtures/*/*.json",
@@ -59,6 +88,14 @@ const sources = import.meta.glob<string>(
 const readGuide = Schema.decodeUnknownSync(Schema.fromJsonString(Guide));
 const readStored = Schema.decodeUnknownSync(Schema.fromJsonString(NormalizedGuide));
 const readSnapshot = Schema.decodeUnknownSync(Schema.fromJsonString(DiffSnapshot));
+
+const effectiveRules = (rules: ReadonlyArray<FixtureRule> = []) =>
+  rules.map((rule, index) => ({
+    ...rule,
+    id: GuideItemId.make(`fixture-${index}`),
+    active: true,
+    decidedBy: null,
+  }));
 
 export async function loadFixture(name: string) {
   const fixture = fixtures.find((candidate) => candidate.name === name);
@@ -71,7 +108,23 @@ export async function loadFixture(name: string) {
   const [guideJson, snapshotJson] = await Promise.all([guideSource(), snapshotSource()]);
   const snapshot = readSnapshot(snapshotJson);
   if (fixture.stored) return { fixture, guide: readStored(guideJson), snapshot, warnings: [] };
-  const result = normalizeGuide(readGuide(guideJson), snapshot);
+  const guide = readGuide(guideJson);
+  const { reviewed, skipped } = projectSnapshot(effectiveRules(fixture.ignore), snapshot);
+  // Guides written before risk are checked without an attempt's context, as they were then.
+  const context =
+    guide.risk === undefined
+      ? null
+      : {
+          focusAreas: [],
+          skipped,
+          signals: riskSignals({ reviewed, skipped, sensitive: effectiveRules(fixture.sensitive) }),
+        };
+  const result = normalizeGuide(guide, reviewed, context);
   if (!result.normalized) throw new Error(result.errors.join("\n"));
-  return { fixture, guide: result.normalized, snapshot, warnings: result.warnings };
+  return {
+    fixture,
+    guide: withSkippedChapter(result.normalized, skipped),
+    snapshot,
+    warnings: result.warnings,
+  };
 }

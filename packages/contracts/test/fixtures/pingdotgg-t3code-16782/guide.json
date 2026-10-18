@@ -78,7 +78,16 @@
           "path": "packages/shared/package.json",
           "note": "Just exposes the new module as `@t3tools/shared/threadLinks`."
         }
-      ]
+      ],
+      "risk": {
+        "level": "low",
+        "reasons": [
+          {
+            "text": "A new module with its own tests. The only file it touches is the package's export map.",
+            "file": "packages/shared/src/threadLinks.ts"
+          }
+        ]
+      }
     },
     {
       "id": "snooze-rule",
@@ -108,7 +117,17 @@
             }
           ]
         }
-      ]
+      ],
+      "risk": {
+        "level": "medium",
+        "reasons": [
+          {
+            "text": "Has to agree with the client's `effectiveSnoozed`, and its comment names one case where it doesn't.",
+            "file": "apps/server/src/orchestration-v2/ThreadSettlementService.ts",
+            "line": 173
+          }
+        ]
+      }
     },
     {
       "id": "thread-tools",
@@ -142,7 +161,21 @@
           "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
           "note": "Description-only change: tells agents about the snoozed filter and to paste links."
         }
-      ]
+      ],
+      "risk": {
+        "level": "medium",
+        "reasons": [
+          {
+            "text": "Changes what every thread tool returns, and the list tool gains a `snoozed` filter.",
+            "file": "apps/server/src/mcp/OrchestratorMcpService.ts",
+            "line": 2282
+          },
+          {
+            "text": "The new fields are part of the tools' contract, so agents start relying on them.",
+            "file": "packages/contracts/src/orchestratorMcp.ts"
+          }
+        ]
+      }
     },
     {
       "id": "web-links",
@@ -162,7 +195,17 @@
           ]
         },
         { "path": "apps/web/src/components/chat/MarkdownThreadLink.tsx" }
-      ]
+      ],
+      "risk": {
+        "level": "low",
+        "reasons": [
+          {
+            "text": "Thread links render through a new component. Every other link takes the same path as before.",
+            "file": "apps/web/src/components/ChatMarkdown.tsx",
+            "line": 3120
+          }
+        ]
+      }
     },
     {
       "id": "mobile-links",
@@ -190,7 +233,17 @@
             }
           ]
         }
-      ]
+      ],
+      "risk": {
+        "level": "low",
+        "reasons": [
+          {
+            "text": "A press on a thread link opens the Thread screen. Other links still open the browser.",
+            "file": "apps/mobile/src/features/threads/ThreadFeed.tsx",
+            "line": 2280
+          }
+        ]
+      }
     },
     {
       "id": "tests",
@@ -199,16 +252,52 @@
       "body": [
         "Round-trip tests for awkward ids, snooze wake rules, an end-to-end snooze/unsnooze through the MCP toolkit, and the launch result's link. Test stubs gained a `title` because links are labeled with it."
       ],
-      "files": ["**/*.test.ts"]
+      "files": ["**/*.test.ts"],
+      "risk": {
+        "level": "low",
+        "reasons": [
+          {
+            "text": "Only adds cases.",
+            "file": "packages/shared/src/threadLinks.test.ts"
+          }
+        ]
+      }
     },
     {
       "id": "docs",
       "title": "Docs",
       "kind": "docs",
       "body": ["The orchestrator MCP doc describes the link format and the snooze fields."],
-      "files": ["docs/orchestration-v2/orchestrator-mcp-server.md"]
+      "files": ["docs/orchestration-v2/orchestrator-mcp-server.md"],
+      "risk": {
+        "level": "low",
+        "reasons": [
+          {
+            "text": "Describes the new fields.",
+            "file": "docs/orchestration-v2/orchestrator-mcp-server.md"
+          }
+        ]
+      }
     }
   ],
+  "risk": {
+    "level": "medium",
+    "reasons": [
+      {
+        "text": "Agents now see snooze state from a server copy of the sidebar's rule, which differs for a renamed failed thread.",
+        "chapter": "snooze-rule",
+        "at": {
+          "path": "apps/server/src/orchestration-v2/ThreadSettlementService.ts",
+          "line": 187
+        }
+      },
+      {
+        "text": "Every thread tool returns `link`, `snoozed` and `snoozedUntil`, and agents repeat them to the user.",
+        "chapter": "thread-tools",
+        "at": { "path": "packages/contracts/src/orchestratorMcp.ts", "line": 321 }
+      }
+    ]
+  },
   "focus": [
     {
       "tone": "question",
