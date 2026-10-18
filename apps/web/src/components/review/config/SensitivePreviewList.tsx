@@ -38,7 +38,11 @@ export function SensitivePreviewList({ preview }: { preview: GuideConfigPreview 
       ) : (
         <ul aria-label="Files that match look-closely paths" className="divide-y divide-border/60">
           {sensitive.map((entry) => (
-            <li key={entry.path} className="space-y-0.5 py-1.5 text-xs">
+            <li
+              key={entry.path}
+              aria-label={`${entry.path}: look closely`}
+              className="space-y-0.5 py-1.5 text-xs"
+            >
               <p>
                 <span className="break-all font-mono">{entry.path}</span>
                 <span className="text-muted-foreground">
