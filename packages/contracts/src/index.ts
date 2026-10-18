@@ -13,6 +13,7 @@ export * from "./guide.ts";
 export * from "./guideConfig.ts";
 export * from "./guideConfigResolve.ts";
 export * from "./guideNormalize.ts";
+export { forReader } from "./guidePreflight.ts";
 export * from "./github.ts";
 export * from "./ids.ts";
 export * from "./inbox.ts";

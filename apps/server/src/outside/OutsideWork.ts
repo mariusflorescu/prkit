@@ -1,5 +1,6 @@
 import {
   type AccountId,
+  forReader,
   matchesInboxFilter,
   orderInbox,
   primaryInboxReason,
@@ -456,9 +457,13 @@ export const make = Effect.gen(function* () {
       const target = yield* resolve(input);
       const snapshot = yield* reviews.get(target.key);
       const revision =
-        snapshot.review?.latestRevision == null
+        snapshot.review === null || snapshot.review.latestRevision === null
           ? null
-          : yield* reviews.guide(target.key, undefined);
+          : forReader(
+              yield* reviews.guide(target.key, undefined),
+              snapshot.review.accountId,
+              target.accountId,
+            );
       const result: GuideResult = {
         status: guideStatusOf(snapshot),
         guide:

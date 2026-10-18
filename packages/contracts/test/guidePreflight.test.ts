@@ -35,6 +35,22 @@ const snapshot: DiffSnapshot = {
       deletions: 1,
       patch: { _tag: "text", patch: "@@ -1 +0,0 @@\n-export {};" },
     },
+    {
+      path: "tsconfig.json",
+      previousPath: null,
+      status: "modified",
+      additions: 1,
+      deletions: 1,
+      patch: { _tag: "text", patch: '@@ -1 +1 @@\n-{"strict": false}\n+{"strict": true}' },
+    },
+    {
+      path: "src/slug.ts",
+      previousPath: "src/slugs.ts",
+      status: "renamed",
+      additions: 0,
+      deletions: 0,
+      patch: { _tag: "text", patch: "" },
+    },
   ],
 };
 const DESCRIPTION = "Raises the URL limit to 2048.\n\nAlso trims  whitespace from slugs.";
@@ -48,7 +64,12 @@ const others: GuideCheckContext = { ...own, preflight: null };
 const base = {
   summary: "Raises the limits.",
   chapters: [
-    { id: "limits", title: "Limits grow", kind: "core", files: ["src/limits.ts", "src/old.ts"] },
+    {
+      id: "limits",
+      title: "Limits grow",
+      kind: "core",
+      files: ["src/limits.ts", "src/old.ts", "src/slug.ts", "tsconfig.json"],
+    },
     { id: "tests", title: "Tests follow", kind: "tests", files: ["test/limits.test.ts"] },
   ],
   flow: { title: "Limits", nodes: [{ id: "limits", status: "changed" }], edges: [] },
@@ -96,7 +117,7 @@ describe("the author's pre-flight", () => {
   it("keeps every claim's evidence to its kind", () => {
     const { errors } = check({
       description: [
-        { kind: "missing-from-description", text: "Slugs are capped too." },
+        { kind: "missing-from-description", text: "Slugs are capped too.", chapter: "" },
         { kind: "missing-from-code", text: "Nothing trims.", quote: "trims", chapter: "limits" },
         { kind: "differs", text: "It says 2048.", chapter: "limits" },
       ],
@@ -124,19 +145,24 @@ describe("the author's pre-flight", () => {
     ).toEqual([expect.stringContaining("is in chapter `limits`, not `tests`")]);
   });
 
-  it("points a missing test at changed source, never at a test or a deleted file", () => {
+  it("points a missing test at changed source code, never a test, config, rename or deleted file", () => {
     const { errors } = check({
       tests: [
         { text: "Nothing tests slugs.", path: "src/limits.ts", line: 3 },
         { text: "The test is thin.", path: "test/limits.test.ts" },
         { text: "Old code.", path: "src/old.ts" },
+        { text: "Strict mode.", path: "tsconfig.json" },
+        { text: "Moved.", path: "src/slug.ts" },
         { text: "Nothing tests this.", path: "src/limits.ts" },
       ],
     });
     expect(errors).toEqual([
+      expect.stringContaining("`preflight.tests` has 6 items. Keep the 4"),
       expect.stringContaining("`src/limits.ts` is already listed"),
-      expect.stringContaining("is in the tests chapter `tests`"),
+      expect.stringContaining("`test/limits.test.ts` isn't changed source code"),
       expect.stringContaining("`src/old.ts` is deleted"),
+      expect.stringContaining("`tsconfig.json` isn't changed source code"),
+      expect.stringContaining("`src/slug.ts` isn't changed source code"),
     ]);
   });
 

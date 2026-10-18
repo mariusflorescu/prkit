@@ -1,6 +1,9 @@
 import type { DiffSnapshot } from "./diffSnapshot.ts";
 import { describeRule } from "./guideConfigResolve.ts";
 import type { DiffLineRef, Guide, NormalizedGuide, NormalizedPreflight } from "./guide.ts";
+import type { AccountId } from "./ids.ts";
+import type { GuideRevision } from "./review.ts";
+import { isChangedSource } from "./riskSignals.ts";
 import {
   type GuideCheckContext,
   type Report,
@@ -22,8 +25,6 @@ type Place = { readonly chapter: string; readonly at: DiffLineRef | null };
 const ITEMS_MAX = 4;
 const WORDS_MAX = 50;
 const QUOTE_MAX = 200;
-/** Chapters of these kinds hold nothing a missing test would cover. */
-const UNTESTED_KINDS: ReadonlySet<Chapter["kind"]> = new Set(["tests", "docs", "generated"]);
 
 /** A quote matches the description whatever its case and spacing. */
 const loose = (text: string) => trim(text).replace(/\s+/gu, " ").toLowerCase();
@@ -57,7 +58,7 @@ const placeOf = (
   context: GuideCheckContext | null,
   report: Report,
 ): Place | null => {
-  if (raw.chapter === undefined && raw.at === undefined) {
+  if ((raw.chapter === undefined || raw.chapter === "") && raw.at === undefined) {
     report.errors.push(
       `${where} points at nothing. Set \`chapter\` to the chapter it is about, and \`at\` to the line when it is about one line.`,
     );
@@ -139,7 +140,6 @@ const normalizeClaim = (
 const normalizeTest = (
   raw: RawTest,
   where: string,
-  chapters: ReadonlyArray<Chapter>,
   snapshot: DiffSnapshot,
   context: GuideCheckContext | null,
   report: Report,
@@ -160,13 +160,12 @@ const normalizeTest = (
     report.errors.push(`${where}: \`${path}\` is deleted, so no test needs to cover it.`);
     return null;
   }
-  const owner = chapters.find((chapter) => chapter.files.some((entry) => entry.path === path));
-  if (owner !== undefined && UNTESTED_KINDS.has(owner.kind))
+  if (!isChangedSource(file))
     report.errors.push(
-      `${where}: \`${path}\` is in the ${owner.kind} chapter \`${owner.id}\`. Point at the changed source file that no test covers.`,
+      `${where}: \`${path}\` isn't changed source code: it is a test, config, docs, generated code or a rename. Point at the changed code that no test covers.`,
     );
-  if (raw.line !== undefined)
-    checkDiffLine({ path, line: raw.line }, where, "", snapshot, context, report);
+  else if (raw.line !== undefined)
+    checkDiffLine({ path, line: raw.line }, where, "", snapshot, context, report, "line");
   return { text, path, line: raw.line ?? null };
 };
 
@@ -246,7 +245,7 @@ export const normalizePreflight = (input: {
           .filter(present),
     tests: tests
       .map((test, index) =>
-        normalizeTest(test, `preflight test ${index + 1}`, chapters, snapshot, context, report),
+        normalizeTest(test, `preflight test ${index + 1}`, snapshot, context, report),
       )
       .filter(present),
   };
@@ -259,3 +258,21 @@ export function* preflightTexts(preflight: NormalizedPreflight | null) {
   for (const item of preflight.description) yield item.text;
   for (const item of preflight.tests) yield item.text;
 }
+
+/**
+ * A revision as one account reads it. The pre-flight, and the description it was checked
+ * against, are only for the review's own account: a pre-flight exists only when that account
+ * opened the pull request, so every other reader gets the guide without one.
+ */
+export const forReader = (
+  revision: GuideRevision,
+  review: AccountId,
+  reader: AccountId,
+): GuideRevision =>
+  reader === review
+    ? revision
+    : {
+        ...revision,
+        normalized: { ...revision.normalized, preflight: null },
+        config: { ...revision.config, preflight: null },
+      };

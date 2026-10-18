@@ -4,7 +4,6 @@ import {
   pullRequestActionReason,
 } from "@prkit/contracts";
 import { FilePenLineIcon } from "lucide-react";
-import { useState } from "react";
 
 import { Button } from "~/components/ui/button";
 import { DescriptionEditor } from "./DescriptionEditor";
@@ -14,12 +13,16 @@ import { useUpdateDescription } from "./useUpdateDescription";
 export function DescriptionFromGuide({
   detail,
   guide,
+  open,
+  onOpenChange,
 }: {
   detail: PullRequestDetail;
   guide: NormalizedGuide;
+  /** Held by the caller, which keeps the guide's revision while the editor is open. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
   const update = useUpdateDescription(detail);
-  const [open, setOpen] = useState(false);
   if (open)
     return (
       <DescriptionEditor
@@ -28,7 +31,7 @@ export function DescriptionFromGuide({
         update={update}
         onClose={() => {
           update.reset();
-          setOpen(false);
+          onOpenChange(false);
         }}
       />
     );
@@ -40,7 +43,7 @@ export function DescriptionFromGuide({
         size="sm"
         disabled={reason !== null || update.isPending}
         title={reason ?? undefined}
-        onClick={() => setOpen(true)}
+        onClick={() => onOpenChange(true)}
       >
         <FilePenLineIcon />
         {detail.body.trim() === ""

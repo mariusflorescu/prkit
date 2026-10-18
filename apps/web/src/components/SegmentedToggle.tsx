@@ -28,7 +28,9 @@ export function SegmentedToggle<Id extends string>({
           aria-pressed={value === entry.id}
           disabled={disabled !== undefined && value !== entry.id}
           title={disabled}
-          onClick={() => onChange(entry.id)}
+          onClick={() => {
+            if (entry.id !== value) onChange(entry.id);
+          }}
           className={cn(
             "rounded-md px-2.5 py-1 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-64",
             value === entry.id

@@ -2,13 +2,13 @@ import {
   type AttemptConfig,
   type AttemptSummary,
   type DiffFile,
-  isAccountLogin,
+  forReader,
   type PullRequestDetail,
   type Review,
   type RevisionSummary,
 } from "@prkit/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import type { LoadContents } from "~/components/diff";
 import { GuideView } from "~/components/guide";
@@ -68,11 +68,21 @@ export function GuideReady({
       : null;
   const composingRevision = useNoteComposerHold(detail.key, "guide");
   const closeComposer = useReviewCommentsStore((state) => state.closeComposer);
+  // Nor a description being edited from the guide: the revision it drafts from holds until it closes.
+  const [describing, setDescribing] = useState<number | null>(null);
   const revision =
     revisions.find((entry) => entry.revision === picked) ??
     revisions.find((entry) => entry.revision === composingRevision) ??
+    revisions.find((entry) => entry.revision === describing) ??
     latest;
   const guide = useQuery(guideQuery(detail.key, revision.revision));
+  const shown = useMemo(
+    () =>
+      guide.data === undefined
+        ? undefined
+        : forReader(guide.data, review.accountId, detail.accountId),
+    [guide.data, review.accountId, detail.accountId],
+  );
   // Notes show what became of their drafts with the first paint, not a moment later.
   const drafts = useQuery(pendingCommentsQuery(detail.key, detail.accountId));
   const { retry } = useReviewActions(detail.key);
@@ -107,6 +117,7 @@ export function GuideReady({
         selected={picked === "draft" && draft !== null ? "draft" : revision.revision}
         onSelect={(next) => {
           if (composingRevision !== null && next !== composingRevision) closeComposer();
+          if (describing !== null && next !== describing) setDescribing(null);
           setPicked(next === latest.revision ? null : next);
         }}
         shown={
@@ -165,12 +176,19 @@ export function GuideReady({
             reviewed={reviewed.status === "ready" ? reviewed : undefined}
             count={<ReviewedCount reviewed={reviewed} files={guide.data.snapshot.files} />}
             preflight={
-              isAccountLogin(detail.accountId, detail.author?.login ?? null)
-                ? {
-                    note: descriptionNote(detail, guide.data.config),
-                    action: <DescriptionFromGuide detail={detail} guide={guide.data.normalized} />,
+              shown === undefined || shown.normalized.preflight === null
+                ? undefined
+                : {
+                    note: descriptionNote(detail, shown.config),
+                    action: (
+                      <DescriptionFromGuide
+                        detail={detail}
+                        guide={shown.normalized}
+                        open={describing !== null}
+                        onOpenChange={(open) => setDescribing(open ? revision.revision : null)}
+                      />
+                    ),
                   }
-                : undefined
             }
           />
         </>

@@ -1,3 +1,4 @@
+import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
@@ -5,6 +6,8 @@ import { type Browser, describe, test } from "@e2e-dev/web";
 import { expect, type TestFixtures } from "e2e";
 import * as Schema from "effect/Schema";
 
+import { RevisionResult } from "../apps/server/src/outside/paritySchemas.ts";
+import { GuideResult } from "../apps/server/src/outside/schemas.ts";
 import { NormalizedGuide } from "../packages/contracts/src/guide.ts";
 import { repoRoot } from "../scripts/verify-run.ts";
 import { cliFixture } from "./cliFixture.ts";
@@ -22,6 +25,7 @@ import { setUpRealClaude } from "./realClaude.ts";
 
 const KEY = "github.com/budget/fixtures#9";
 const OWN = "budget-test";
+const SECOND = "budget-second";
 /** Leaves out the 64-character slug cap PR 9 adds, and claims trimming that nothing does. */
 const DESCRIPTION =
   "Raises the URL limit to 2048 characters.\n\nAlso trims whitespace from slugs before they are stored.";
@@ -60,22 +64,34 @@ const guideUrl = (url: string) =>
   `${url}/pr/github.com/budget/fixtures/9?account=${encodeURIComponent(`github.com/${OWN}`)}&tab=guide`;
 
 /** The fake's PR 9, opened by `author` with `body`, and an instance reading it with `claude`. */
-const bringUp = async (name: string, claude: string, author: string, body: string) => {
+const bringUp = async (
+  name: string,
+  claude: string,
+  author: string,
+  body: string,
+  secondAccount = false,
+) => {
   NodeFS.rmSync(NodePath.join(repoRoot, ".e2e", "logs", `${name}.log`), { force: true });
-  const fake = await startFakeGitHub(name);
+  const fake = await startFakeGitHub(name, { secondAccount });
   const git = await cliFixture(fake, FILES);
   await fake.describe(9, { author, body });
   const launch = () => {
     const path = process.env.PATH;
     process.env.PATH = git.path;
     try {
-      return startFakeInstance(name, fake, ["--claude", claude, "--e2e"]);
+      return startFakeInstance(name, fake, [
+        "--claude",
+        claude,
+        "--watch-interval",
+        "5000",
+        "--e2e",
+      ]);
     } finally {
       if (path === undefined) delete process.env.PATH;
       else process.env.PATH = path;
     }
   };
-  return { fake, run: launch(), launch };
+  return { fake, git, run: launch(), launch };
 };
 
 const generate = async (
@@ -105,17 +121,36 @@ const inView = (browser: Browser, path: string) =>
     return box !== undefined && box.top < window.innerHeight && box.bottom > 0;
   }, path);
 
+/** What the installed `prkit` command prints for PR 9, read through `login`. */
+const readThrough = (
+  home: string,
+  fake: FakeGitHub,
+  login: string,
+  command: ReadonlyArray<string>,
+) => {
+  const result = NodeChildProcess.spawnSync(
+    NodePath.join(home, "bin/prkit"),
+    [...command, "budget/fixtures#9", "--account", `github.com/${login}`, "--json"],
+    {
+      encoding: "utf8",
+      env: { HOME: fake.home, PATH: process.env.PATH ?? "/usr/bin:/bin", NO_COLOR: "1" },
+    },
+  );
+  if (result.status !== 0) throw new Error(`prkit ${command.join(" ")} failed: ${result.stderr}`);
+  return result.stdout;
+};
+
 const editsOf = async (fake: FakeGitHub) =>
   (await fake.writes()).filter((write) => write.kind === "PATCH pulls/9");
 
 test(
-  "the author sees the pre-flight with its evidence, and it survives a relaunch",
+  "the author sees the pre-flight with its evidence, outside agents reading through another account don't, and it survives a relaunch",
   { timeout: 300_000 },
   async ({ app, screen, browser }) => {
     const name = "author-preflight";
     const claude = setUpFakeClaude(name);
     claude.preflight(PREFLIGHT);
-    const { fake, run, launch } = await bringUp(name, claude.file, OWN, DESCRIPTION);
+    const { fake, run, launch } = await bringUp(name, claude.file, OWN, DESCRIPTION, true);
     try {
       await emulateOsColorScheme(browser, "light");
       await browser.setViewport({ width: 1280, height: 900 });
@@ -179,6 +214,25 @@ test(
       await section.scrollIntoView();
       await screenshotLightAndDark(app, browser, "preflight-narrow");
 
+      await app.open(`${run.url}/settings/outside-agents`);
+      await screen.getByRole("switch", "Let my coding agents use prkit").tap();
+      await expect(screen.getByText("Outside agents can read", { exact: true })).toBeVisible();
+      const latest = (login: string) =>
+        Schema.decodeSync(Schema.fromJsonString(GuideResult))(
+          readThrough(run.home, fake, login, ["guide", "read"]),
+        ).guide?.content.preflight;
+      const revision = (login: string) =>
+        Schema.decodeSync(Schema.fromJsonString(RevisionResult))(
+          readThrough(run.home, fake, login, ["guide", "revision", "--revision", "1"]),
+        );
+      expect(latest(OWN)?.description).toHaveLength(2);
+      expect(latest(SECOND)).toBeNull();
+      expect(revision(OWN).config.preflight).toEqual({ description: DESCRIPTION });
+      expect(revision(SECOND)).toMatchObject({
+        content: { preflight: null },
+        config: { preflight: null },
+      });
+
       stopFakeInstance(name, { keepHome: true });
       const again = launch();
       await app.open(again.openUrl);
@@ -230,7 +284,7 @@ test(
     const MEANWHILE = "Changed on GitHub while the editor was open.";
     const draftOn = (current: string) =>
       `${current}\n\n<!-- prkit guide -->\n## What changed\n\nA guide written by the stand-in agent.\n\n### Reading order\n\n1. Every change\n<!-- /prkit guide -->`;
-    const { fake, run } = await bringUp(name, claude.file, OWN, BODY);
+    const { fake, git, run } = await bringUp(name, claude.file, OWN, BODY);
     try {
       await emulateOsColorScheme(browser, "light");
       await browser.setViewport({ width: 1280, height: 900 });
@@ -257,6 +311,13 @@ test(
       const edited = `${draftOn(BODY)}\n\nThanks for reading.`;
       await text.fill(edited);
       await expect(editor.getByRole("button", "Replace it")).toBeDisabled();
+      await editor.getByRole("button", "Add a section").tap();
+      await expect(text).toHaveValue(edited);
+      await git.commit({ "src/extra.ts": "export const extra = 1;\n" }, "Add an extra file");
+      await expect
+        .poll(() => reviewState(run.home), { timeout: 120_000 })
+        .toEqual([{ revision: 2, state: "watching" }]);
+      await expect(text).toHaveValue(edited);
       await screenshotLightAndDark(app, browser, "description-edit");
 
       await fake.describe(9, { body: MEANWHILE });
