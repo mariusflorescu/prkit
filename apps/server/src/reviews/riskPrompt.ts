@@ -35,7 +35,7 @@ export const riskSignalLines = (signals: ReadonlyArray<RiskSignal>) => {
   return {
     label: `signals:${signals.length === 0 ? "none" : signals.map((signal) => signal._tag).join(",")}`,
     lines: [
-      'prkit checked the reviewed files for facts that bear on how carefully to read. They are evidence, not verdicts: weigh them with what you read when you write `risk` (see "How carefully to read" in your instructions). The reviewer sees them next to your level.',
+      'prkit checked the reviewed files for facts that bear on how carefully to read. Weigh them with what you read when you write `risk` ("How carefully to read" in your instructions).',
       ...(signals.length === 0
         ? [
             `prkit checked for ${missing.join(", ")}. None of them fired. That alone is no reason for \`low\`: judge the level from what you read.`,
@@ -45,11 +45,6 @@ export const riskSignalLines = (signals: ReadonlyArray<RiskSignal>) => {
               const { label, text } = describeSignal(signal);
               return [`- ${label}: ${text}`, ...filesOf(signal)];
             }),
-            ...(fired.has("sensitive")
-              ? [
-                  "Every chapter that holds a file matching one of those look-closely paths is at least `medium`.",
-                ]
-              : []),
             ...(missing.length === 0
               ? []
               : [`prkit also checked for, and didn't find: ${missing.join(", ")}.`]),

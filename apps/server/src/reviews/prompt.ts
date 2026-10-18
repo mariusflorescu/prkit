@@ -11,7 +11,6 @@ import {
 import type { PullRequestContext } from "../pullRequests/pullRequestContext.ts";
 import type { LocalCapture } from "../repo/localCapture.ts";
 import { contextLines, contextSection } from "./contextFile.ts";
-import { manualCheckLines } from "./manualCheckPrompt.ts";
 import { preflightLines } from "./preflightPrompt.ts";
 import { riskSignalLines } from "./riskPrompt.ts";
 import type { ReviewTarget } from "./reviewTarget.ts";
@@ -152,7 +151,7 @@ const focusLines = (areas: ReadonlyArray<EffectiveFocusArea>, change = "PR") =>
         "",
       ];
 
-const handOverLines = (streamsGuideInput: boolean, change = "PR") => {
+const handOverLines = (streamsGuideInput: boolean, authored: boolean, change = "PR") => {
   const whole = change === "PR" ? "pull request" : change;
   return [
     "How to hand the guide over, in this order:",
@@ -161,13 +160,13 @@ const handOverLines = (streamsGuideInput: boolean, change = "PR") => {
       ? [
           "2. Once you understand the change, write the whole guide in one `submit_guide` call. The reviewer sees it while you write it: the overview as soon as its fields are done, then each chapter the moment you close it. So write the fields in this order: `summary`, `flow` (the before/after in its one form, or left out when neither helps), `background`, `steps`, then `chapters` in reading order, each with its own `risk`, then `risk` for the whole " +
             whole +
-            ", then `manualCheck`, then `focus`, `focusAreas` and `guidanceNote`.",
+            `, then \`manualCheck\`, then \`focus\`, \`focusAreas\` and \`guidanceNote\`${authored ? ", and `preflight` last" : ""}.`,
           "3. If `submit_guide` reports problems, fix every one with `revise_guide`, sending only the chapters and fields you change. Once prkit accepts the guide, end your turn.",
         ]
       : [
           `2. Always draft before you submit, even for a small ${change}. Before you write any chapter, call \`submit_draft\` with the overview (\`summary\`, \`flow\`, \`background\`, \`steps\`) and every planned chapter's \`id\` and \`title\`, without files. The reviewer starts reading it right away.`,
           `3. Write the chapters in order. After each one, call \`submit_draft\` with just that chapter (same \`id\`, with body, files and its \`risk\`). Once every chapter is written, call \`submit_draft\` with the ${whole}'s \`risk\`.`,
-          "4. Call `submit_guide` with the whole guide, the same content as your drafts. If it reports problems, fix every one with `revise_guide`, sending only the chapters and fields you change. Once prkit accepts the guide, end your turn.",
+          `4. Call \`submit_guide\` with the whole guide: the same content as your drafts, then \`manualCheck\`, \`focus\`, \`focusAreas\` and \`guidanceNote\`${authored ? ", and `preflight` last" : ""}. If it reports problems, fix every one with \`revise_guide\`, sending only the chapters and fields you change. Once prkit accepts the guide, end your turn.`,
         ]),
   ];
 };
@@ -193,7 +192,7 @@ const stackContext = (stack: PullRequestStack | null, number: number, baseRef: s
     ...(lower.length === 0
       ? []
       : [
-          `- In the flow diagram, code that a lower pull request added already exists: mark it \`unchanged\` and say where it came from in its \`detail\` ("Added in #${lower.at(-1)?.number ?? number}").`,
+          `- In the before/after, code a lower pull request added already exists, so it is unchanged context, never added. In a graph, mark its node \`unchanged\` and say where it came from in its \`detail\` ("Added in #${lower.at(-1)?.number ?? number}"). In a behavior diff, give its row no \`status\`, and name the pull request in the row's text when the reader needs it.`,
         ]),
     "",
   ];
@@ -212,7 +211,6 @@ export const buildPrompt = (input: PromptInput) => {
   const stack = stackContext(input.subject.stack, target.ref.number, target.baseRef);
   const risk = riskSignalLines(input.signals);
   const preflight = input.subject.authored ? preflightLines(body) : null;
-  const manualCheck = manualCheckLines();
   const sections = [
     `task:${input.previous?._tag ?? "first"}`,
     `files:${snapshot.files.length}`,
@@ -226,7 +224,6 @@ export const buildPrompt = (input: PromptInput) => {
       ? [`focus-areas:${settings.focusAreas.map((area) => area.handle ?? "").join(",")}`]
       : []),
     risk.label,
-    manualCheck.label,
   ];
   const text = [
     taskFor(input.previous),
@@ -261,8 +258,7 @@ export const buildPrompt = (input: PromptInput) => {
     ...guidanceLines(settings.guidance),
     ...focusLines(settings.focusAreas),
     ...risk.lines,
-    ...manualCheck.lines,
-    ...handOverLines(input.streamsGuideInput),
+    ...handOverLines(input.streamsGuideInput, input.subject.authored),
   ].join("\n");
   return { text, sections };
 };
@@ -339,7 +335,6 @@ const localPrompt = (
   const hidden = capture.commitCount - listed.length;
   const description = capture.description?.trim() ?? "";
   const risk = riskSignalLines(input.signals);
-  const manualCheck = manualCheckLines();
   const sections = [
     `task:${input.previous?._tag ?? "first"}`,
     "subject:local",
@@ -352,7 +347,6 @@ const localPrompt = (
       ? [`focus-areas:${settings.focusAreas.map((area) => area.handle ?? "").join(",")}`]
       : []),
     risk.label,
-    manualCheck.label,
   ];
   const text = [
     localTask(input.previous),
@@ -394,8 +388,7 @@ const localPrompt = (
     ),
     ...focusLines(settings.focusAreas, "change"),
     ...risk.lines,
-    ...manualCheck.lines,
-    ...handOverLines(input.streamsGuideInput, "change"),
+    ...handOverLines(input.streamsGuideInput, false, "change"),
   ].join("\n");
   return { text, sections };
 };
