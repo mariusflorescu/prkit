@@ -50,6 +50,7 @@ import {
   type PullRequestGuideConfig,
   type ScopeConfig,
   type ReviewFeedEvent,
+  type ReviewKey,
   type ReviewSnapshot,
   type StackGuidesResult,
   type ReviewWatchEvent,
@@ -309,11 +310,11 @@ export const stopReview = (key: PullRequestKey): Promise<ReviewSnapshot> =>
   call((client) => client[WS_METHODS.reviewsStop]({ key }));
 export const retryReview = (key: PullRequestKey): Promise<ReviewSnapshot> =>
   call((client) => client[WS_METHODS.reviewsRetry]({ key }));
-export const getGuide = (key: PullRequestKey, revision: number): Promise<GuideRevision> =>
+export const getGuide = (key: ReviewKey, revision: number): Promise<GuideRevision> =>
   call((client) => client[WS_METHODS.guidesGet]({ key, revision }));
-export const getDraft = (key: PullRequestKey, attemptId: AttemptId): Promise<DraftGuideResult> =>
+export const getDraft = (key: ReviewKey, attemptId: AttemptId): Promise<DraftGuideResult> =>
   call((client) => client[WS_METHODS.guidesDraft]({ key, attemptId }));
-export const getAttemptDiff = (key: PullRequestKey, attemptId: AttemptId): Promise<DiffSnapshot> =>
+export const getAttemptDiff = (key: ReviewKey, attemptId: AttemptId): Promise<DiffSnapshot> =>
   call((client) => client[WS_METHODS.reviewsDiff]({ key, attemptId }));
 export const getTypicalDuration = (
   instance: AgentInstanceId,

@@ -1,4 +1,10 @@
-import type { AttemptSummary, PullRequestDetail, Review, ReviewSnapshot } from "@prkit/contracts";
+import type {
+  AttemptSummary,
+  DiffSource,
+  ReviewActivity,
+  ReviewCore,
+  ReviewKey,
+} from "@prkit/contracts";
 import { useQuery } from "@tanstack/react-query";
 
 import { Button } from "~/components/ui/button";
@@ -11,30 +17,43 @@ import { guideProgress } from "./progressModel";
 import { NarrationLine } from "./NarrationLine";
 import { ProgressBar } from "./ProgressBar";
 import { ProgressHeader } from "./ProgressHeader";
-import { useReviewActions } from "./useReviewActions";
 
 /**
  * A first guide being written: what the agent is doing in one line, the files it
  * has read with its notes, then the draft itself as soon as it shares one.
  */
 export function GuideProgress({
-  detail,
+  reviewKey,
   review,
-  snapshot,
   attempt,
+  activity,
+  subject,
+  expectedFiles,
+  stop,
+  source,
+  prUrl,
+  prDescription,
 }: {
-  detail: PullRequestDetail;
-  review: Review;
-  snapshot: ReviewSnapshot;
+  reviewKey: ReviewKey;
+  review: Pick<ReviewCore, "instance" | "provider" | "model" | "modelOptions">;
   attempt: AttemptSummary;
+  activity: ReadonlyArray<ReviewActivity>;
+  /** What the agent reads, in "Claude is reading …": "this PR", "your changes". */
+  subject: string;
+  /** How many file rows to sketch until the attempt lists them. */
+  expectedFiles: number;
+  stop: { readonly pending: boolean; readonly error: Error | null; readonly run: () => void };
+  /** Where the draft's scope lines read the new side; null reads none. */
+  source: DiffSource | null;
+  prUrl?: string;
+  prDescription?: string;
 }) {
-  const { stop } = useReviewActions(detail.key);
   const catalog = useQuery(agentCatalogQuery);
   const progress = guideProgress(attempt);
   const name = agentName(catalog.data, review);
   const title =
     progress.stage === "reading"
-      ? `${name} is reading this PR`
+      ? `${name} is reading ${subject}`
       : progress.stage === "writing"
         ? `${name} is writing the guide`
         : progress.stage === "checking"
@@ -56,8 +75,8 @@ export function GuideProgress({
           })}
           label={progress.label}
           startedAt={attempt.startedAt}
-          stopping={stop.isPending}
-          onStop={() => stop.mutate()}
+          stopping={stop.pending}
+          onStop={stop.run}
         />
         <ProgressBar fraction={progress.fraction} label={progress.label} />
         {attempt.startedBy !== null && (
@@ -66,7 +85,7 @@ export function GuideProgress({
         {stop.error && (
           <p role="alert" className="text-xs text-error-foreground">
             {stop.error.message}{" "}
-            <Button variant="link" size="xs" onClick={() => stop.mutate()}>
+            <Button variant="link" size="xs" onClick={stop.run}>
               Retry
             </Button>
           </p>
@@ -78,27 +97,31 @@ export function GuideProgress({
               ? progress.label
               : `Waiting for ${name}'s first step`
           }
-          activity={snapshot.activity}
+          activity={activity}
         />
       </section>
       {attempt.draft === null ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-4xl px-6 pb-8">
             <AttemptFileList
-              reviewKey={detail.key}
+              reviewKey={reviewKey}
               attemptId={attempt.id}
               files={attempt.files}
-              expected={detail.changedFiles}
+              expected={expectedFiles}
+              source={source}
             />
           </div>
         </div>
       ) : (
         <div className="min-h-0 flex-1">
           <DraftView
-            detail={detail}
+            reviewKey={reviewKey}
             attemptId={attempt.id}
             version={attempt.draft.version}
             growing={attempt.draft.growing}
+            source={source}
+            {...(prUrl === undefined ? {} : { prUrl })}
+            {...(prDescription === undefined ? {} : { prDescription })}
           />
         </div>
       )}

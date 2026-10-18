@@ -10,6 +10,7 @@ import {
   type GuideScope,
   type PullRequestStatus,
   type ReviewFeedEntry,
+  type ReviewKey,
   type FixerFeedEntry,
   type FixerTurnId,
 } from "@prkit/contracts";
@@ -152,7 +153,7 @@ export const reviewQuery = (key: PullRequestKey) =>
     retry: false,
   });
 /** A revision never changes once written. */
-export const guideQuery = (key: PullRequestKey, revision: number) =>
+export const guideQuery = (key: ReviewKey, revision: number) =>
   queryOptions({
     queryKey: ["guide", key, revision],
     queryFn: () => getGuide(key, revision),
@@ -187,7 +188,7 @@ export const appearanceQuery = queryOptions({
   retry: false,
 });
 /** An attempt's diff never changes once fetched. */
-export const attemptDiffQuery = (key: PullRequestKey, attemptId: AttemptId) =>
+export const attemptDiffQuery = (key: ReviewKey, attemptId: AttemptId) =>
   queryOptions({
     queryKey: ["attemptDiff", key, attemptId],
     queryFn: () => getAttemptDiff(key, attemptId),
@@ -195,7 +196,7 @@ export const attemptDiffQuery = (key: PullRequestKey, attemptId: AttemptId) =>
     retry: false,
   });
 /** One version of a draft; the version in the key comes from the review stream. */
-export const draftQuery = (key: PullRequestKey, attemptId: AttemptId, version: number) =>
+export const draftQuery = (key: ReviewKey, attemptId: AttemptId, version: number) =>
   queryOptions({
     queryKey: ["draft", key, attemptId, version],
     queryFn: () => getDraft(key, attemptId),

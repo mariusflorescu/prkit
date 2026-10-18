@@ -81,7 +81,7 @@ export function PullRequestWorkspaceTab({
           />
         </TabCloseButton>
         <TabTooltip
-          number={ref.number}
+          label={`#${ref.number}`}
           details={
             <>
               <p>{data?.title ?? name}</p>

@@ -1,4 +1,4 @@
-import type { AttemptFile, AttemptId, DiffFile, PullRequestKey } from "@prkit/contracts";
+import type { AttemptFile, AttemptId, DiffFile, DiffSource, ReviewKey } from "@prkit/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 
@@ -12,18 +12,21 @@ import { AttemptFileRow } from "./AttemptFileRow";
 
 const noFiles: ReadonlyArray<DiffFile> = [];
 
-/** The PR's changed files, each checked off as the agent reads it; any row opens its diff. */
+/** The changed files, each checked off as the agent reads it; any row opens its diff. */
 export function AttemptFileList({
   reviewKey,
   attemptId,
   files,
   expected,
+  source,
 }: {
-  reviewKey: PullRequestKey;
+  reviewKey: ReviewKey;
   attemptId: AttemptId;
   files: ReadonlyArray<AttemptFile>;
   /** How many rows to sketch while the code is checked out. */
   expected: number;
+  /** Where the diffs' scope lines read the new side; null reads none. */
+  source: DiffSource | null;
 }) {
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
   const diff = useQuery({ ...attemptDiffQuery(reviewKey, attemptId), enabled: opened.size > 0 });
@@ -46,11 +49,7 @@ export function AttemptFileList({
       </div>
     );
   return (
-    <DiffList
-      files={snapshotFiles}
-      source={{ _tag: "attempt", key: reviewKey, attemptId }}
-      locate={locate}
-    >
+    <DiffList files={snapshotFiles} source={source} locate={locate}>
       <ul aria-label="Changed files" className="px-1">
         {files.map((file) => {
           const snapshotFile = byPath.get(file.path);
