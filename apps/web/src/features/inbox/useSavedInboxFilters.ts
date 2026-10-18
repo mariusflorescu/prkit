@@ -22,12 +22,13 @@ export function useSavedInboxFilters(entries: ReadonlyArray<InboxEntry> | undefi
   const client = useQueryClient();
   const saved = useQuery({ ...workspaceQuery, select: (workspace) => workspace.inboxFilters });
   const accounts = useQuery(accountsQuery);
-  const { restored, search, account, repository } = useInboxStore(
-    useShallow(({ restored, search, account, repository }) => ({
+  const { restored, search, account, repository, sort } = useInboxStore(
+    useShallow(({ restored, search, account, repository, sort }) => ({
       restored,
       search,
       account,
       repository,
+      sort,
     })),
   );
   // What this window sent last, so each change is sent once and a remount sends nothing.
@@ -59,17 +60,18 @@ export function useSavedInboxFilters(entries: ReadonlyArray<InboxEntry> | undefi
   useEffect(() => {
     if (!restored || !saved.data) return;
     const last = sent.current ?? saved.data;
-    const searchOnly = account === last.account && sameRepository(repository, last.repository);
+    const searchOnly =
+      account === last.account && sameRepository(repository, last.repository) && sort === last.sort;
     if (searchOnly && search === last.search) return;
     const timer = setTimeout(
       () => {
-        sent.current = { search, account, repository };
+        sent.current = { search, account, repository, sort };
         save(sent.current);
       },
       searchOnly ? SEARCH_SAVE_DELAY : 0,
     );
     return () => clearTimeout(timer);
-  }, [restored, search, account, repository, saved.data, save]);
+  }, [restored, search, account, repository, sort, saved.data, save]);
   useEffect(() => {
     const savedAt = saved.data?.savedAt ?? null;
     if (

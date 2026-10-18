@@ -16,7 +16,9 @@ import {
   OWNER,
   type Pull,
   pulls,
+  pullDefaults,
   REPO,
+  type Reviewer,
   rollup,
   sha,
   STACK,
@@ -24,6 +26,7 @@ import {
   start,
   stats,
   TOOLS_PULL,
+  unreadable,
   WITHHELD,
 } from "./model.ts";
 import { STACKS } from "./options.ts";
@@ -38,18 +41,19 @@ const decodeRequest = Schema.decodeUnknownOption(GraphQLRequest);
 
 const searchNode = (pull: Pull) => ({
   ...stackFields(pull),
+  id: nodeId(pull),
   number: pull.number,
   title: pull.title,
   url: `https://github.com/${OWNER}/${REPO}/pull/${pull.number}`,
   state: pull.state,
   isDraft: pull.draft,
-  createdAt: iso(start),
+  createdAt: iso(pull.createdAt),
   updatedAt: iso(pull.updatedAt),
   headRefName: `feature-${pull.number}`,
   baseRefName: "main",
-  additions: pull.heads.length,
-  deletions: 0,
-  changedFiles: pull.heads.length,
+  additions: pull.size.additions,
+  deletions: pull.size.deletions,
+  changedFiles: pull.size.files,
   reviewDecision: null,
   author: { login: LOGIN, avatarUrl: "" },
   repository: { name: REPO, owner: { login: OWNER } },
@@ -294,8 +298,8 @@ const stackLayers = () => ({
                       isDraft: false,
                       headRefName: `feature-${number}`,
                       baseRefName: index === 0 ? "main" : `feature-${STACK[index - 1] ?? 1}`,
-                      additions: pull.heads.length,
-                      deletions: 0,
+                      additions: pull.size.additions,
+                      deletions: pull.size.deletions,
                     },
                   },
                 ];
@@ -322,12 +326,65 @@ const toolsNode = () => ({
     autoMerge: null,
     reviews: [],
     runs: [],
+    ...pullDefaults(),
   }),
   ...(STACKS ? { stack: null, stackEntry: null } : {}),
   url: `https://github.com/${OWNER}/tools/pull/1`,
   author: { login: TOOLS_PULL.author, avatarUrl: "" },
   repository: { name: "tools", owner: { login: OWNER } },
 });
+
+const decodeIds = Schema.decodeUnknownOption(Schema.Array(Schema.String));
+const reviewerNode = (reviewer: Reviewer) =>
+  reviewer.kind === "user"
+    ? { __typename: "User", login: reviewer.login }
+    : { __typename: "Team", combinedSlug: reviewer.slug };
+const PAGE = 20;
+const reviewWaits = (ids: ReadonlyArray<string>) => {
+  const errors: Array<Schema.Json> = [];
+  const nodes = ids.map((id, index) => {
+    const pull = [...pulls.values()].find((candidate) => nodeId(candidate) === id);
+    if (pull === undefined || unreadable.has(pull.number)) {
+      errors.push({
+        type: pull === undefined ? "NOT_FOUND" : "FORBIDDEN",
+        path: ["nodes", index],
+        message:
+          pull === undefined
+            ? `Could not resolve to a node with the global id of '${id}'`
+            : "Resource protected by organization SAML enforcement. You must grant your Personal Access token access to this organization.",
+      });
+      return null;
+    }
+    const events = pull.reviewEvents.toSorted((left, right) => left.at - right.at);
+    return {
+      id,
+      reviewRequests: {
+        pageInfo: { hasNextPage: pull.requested.length > PAGE },
+        nodes: pull.requested
+          .slice(0, PAGE)
+          .map((reviewer) => ({ requestedReviewer: reviewerNode(reviewer) })),
+      },
+      timelineItems: {
+        pageInfo: { hasPreviousPage: events.length > PAGE },
+        nodes: events.slice(-PAGE).map((event) =>
+          event.kind === "ready"
+            ? { __typename: "ReadyForReviewEvent", createdAt: iso(event.at) }
+            : {
+                __typename: "ReviewRequestedEvent",
+                createdAt: iso(event.at),
+                requestedReviewer: reviewerNode(event.reviewer),
+              },
+        ),
+      },
+    };
+  });
+  return {
+    kind: "graphql:review-waits",
+    cost: 1,
+    data: { nodes },
+    ...(errors.length === 0 ? {} : { errors }),
+  };
+};
 
 const decodeMutationTarget = Schema.decodeUnknownOption(
   Schema.Union([
@@ -492,12 +549,16 @@ export const graphql = (
   }
   if (query.includes("PrkitStack"))
     return { kind: "graphql:stack", cost: 1, data: STACKS ? stackLayers() : { repository: null } };
+  if (query.includes("PrkitReviewWaits"))
+    return reviewWaits(Option.getOrElse(decodeIds(variables["ids"]), () => []));
   if (query.includes("PrkitInbox"))
     return {
       kind: "graphql:inbox",
       cost: 6,
       data: {
-        reviewRequested: search([1, 2, 3]),
+        reviewRequested: search(
+          [1, 2, 3, 4, 5, 6].filter((number) => (pulls.get(number)?.requested.length ?? 0) > 0),
+        ),
         authored: search([4, 5, 6]),
         involved: search([]),
       },

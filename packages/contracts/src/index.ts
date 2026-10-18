@@ -16,6 +16,7 @@ export * from "./github.ts";
 export * from "./ids.ts";
 export * from "./inbox.ts";
 export * from "./inboxFilter.ts";
+export * from "./inboxTriage.ts";
 export * from "./localReview.ts";
 export * from "./model.ts";
 export * from "./outsideAgents.ts";

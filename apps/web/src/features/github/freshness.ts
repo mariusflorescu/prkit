@@ -1,10 +1,7 @@
-import type { GitHubProblem } from "@prkit/contracts";
+import { type AccountId, type GitHubProblem, loginOf } from "@prkit/contracts";
 
 const relative = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 const clock = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
-
-/** `AccountId` is `${host}/${login}`. */
-export const loginOf = (accountId: string) => accountId.slice(accountId.indexOf("/") + 1);
 
 const format = (seconds: number) => {
   const size = Math.abs(seconds);
@@ -34,7 +31,7 @@ export const retryAt = (problem: GitHubProblem) =>
 /** One plain sentence or three: why this is cached, how old it is, when it can change. */
 export const freshnessText = (
   problem: GitHubProblem,
-  accountId: string,
+  accountId: AccountId,
   fetchedAt: string | null,
   now: number,
 ) => {

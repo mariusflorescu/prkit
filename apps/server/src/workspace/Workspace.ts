@@ -1,6 +1,8 @@
 import {
   applyWorkspaceCommand,
+  DEFAULT_INBOX_SORT,
   type InboxFilters,
+  InboxSort,
   NO_INBOX_FILTERS,
   refFromKey,
   SavedInboxFilters,
@@ -20,7 +22,13 @@ import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 
-const StoredFilters = Schema.fromJsonString(SavedInboxFilters);
+/** Filters saved before the sort existed keep their search and selections, and sort by recent activity. */
+const StoredFilters = Schema.fromJsonString(
+  Schema.Struct({
+    ...SavedInboxFilters.fields,
+    sort: InboxSort.pipe(Schema.withDecodingDefaultKey(Effect.succeed(DEFAULT_INBOX_SORT))),
+  }),
+);
 const UNSAVED: SavedInboxFilters = { ...NO_INBOX_FILTERS, savedAt: null };
 /** Saved filters that don't decode start the Inbox unfiltered rather than fail the open tabs' read. */
 const decodeFilters = (stored: string | null) =>

@@ -1,4 +1,4 @@
-import type { GitHubProblem } from "@prkit/contracts";
+import type { AccountId, GitHubProblem } from "@prkit/contracts";
 import { Link } from "@tanstack/react-router";
 
 import { Button } from "~/components/ui/button";
@@ -19,7 +19,7 @@ export function FreshnessNotice({
   retrying,
 }: {
   problem: GitHubProblem;
-  accountId: string;
+  accountId: AccountId;
   fetchedAt: string | null;
   retry: () => void;
   retrying: boolean;

@@ -34,6 +34,12 @@ const decodePull = Schema.decodeUnknownSync(
   ),
 );
 
+type Reviewer = { login: string } | { team: string };
+const reviewerQuery = (who: Reviewer) =>
+  "login" in who
+    ? `login=${encodeURIComponent(who.login)}`
+    : `team=${encodeURIComponent(who.team)}`;
+
 /**
  * A fake GitHub (scripts/fake-github.ts) and a prkit instance that reads only it, so
  * budget journeys spend nothing of the real accounts. Stop both in a `finally`.
@@ -124,6 +130,23 @@ export const startFakeGitHub = async (
     merge: (pr: number) => post(`merge?pr=${pr}`),
     close: (pr: number) => post(`close?pr=${pr}`),
     draft: (pr: number) => post(`draft?pr=${pr}`),
+    ready: (pr: number, minutesAgo = 0) => post(`ready?pr=${pr}&minutes=${minutesAgo}`),
+    shape: (
+      pr: number,
+      shape: { additions?: number; deletions?: number; files?: number; opened?: number },
+    ) =>
+      post(
+        `shape?${new URLSearchParams([
+          ["pr", String(pr)],
+          ...Object.entries(shape).map(([key, value]): [string, string] => [key, String(value)]),
+        ])}`,
+      ),
+    requestReview: (pr: number, who: Reviewer, minutesAgo = 0) =>
+      post(`request-review?pr=${pr}&${reviewerQuery(who)}&minutes=${minutesAgo}`),
+    unrequest: (pr: number, who: Reviewer) => post(`unrequest?pr=${pr}&${reviewerQuery(who)}`),
+    unreadable: (pr: number) => post(`unreadable?pr=${pr}`),
+    fail: (kind: string, times: number, status = 502) =>
+      post(`fail?kind=${encodeURIComponent(kind)}&status=${status}&times=${times}`),
     behind: (pr: number, by: number) => post(`behind?pr=${pr}&by=${by}`),
     checks: (pr: number, status: "queued" | "in_progress" | "completed") =>
       post(`checks?pr=${pr}&status=${status}`),

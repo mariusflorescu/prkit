@@ -6,6 +6,7 @@ import { cn } from "~/lib/utils";
 
 import { InboxAccountFilter } from "./InboxAccountFilter";
 import { InboxRepositoryFilter } from "./InboxRepositoryFilter";
+import { InboxSortSelect } from "./InboxSortSelect";
 import { useInboxStore } from "./inboxStore";
 
 /**
@@ -51,6 +52,7 @@ export function InboxToolbar({
       </div>
       {accounts.length > 1 && <InboxAccountFilter accounts={accounts} />}
       <InboxRepositoryFilter entries={entries} account={account} />
+      <InboxSortSelect />
       <span data-collapse-compact="" inert={!collapsed} aria-hidden={!collapsed}>
         <ToolbarIconButton label="Refresh" disabled={refreshing} onClick={onRefresh}>
           <RefreshCwIcon className={cn(refreshing && "animate-spin motion-reduce:animate-none")} />

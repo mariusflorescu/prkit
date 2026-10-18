@@ -1,9 +1,8 @@
-import type { RepositoryList } from "@prkit/contracts";
+import { loginOf, type RepositoryList } from "@prkit/contracts";
 
 import { Button } from "~/components/ui/button";
 import { ComboboxStatus } from "~/components/ui/combobox";
 import { Skeleton } from "~/components/ui/skeleton";
-import { loginOf } from "~/features/github/freshness";
 
 /**
  * What the repository filter says above its list: that it is still reading, that it

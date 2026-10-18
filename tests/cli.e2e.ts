@@ -88,6 +88,10 @@ test(
   async ({ app, screen, browser }) => {
     const name = "u71-cli";
     const fake = await startFakeGitHub(name);
+    await fake.shape(1, { additions: 2 });
+    await fake.shape(2, { additions: 400 });
+    await fake.shape(3, { additions: 5000 });
+    await fake.requestReview(3, { login: "budget-test" }, 5);
     const localGit = await cliFixture(fake);
     const claude = setUpFakeClaude(name);
     const install = NodePath.join(fake.home, "local-bin", "prkit");
@@ -234,6 +238,38 @@ test(
       await bridge.initialize();
       const direct = await bridge.call("list_inbox");
       expect("json" in direct ? direct.json : null).toEqual(Schema.decodeSync(Json)(inbox.stdout));
+      const reviewOrder = (stdout: string) =>
+        Schema.decodeSync(Schema.fromJsonString(InboxListResult))(stdout)
+          .accounts.flatMap((entry) => entry.sections)
+          .filter((section) => section.reason === "review-requested")
+          .flatMap((section) => section.pullRequests.map((pr) => pr.key.split("#")[1]));
+      expect(reviewOrder(inbox.stdout)).toEqual(["3", "1", "2"]);
+      for (const [sort, order] of [
+        ["waiting", ["1", "2", "3"]],
+        ["size", ["1", "2", "3"]],
+        ["updated", ["3", "1", "2"]],
+      ] as const) {
+        const sorted = cli(["inbox", "--sort", sort, "--json"]);
+        expect(sorted.code).toBe(0);
+        expect(reviewOrder(sorted.stdout)).toEqual(order);
+        const viaBridge = await bridge.call("list_inbox", { sort });
+        expect("json" in viaBridge ? viaBridge.json : null).toEqual(
+          Schema.decodeSync(Json)(sorted.stdout),
+        );
+      }
+      const waiting = Schema.decodeSync(Schema.fromJsonString(InboxListResult))(
+        cli(["inbox", "--sort", "waiting", "--json"]).stdout,
+      );
+      const asked = waiting.accounts
+        .flatMap((entry) => entry.sections.flatMap((section) => section.pullRequests))
+        .find((pr) => pr.key.endsWith("#3"));
+      expect(asked?.wait).toMatchObject({
+        _tag: "waiting",
+        cause: "requested-again",
+        atLeast: false,
+      });
+      expect(asked?.size).toMatchObject({ bucket: "XL", lines: 5000, files: 1 });
+      expect(cli(["inbox", "--sort", "newest"]).code).toBe(2);
       const account = Schema.decodeSync(
         Schema.fromJsonString(
           Schema.Struct({ accounts: Schema.Array(Schema.Struct({ accountId: Schema.String })) }),

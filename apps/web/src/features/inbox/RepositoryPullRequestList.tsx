@@ -6,6 +6,7 @@ import { ListSkeleton } from "~/components/ListSkeleton";
 import { FreshnessNotice } from "~/features/github/FreshnessNotice";
 import { repositoryPullRequestsQuery } from "~/rpc/queries";
 
+import { updatedClock } from "./inboxPresentation";
 import { InboxRow } from "./InboxRow";
 
 /** A repository's open pull requests, in the Inbox's row style, read through one account. */
@@ -56,7 +57,12 @@ export function RepositoryPullRequestList({ repository }: { repository: Reposito
       ) : (
         <ul>
           {entries.map((entry) => (
-            <InboxRow key={entry.ref.number} entry={entry} showAccount={false} />
+            <InboxRow
+              key={entry.ref.number}
+              entry={entry}
+              clock={updatedClock(entry)}
+              showAccount={false}
+            />
           ))}
         </ul>
       )}

@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 
 import { GitHubProblem, PullRequestState } from "./github.ts";
 import { AccountId, PullRequestKey } from "./ids.ts";
+import { ReviewWait } from "./inboxTriage.ts";
 import { StackMembership } from "./stack.ts";
 
 export const PullRequestRef = Schema.Struct({
@@ -51,6 +52,8 @@ export type PullRequestSummary = typeof PullRequestSummary.Type;
 export const InboxEntry = Schema.Struct({
   ...PullRequestSummary.fields,
   reasons: Schema.NonEmptyArray(InboxReason),
+  /** Null when the entry isn't a review request. */
+  wait: Schema.NullOr(ReviewWait),
 });
 export type InboxEntry = typeof InboxEntry.Type;
 export const inboxReasonPriority = { "review-requested": 0, authored: 1, involved: 2 } as const;

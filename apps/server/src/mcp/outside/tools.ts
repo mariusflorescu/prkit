@@ -68,7 +68,7 @@ const PrkitStatus = read(
 const ListInbox = read(
   Tool.make("list_inbox", {
     description:
-      "The pull requests that need the owner, per GitHub account, in sections: review requested, authored, involved. Each has its url, state, checks, review decision, stack position and guide state. Answers from prkit's cache and says when each account was read; refresh reads GitHub now and spends budget.",
+      "The pull requests that need the owner, per GitHub account, in sections: review requested, authored, involved. Each has its url, state, checks, review decision, stack position, guide state, size (bucket, changed lines, files and a reading time in minutes) and, for a review request, how long it has waited on the owner. sort orders each section, updated when omitted. Answers from prkit's cache and says when each account was read; refresh reads GitHub now and spends budget.",
     parameters: InboxInput,
     success: limited(InboxListResult),
     failure: OutsideToolFailure,
@@ -603,7 +603,8 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
 
   const SaveInboxFilters = work(
     Tool.make("save_inbox_filters", {
-      description: "Persist the app’s search, account and repository filter for the next launch.",
+      description:
+        "Persist the app’s search, account, repository filter and sort for the next launch. It replaces all four, so send all four.",
       parameters: Parity.SaveInboxFiltersInput,
       success: limited(Parity.SavedFiltersResult),
       failure: OutsideToolFailure,

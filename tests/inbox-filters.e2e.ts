@@ -214,6 +214,7 @@ const KEPT_FILTERS = JSON.stringify({
   search: "fixture 3",
   account: null,
   repository: { ...FIXTURES, accountIds: ["github.com/budget-test"] },
+  sort: "updated",
 });
 
 test(

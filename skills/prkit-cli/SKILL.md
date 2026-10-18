@@ -55,11 +55,12 @@ When the user asks for an excluded action, tell them it's waiting for them in pr
 ```sh
 prkit inbox --json
 prkit inbox --reason review-requested --json
+prkit inbox --reason review-requested --sort waiting --json
 prkit inbox --reason authored --json
 prkit inbox --reason involved --repo owner/repo --json
 ```
 
-Summarize by repository and age, and say which PRs already have a guide. Add `--account`, `--state`, `--draft`, `--checks`, `--search` or `--stacks` when the user asks to narrow it. These reads don't change the app's saved filters.
+Summarize by repository and how long each has waited, say which PRs are small enough to review quickly (each carries its `size`), and say which already have a guide. Add `--account`, `--state`, `--draft`, `--checks`, `--search` or `--stacks` when the user asks to narrow it. These reads don't change the app's saved filters.
 
 ### Read the PR and its diff
 

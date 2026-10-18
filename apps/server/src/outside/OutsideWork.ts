@@ -1,7 +1,9 @@
 import {
   type AccountId,
   matchesInboxFilter,
-  stackOrder,
+  orderInbox,
+  primaryInboxReason,
+  pullRequestSize,
   type FixerSnapshot,
   type FixerTurn,
   type FixerTurnId,
@@ -264,7 +266,7 @@ export const make = Effect.gen(function* () {
       );
       const { cursor: _cursor, limit: _limit, refresh: _refresh, ...filters } = input;
       const filterKey = yield* Schema.encodeEffect(Schema.fromJsonString(InboxInput))(filters);
-      const filtered = stackOrder(
+      const filtered = orderInbox(
         result.entries.filter((entry) =>
           matchesInboxFilter(
             entry,
@@ -274,6 +276,7 @@ export const make = Effect.gen(function* () {
             input,
           ),
         ),
+        input.sort,
       );
       const paged = yield* page(
         filtered,
@@ -309,7 +312,7 @@ export const make = Effect.gen(function* () {
                 .map((reason) => ({
                   reason,
                   pullRequests: entries
-                    .filter((entry) => entry.reasons[0] === reason)
+                    .filter((entry) => primaryInboxReason(entry.reasons) === reason)
                     .map((entry) => {
                       const key = pullRequestKey(entry.ref);
                       return {
@@ -319,7 +322,10 @@ export const make = Effect.gen(function* () {
                         author: entry.author?.login ?? null,
                         state: entry.state,
                         isDraft: entry.isDraft,
+                        createdAt: entry.createdAt,
                         updatedAt: entry.updatedAt,
+                        size: pullRequestSize(entry),
+                        wait: entry.wait,
                         checks: entry.checks,
                         reviewDecision: entry.reviewDecision,
                         reasons: entry.reasons,

@@ -6,6 +6,7 @@ const makeEntityId = <Brand extends string>(brand: Parameters<typeof Schema.bran
 /** `${host}/${login}`, e.g. "github.com/octocat". */
 export const AccountId = makeEntityId("AccountId");
 export type AccountId = typeof AccountId.Type;
+export const loginOf = (id: AccountId) => id.slice(id.indexOf("/") + 1);
 
 /** `${host}/${owner}/${repo}#${number}`: the stable key for tabs, reviews and caches. */
 export const PullRequestKey = makeEntityId("PullRequestKey");

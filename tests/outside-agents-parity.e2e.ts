@@ -106,6 +106,19 @@ test(
           entry.sections.flatMap((section) => section.pullRequests.map((pr) => pr.key)),
         ),
       );
+      const bySize = Schema.decodeUnknownSync(InboxListResult)(
+        await ok("list_inbox", { accountId, reason: "authored", sort: "size", limit: 1 }),
+      );
+      expect(bySize.nextCursor).toBeTruthy();
+      await refusal(
+        "list_inbox",
+        { accountId, reason: "authored", sort: "waiting", limit: 1, cursor: bySize.nextCursor },
+        "list changed",
+      );
+      const sizes = bySize.accounts
+        .flatMap((entry) => entry.sections.flatMap((section) => section.pullRequests))
+        .map((pr) => pr.size);
+      expect(sizes.every((size) => size.lines === size.additions + size.deletions)).toBe(true);
       const otherInbox = Schema.decodeUnknownSync(InboxListResult)(
         await ok("list_inbox", { accountId: second.accountId, reason: "review-requested" }),
       );
@@ -214,7 +227,14 @@ test(
           timeout: 20_000,
         })
         .toBe(true);
-      await ok("save_inbox_filters", { search: "fixture", account: accountId, repository: null });
+      const saved = async (input: object) =>
+        Schema.decodeUnknownSync(Results.SavedFiltersResult)(await ok("save_inbox_filters", input));
+      const filters = { search: "fixture", account: accountId, repository: null };
+      expect(await client.call("save_inbox_filters", filters)).toMatchObject({
+        rpcError: expect.stringContaining('Missing key\n  at ["sort"]'),
+      });
+      expect((await saved({ ...filters, sort: "size" })).sort).toBe("size");
+      expect((await saved({ ...filters, sort: "updated" })).sort).toBe("updated");
       await ok("open_pull_request", { ...pr, focus: false });
       await ok("open_pull_request", { ...ninth, focus: false });
       const tabs = Schema.decodeUnknownSync(OpenPullRequestsResult)(

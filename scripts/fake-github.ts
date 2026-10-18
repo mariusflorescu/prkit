@@ -9,6 +9,12 @@
  * see, which comes back as a null node and a FORBIDDEN error like GitHub's. PR 9, opened
  * by its URL too, changes one file in one hunk of context, a deletion and two additions.
  *
+ * PRs 1-3 have a review pending from the account, with one request event at the start;
+ * the rest have none. A second GraphQL request, `PrkitReviewWaits`, asks for the pending
+ * reviewers and the last request and ready events of the inbox's review-requested pull
+ * requests, and is counted as `graphql:review-waits`. `shape`, `request-review`, `ready`
+ * and the routes next to them seed what it answers.
+ *
  * A timeline query gets only the `itemTypes` it asks for and only the fields it
  * selects, and fails like GitHub's on a fragment on a type it doesn't know or one that
  * can't be spread where it is (`... on Team` inside `assignee`).
@@ -50,6 +56,18 @@
  *   POST merge?pr=<n>                   merged on GitHub; inbox searches still find it for 15 seconds
  *   POST close?pr=<n>                   closed on GitHub without a merge; the account may reopen it
  *   POST draft?pr=<n>                   converted to a draft
+ *   POST ready?pr=<n>&minutes=<ago>     no longer a draft, with a ready event that long ago (default 0)
+ *   POST shape?pr=<n>&additions=&deletions=&files=&opened=<minutes ago>
+ *                                       any subset: its size (the rest keeps its value) and when it was opened
+ *   POST request-review?pr=<n>&login=<l>|team=<slug>&minutes=<ago>
+ *                                       asks that user or team (a team's slug is `budget/web`), with a
+ *                                       request event that long ago (default 0); asking twice adds the event only
+ *   POST unrequest?pr=<n>&login=<l>|team=<slug>   takes the request back, as a submitted review does; events stay
+ *   POST unreadable?pr=<n>              the waits read answers a null node and a FORBIDDEN error for it from now on
+ *   POST fail?kind=<kind>&status=<s>&times=<n>
+ *                                       the next n requests counted as `kind` (say `graphql:review-waits`)
+ *                                       get that status (default 502) and `{}`, counted as `<kind>:failed`;
+ *                                       n defaults to 1, 0 clears it, and reset-stats leaves it alone
  *   POST behind?pr=<n>&by=<k>           its base gained k commits, so Update branch applies
  *   GET  pull?pr=<n>                    its node id, head sha and workflow run ids, for assertions
  *   GET  writes                         every mutation and REST write, with its input
@@ -82,10 +100,13 @@ import {
   nodeId,
   pulls,
   resetStats,
+  type Reviewer,
   SECOND_LOGIN,
+  sameReviewer,
   servedFiles,
   sha,
   stats,
+  unreadable,
   writes,
 } from "./fake-github/model.ts";
 import { home, values } from "./fake-github/options.ts";
@@ -114,6 +135,8 @@ const quotas = {
 };
 type Resource = keyof typeof quotas;
 const latency: Record<Resource, number> = { core: 0, graphql: 0 };
+
+const failures = new Map<string, { status: number; times: number }>();
 
 const remaining = (resource: Resource) =>
   Date.now() < quotas[resource].limitedUntil ? 0 : Math.max(0, LIMIT - quotas[resource].used);
@@ -152,6 +175,28 @@ const send = (
   }, latency[resource]);
 };
 
+const failedByControl = (response: NodeHttp.ServerResponse, resource: Resource, kind: string) => {
+  const failure = failures.get(kind);
+  if (failure === undefined) return false;
+  failure.times--;
+  if (failure.times <= 0) failures.delete(kind);
+  count(`${kind}:failed`, failure.status, 0);
+  send(response, resource, failure.status, "{}");
+  return true;
+};
+
+const reviewerOf = (url: URL): Reviewer | undefined => {
+  const login = url.searchParams.get("login");
+  const slug = url.searchParams.get("team");
+  return login !== null
+    ? { kind: "user", login }
+    : slug !== null
+      ? { kind: "team", slug }
+      : undefined;
+};
+const minutesAgo = (url: URL) =>
+  Date.now() - Number(url.searchParams.get("minutes") ?? "0") * 60_000;
+
 const control = (url: URL, method: string, text: string, response: NodeHttp.ServerResponse) => {
   const answer = (body: Schema.Json) => {
     response.writeHead(200, { "content-type": "application/json" });
@@ -165,6 +210,14 @@ const control = (url: URL, method: string, text: string, response: NodeHttp.Serv
   if (name === "reset-stats") {
     resetStats();
     return answer({ ok: true });
+  }
+  if (name === "fail") {
+    const kind = url.searchParams.get("kind") ?? "";
+    const times = Number(url.searchParams.get("times") ?? "1");
+    if (times > 0)
+      failures.set(kind, { status: Number(url.searchParams.get("status") ?? "502"), times });
+    else failures.delete(kind);
+    return answer({ ok: true, kind, times });
   }
   const pull = pulls.get(Number(url.searchParams.get("pr")));
   const gitHead = url.searchParams.get("sha");
@@ -273,6 +326,45 @@ const control = (url: URL, method: string, text: string, response: NodeHttp.Serv
     pull.updatedAt = Date.now();
     return answer({ ok: true });
   }
+  if (name === "ready" && pull !== undefined) {
+    pull.draft = false;
+    pull.reviewEvents.push({ kind: "ready", at: minutesAgo(url) });
+    return answer({ ok: true });
+  }
+  if (name === "shape" && pull !== undefined) {
+    const given = (key: string) => {
+      const value = url.searchParams.get(key);
+      return value === null ? undefined : Number(value);
+    };
+    pull.size = {
+      additions: given("additions") ?? pull.size.additions,
+      deletions: given("deletions") ?? pull.size.deletions,
+      files: given("files") ?? pull.size.files,
+    };
+    const opened = given("opened");
+    if (opened !== undefined) pull.createdAt = Date.now() - opened * 60_000;
+    return answer({ ok: true, size: pull.size });
+  }
+  if (name === "request-review" && pull !== undefined) {
+    const reviewer = reviewerOf(url);
+    if (reviewer !== undefined) {
+      if (!pull.requested.some((pending) => sameReviewer(pending, reviewer)))
+        pull.requested.push(reviewer);
+      pull.reviewEvents.push({ kind: "requested", at: minutesAgo(url), reviewer });
+      return answer({ ok: true });
+    }
+  }
+  if (name === "unrequest" && pull !== undefined) {
+    const reviewer = reviewerOf(url);
+    if (reviewer !== undefined) {
+      pull.requested = pull.requested.filter((pending) => !sameReviewer(pending, reviewer));
+      return answer({ ok: true });
+    }
+  }
+  if (name === "unreadable" && pull !== undefined) {
+    unreadable.add(pull.number);
+    return answer({ ok: true });
+  }
   if (name === "behind" && pull !== undefined) {
     pull.behindBy = Number(url.searchParams.get("by") ?? "1");
     return answer({ ok: true });
@@ -352,6 +444,7 @@ const server = NodeHttp.createServer((request, response) => {
         return;
       }
       const answer = graphql(body);
+      if (failedByControl(response, "graphql", answer.kind)) return;
       quotas.graphql.used += answer.cost;
       count(answer.kind, 200, answer.cost);
       const withCost =
@@ -390,6 +483,7 @@ const server = NodeHttp.createServer((request, response) => {
       request.headers["if-none-match"],
       request.headers.authorization ?? "",
     );
+    if (failedByControl(response, "core", answer.kind)) return;
     const cost = answer.status === 304 ? 0 : 1;
     quotas.core.used += cost;
     count(answer.kind, answer.status, cost);
