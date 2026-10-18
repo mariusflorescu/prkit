@@ -23,6 +23,7 @@ import {
   stopFakeInstance,
 } from "./fakeGitHub.ts";
 import { AGENT_RUNS, AGENT_SKIP, readRows } from "./fixturePr.ts";
+import { setUpRealClaude } from "./realClaude.ts";
 import { localRepoFixture } from "./localRepoFixture.ts";
 
 const decodeGenerate = Schema.decodeSync(Schema.fromJsonString(GenerateLocalGuideResult));
@@ -371,7 +372,13 @@ describe("a guide of local changes with the user's Claude", { tags: ["agent"] },
           encoding: "utf8",
           env: { PATH: process.env.PATH ?? "/usr/bin:/bin", GIT_CONFIG_GLOBAL: "/dev/null" },
         });
-        const run = startFakeInstance(name, fake, ["--watch-interval", "600000"]);
+        const claude = setUpRealClaude(name);
+        const run = startFakeInstance(name, fake, [
+          "--watch-interval",
+          "600000",
+          "--claude",
+          claude.file,
+        ]);
         const cli = cliIn(NodePath.join(run.home, "bin/prkit"), fake.home, log);
         await switchOn({ app, screen, browser }, run.openUrl);
         const started = cli(shop.repo, [
