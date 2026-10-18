@@ -209,14 +209,14 @@ const attributedPaths = (text: string) => {
   return named;
 };
 
-/** `ls-files -s -z` entries, `<mode> <sha> <stage>\t<path>`, as each path's sha. */
-const parseStage = (text: string) =>
-  new Map(
-    fields(text).map((entry) => {
-      const tab = entry.indexOf("\t");
-      return [entry.slice(tab + 1), entry.slice(0, tab).split(" ")[1] ?? ""] as const;
-    }),
-  );
+/** `ls-files -s -v -z` entries, `<tag> <mode> <sha> <stage>\t<path>`. */
+const parseIndex = (text: string) =>
+  fields(text).map((entry) => {
+    const tab = entry.indexOf("\t");
+    const [tag = "", mode = "", sha = "", stage = ""] = entry.slice(0, tab).split(" ");
+    return { tag, mode, sha, stage, path: entry.slice(tab + 1) };
+  });
+type IndexEntry = ReturnType<typeof parseIndex>[number];
 
 /** `--stdin-paths` reads one path a line, and C-unquotes a line that starts with a double quote. */
 const stdinPath = (file: string) => {
@@ -424,11 +424,14 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
       );
     });
 
-  /** Copies the objects of `trees` the copy lacks, reading the user's objects as alternates. */
-  const copyObjects = (user: UserRepository, copy: string, trees: ReadonlyArray<string>) =>
+  /**
+   * Copies the objects of `roots`, trees or blobs, the copy lacks, reading the user's objects
+   * as alternates.
+   */
+  const copyObjects = (user: UserRepository, copy: string, roots: ReadonlyArray<string>) =>
     Effect.gen(function* () {
       const failure = "Couldn't copy your repository's objects into prkit's copy.";
-      const listed = yield* run(["rev-list", "--objects", "--no-object-names", ...trees], {
+      const listed = yield* run(["rev-list", "--objects", "--no-object-names", ...roots], {
         target: user,
       });
       if (listed.code !== 0) return yield* missingOr(listed.stderr, failure);
@@ -526,13 +529,13 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
   };
 
   /**
-   * `ls-files -v` of the user's index, read from a copy in prkit's copy: git touches a split
-   * index's shared file whenever it reads the index, so the user's own is never read in place.
+   * The user's index, read from a copy in prkit's copy: git touches a split index's shared
+   * file whenever it reads the index, so the user's own is never read in place.
    */
   const userIndexEntries = (identity: LocalIdentity, copy: string, scratch: string) =>
     Effect.gen(function* () {
       const index = path.join(identity.gitDir, "index");
-      if (!(yield* fs.exists(index))) return [];
+      if (!(yield* fs.exists(index))) return new Array<IndexEntry>();
       const shared = (yield* fs.readDirectory(identity.gitDir)).filter((name) =>
         name.startsWith("sharedindex."),
       );
@@ -543,13 +546,13 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
         { discard: true },
       ).pipe(
         Effect.andThen(
-          git(["ls-files", "-v", "-z"], {
+          git(["ls-files", "-s", "-v", "-z"], {
             target: bare(copy),
             env: { GIT_INDEX_FILE: path.join(scratch, "user-index") },
             failure: "Couldn't read your repository's index.",
           }),
         ),
-        Effect.map(fields),
+        Effect.map(parseIndex),
         Effect.ensuring(
           Effect.forEach(shared, (name) => fs.remove(path.join(copy, name), { force: true }), {
             discard: true,
@@ -560,15 +563,19 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
 
   /**
    * The ids `git add` gives `files`: line endings, `ident` and the like converted by the user's
-   * attributes, by git's own rules. git reads the user's work tree into a HEAD index of prkit's
-   * and writes objects only to the copy, whose config names no filter command to run.
+   * attributes, by git's own rules. git reads the user's work tree into an index of prkit's,
+   * HEAD's with the user's own entries for `staged`, since whether git converts a file's line
+   * endings depends on the entry it already has. It writes objects only to the copy, whose
+   * config names no filter command to run.
    */
   const addedShas = (input: {
+    readonly user: UserRepository;
     readonly copy: string;
     readonly scratch: string;
     readonly identity: LocalIdentity;
     readonly headTree: string;
     readonly files: ReadonlyArray<string>;
+    readonly staged: ReadonlyArray<IndexEntry>;
     readonly settings: ReadonlyArray<string>;
   }) =>
     Effect.gen(function* () {
@@ -587,6 +594,21 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
         GIT_LITERAL_PATHSPECS: "1",
       };
       yield* git(["read-tree", input.headTree], { target: bare(copy), env, failure });
+      if (input.staged.length > 0) {
+        yield* copyObjects(
+          input.user,
+          copy,
+          input.staged.map((entry) => entry.sha),
+        );
+        yield* git(["update-index", "-z", "--index-info"], {
+          target: bare(copy),
+          env,
+          input: input.staged
+            .map((entry) => `${entry.mode} ${entry.sha}\t${entry.path}\0`)
+            .join(""),
+          failure,
+        });
+      }
       yield* git(
         [
           ...input.settings,
@@ -611,12 +633,14 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
           failure,
         },
       );
-      const staged = parseStage(
-        yield* git(["ls-files", "-s", "-z"], { target: bare(copy), env, failure }),
+      const added = new Map(
+        parseIndex(
+          yield* git(["ls-files", "-s", "-v", "-z"], { target: bare(copy), env, failure }),
+        ).map((entry) => [entry.path, entry.sha]),
       );
       return new Map(
         input.files.flatMap((file) => {
-          const sha = staged.get(file);
+          const sha = added.get(file);
           return sha === undefined ? [] : [[file, sha] as const];
         }),
       );
@@ -643,7 +667,7 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
         git(args, { target: user, failure });
 
       const entries = yield* userIndexEntries(identity, copy, scratch);
-      if (entries.some((entry) => /^[Ss] /.test(entry)))
+      if (entries.some((entry) => entry.tag === "S" || entry.tag === "s"))
         return yield* refuse(
           "sparse-checkout",
           "prkit can't read sparse checkouts yet: files it can't see would look deleted.",
@@ -692,8 +716,11 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
         .map((file) => ({ path: file.slice(0, -1), reason: "nested-repository", bytes: null }));
       const listed = new Set(others);
       // Files staged though ignored (`git add -f`) are in neither list.
-      const staged = [...new Set(entries.map((entry) => entry.slice(2)))].filter(
+      const staged = [...new Set(entries.map((entry) => entry.path))].filter(
         (file) => !tracked.has(file) && !listed.has(file),
+      );
+      const indexed = new Map(
+        entries.filter((entry) => entry.stage === "0").map((entry) => [entry.path, entry]),
       );
       const files = [
         ...[...tracked].filter(([, entry]) => entry.type !== "commit").map(([file]) => file),
@@ -735,7 +762,7 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
               ? disk.executable
                 ? "100755"
                 : "100644"
-              : old?.mode === "100755"
+              : indexed.get(file)?.mode === "100755"
                 ? "100755"
                 : "100644";
           toHash.push({
@@ -775,7 +802,9 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
       for (const [index, entry] of toHash.entries()) {
         const sha = hashed[index] ?? "";
         const old = tracked.get(entry.path);
-        if (old === undefined || old.sha !== sha || old.mode !== entry.mode)
+        // `git add --renormalize` stages a change to a file whose bytes on disk are HEAD's.
+        const inIndex = indexed.get(entry.path)?.sha ?? old?.sha;
+        if (old === undefined || old.sha !== sha || old.mode !== entry.mode || inIndex !== old.sha)
           changes.push({ ...entry, sha });
       }
 
@@ -804,12 +833,25 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
               ),
             );
       // The rest as `git add` stores them: line endings, `ident` and the like by git's own rules.
+      const readable = contents.filter((change) => !unread.has(change.path));
       const added = yield* addedShas({
+        user,
         copy,
         scratch,
         identity,
         headTree: input.headTree,
-        files: contents.filter((change) => !unread.has(change.path)).map((change) => change.path),
+        files: readable.map((change) => change.path),
+        // Only entries of files HEAD has: a new file's may be an intent-to-add, with no object.
+        staged: readable.flatMap((change) => {
+          const entry = indexed.get(change.path);
+          const old = tracked.get(change.path);
+          return entry !== undefined &&
+            old !== undefined &&
+            entry.sha !== old.sha &&
+            (entry.mode === "100644" || entry.mode === "100755")
+            ? [entry]
+            : [];
+        }),
         settings: [
           ...(attributesFile === null ? [] : ["-c", `core.attributesFile=${attributesFile}`]),
           ...(autocrlf === null ? [] : ["-c", `core.autocrlf=${autocrlf}`]),
@@ -949,15 +991,20 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
               ? yield* workingTree({ user, copy, scratch, identity, userHead, headTree, unmoved })
               : { tree: headTree, leftOut: [] };
 
-          if (taken.tree === baseTree)
+          if (taken.tree === baseTree) {
+            const where =
+              input.head === "working-tree"
+                ? `your working tree on ${onWhat(identity.branch)}`
+                : onWhat(identity.branch);
+            const filtered = taken.leftOut.filter((file) => file.reason === "filtered");
+            const [first] = filtered;
             return yield* refuse(
               "nothing-changed",
-              `Nothing differs between \`${base.ref}\` and ${
-                input.head === "working-tree"
-                  ? `your working tree on ${onWhat(identity.branch)}`
-                  : onWhat(identity.branch)
-              }.`,
+              first === undefined
+                ? `Nothing differs between \`${base.ref}\` and ${where}.`
+                : `Nothing prkit can read differs between \`${base.ref}\` and ${where}. \`${first.path}\`${filtered.length > 1 ? ` and ${filtered.length - 1} more` : ""} changed, but prkit leaves out files git stores through a filter.`,
             );
+          }
 
           const listCommits = (range: string) =>
             readOk([
