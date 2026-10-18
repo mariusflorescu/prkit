@@ -296,6 +296,9 @@ const decodeDraft = Schema.decodeUnknownEffect(Schema.Array(DraftRow));
 const decodeDraftOnly = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ draft: Schema.NullOr(Schema.fromJsonString(DraftGuide)) })),
 );
+const decodeHeads = Schema.decodeUnknownEffect(
+  Schema.Array(Schema.Struct({ head_sha: Schema.NullOr(Schema.String) })),
+);
 const decodeFeed = Schema.decodeUnknownEffect(Schema.Array(FeedRow));
 const decodeDurations = Schema.decodeUnknownEffect(Schema.Array(DurationRow));
 const decodeCount = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ count: Schema.Int })));
@@ -2414,6 +2417,27 @@ export const make = Effect.gen(function* () {
       return snapshot;
     }).pipe(Effect.catchTags(dbFailures));
 
+  /** The new side of paths at the commit an attempt read, from prkit's own copy of the repository. */
+  const texts = (key: PullRequestKey, attemptId: AttemptId, paths: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const rows = yield* sql`
+        SELECT a.head_sha FROM review_attempts a
+        JOIN reviews r ON r.id = a.review_id
+        WHERE a.id = ${attemptId} AND r.pr_key = ${key} AND r.local IS NULL`.pipe(
+        Effect.flatMap(decodeHeads),
+      );
+      const headSha = rows[0]?.head_sha ?? null;
+      const ref = refFromKey(key);
+      if (headSha === null || ref === null)
+        return yield* new GuideNotFoundError({ key, message: "The code isn't checked out yet." });
+      return yield* repo.readTexts(ref, headSha, paths);
+    }).pipe(
+      Effect.catchTags({
+        ...dbFailures,
+        RepoError: (error) => Effect.fail(new ReviewError({ message: error.message })),
+      }),
+    );
+
   /**
    * The median click-to-guide time of past full guides by the same agent instance on
    * diffs of a similar size (half to double the changed lines). Null with fewer
@@ -2716,6 +2740,7 @@ export const make = Effect.gen(function* () {
     guide,
     draft,
     diff,
+    texts,
     typicalDuration,
     submitGuide,
     reviseGuide,

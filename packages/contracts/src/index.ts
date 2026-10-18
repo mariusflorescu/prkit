@@ -7,6 +7,7 @@ export * from "./desktopUpdateIpc.ts";
 export * from "./desktopUpdates.ts";
 export * from "./diffRows.ts";
 export * from "./diffSnapshot.ts";
+export * from "./diffTexts.ts";
 export * from "./fixer.ts";
 export * from "./guide.ts";
 export * from "./guideConfig.ts";

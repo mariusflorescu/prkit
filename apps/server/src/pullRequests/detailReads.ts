@@ -1,6 +1,7 @@
 import {
   type AccountId,
   BlobId,
+  DiffTexts,
   type Freshness,
   FileContents,
   type FileSide,
@@ -25,6 +26,7 @@ import * as Schema from "effect/Schema";
 import { GitHubAccounts } from "../accounts/GitHubAccounts.ts";
 import { GitHubApi, GitHubRequestError, queryFailure } from "../github/GitHubApi.ts";
 import { makeReviewThreads } from "./reviewThreads.ts";
+import { makeTextsRead } from "./textsRead.ts";
 import { makeTimelineRead } from "./timelineRead.ts";
 import { makeActionReads } from "./actionReads.ts";
 import { clipText } from "./clipText.ts";
@@ -191,6 +193,7 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
   const api = yield* GitHubApi;
   const accounts = yield* GitHubAccounts;
   const readTimeline = yield* makeTimelineRead;
+  const readTexts = yield* makeTextsRead;
   const actionReads = yield* makeActionReads;
   const reviewThreads = yield* makeReviewThreads;
   const changed = (cacheKey: { readonly accountId: AccountId; readonly key: string }) =>
@@ -228,6 +231,16 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
     json: Schema.fromJsonString(FileContents),
     maxEntries: 128,
     maxBytes: 16 * 1024 * 1024,
+    freshMs: Number.POSITIVE_INFINITY,
+    persist: false,
+    changed: () => Effect.void,
+  });
+  // Keyed by commit and paths, so an answer never goes stale.
+  const textsCache = yield* makeReadCache({
+    name: "texts",
+    json: Schema.fromJsonString(DiffTexts),
+    maxEntries: 64,
+    maxBytes: 32 * 1024 * 1024,
     freshMs: Number.POSITIVE_INFINITY,
     persist: false,
     changed: () => Effect.void,
@@ -687,6 +700,41 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
       );
       return cached.value;
     }).pipe(readError(key, accountId));
+  /**
+   * The new side of each path at a commit, so the diff viewer can show the code around each
+   * change. One GitHub request per call, so a caller sends one batch (`DIFF_TEXT_BATCH`).
+   */
+  const texts = (
+    key: PullRequestKey,
+    accountId: AccountId,
+    sha: string,
+    paths: ReadonlyArray<string>,
+  ) =>
+    Effect.gen(function* () {
+      if (paths.length === 0) return { files: [] };
+      const { ref, account } = yield* binding(key, accountId);
+      // The sha becomes part of a cache key that never goes stale, so a branch name won't do.
+      if (!/^[0-9a-f]{40}$/.test(sha))
+        return yield* fail(
+          key,
+          accountId,
+          "contents",
+          "This commit can't be read. Refresh and try again.",
+        );
+      // No path holds a NUL, so two batches never share a key.
+      const cached = yield* textsCache.read(
+        { accountId, configDir: account.configDir, key: `${key}:${sha}:${paths.join("\0")}` },
+        readTexts(accountId, ref, sha, paths).pipe(
+          deadline(
+            key,
+            accountId,
+            "File text read",
+            "GitHub took too long to send the code. Retry.",
+          ),
+        ),
+      );
+      return cached.value;
+    }).pipe(readError(key, accountId));
   const timeline = (key: PullRequestKey, accountId: AccountId) =>
     Effect.gen(function* () {
       const { account, ref } = yield* binding(key, accountId);
@@ -911,6 +959,7 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
     current,
     files,
     fileContents,
+    texts,
     fileDiffIdentity,
     timeline,
     invalidate,

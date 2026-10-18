@@ -1,7 +1,7 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- effect/Crypto has no constant-time compare.
 import * as NodeCrypto from "node:crypto";
 
-import { WS_METHODS, WsRpcGroup } from "@prkit/contracts";
+import { type DiffSource, DiffTextsError, WS_METHODS, WsRpcGroup } from "@prkit/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -78,6 +78,25 @@ const layerHandlers = WsRpcGroup.toLayer(
     const guideConfig = yield* GuideConfigStore;
     const cliInstall = yield* CliInstall;
     const outsideAgents = yield* OutsideAgents;
+    const textsError = (error: { readonly message: string }) =>
+      new DiffTextsError({ message: error.message });
+    /** Each kind of diff source is read by the one service that owns its commit. */
+    const diffTexts = (source: DiffSource, paths: ReadonlyArray<string>) => {
+      switch (source._tag) {
+        case "pullRequest":
+          return pullRequests
+            .texts(source.key, source.accountId, source.sha, paths)
+            .pipe(Effect.mapError(textsError));
+        case "attempt":
+          return reviews
+            .texts(source.key, source.attemptId, paths)
+            .pipe(Effect.mapError(textsError));
+        case "fixerTurn":
+          return fixers
+            .texts(source.key, source.turnId, source.sha, paths)
+            .pipe(Effect.mapError(textsError));
+      }
+    };
     return WsRpcGroup.of({
       [WS_METHODS.accountsList]: () => accounts.list(),
       [WS_METHODS.accountsRefresh]: () => accounts.refresh(),
@@ -98,6 +117,7 @@ const layerHandlers = WsRpcGroup.toLayer(
         pullRequests.timeline(key, accountId),
       [WS_METHODS.pullRequestsFileContents]: ({ key, accountId, path, side }) =>
         pullRequests.fileContents(key, accountId, path, side),
+      [WS_METHODS.diffsTexts]: ({ source, paths }) => diffTexts(source, paths),
       [WS_METHODS.pullRequestsExecute]: ({ key, accountId, command }) =>
         pullRequests.execute(key, accountId, command),
       [WS_METHODS.pullRequestsCandidates]: ({ key, accountId }) =>

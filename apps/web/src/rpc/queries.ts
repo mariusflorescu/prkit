@@ -4,6 +4,7 @@ import {
   type AccountId,
   type AgentInstanceId,
   type AttemptId,
+  type DiffSource,
   type PullRequestKey,
   type FileSide,
   type GuideScope,
@@ -31,6 +32,7 @@ import {
   getPullRequestStack,
   getPullRequestTimeline,
   getFileContents,
+  getDiffTexts,
   getReview,
   getReviewedFiles,
   getWorkspace,
@@ -237,6 +239,17 @@ export const pullRequestTimelineQuery = (key: PullRequestKey, accountId: Account
     queryFn: () => getPullRequestTimeline(key, accountId),
     staleTime: Infinity,
     gcTime: Infinity,
+    retry: false,
+  });
+/**
+ * The new side of a batch of a diff's files, read at the commit `source` names, so an
+ * answer never goes stale. A failed batch stays failed until Retry.
+ */
+export const diffTextsQuery = (source: DiffSource, paths: ReadonlyArray<string>) =>
+  queryOptions({
+    queryKey: ["diffTexts", source, paths],
+    queryFn: () => getDiffTexts(source, paths),
+    staleTime: Infinity,
     retry: false,
   });
 export const pullRequestFileContentsQuery = (
