@@ -6,7 +6,7 @@ import { DiffStat } from "./DiffStat";
 import { InlineMarkdown } from "./InlineMarkdown";
 import { LazyDiffBody } from "./LazyDiffBody";
 import { RenderBoundary } from "./RenderBoundary";
-import type { DiffAnnotation, DiffComments, LoadContents } from "./types";
+import type { DiffAnnotation, DiffComments, LoadContents, RevealLine } from "./types";
 import "./diff.css";
 
 const noAnnotations: ReadonlyArray<DiffAnnotation> = [];
@@ -22,6 +22,7 @@ export type FileDiffCardProps = {
   id?: string;
   prUrl?: string | undefined;
   trailingLines?: number | undefined;
+  reveal?: RevealLine | null | undefined;
 };
 
 export function FileDiffCard({
@@ -34,8 +35,14 @@ export function FileDiffCard({
   id,
   prUrl,
   trailingLines,
+  reveal = null,
 }: FileDiffCardProps) {
-  const [open, setOpen] = useState(!defaultCollapsed);
+  const [open, setOpen] = useState(!defaultCollapsed || reveal !== null);
+  const [revealed, setRevealed] = useState(reveal);
+  if (reveal !== revealed) {
+    setRevealed(reveal);
+    if (reveal !== null) setOpen(true);
+  }
   const bodyId = useId();
   const risks = annotations.filter((annotation) => annotation.tone === "risk").length;
   const questions = annotations.filter((annotation) => annotation.tone === "question").length;
@@ -46,6 +53,7 @@ export function FileDiffCard({
       data-path={file.path}
       data-open={open}
       aria-label={file.path}
+      tabIndex={-1}
     >
       <header data-file-diff-header="">
         <button
@@ -100,6 +108,7 @@ export function FileDiffCard({
               loadContents={loadContents}
               trailingLines={trailingLines}
               prUrl={prUrl}
+              reveal={reveal}
             />
           </RenderBoundary>
           {comments?.footer}

@@ -1,0 +1,493 @@
+{
+  "summary": [
+    "The AI SDK already printed a warning when you used something deprecated, and in Node it already went through `process.emitWarning` as a `DeprecationWarning`. But those warnings had no code, so you couldn't tell one apart from another or filter on it, and they repeated on every call. A server that calls a deprecated function in a loop printed the same line thousands of times. A few deprecated APIs (`generateObject`, `streamObject`, `experimental_generateSpeech`, `experimental_transcribe`) were only marked `@deprecated` in their types and never warned at runtime at all.",
+    "This PR gives every deprecation a fixed code like `AISDK_DEP_GENERATE_OBJECT`. The default logger now prints each code only once per process. In Node the code is attached to the warning, so `process.on('warning')` can read `warning.code` and the usual `--no-deprecation` / `--throw-deprecation` flags apply. In browsers and edge runtimes the code is printed in brackets in front of the message. The four deprecated APIs above now warn when called.",
+    "Nothing changes for people who set `AI_SDK_LOG_WARNINGS` to `false` or to their own function. A custom function still receives every warning, repeats included."
+  ],
+  "background": [],
+  "steps": [
+    "A deprecated API, or code that already flagged deprecated input (legacy tool-result types, `image` parts, `rawInput`, provider warnings), calls `logWarnings` with a `deprecated` warning.",
+    "If `AI_SDK_LOG_WARNINGS` is `false` or a function, `logWarnings` returns early as before, so nothing is counted.",
+    "Otherwise `getDeprecationCode` turns the warning's `setting` text, plus the provider id if there is one, into a code.",
+    "If that code was already printed in this process, the warning is skipped. Otherwise the code is remembered in `emittedDeprecationCodes`.",
+    "`emitWarning` passes the code to `process.emitWarning` in Node, or prefixes the message with `[CODE]` for `console.warn` elsewhere."
+  ],
+  "chapters": [
+    {
+      "id": "codes",
+      "title": "Every deprecation gets a fixed code",
+      "kind": "core",
+      "body": [
+        "`getDeprecationCode` decides which code a warning gets. Built-in deprecations come from a hand-written table that maps the warning's `setting` text (for example `'\"tool-result\" content of type \"file-data\"'`) to a readable code (`AISDK_DEP_TOOL_RESULT_FILE_DATA`). The comment at the top says these codes must never be renamed or reused, because users may filter on them.",
+        "Anything not in the table still gets a code, built from its text: `AISDK_DEP_SETTING_<setting>` for SDK warnings and `AISDK_DEP_PROVIDER_<provider>__<setting>` for warnings a provider reports. Provider codes deliberately ignore the model id and message, so one provider setting is one code no matter which model raised it. That works for third-party providers without asking them to send a code.",
+        "The careful part is `encodeCodePart`. Codes may only contain letters, digits and `_`, so every other character is replaced with `_` plus its 4-digit hex value. Underscore itself is escaped too. That way `old-key` and `old_key` never end up with the same code, and a double underscore can only mean the split between provider and setting."
+      ],
+      "pseudocode": null,
+      "callouts": [
+        {
+          "tone": "question",
+          "text": "Codes are looked up by the `setting` text each call site writes inline, so rewording that text later quietly switches it to a fallback `AISDK_DEP_SETTING_...` code. Only the tool-result and `generateObject` codes are pinned end to end by tests - would shared constants be safer?"
+        }
+      ],
+      "files": [
+        {
+          "path": "packages/ai/src/logger/deprecations.ts",
+          "note": null,
+          "collapsed": false,
+          "annotations": [
+            {
+              "line": 2,
+              "side": "additions",
+              "tone": "note",
+              "text": "A `Map` rather than a plain object, so a setting named `toString` can't accidentally match a built-in object method. The test checks this."
+            },
+            {
+              "line": 49,
+              "side": "additions",
+              "tone": "note",
+              "text": "Every non-alphanumeric character becomes `_XXXX`, including `_` itself. Upper and lower case are kept as-is, so `Old-key` and `old-key` stay distinct."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dedupe",
+      "title": "The default logger prints each code once",
+      "kind": "core",
+      "body": [
+        "`logWarnings` keeps a `Set` of codes it has already printed. For each `deprecated` warning it computes the code, skips the warning if the code is in the set, and adds it otherwise. Ordinary warnings (unsupported feature, compatibility, other) have no code and still print every time.",
+        "Order matters here. The skip check sits after the early returns for `AI_SDK_LOG_WARNINGS === false` and for a custom logger function. So while warnings are turned off or routed to a custom function, no codes get used up. If you switch back to the default logger later, the first deprecation still prints.",
+        "Skipping is keyed on the code only, not the message. Two warnings with the same setting but different text count as the same warning. The tests confirm this is on purpose.",
+        "`emitWarning` takes the code and passes it on: as the `code` option to `process.emitWarning` in Node, or as a `[CODE] ` prefix for `console.warn` where there's no `process`. `resetLogWarningsState` now clears the set too, which the test suites rely on."
+      ],
+      "pseudocode": null,
+      "callouts": [
+        {
+          "tone": "note",
+          "text": "Because skipping ignores the message, the extra detail some warnings carry only shows the first time. For example, a `file-url` tool result missing a `mediaType` adds \"Inferred media type ... from URL\" to its deprecation message, and later parts with a different URL won't print that hint."
+        }
+      ],
+      "files": [
+        {
+          "path": "packages/ai/src/logger/log-warnings.ts",
+          "note": null,
+          "collapsed": false,
+          "annotations": [
+            {
+              "line": 91,
+              "side": "additions",
+              "tone": "note",
+              "text": "Module-level, so \"once\" means once per loaded copy of the SDK. If an app ends up with two copies (say, ESM and CommonJS), each prints its own."
+            },
+            {
+              "line": 108,
+              "side": "additions",
+              "tone": "note",
+              "text": "The bracket prefix means browser messages no longer start with \"AI SDK Warning:\". The docs are updated to say \"include\" instead of \"start with\"."
+            },
+            {
+              "line": 165,
+              "side": "additions",
+              "tone": "note",
+              "text": "Keyed on the code alone. A second warning with the same code but different message text is dropped."
+            }
+          ]
+        },
+        {
+          "path": "packages/ai/src/global.ts",
+          "note": "Doc comment only: describes the new default logger behavior.",
+          "collapsed": false,
+          "annotations": []
+        }
+      ]
+    },
+    {
+      "id": "deprecated-apis",
+      "title": "Four deprecated APIs start warning at runtime",
+      "kind": "core",
+      "body": [
+        "`generateObject` and `streamObject` now call `logWarnings` with a `deprecated` warning as their very first line, on every call. No provider is passed, so the code is the plain `AISDK_DEP_GENERATE_OBJECT` / `AISDK_DEP_STREAM_OBJECT` from the table, and the default logger prints it once.",
+        "`experimental_generateSpeech` and `experimental_transcribe` used to be the same function as `generateSpeech` and `transcribe` under another name. To warn, they now have to be separate wrapper functions that log and then call the real one. The `typeof generateSpeech` type keeps their signatures identical."
+      ],
+      "pseudocode": null,
+      "callouts": [
+        {
+          "tone": "note",
+          "text": "Users with a custom `AI_SDK_LOG_WARNINGS` function now get one extra call per `generateObject` / `streamObject` call, with no provider or model set, and it is never deduplicated. Anyone forwarding warnings to monitoring will see that volume."
+        }
+      ],
+      "files": [
+        {
+          "path": "packages/ai/src/generate-object/generate-object.ts",
+          "note": null,
+          "collapsed": false,
+          "annotations": [
+            {
+              "line": 266,
+              "side": "additions",
+              "tone": "note",
+              "text": "Runs before the model is resolved, so the warning has no provider and gets the fixed table code rather than a provider-scoped one."
+            }
+          ]
+        },
+        {
+          "path": "packages/ai/src/generate-object/stream-object.ts",
+          "note": "Same change as generateObject.",
+          "collapsed": false,
+          "annotations": []
+        },
+        {
+          "path": "packages/ai/src/generate-speech/index.ts",
+          "note": null,
+          "collapsed": false,
+          "annotations": [
+            {
+              "line": 18,
+              "side": "additions",
+              "tone": "note",
+              "text": "Was a plain alias. It is now its own function, so `experimental_generateSpeech === generateSpeech` is no longer true."
+            }
+          ]
+        },
+        {
+          "path": "packages/ai/src/transcribe/index.ts",
+          "note": "Same wrapper pattern as experimental_generateSpeech.",
+          "collapsed": false,
+          "annotations": []
+        }
+      ]
+    },
+    {
+      "id": "example",
+      "title": "An example that calls generateObject twice and warns once",
+      "kind": "supporting",
+      "body": [
+        "The PR's end-to-end check. It uses a mock model, so it needs no API keys. Run it as is to see the deprecation printed once for two calls, or with `NODE_OPTIONS=--throw-deprecation` to see it fail on the first call."
+      ],
+      "pseudocode": null,
+      "callouts": [],
+      "files": [
+        {
+          "path": "examples/ai-functions/src/generate-object/mock/deprecation-warnings.ts",
+          "note": null,
+          "collapsed": false,
+          "annotations": []
+        }
+      ]
+    },
+    {
+      "id": "bundle",
+      "title": "Bundle size limit goes up 5 KiB",
+      "kind": "config",
+      "body": [
+        "The code table and the two wrappers grow the full-SDK bundle, so its CI limit moves from 545 to 550 KiB. The smaller `generateText`-only and `tool`-only limits are unchanged."
+      ],
+      "pseudocode": null,
+      "callouts": [],
+      "files": [
+        {
+          "path": "packages/ai/scripts/check-bundle-size.ts",
+          "note": null,
+          "collapsed": false,
+          "annotations": [
+            {
+              "line": 6,
+              "side": "additions",
+              "tone": "note",
+              "text": "`deprecations.ts` is about 2 KB before minifying, so most of the extra 5 KiB is headroom."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "new-tests",
+      "title": "New tests for codes, skipping and Node flags",
+      "kind": "tests",
+      "body": [
+        "`deprecations.test.ts` pins every code in the table and checks that tricky inputs (punctuation, case, emoji, broken Unicode, provider boundaries, `toString`) all produce distinct, valid codes.",
+        "`log-warnings.test.ts` covers the skip rules: once across calls and message changes, separate per provider but not per model, ordinary warnings always printed, nothing used up while warnings are off or custom, and the `[CODE]` prefix when there's no `process`.",
+        "`log-warnings.node.test.ts` is the unusual one. It bundles the real logger with esbuild and runs it in a fresh `node` process, so the real `--no-deprecation`, `--throw-deprecation` and `--trace-deprecation` flags are tested without mocking `process.emitWarning`. The `.node.test.ts` name keeps it out of the edge-runtime test run."
+      ],
+      "pseudocode": null,
+      "callouts": [],
+      "files": [
+        {
+          "path": "packages/ai/src/logger/deprecations.test.ts",
+          "note": null,
+          "collapsed": false,
+          "annotations": [
+            {
+              "line": 51,
+              "side": "additions",
+              "tone": "note",
+              "text": "Would return a function, not undefined, if the table were a plain object."
+            }
+          ]
+        },
+        {
+          "path": "packages/ai/src/logger/log-warnings.test.ts",
+          "note": null,
+          "collapsed": false,
+          "annotations": [
+            {
+              "line": 310,
+              "side": "additions",
+              "tone": "note",
+              "text": "What a provider-scoped code looks like when the setting has spaces, quotes and dashes in it."
+            }
+          ]
+        },
+        {
+          "path": "packages/ai/src/logger/log-warnings.node.test.ts",
+          "note": null,
+          "collapsed": false,
+          "annotations": [
+            {
+              "line": 34,
+              "side": "additions",
+              "tone": "note",
+              "text": "Clears `NODE_OPTIONS` so flags from the parent test run don't leak into the child process."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "test-expectations",
+      "title": "Existing tests absorb the extra warning calls",
+      "kind": "tests",
+      "body": [
+        "Two different reasons push these counts up, and both are expected.",
+        "In the `generateObject` and `streamObject` tests, `logWarnings` is now called twice per run: first the new deprecation, then the model's own warnings. The old `toHaveBeenCalledOnce` checks become \"called twice, and the second call has the model warnings\".",
+        "In the prompt conversion tests, several tests trigger the same `file-url` code. Without a reset, skipping would hide it in every test after the first, so `beforeEach` now calls `resetLogWarningsState`. That reset also brings back the one-time \"how to turn off warnings\" message, which is why each `process.emitWarning` count goes up by one. Each assertion also gains the expected code."
+      ],
+      "pseudocode": null,
+      "callouts": [],
+      "files": [
+        {
+          "path": "packages/ai/src/prompt/convert-to-language-model-prompt.test.ts",
+          "note": null,
+          "collapsed": false,
+          "annotations": [
+            {
+              "line": 2444,
+              "side": "additions",
+              "tone": "note",
+              "text": "Clears both the remembered codes and the first-message flag. The second is why every count below goes up by one."
+            }
+          ]
+        },
+        {
+          "path": "packages/ai/src/generate-object/generate-object.test.ts",
+          "note": null,
+          "collapsed": false,
+          "annotations": [
+            {
+              "line": 223,
+              "side": "additions",
+              "tone": "note",
+              "text": "Call 1 is the new `generateObject` deprecation. Call 2 is the model's warnings, as before."
+            }
+          ]
+        },
+        {
+          "path": "packages/ai/src/generate-object/stream-object.test.ts",
+          "note": "Same updates as the generateObject tests.",
+          "collapsed": false,
+          "annotations": []
+        }
+      ]
+    },
+    {
+      "id": "docs",
+      "title": "Docs list the codes and the Node flags",
+      "kind": "docs",
+      "body": [
+        "The error-handling page gains a Deprecation Warnings section with the code table and the Node flags, and notes that custom handlers see repeats. Worth checking the table against `deprecations.ts`. It doesn't mention the generated `AISDK_DEP_PROVIDER_*` and `AISDK_DEP_SETTING_*` codes."
+      ],
+      "pseudocode": null,
+      "callouts": [],
+      "files": [
+        {
+          "path": "content/docs/04-ai-sdk-ui/21-error-handling.mdx",
+          "note": null,
+          "collapsed": false,
+          "annotations": [
+            {
+              "line": 25,
+              "side": "additions",
+              "tone": "note",
+              "text": "Was \"start with\". Browser messages now begin with the `[CODE]` prefix."
+            }
+          ]
+        },
+        {
+          "path": ".changeset/bright-deprecations-warn.md",
+          "note": null,
+          "collapsed": false,
+          "annotations": []
+        }
+      ]
+    }
+  ],
+  "flow": {
+    "title": "A deprecation warning gets a code and is printed once",
+    "subtitle": "Custom loggers still see every warning. Only the default logger skips repeats.",
+    "direction": "auto",
+    "nodes": [
+      {
+        "id": "objapi",
+        "label": "generateObject / streamObject",
+        "status": "changed",
+        "chapter": "deprecated-apis",
+        "detail": "Now log a deprecation at the start of every call. Before, they only had a @deprecated tag in the types."
+      },
+      {
+        "id": "aliases",
+        "label": "experimental_* aliases",
+        "status": "changed",
+        "chapter": "deprecated-apis",
+        "detail": "experimental_generateSpeech and experimental_transcribe were plain aliases. Now they are small wrappers that warn, then call the real function."
+      },
+      {
+        "id": "prompt",
+        "label": "convertToLanguageModelPrompt",
+        "status": "unchanged",
+        "chapter": null,
+        "detail": "Already logged deprecations for legacy tool-result types and image parts. Provider warnings and the UI rawInput check reach logWarnings the same way."
+      },
+      {
+        "id": "log",
+        "label": "logWarnings()",
+        "status": "changed",
+        "chapter": "dedupe",
+        "detail": "The single entry point for all SDK warnings."
+      },
+      {
+        "id": "custom",
+        "label": "AI_SDK_LOG_WARNINGS()",
+        "status": "unchanged",
+        "chapter": null,
+        "detail": "A user-supplied logger. Gets the original warnings every time, no codes, no skipping."
+      },
+      {
+        "id": "code",
+        "label": "getDeprecationCode()",
+        "status": "added",
+        "chapter": "codes",
+        "detail": "Looks up a fixed code for built-in deprecations, or builds one from the provider id and setting."
+      },
+      {
+        "id": "seen",
+        "label": "emittedDeprecationCodes",
+        "status": "added",
+        "chapter": "dedupe",
+        "detail": "A module-level Set. A code already in it means the warning is skipped."
+      },
+      {
+        "id": "emit",
+        "label": "emitWarning()",
+        "status": "changed",
+        "chapter": "dedupe",
+        "detail": "Now accepts an optional code."
+      },
+      {
+        "id": "node",
+        "label": "process.emitWarning",
+        "status": "unchanged",
+        "chapter": null,
+        "detail": "Node: gets { type: 'DeprecationWarning', code }."
+      },
+      {
+        "id": "console",
+        "label": "console.warn",
+        "status": "unchanged",
+        "chapter": null,
+        "detail": "Browser / edge: message prefixed with [CODE]."
+      }
+    ],
+    "edges": [
+      {
+        "from": "objapi",
+        "to": "log",
+        "label": null,
+        "status": "added"
+      },
+      {
+        "from": "aliases",
+        "to": "log",
+        "label": null,
+        "status": "added"
+      },
+      {
+        "from": "prompt",
+        "to": "log",
+        "label": null,
+        "status": "unchanged"
+      },
+      {
+        "from": "log",
+        "to": "custom",
+        "label": "custom logger",
+        "status": "unchanged"
+      },
+      {
+        "from": "log",
+        "to": "code",
+        "label": "deprecated",
+        "status": "added"
+      },
+      {
+        "from": "code",
+        "to": "seen",
+        "label": null,
+        "status": "added"
+      },
+      {
+        "from": "seen",
+        "to": "emit",
+        "label": "first time",
+        "status": "added"
+      },
+      {
+        "from": "log",
+        "to": "emit",
+        "label": null,
+        "status": "unchanged"
+      },
+      {
+        "from": "emit",
+        "to": "node",
+        "label": "Node",
+        "status": "unchanged"
+      },
+      {
+        "from": "emit",
+        "to": "console",
+        "label": "browser / edge",
+        "status": "unchanged"
+      }
+    ]
+  },
+  "focus": [
+    {
+      "tone": "question",
+      "text": "Built-in codes are looked up by the inline `setting` text, so rewording that text later silently changes the code.",
+      "chapter": "codes"
+    },
+    {
+      "tone": "note",
+      "text": "Custom `AI_SDK_LOG_WARNINGS` functions now get a deprecation on every `generateObject` / `streamObject` call, never deduplicated.",
+      "chapter": "deprecated-apis"
+    },
+    {
+      "tone": "note",
+      "text": "Repeats are skipped by code alone, so extra detail in later messages (like the inferred media type for `file-url`) is lost.",
+      "chapter": "dedupe"
+    }
+  ],
+  "focusAreas": [],
+  "guidanceNote": null
+}

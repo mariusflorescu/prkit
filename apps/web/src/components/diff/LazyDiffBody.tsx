@@ -7,7 +7,7 @@ import type { ComponentProps } from "react";
 
 export function LazyDiffBody(props: ComponentProps<typeof DiffBody>) {
   const diffStyle = useDiffPrefs((state) => state.diffStyle);
-  const { ref, ready } = useDeferredMount();
+  const { ref, ready } = useDeferredMount(props.reveal != null);
   const height = estimateDiffHeight(
     props.file,
     diffStyle,

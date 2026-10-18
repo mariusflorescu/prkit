@@ -1,4 +1,4 @@
-import type { DiffFile, NormalizedGuide } from "@prkit/contracts";
+import type { DiffFile, DiffLineRef, NormalizedGuide } from "@prkit/contracts";
 import { useMemo } from "react";
 
 import { ChapterRoadmap } from "./ChapterRoadmap";
@@ -12,6 +12,7 @@ export function GuideOverview({
   guide,
   files,
   onChapter,
+  onLine,
   prUrl,
   prDescription,
   pendingChapterIds,
@@ -19,31 +20,38 @@ export function GuideOverview({
   guide: NormalizedGuide;
   files: ReadonlyMap<string, DiffFile>;
   onChapter: (id: string) => void;
+  onLine: (at: DiffLineRef) => void;
   prUrl?: string | undefined;
   prDescription?: string | undefined;
   pendingChapterIds: ReadonlySet<string>;
 }) {
+  const flow =
+    guide.flow && (guide.flow._tag === "graph" ? guide.flow.nodes : guide.flow.rows).length > 0
+      ? guide.flow
+      : null;
   const layout = useMemo(() => {
-    if (!guide.flow || guide.flow.nodes.length === 0) return "single";
-    const nodes = indexFlowNodes(guide.flow, guide.chapters);
+    if (!flow) return "single";
+    if (flow._tag === "behavior") return "side";
+    const nodes = indexFlowNodes(flow, guide.chapters);
     const width =
-      guide.flow.direction === "auto"
+      flow.direction === "auto"
         ? Math.min(
-            layoutFlow(nodes, guide.flow.edges, "LR").width,
-            layoutFlow(nodes, guide.flow.edges, "TB").width,
+            layoutFlow(nodes, flow.edges, "LR").width,
+            layoutFlow(nodes, flow.edges, "TB").width,
           )
-        : layoutFlow(nodes, guide.flow.edges, guide.flow.direction).width;
+        : layoutFlow(nodes, flow.edges, flow.direction).width;
     return width > 600 ? "stacked" : "side";
-  }, [guide]);
+  }, [flow, guide.chapters]);
   return (
     <div data-guide-overview="">
       <div data-overview-grid="" data-layout={layout}>
         <SummaryPanel guide={guide} prUrl={prUrl} />
-        {guide.flow && guide.flow.nodes.length > 0 && (
+        {flow && (
           <FlowCard
-            flow={guide.flow}
+            flow={flow}
             chapters={guide.chapters}
             onChapter={onChapter}
+            onLine={onLine}
             prUrl={prUrl}
           />
         )}

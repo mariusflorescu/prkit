@@ -4,42 +4,39 @@ import * as Schema from "effect/Schema";
 import type { DiffFile, DiffSnapshot } from "./diffSnapshot.ts";
 import type { AttemptConfig, SkippedFile } from "./guideConfig.ts";
 import { describeRule } from "./guideConfigResolve.ts";
+import { globTokens, matchesGlob } from "./guideGlob.ts";
 import {
   type DraftGuide,
   type Guide,
   type GuidePatch,
-  GuideFlowStatus,
   GuideKind,
   GuideSide,
   GuideTone,
   type NormalizedGuide,
 } from "./guide.ts";
+import {
+  type GuideCheckContext,
+  type Mode,
+  type Report,
+  asList,
+  didYouMean,
+  hunkRanges,
+  listRanges,
+  paragraphs,
+  repr,
+  resolveChapter,
+  slugify,
+  trim,
+  words,
+} from "./guideCheck.ts";
+import { checkFlowLengths, flowTexts, normalizeFlow } from "./guideFlow.ts";
 
-type Report = { errors: Array<string>; warnings: Array<string> };
-/** `draft` skips the checks a guide can only pass once it is finished: coverage and empty chapters. */
-type Mode = "guide" | "draft";
+export type { GuideCheckContext };
+
 type RawChapter = DraftChapter | Guide["chapters"][number];
 type DraftChapter = NonNullable<DraftGuide["chapters"]>[number];
 type Chapter = NormalizedGuide["chapters"][number];
 type FileEntry = Exclude<Guide["chapters"][number]["files"][number], string>;
-type Flow = NonNullable<NormalizedGuide["flow"]>;
-type Range = readonly [number, number];
-type GlobToken = { kind: "star" } | { kind: "character"; matches: (char: string) => boolean };
-
-/**
- * What one attempt asked for, so the checks that depend on the reviewer's settings
- * run. Without it a guide is checked as the visualize-pr format alone.
- */
-export interface GuideCheckContext {
-  /** The active focus areas, by the id the agent answers under: exactly one entry each. */
-  readonly focusAreas: ReadonlyArray<{
-    readonly handle: string;
-    readonly label: string;
-    readonly question: string;
-  }>;
-  /** Files the ignore rules skip. They are not in the snapshot the guide is checked against. */
-  readonly skipped: ReadonlyArray<SkippedFile>;
-}
 
 export const checkContextOf = (config: AttemptConfig): GuideCheckContext => ({
   focusAreas: config.focusAreas.flatMap((area) =>
@@ -66,131 +63,6 @@ const sideAliases = new Map<string, typeof GuideSide.Type>([
   ["left", "deletions"],
   ["-", "deletions"],
 ]);
-const statusAliases = new Map<string, typeof GuideFlowStatus.Type>([
-  ["added", "added"],
-  ["new", "added"],
-  ["add", "added"],
-  ["changed", "changed"],
-  ["modified", "changed"],
-  ["updated", "changed"],
-  ["removed", "removed"],
-  ["deleted", "removed"],
-  ["gone", "removed"],
-  ["unchanged", "unchanged"],
-  ["same", "unchanged"],
-  ["existing", "unchanged"],
-]);
-
-const slugify = (text: string) =>
-  text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "chapter";
-const asList = (value: string | ReadonlyArray<string> | undefined): ReadonlyArray<string> =>
-  value === undefined ? [] : typeof value === "string" ? [value] : value;
-const whitespace =
-  "\\t-\\r\\x1c-\\x20\\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000";
-const trimWhitespace = new RegExp(`^[${whitespace}]+|[${whitespace}]+$`, "gu");
-const wordSeparator = new RegExp(`[${whitespace}]+`, "u");
-const trim = (text: string) => text.replace(trimWhitespace, "");
-const paragraphs = (value: string | ReadonlyArray<string> | undefined) =>
-  asList(value).map(trim).filter(Boolean);
-const words = (text: string) => (trim(text) ? trim(text).split(wordSeparator).length : 0);
-const repr = (text: string) => {
-  const quote = text.includes("'") && !text.includes('"') ? '"' : "'";
-  return (
-    quote +
-    text
-      .replace(/\\/g, "\\\\")
-      .replaceAll(quote, "\\" + quote)
-      .replace(/\n/g, "\\n")
-      .replace(/\r/g, "\\r")
-      .replace(/\t/g, "\\t") +
-    quote
-  );
-};
-
-const hunkRanges = (patch: string) => {
-  const additions: Array<Range> = [];
-  const deletions: Array<Range> = [];
-  for (const match of patch.matchAll(/(?:^|\n)@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/g)) {
-    const oldStart = Number(match[1]);
-    const oldLength = Number(match[2] ?? 1);
-    const newStart = Number(match[3]);
-    const newLength = Number(match[4] ?? 1);
-    if (oldLength) deletions.push([oldStart, oldStart + oldLength - 1]);
-    if (newLength) additions.push([newStart, newStart + newLength - 1]);
-  }
-  return { additions, deletions };
-};
-
-const classMatches = (contents: string, char: string) => {
-  const negated = contents.startsWith("!");
-  const chars = Array.from(negated ? contents.slice(1) : contents);
-  let matched = false;
-  for (let i = 0; i < chars.length; i++) {
-    const low = chars[i];
-    const high = chars[i + 2];
-    if (low === undefined) continue;
-    if (chars[i + 1] === "-" && high !== undefined) {
-      matched ||= low <= char && char <= high;
-      i += 2;
-    } else {
-      matched ||= low === char;
-    }
-  }
-  return negated ? !matched : matched;
-};
-
-const globTokens = (pattern: string) => {
-  const chars = Array.from(pattern);
-  const tokens: Array<GlobToken> = [];
-  for (let i = 0; i < chars.length; i++) {
-    const char = chars[i];
-    if (char === undefined) continue;
-    if (char === "*") {
-      if (tokens.at(-1)?.kind !== "star") tokens.push({ kind: "star" });
-    } else if (char === "?") {
-      tokens.push({ kind: "character", matches: () => true });
-    } else if (char === "[") {
-      let end = i + 1;
-      if (chars[end] === "!") end++;
-      if (chars[end] === "]") end++;
-      while (end < chars.length && chars[end] !== "]") end++;
-      if (end === chars.length) {
-        tokens.push({ kind: "character", matches: (value) => value === "[" });
-      } else {
-        const contents = chars.slice(i + 1, end).join("");
-        tokens.push({ kind: "character", matches: (value) => classMatches(contents, value) });
-        i = end;
-      }
-    } else {
-      tokens.push({ kind: "character", matches: (value) => value === char });
-    }
-  }
-  return tokens;
-};
-
-const matchesGlob = (path: string, tokens: ReadonlyArray<GlobToken>) => {
-  const chars = Array.from(path);
-  let reachable = chars.map(() => false);
-  reachable.unshift(true);
-  for (const token of tokens) {
-    const next = reachable.map(() => false);
-    if (token.kind === "star") {
-      next[0] = reachable[0] === true;
-      for (let i = 1; i <= chars.length; i++)
-        next[i] = reachable[i] === true || next[i - 1] === true;
-    } else {
-      for (let i = 0; i < chars.length; i++) {
-        const char = chars[i];
-        next[i + 1] = reachable[i] === true && char !== undefined && token.matches(char);
-      }
-    }
-    reachable = next;
-  }
-  return reachable[chars.length] === true;
-};
 
 const normalizeEntry = (
   entry: FileEntry,
@@ -231,9 +103,8 @@ const normalizeEntry = (
       continue;
     }
     if (!ranges[side].some(([low, high]) => low <= line && line <= high)) {
-      const shown = ranges[side].map(([low, high]) => `${low}-${high}`).join(", ") || "none";
       report.errors.push(
-        `\`${path}\`: ${side} line ${line} is outside the diff hunks, so the note would be hidden. Visible ${side} lines: ${shown}.`,
+        `\`${path}\`: ${side} line ${line} is outside the diff hunks, so the note would be hidden. Visible ${side} lines: ${listRanges(ranges[side])}.`,
       );
       continue;
     }
@@ -335,10 +206,9 @@ const normalizeChapters = (
         continue;
       }
       if (file === undefined) {
-        const basename = path.split("/").at(-1);
-        const close = snapshot.files.find((candidate) => candidate.path.endsWith("/" + basename));
-        const hint = close === undefined ? "" : ` Did you mean ${repr(close.path)}?`;
-        report.errors.push(`chapter \`${id}\`: \`${path}\` is not a file in this PR.${hint}`);
+        report.errors.push(
+          `chapter \`${id}\`: \`${path}\` is not a file in this PR.${didYouMean(path, snapshot)}`,
+        );
         continue;
       }
       const previousOwner = owner.get(path);
@@ -394,113 +264,6 @@ const normalizeChapters = (
   return chapters;
 };
 
-const resolveChapter = (
-  value: string | number | undefined,
-  chapterIds: ReadonlyArray<string>,
-  where: string,
-  report: Report,
-) => {
-  if (value === undefined || value === "") return null;
-  if (typeof value === "number") {
-    const id = Number.isInteger(value) && value >= 1 ? chapterIds[value - 1] : undefined;
-    if (id !== undefined) return id;
-    report.errors.push(
-      `${where}: chapter number ${value} is out of range (1-${chapterIds.length}).`,
-    );
-    return null;
-  }
-  const id = slugify(value);
-  if (chapterIds.includes(id)) return id;
-  report.errors.push(
-    `${where}: chapter \`${value}\` doesn't exist. Chapter ids: ${chapterIds.join(", ")}.`,
-  );
-  return null;
-};
-
-const normalizeFlow = (
-  raw: Guide["flow"],
-  chapterIds: ReadonlyArray<string>,
-  snapshot: DiffSnapshot,
-  report: Report,
-): Flow | null => {
-  if (raw === undefined) {
-    if (snapshot.files.some((file) => !/\.(md|mdx|rst|txt|adoc)$/iu.test(file.path)))
-      report.warnings.push(
-        "no `flow` - a before/after diagram is the fastest way to show what changed. Skip it only if this PR doesn't change what the code does.",
-      );
-    return null;
-  }
-  const nodes: Array<Flow["nodes"][number]> = [];
-  const statuses = new Map<string, Flow["nodes"][number]["status"]>();
-  for (const node of raw.nodes) {
-    const id = trim(node.id);
-    if (!id || statuses.has(id)) {
-      const nodeRepr =
-        "{" +
-        Object.entries(node)
-          .map(([key, value]) => `${repr(key)}: ${typeof value === "string" ? repr(value) : value}`)
-          .join(", ") +
-        "}";
-      report.errors.push(`flow node ${nodeRepr}: every node needs a unique \`id\`.`);
-      continue;
-    }
-    let status = statusAliases.get((node.status ?? "unchanged").toLowerCase());
-    if (status === undefined) {
-      report.errors.push(
-        `flow node \`${id}\`: status must be added, changed, removed or unchanged.`,
-      );
-      status = "unchanged";
-    }
-    statuses.set(id, status);
-    nodes.push({
-      id,
-      label: node.label || id,
-      status,
-      chapter: resolveChapter(node.chapter, chapterIds, `flow node \`${id}\``, report),
-      detail: node.detail || null,
-    });
-  }
-  if (nodes.length === 0) {
-    report.errors.push("`flow.nodes` is empty.");
-    return null;
-  }
-  const edges: Array<Flow["edges"][number]> = [];
-  for (const edge of raw.edges) {
-    const fromStatus = statuses.get(edge.from);
-    const toStatus = statuses.get(edge.to);
-    if (fromStatus === undefined || toStatus === undefined) {
-      report.errors.push(`flow edge ${edge.from} -> ${edge.to}: both ends must be node ids.`);
-      continue;
-    }
-    let status = edge.status;
-    if (status === undefined)
-      status =
-        fromStatus === "added" || toStatus === "added"
-          ? "added"
-          : fromStatus === "removed" || toStatus === "removed"
-            ? "removed"
-            : "unchanged";
-    edges.push({
-      from: edge.from,
-      to: edge.to,
-      label: edge.label || null,
-      status: statusAliases.get(status.toLowerCase()) ?? "unchanged",
-    });
-  }
-  if (nodes.length > 12)
-    report.warnings.push(
-      `flow has ${nodes.length} nodes - past 12 it stops being readable. Keep the main path (4-10 nodes).`,
-    );
-  const direction = (raw.direction ?? "auto").toUpperCase();
-  return {
-    title: raw.title || "How it fits together",
-    subtitle: raw.subtitle || null,
-    direction: direction === "LR" || direction === "TB" ? direction : "auto",
-    nodes,
-    edges,
-  };
-};
-
 const checkLengths = (guide: NormalizedGuide, report: Report) => {
   for (const chapter of guide.chapters) {
     for (const callout of chapter.callouts) {
@@ -520,13 +283,7 @@ const checkLengths = (guide: NormalizedGuide, report: Report) => {
       }
     }
   }
-  for (const node of guide.flow?.nodes ?? []) {
-    const length = Array.from(node.label).length;
-    if (length > 32)
-      report.warnings.push(
-        `flow node \`${node.id}\` label is ${length} chars and will be cut off - use one short identifier and put the rest in \`detail\`.`,
-      );
-  }
+  checkFlowLengths(guide.flow, report);
 };
 
 function* guideTexts(guide: NormalizedGuide) {
@@ -543,15 +300,7 @@ function* guideTexts(guide: NormalizedGuide) {
       for (const annotation of file.annotations) yield annotation.text;
     }
   }
-  if (guide.flow !== null) {
-    yield guide.flow.title;
-    yield guide.flow.subtitle ?? "";
-    for (const node of guide.flow.nodes) {
-      yield node.label;
-      yield node.detail ?? "";
-    }
-    for (const edge of guide.flow.edges) yield edge.label ?? "";
-  }
+  if (guide.flow !== null) yield* flowTexts(guide.flow);
   for (const item of guide.focus) yield item.text;
   for (const area of guide.focusAreas) yield area.text;
   yield guide.guidanceNote ?? "";
@@ -670,7 +419,7 @@ const normalize = (
     background: paragraphs(guide.background),
     steps: [...asList(guide.steps)],
     chapters,
-    flow: normalizeFlow(guide.flow, chapterIds, snapshot, report),
+    flow: normalizeFlow(guide.flow, chapterIds, snapshot, mode, context, report),
     focus,
     focusAreas:
       mode === "draft" ? [] : normalizeFocusAreas(guide.focusAreas, chapterIds, context, report),
@@ -790,7 +539,13 @@ export const withoutUnwrittenChapters = (draft: DraftGuide): DraftGuide => {
     ...draft,
     ...(draft.flow === undefined
       ? {}
-      : { flow: { ...draft.flow, nodes: draft.flow.nodes.map(unlinked) } }),
+      : {
+          flow: {
+            ...draft.flow,
+            ...(draft.flow.nodes === undefined ? {} : { nodes: draft.flow.nodes.map(unlinked) }),
+            ...(draft.flow.rows === undefined ? {} : { rows: draft.flow.rows.map(unlinked) }),
+          },
+        }),
     ...(draft.focus === undefined ? {} : { focus: draft.focus.map(unlinked) }),
   };
 };

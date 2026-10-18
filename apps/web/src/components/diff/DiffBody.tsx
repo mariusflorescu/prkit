@@ -15,7 +15,7 @@ import { GuideNote } from "./GuideNote";
 import { useDiffPrefs } from "./diffPrefs";
 import { DIFF_CSS } from "./diffStyles";
 import { buildFileDiff, labelTrailingSeparator } from "./fileDiff";
-import { makeLineKeys } from "./lineKeys";
+import { cellAt, makeLineKeys } from "./lineKeys";
 import type {
   ContentsState,
   DiffAnnotation,
@@ -23,6 +23,7 @@ import type {
   DiffContents,
   LineRange,
   LoadContents,
+  RevealLine,
 } from "./types";
 
 type Pin =
@@ -43,6 +44,11 @@ const fromPierre = (range: SelectedLineRange): LineRange => ({
     line: range.end,
   },
 });
+const reportCell = (rendered: HTMLElement | null, reveal: RevealLine | null | undefined) => {
+  const root = rendered?.shadowRoot;
+  const cell = reveal && root ? cellAt(root, { side: "new", line: reveal.line }) : undefined;
+  if (reveal && cell) reveal.onCell(cell);
+};
 
 export function DiffBody({
   file,
@@ -51,6 +57,7 @@ export function DiffBody({
   loadContents,
   trailingLines,
   prUrl,
+  reveal,
 }: {
   file: DiffFile;
   annotations: ReadonlyArray<DiffAnnotation>;
@@ -58,6 +65,7 @@ export function DiffBody({
   loadContents?: LoadContents | undefined;
   trailingLines?: number | undefined;
   prUrl?: string | undefined;
+  reveal?: RevealLine | null | undefined;
 }) {
   const { diffStyle, wrap } = useDiffPrefs();
   const built = useMemo(() => buildFileDiff(file), [file]);
@@ -73,9 +81,9 @@ export function DiffBody({
   // identity, which also drops the hovered line's comment button until the pointer
   // moves. So the handlers it calls are read through a ref, and pins are keyed by the
   // lines they sit on. Only a file whose comments moved renders again.
-  const latest = useRef({ comments, loadContents });
+  const latest = useRef({ comments, loadContents, reveal });
   useLayoutEffect(() => {
-    latest.current = { comments, loadContents };
+    latest.current = { comments, loadContents, reveal };
   });
   const loadFiles = useCallback<FileDiffContentsLoader>(async () => {
     const load = latest.current.loadContents;
@@ -107,6 +115,7 @@ export function DiffBody({
   const commentable = comments !== undefined;
   const [keyRange, setKeyRange] = useState<LineRange | null>(null);
   const [lineKeys] = useState(() => makeLineKeys(setKeyRange));
+  const host = useRef<HTMLElement | null>(null);
   const options = useMemo<FileDiffOptions<Pin, undefined>>(() => {
     const trailing =
       trailingLines === undefined ? undefined : labelTrailingSeparator<Pin>(trailingLines);
@@ -122,16 +131,14 @@ export function DiffBody({
       expansionLineCount: 20,
       loadDiffFiles: loadFiles,
       unsafeCSS: DIFF_CSS,
-      ...(trailing === undefined && !commentable
-        ? {}
-        : {
-            onPostRender: (host, instance, phase) => {
-              trailing?.(host, instance, phase);
-              if (!commentable) return;
-              if (phase === "unmount") lineKeys.detach();
-              else lineKeys.attach(host, (range) => latest.current.comments?.onSelect(range));
-            },
-          }),
+      onPostRender: (rendered, instance, phase) => {
+        trailing?.(rendered, instance, phase);
+        host.current = phase === "unmount" ? null : rendered;
+        reportCell(host.current, latest.current.reveal);
+        if (!commentable) return;
+        if (phase === "unmount") lineKeys.detach();
+        else lineKeys.attach(rendered, (range) => latest.current.comments?.onSelect(range));
+      },
       ...(commentable
         ? {
             enableGutterUtility: true,
@@ -187,7 +194,11 @@ export function DiffBody({
   useEffect(() => {
     if (composing === "") lineKeys.restore();
   }, [composing, lineKeys]);
-  const shown = keyRange ?? selection;
+  useLayoutEffect(() => reportCell(host.current, reveal), [reveal]);
+  const revealed: LineRange | null = reveal
+    ? { start: { side: "new", line: reveal.line }, end: { side: "new", line: reveal.line } }
+    : null;
+  const shown = keyRange ?? selection ?? revealed;
   const selectionKey = shown ? `${pointKey(shown.start)},${pointKey(shown.end)}` : "";
   const selectedLines = useMemo<SelectedLineRange | null>(() => {
     if (selectionKey === "") return null;

@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from "react";
 
 import { queueIdleMount } from "./idleMount";
 
-export function useDeferredMount() {
+export function useDeferredMount(force = false) {
   const ref = useRef<HTMLDivElement>(null);
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(force);
+  if (force && !ready) setReady(true);
   useEffect(() => {
     if (ready || !ref.current) return;
     const observer = new IntersectionObserver(

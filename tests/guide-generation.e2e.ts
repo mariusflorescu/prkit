@@ -4,9 +4,11 @@ import * as NodeOs from "node:os";
 import * as NodePath from "node:path";
 
 import { describe, test } from "@e2e-dev/web";
+import * as Schema from "effect/Schema";
 import { expect } from "e2e";
 
 import { childEnv } from "../packages/contracts/src/childEnv.ts";
+import { NormalizedGuide } from "../packages/contracts/src/guide.ts";
 import { runForUrl } from "../scripts/verify-run.ts";
 import { setUpFakeClaude } from "./fakeClaude.ts";
 import { startInstance, stopFakeInstance } from "./fakeGitHub.ts";
@@ -30,6 +32,25 @@ import { closeReviewFixture, createReviewFixture } from "./reviewFixture.ts";
 
 const CODEX_RUNS = process.env.PRKIT_E2E_CODEX === "1";
 const FIXTURE_KEY = `github.com/${FIXTURE_REPO}#1`;
+
+const decodeStoredGuide = Schema.decodeSync(Schema.fromJsonString(NormalizedGuide));
+
+const newLineSelected = ({ path, line }: { path: string; line: number }) => {
+  const card = document.querySelector(`[data-file-diff-card][data-path="${CSS.escape(path)}"]`);
+  const roots = [...(card?.querySelectorAll("*") ?? [])].flatMap((element) =>
+    element.shadowRoot === null ? [] : [element.shadowRoot],
+  );
+  return roots.some((root) =>
+    [...root.querySelectorAll(`[data-gutter] > [data-column-number="${line}"]`)].some((cell) => {
+      const code = cell.closest("code");
+      if (code === null || !(cell instanceof HTMLElement)) return false;
+      const old =
+        code.hasAttribute("data-deletions") ||
+        (!code.hasAttribute("data-additions") && cell.dataset.lineType === "change-deletion");
+      return !old && cell.hasAttribute("data-selected-line");
+    }),
+  );
+};
 
 /**
  * What of the user's own Codex setup reached these transcripts: the lines of the AGENTS.md
@@ -404,6 +425,39 @@ describe("guide generation with the user's agent", { tags: ["agent"], skip: NEED
       expect(readRows(run.home, "SELECT revision FROM review_revisions")).toEqual([
         { revision: 1 },
       ]);
+
+      const [accepted] = readRows(run.home, "SELECT guide FROM review_revisions");
+      if (typeof accepted?.guide !== "string")
+        throw new Error("The accepted revision has no stored guide.");
+      const { flow } = decodeStoredGuide(accepted.guide);
+      console.info(
+        flow === null
+          ? "before/after: none"
+          : flow._tag === "graph"
+            ? `before/after: graph, ${flow.nodes.length} nodes`
+            : `before/after: behavior, ${flow.rows.length} rows`,
+      );
+      const card = browser.locator("[data-flow-card]");
+      if (flow === null) await expect(card).toHaveCount(0);
+      else {
+        await card.scrollIntoView();
+        await expect(card.getByRole("button", /^(Before|After)$/)).toHaveCount(0);
+        await app.screenshot("guide-before-after");
+      }
+      if (flow?._tag === "graph") {
+        await expect(browser.locator("[data-flow-card] [data-flow-legend]")).toBeVisible();
+        await expect(browser.locator("[data-flow-card] [data-flow-node]")).toHaveCount(
+          flow.nodes.length,
+        );
+      }
+      if (flow?._tag === "behavior")
+        for (const [index, row] of flow.rows.entries()) {
+          await screen.getByRole("button", `Open ${row.at.path} line ${row.at.line}`).first().tap();
+          await expect
+            .poll(() => browser.evaluate(newLineSelected, row.at), { timeout: 10_000 })
+            .toBe(true);
+          if (index === 0) await app.screenshot("guide-before-after-line");
+        }
 
       await screen.getByRole("button", "Stop watching").tap();
       await expect(screen.getByRole("status", "Guide status")).toContainText(

@@ -14,6 +14,8 @@ export const GuideTone = Schema.Literals(["risk", "question", "note"]);
 export const GuideSide = Schema.Literals(["additions", "deletions"]);
 export const GuideFlowStatus = Schema.Literals(["added", "changed", "removed", "unchanged"]);
 export const GuideFlowDirection = Schema.Literals(["auto", "LR", "TB"]);
+export const GuideRowStatus = Schema.Literals(["added", "removed", "unchanged"]);
+export const GuideRowDepth = Schema.Literals([0, 1, 2, 3]);
 /**
  * The agent's answer to one of the reviewer's focus areas. `notable` points at the
  * chapter that explains it; `not-assessed` says why the PR gave nothing to judge.
@@ -43,6 +45,10 @@ const FileEntry = Schema.Union([
   }),
 ]);
 
+/** A line of the PR's new side, numbered as the numbered diff numbers it. */
+export const DiffLineRef = Schema.Struct({ path: Schema.String, line: Schema.Int });
+export type DiffLineRef = typeof DiffLineRef.Type;
+
 const chapterFields = {
   id: Schema.optionalKey(Schema.String),
   title: Schema.String,
@@ -51,27 +57,40 @@ const chapterFields = {
   pseudocode: Schema.optionalKey(Schema.String),
   callouts: Schema.optionalKey(Schema.Array(Callout)),
 };
+const FlowNode = Schema.Struct({
+  id: Schema.String,
+  label: Schema.optionalKey(Schema.String),
+  status: Schema.optionalKey(GuideFlowStatus),
+  chapter: Schema.optionalKey(ChapterReference),
+  detail: Schema.optionalKey(Schema.String),
+});
+const FlowEdge = Schema.Struct({
+  from: Schema.String,
+  to: Schema.String,
+  label: Schema.optionalKey(Schema.String),
+  status: Schema.optionalKey(GuideFlowStatus),
+});
+const BehaviorRow = Schema.Struct({
+  text: Schema.String,
+  /** Defaults to `unchanged`: a context row. */
+  status: Schema.optionalKey(GuideRowStatus),
+  depth: Schema.optionalKey(Schema.Int),
+  at: DiffLineRef,
+  chapter: Schema.optionalKey(ChapterReference),
+});
+/**
+ * The Overview's before/after in one of two forms: a graph (`nodes` and `edges`) or a
+ * behavior diff (`rows`). Every form key is optional so that both or neither reach
+ * `normalize`, which accepts exactly one and says what to send instead.
+ */
 const Flow = Schema.Struct({
   title: Schema.String,
   subtitle: Schema.optionalKey(Schema.String),
+  /** Graph only; a behavior diff ignores it. */
   direction: Schema.optionalKey(GuideFlowDirection),
-  nodes: Schema.Array(
-    Schema.Struct({
-      id: Schema.String,
-      label: Schema.optionalKey(Schema.String),
-      status: Schema.optionalKey(GuideFlowStatus),
-      chapter: Schema.optionalKey(ChapterReference),
-      detail: Schema.optionalKey(Schema.String),
-    }),
-  ),
-  edges: Schema.Array(
-    Schema.Struct({
-      from: Schema.String,
-      to: Schema.String,
-      label: Schema.optionalKey(Schema.String),
-      status: Schema.optionalKey(GuideFlowStatus),
-    }),
-  ),
+  nodes: Schema.optionalKey(Schema.Array(FlowNode)),
+  edges: Schema.optionalKey(Schema.Array(FlowEdge)),
+  rows: Schema.optionalKey(Schema.Array(BehaviorRow)),
 });
 const Focus = Schema.Array(
   Schema.Struct({
@@ -141,9 +160,46 @@ export const GuidePatch = Schema.Struct({
 });
 export type GuidePatch = typeof GuidePatch.Type;
 
-export const GuideJsonSchema = Schema.toJsonSchemaDocument(Guide).schema;
-
 const NormalizedCallout = Schema.Struct({ tone: GuideTone, text: Schema.String });
+const NormalizedFlowGraph = Schema.Struct({
+  _tag: Schema.Literal("graph").pipe(Schema.withDecodingDefaultKey(Effect.succeed("graph"))),
+  title: Schema.String,
+  subtitle: Schema.NullOr(Schema.String),
+  direction: GuideFlowDirection,
+  nodes: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      label: Schema.String,
+      status: GuideFlowStatus,
+      chapter: Schema.NullOr(Schema.String),
+      detail: Schema.NullOr(Schema.String),
+    }),
+  ),
+  edges: Schema.Array(
+    Schema.Struct({
+      from: Schema.String,
+      to: Schema.String,
+      label: Schema.NullOr(Schema.String),
+      status: GuideFlowStatus,
+    }),
+  ),
+});
+const NormalizedBehaviorDiff = Schema.TaggedStruct("behavior", {
+  title: Schema.String,
+  subtitle: Schema.NullOr(Schema.String),
+  /** Reading order. The first row is at depth 0 and each row is at most one deeper than the row above. */
+  rows: Schema.Array(
+    Schema.Struct({
+      status: GuideRowStatus,
+      /** Inline markdown, one short line. */
+      text: Schema.String,
+      depth: GuideRowDepth,
+      /** A new-side line inside a hunk of a text diff. */
+      at: DiffLineRef,
+      chapter: Schema.NullOr(Schema.String),
+    }),
+  ),
+});
 export const NormalizedGuide = Schema.Struct({
   summary: Schema.Array(Schema.String),
   background: Schema.Array(Schema.String),
@@ -173,30 +229,7 @@ export const NormalizedGuide = Schema.Struct({
       ),
     }),
   ),
-  flow: Schema.NullOr(
-    Schema.Struct({
-      title: Schema.String,
-      subtitle: Schema.NullOr(Schema.String),
-      direction: GuideFlowDirection,
-      nodes: Schema.Array(
-        Schema.Struct({
-          id: Schema.String,
-          label: Schema.String,
-          status: GuideFlowStatus,
-          chapter: Schema.NullOr(Schema.String),
-          detail: Schema.NullOr(Schema.String),
-        }),
-      ),
-      edges: Schema.Array(
-        Schema.Struct({
-          from: Schema.String,
-          to: Schema.String,
-          label: Schema.NullOr(Schema.String),
-          status: GuideFlowStatus,
-        }),
-      ),
-    }),
-  ),
+  flow: Schema.NullOr(Schema.Union([NormalizedFlowGraph, NormalizedBehaviorDiff])),
   focus: Schema.Array(
     Schema.Struct({
       tone: GuideTone,

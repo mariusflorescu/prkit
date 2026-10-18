@@ -1,4 +1,4 @@
-import type { DiffFile, DiffSnapshot, NormalizedGuide } from "@prkit/contracts";
+import type { DiffFile, DiffLineRef, DiffSnapshot, NormalizedGuide } from "@prkit/contracts";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import {
@@ -13,6 +13,7 @@ import { TabActions, useHasTabActions } from "~/components/TabActions";
 import { ChapterSection } from "./ChapterSection";
 import { GuideOverview } from "./GuideOverview";
 import { PendingChapter } from "./PendingChapter";
+import type { LineJump } from "./types";
 import { useChapterKeyboard } from "./useChapterKeyboard";
 import "./guide.css";
 
@@ -35,6 +36,19 @@ export type GuideViewProps = {
 
 const noPending: ReadonlySet<string> = new Set();
 
+type ScrollTarget = () => {
+  readonly element: Element;
+  readonly block: ScrollLogicalPosition;
+  readonly focus: HTMLElement;
+} | null;
+
+const byId =
+  (id: string): ScrollTarget =>
+  () => {
+    const element = document.getElementById(id);
+    return element && { element, block: "start", focus: element };
+  };
+
 export function GuideView({
   guide,
   snapshot,
@@ -53,17 +67,27 @@ export function GuideView({
   const [collapsed, setCollapsed] = useState<ReadonlyMap<string, boolean>>(() => new Map());
   const chapterId = useCallback((id: string) => `${prefix}-chapter-${id}`, [prefix]);
   const fileId = useCallback((path: string) => `${prefix}-file-${path}`, [prefix]);
+  const owners = useMemo(() => {
+    const owners = new Map<string, string>();
+    for (const chapter of guide.chapters)
+      for (const file of chapter.files)
+        if (!owners.has(file.path)) owners.set(file.path, chapter.id);
+    return owners;
+  }, [guide.chapters]);
+  const [jump, setJump] = useState<LineJump | null>(null);
 
-  const scrollTo = useCallback((id: string) => {
+  const scrollTo = useCallback((target: ScrollTarget) => {
     cleanupScroll.current?.();
     const viewport = viewportRef.current;
-    if (!viewport) return;
-    const align = () => {
-      const element = document.getElementById(id);
-      element?.scrollIntoView({ block: "start", behavior: "instant" });
+    if (!viewport) return () => {};
+    let aligning = true;
+    const realign = () => {
+      const found = aligning ? target() : null;
+      found?.element.scrollIntoView({ block: found.block, behavior: "instant" });
     };
-    const observer = new ResizeObserver(align);
+    const observer = new ResizeObserver(realign);
     const stop = () => {
+      aligning = false;
       observer.disconnect();
       window.clearTimeout(timeout);
       window.cancelAnimationFrame(frame);
@@ -74,20 +98,42 @@ export function GuideView({
     const timeout = window.setTimeout(stop, 3000);
     const frame = window.requestAnimationFrame(() => {
       if (viewport.firstElementChild) observer.observe(viewport.firstElementChild);
-      align();
-      document.getElementById(id)?.focus({ preventScroll: true });
+      realign();
+      target()?.focus.focus({ preventScroll: true });
     });
     for (const event of ["wheel", "touchstart", "keydown", "mousedown"])
       viewport.addEventListener(event, stop, { passive: true });
     cleanupScroll.current = stop;
+    return realign;
   }, []);
 
   const onChapter = useCallback(
     (id: string) => {
       setCollapsed((previous) => new Map(previous).set(id, false));
-      scrollTo(chapterId(id));
+      scrollTo(byId(chapterId(id)));
     },
     [chapterId, scrollTo],
+  );
+  const onLine = useCallback(
+    (at: DiffLineRef) => {
+      const owner = owners.get(at.path);
+      if (owner === undefined) return;
+      setCollapsed((previous) => new Map(previous).set(owner, false));
+      let cell: HTMLElement | null = null;
+      const realign = scrollTo(() => {
+        const card = document.getElementById(fileId(at.path));
+        if (!card) return null;
+        return cell?.isConnected
+          ? { element: cell, block: "center", focus: card }
+          : { element: card, block: "start", focus: card };
+      });
+      const onCell = (found: HTMLElement) => {
+        cell = found;
+        realign();
+      };
+      setJump({ path: at.path, reveal: { line: at.line, onCell } });
+    },
+    [owners, fileId, scrollTo],
   );
   useChapterKeyboard(viewportRef, onChapter);
   useEffect(() => () => cleanupScroll.current?.(), []);
@@ -114,6 +160,7 @@ export function GuideView({
                 guide={guide}
                 files={files}
                 onChapter={onChapter}
+                onLine={onLine}
                 prUrl={prUrl}
                 prDescription={prDescription}
                 pendingChapterIds={pendingChapterIds}
@@ -144,7 +191,8 @@ export function GuideView({
                     onToggle={() =>
                       setCollapsed((previous) => new Map(previous).set(chapter.id, !isCollapsed))
                     }
-                    onFile={(path) => scrollTo(fileId(path))}
+                    onFile={(path) => scrollTo(byId(fileId(path)))}
+                    jump={jump && owners.get(jump.path) === chapter.id ? jump : null}
                     loadContents={loadContents}
                     comments={comments}
                     prUrl={prUrl}

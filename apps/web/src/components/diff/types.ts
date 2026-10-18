@@ -16,6 +16,8 @@ export type ContentsState =
 /** A run of diff lines from `start` to `end`, the same point for one line. */
 export type LineRange = { start: LinePoint; end: LinePoint };
 
+export type RevealLine = { readonly line: number; readonly onCell: (cell: HTMLElement) => void };
+
 /** Review comments on one file's diff, opted into by the caller. */
 export type DiffComments = {
   /** The lines that have something under them, drawn by `render`. */

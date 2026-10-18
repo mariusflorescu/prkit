@@ -127,11 +127,11 @@ const handOverLines = (streamsGuideInput: boolean) => [
   "1. While you read, call `report_progress` when your focus moves, and `note_file` once for each changed file.",
   ...(streamsGuideInput
     ? [
-        "2. Once you understand the change, write the whole guide in one `submit_guide` call. The reviewer sees it while you write it: the overview as soon as its fields are done, then each chapter the moment you close it. So write the fields in this order: `summary`, `background`, `steps`, `flow`, then `chapters` in reading order, then `focus`, `focusAreas` and `guidanceNote`.",
+        "2. Once you understand the change, write the whole guide in one `submit_guide` call. The reviewer sees it while you write it: the overview as soon as its fields are done, then each chapter the moment you close it. So write the fields in this order: `summary`, `flow` (the before/after in its one form, or left out when neither helps), `background`, `steps`, then `chapters` in reading order, then `focus`, `focusAreas` and `guidanceNote`.",
         "3. If `submit_guide` reports problems, fix every one with `revise_guide`, sending only the chapters and fields you change. Once prkit accepts the guide, end your turn.",
       ]
     : [
-        "2. Always draft before you submit, even for a small PR. Before you write any chapter, call `submit_draft` with the overview (`summary`, `steps`, `flow`) and every planned chapter's `id` and `title`, without files. The reviewer starts reading it right away.",
+        "2. Always draft before you submit, even for a small PR. Before you write any chapter, call `submit_draft` with the overview (`summary`, `flow`, `background`, `steps`) and every planned chapter's `id` and `title`, without files. The reviewer starts reading it right away.",
         "3. Write the chapters in order. After each one, call `submit_draft` with just that chapter (same `id`, with body and files).",
         "4. Call `submit_guide` with the whole guide, the same content as your drafts. If it reports problems, fix every one with `revise_guide`, sending only the chapters and fields you change. Once prkit accepts the guide, end your turn.",
       ]),

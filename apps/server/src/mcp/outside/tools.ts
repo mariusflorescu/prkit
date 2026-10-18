@@ -98,7 +98,7 @@ const ReadPullRequest = read(
 
 const ReadGuide = read(
   Tool.make("read_guide", {
-    description: `The guide prkit's agent wrote for a pull request: its state (none, preparing, writing, watching, failed, done), progress while it is written, and the latest accepted guide (summary, steps, flow, chapters with line notes).${TARGET_HINT}`,
+    description: `The guide prkit's agent wrote for a pull request: its state (none, preparing, writing, watching, failed, done), progress while it is written, and the latest accepted guide (summary, steps, the before/after as a graph or a behavior diff, chapters with line notes).${TARGET_HINT}`,
     parameters: TargetInput,
     success: limited(GuideResult),
     failure: OutsideToolFailure,

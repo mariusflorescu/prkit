@@ -1,11 +1,11 @@
 # Guide viewer
 
-The guide viewer renders a normalized review with a summary, Before/After flow, chapters and notes pinned to diff lines. Accepted revisions render in the PR Guide tab. `/dev/guide/<fixture>` supplies static public examples in Vite development only.
+The guide viewer renders a normalized review with a summary, a before/after card (a merged graph or a behavior diff), chapters and notes pinned to diff lines. Accepted revisions render in the PR Guide tab. `/dev/guide/<fixture>` supplies static public examples in Vite development only.
 
 ## Sub-features
 
-- `guide-render` shows the overview, flow, chapter kinds, file notes and line annotations.
-- `guide-navigation` opens chapters from the roadmap, focus items, flow nodes and j/k.
+- `guide-render` shows the overview, the before/after, chapter kinds, file notes and line annotations.
+- `guide-navigation` opens chapters from the roadmap, focus items, flow nodes, behavior-diff chapter numbers and j/k, and opens a line from a behavior-diff row's file:line.
 - `guide-diff` switches unified/split and wrapping, and expands unchanged lines through a callback.
 - `guide-states` contains a chapter failure and shows unavailable contents without losing the guide.
 - `guide-production` excludes fixture routes and fixture JSON from production.
@@ -27,14 +27,16 @@ Preconditions:
 - Retain the supervisor's token. Pass `http://127.0.0.1:43112/?token=<token>` as `PRKIT_GUIDE_URL` to `pnpm e2e run tests/guide-viewer.e2e.ts`. After capturing proof, stop Vite and run `pnpm verify:app stop --name guide`.
 - The production-only journey runs with `pnpm e2e run tests/guide-viewer.e2e.ts` and reports the DEV journey skipped when no preview URL is provided.
 
-- **Fixtures.** `choose(screen, screen.getByRole("combobox", "Guide fixture"), label)` opens each of the four fixtures by its label (`Vercel AI #22182`); `screen.getByRole("heading", "Overview")` is visible.
-- **Flow.** Tap `screen.getByRole("button", "Before")` and `screen.getByRole("button", "After")`; the selected button has `aria-pressed="true"` and nodes keep their positions.
+- **Fixtures.** `choose(screen, screen.getByRole("combobox", "Guide fixture"), label)` opens a fixture by its label (`Vercel AI #22182`); `screen.getByRole("heading", "Overview")` is visible. Four are graphs, `gh-stack #91, behavior diff` is the same PR as rows, and `Vercel AI #22182, stored before behavior diffs` is a revision stored before the `_tag`, decoded without normalizing as the Guide tab reads it.
+- **Graph.** `screen.getByRole("region", "Before and after")` shows one merged picture: no `Before` or `After` buttons, the `Legend` list is visible, and on gh-stack #91 a `[data-flow-node][data-status="added"]` and a `[data-status="removed"]` node are visible together. Removed nodes and edges are dashed.
+- **Behavior diff.** Rows read like a diff (`+`, `-`, context) with a file:line chip and a chapter number. Collapse the chapter first (`[data-chapter-id="init-flow"] [data-chapter-toggle]`), then tap `screen.getByRole("button", "Open cmd/init.go line 154")`: the chapter opens, `screen.getByRole("region", "cmd/init.go")` has `data-open="true"` and focus, and in the diff's shadow root the new-side gutter cell for 154 has `data-selected-line`. Its top is the same 100 ms and 1.5 s after the tap, and the page root never scrolls. Tapping another row's chip moves the highlight. Under 700px the chip drops under the row text.
+- **Stored revision.** The stored fixture renders its graph with no window errors.
 - **Line notes.** Tap a `[data-roadmap-row]`, scroll a `[data-guide-note][data-pinned]` into view, then capture the chapter. Pierre's shadow DOM places it in `[data-line-annotation]`.
 - **Preferences.** Tap the icon buttons `Split`, `Unified` and `Wrap`; check their `aria-pressed` values.
 - **Keyboard.** From a chapter, `browser.keyboard.press("j")` opens the next, `k` the previous. Escape leaves the scroll unchanged. Text inputs and controls outside the guide keep their keys.
 - **Contents.** Click `[data-unmodified-lines]`, or focus `[data-expand-button]` and press Enter. Fixtures explain that full contents are unavailable; changed lines and notes remain visible. `tests/pr-view.e2e.ts` proves live Files contents load only after expansion.
 - **Production.** The built app shows `Not Found` at `/dev/guide/vercel-ai-22182` and has no `Guide fixture` picker.
-- **Proof.** Keep overview Before/After and one pinned-note chapter in light and dark for each fixture. Scroll all 17 Vercel AI files and save a recording, long-task measurements and direct window errors under `.e2e/evidence/guide-viewer/`.
+- **Proof.** Keep each graph overview in light and dark with one pinned-note chapter, the behavior diff in light and dark and at 760 and 640 wide, both jumps, and a recording of the jump (`pnpm e2e run tests/guide-viewer.e2e.ts --video=on`). Scroll all 17 Vercel AI files and save a recording, long-task measurements and direct window errors under `.e2e/evidence/guide-viewer/`.
 
 ## Gotchas
 

@@ -56,6 +56,8 @@ Inbox flags are `--reason review-requested|authored|involved`, `--repo owner/rep
 | `prkit guide repositories --json`                                       | Paged repositories with guide configuration.                                               |
 | `prkit guide repository owner/repo --account github.com/octocat --json` | Stable repository id for a repository scope.                                               |
 
+A guide's `content.flow` is its before/after: `null`, `{ "_tag": "graph", nodes, edges }` or `{ "_tag": "behavior", rows }`, where each row has `status`, `text`, `depth`, `at` and `chapter`, and `at` is a new-side `{ path, line }` in that revision's own diff, so read it with the attempt's diff (`prkit pr diff <pr> --attempt-id <attempt-id> --json`), not today's.
+
 Generation accepts `--agent <instance> --model <slug>` and repeated `--option key=value`. Use only catalog-supported selections from `prkit agents --json`. For a stack, read its layers first: `--stack this`, `--stack all` or `--stack 1,3`; `--regenerate` includes layers with guides. Use `--stack` once; numbered selection cannot be combined with `--layers`. Native values `this-pr`, `whole-stack` and `chosen-layers` are also accepted; the last takes repeated `--layers <number>`:
 
 ```sh

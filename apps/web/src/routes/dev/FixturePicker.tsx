@@ -24,7 +24,7 @@ export function FixturePicker({ selected }: { selected?: string }) {
           if (fixture !== null) void navigate({ to: "/dev/guide/$fixture", params: { fixture } });
         }}
       >
-        <SelectTrigger aria-labelledby="guide-fixture-label" size="sm" className="w-48">
+        <SelectTrigger aria-labelledby="guide-fixture-label" size="sm" className="w-80">
           <SelectValue placeholder="Choose a fixture" />
         </SelectTrigger>
         <SelectPopup alignItemWithTrigger={false}>
