@@ -124,6 +124,42 @@ prkit checks:
 
 `risk` is not `tone: "risk"`. A line note, callout or focus item with `tone: "risk"` is one specific way the code could break, pinned where it lives. `risk` is how carefully to read. Don't restate a `focus` item as a reason.
 
+Write each chapter's `risk` with the chapter, and the pull request's `risk` right after the chapters, once you have judged every chapter. For the password reset example above:
+
+```json
+{
+  "id": "reset-links-expire",
+  "title": "Reset links expire after an hour",
+  "kind": "core",
+  "files": ["src/tokens.js", "src/reset.js"],
+  "risk": {
+    "level": "medium",
+    "reasons": [
+      {
+        "text": "An expired link now gets a 410, so a link in an old email stops working.",
+        "file": "src/tokens.js",
+        "line": 21
+      }
+    ]
+  }
+}
+```
+
+```json
+{
+  "risk": {
+    "level": "medium",
+    "reasons": [
+      {
+        "text": "Reset links stop working after an hour, which changes what people with old emails see.",
+        "chapter": "reset-links-expire",
+        "at": { "path": "src/tokens.js", "line": 21 }
+      }
+    ]
+  }
+}
+```
+
 ## How to check it
 
 People who click around before they merge (testers, product people, the author) want one thing from a guide: how do I see this working, and what should I watch for? `manualCheck` answers it. prkit shows it on the Overview, under the summary, as your suggestion, because you read the code and didn't run it. Never write that you ran, tested or saw anything.
@@ -169,42 +205,6 @@ For the password reset example above:
 ```
 
 prkit checks: at most 5 steps, each with `action` and `expect`; at least one `watchFor`; no two steps the same check; every `chapter` one of yours; and a `reason` only when there are no steps.
-
-Write each chapter's `risk` with the chapter, and the pull request's `risk` right after the chapters, once you have judged every chapter. For the password reset example above:
-
-```json
-{
-  "id": "reset-links-expire",
-  "title": "Reset links expire after an hour",
-  "kind": "core",
-  "files": ["src/tokens.js", "src/reset.js"],
-  "risk": {
-    "level": "medium",
-    "reasons": [
-      {
-        "text": "An expired link now gets a 410, so a link in an old email stops working.",
-        "file": "src/tokens.js",
-        "line": 21
-      }
-    ]
-  }
-}
-```
-
-```json
-{
-  "risk": {
-    "level": "medium",
-    "reasons": [
-      {
-        "text": "Reset links stop working after an hour, which changes what people with old emails see.",
-        "chapter": "reset-links-expire",
-        "at": { "path": "src/tokens.js", "line": 21 }
-      }
-    ]
-  }
-}
-```
 
 ## Line notes
 
