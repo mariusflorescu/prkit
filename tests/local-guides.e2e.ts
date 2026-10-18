@@ -125,7 +125,7 @@ test(
       });
       const read = decodeRead(local(["read", "--json"]).stdout);
       expect(read.guide?.content.summary).toEqual(["A guide written by the stand-in agent."]);
-      expect(claude.prompts().at(-1)?.prompt).toContain("Write `manualCheck` after the chapters");
+      expect(claude.prompts().at(-1)?.prompt).toContain("then `manualCheck`");
       expect(read.guide?.content.manualCheck).toEqual({
         _tag: "nothing",
         reason: "The stand-in agent never suggests checks.",

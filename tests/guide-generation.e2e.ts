@@ -36,6 +36,13 @@ const FIXTURE_KEY = `github.com/${FIXTURE_REPO}#1`;
 
 const decodeStoredGuide = Schema.decodeSync(Schema.fromJsonString(NormalizedGuide));
 
+/** Keeps an accepted guide, so a change to the guide instructions can be compared with an earlier run. */
+const keepGuide = (name: string, guide: string) => {
+  const dir = NodePath.resolve(import.meta.dirname, "../.e2e/evidence/guide-generation");
+  NodeFS.mkdirSync(dir, { recursive: true });
+  NodeFS.writeFileSync(NodePath.join(dir, `${name}-guide.json`), guide);
+};
+
 const newLineSelected = ({ path, line }: { path: string; line: number }) => {
   const card = document.querySelector(`[data-file-diff-card][data-path="${CSS.escape(path)}"]`);
   const roots = [...(card?.querySelectorAll("*") ?? [])].flatMap((element) =>
@@ -291,6 +298,13 @@ describe("guide generation with Codex", { tags: ["codex"], skip: NEEDS_FIXTURE }
       expect(attempt?.outcome).toBe("accepted");
       if (typeof review?.id !== "string" || typeof attempt?.agent_pid !== "number")
         throw new Error("The Codex attempt didn't save its review or process id.");
+      const [accepted] = readRows(
+        run.home,
+        `SELECT guide FROM review_revisions WHERE review_id = '${review.id}' AND revision = 1`,
+      );
+      if (typeof accepted?.guide !== "string")
+        throw new Error("The accepted revision has no stored guide.");
+      keepGuide("codex", accepted.guide);
       expect(
         readRows(
           run.home,
@@ -431,6 +445,7 @@ describe("guide generation with the user's agent", { tags: ["agent"], skip: NEED
       const [accepted] = readRows(run.home, "SELECT guide FROM review_revisions");
       if (typeof accepted?.guide !== "string")
         throw new Error("The accepted revision has no stored guide.");
+      keepGuide("claude", accepted.guide);
       const { flow, chapters } = decodeStoredGuide(accepted.guide);
       console.info(
         flow === null
