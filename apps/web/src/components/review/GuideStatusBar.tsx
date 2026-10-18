@@ -16,6 +16,7 @@ import { SettingsChangedNotice } from "./config/SettingsChangedNotice";
 import { GenerateAgain } from "./GenerateAgain";
 import { guideProgress } from "./progressModel";
 import { ProgressBar } from "./ProgressBar";
+import { PULL_REQUEST_WORDS } from "./reviewPresentation";
 import { ReviewStatusLine } from "./ReviewStatusLine";
 import { type GuideChoice, RevisionSwitcher } from "./RevisionSwitcher";
 import { useReviewActions } from "./useReviewActions";
@@ -69,7 +70,12 @@ export function GuideStatusBar({
         className="flex min-h-10 items-center justify-between gap-3 px-(--workspace-gutter-start) text-xs text-muted-foreground"
       >
         <span className="flex min-w-0 flex-1 items-center gap-2">
-          <ReviewStatusLine status={status} watchProblem={review.watchProblem} attempt={attempt} />
+          <ReviewStatusLine
+            status={status}
+            watchProblem={review.watchProblem}
+            attempt={attempt}
+            words={PULL_REQUEST_WORDS}
+          />
           {shown !== null && <RevisionSettingsSummary config={shown.config} />}
         </span>
         <span className="flex min-w-0 shrink-0 items-center gap-2">
@@ -98,6 +104,7 @@ export function GuideStatusBar({
             selected={selected}
             onSelect={onSelect}
             draft={running && attempt?.draft != null ? { revision: attempt.revision } : null}
+            words={PULL_REQUEST_WORDS}
           />
           {settingsChanged && (
             <SettingsChangedNotice

@@ -3,6 +3,7 @@ import { CheckIcon } from "lucide-react";
 import { guideProgress } from "~/components/review/progressModel";
 import { pullRequestState } from "~/lib/pullRequestState";
 import { cn } from "~/lib/utils";
+import { TabProgressRing } from "./TabProgressRing";
 
 export function TabStateIcon({
   data,
@@ -29,36 +30,7 @@ export function TabStateIcon({
       data-review-status={status ?? "none"}
       className="relative flex size-3 items-center justify-center"
     >
-      {running ? (
-        <svg
-          viewBox="0 0 16 16"
-          className="size-3 text-muted-foreground"
-          data-guide-progress={filled}
-        >
-          <circle
-            cx="8"
-            cy="8"
-            r="6"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            opacity="0.25"
-          />
-          <circle
-            cx="8"
-            cy="8"
-            r="6"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            pathLength="100"
-            strokeDasharray={`${Math.max(4, filled)} 100`}
-            transform="rotate(-90 8 8)"
-          />
-        </svg>
-      ) : (
-        <Icon className={cn("size-3", tone)} />
-      )}
+      {running ? <TabProgressRing filled={filled} /> : <Icon className={cn("size-3", tone)} />}
       {(status === "failed" || conflicting) && (
         <span
           data-guide-warning=""

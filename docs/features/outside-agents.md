@@ -75,6 +75,7 @@ The inventory covers every WebSocket RPC and the app's local presentation action
 | CLI setup and skill installer | cliInstall.get, cliInstall.install, cliInstall.uninstall, cliInstall.skill | Setup status is presentation; installing/removing the launcher and opening the skill installer are excluded B: machine setup | Presentation / Excluded |
 | Local guides: list, read, file contents | localReviews.list, localReviews.get, localReviews.fileContents, guides.get | `list_local_guides`, `read_local_guide` | Read |
 | Start and stop a local guide | localReviews.generate, localReviews.stop | `generate_local_guide` from a folder (the app's Run again takes the review's key), `stop_local_guide` | Work |
+| Open/close a local guide's tab | workspace.openLocal, workspace.closeLocal | `generate_local_guide` opens the tab without focus; closing it is app only | Work / App |
 | Retry a local guide's failed run | localReviews.retry | App only: `generate_local_guide` again takes a fresh snapshot instead | App |
 | Remove a local guide | localReviews.remove | Excluded C | Excluded |
 | Live updates and waiting | github.events, workspace.changes, reviewedFiles.changes, reviews.watch, fixers.watch, localReviews.watch, localReviews.feed | Finite snapshot reads above plus `wait_for` and `wait_for_local_guide`; no outside background subscriptions or polling loop | Read |

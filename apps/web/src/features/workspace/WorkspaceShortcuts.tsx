@@ -1,4 +1,5 @@
-import { useNavigate, useRouterState } from "@tanstack/react-router";
+import { isLocalReviewKey, type LocalReviewKey } from "@prkit/contracts";
+import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import { useEffect } from "react";
 
 import { composerFor, useStartGuide } from "~/components/review";
@@ -13,6 +14,7 @@ export function WorkspaceShortcuts() {
   const workspace = useWorkspace();
   const navigate = useNavigate();
   const path = useRouterState({ select: (state) => state.location.pathname });
+  const shownLocal = useParams({ strict: false }).key;
   const guide = useStartGuide();
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -21,25 +23,35 @@ export function WorkspaceShortcuts() {
       if (id === undefined) return;
       const session = useWorkspaceSession.getState();
       const rows = workspace.data?.open ?? [];
+      const locals = workspace.data?.local ?? [];
       const onPullRequest = path.startsWith("/pr/");
       const onSettings = isSettingsPath(path);
-      // The strip in order: Inbox, the PR tabs, then Settings when it is open.
+      // From the route, so a page whose tab is already gone (removed elsewhere) still closes.
+      const onLocal =
+        path.startsWith("/local/") && isLocalReviewKey(shownLocal) ? shownLocal : undefined;
+      // The strip in order: Inbox, the PR tabs, the local reviews, then Settings when it is open.
       const strip = [
         "inbox" as const,
         ...rows.map((row) => row.key),
+        ...locals.map((row) => ({ local: row.key })),
         ...(session.settingsTab.open || onSettings ? ["settings" as const] : []),
       ];
       const select = (tab: (typeof strip)[number] | undefined) => {
         if (tab === "inbox") void navigate({ to: "/" });
         else if (tab === "settings") workspace.openSettings();
+        else if (typeof tab === "object") workspace.openLocal(tab.local);
         else if (tab !== undefined) workspace.activate(tab);
       };
+      const localIndex = (key: LocalReviewKey) =>
+        1 + rows.length + locals.findIndex((row) => row.key === key);
       const cycle = (direction: 1 | -1) => {
         const index = onSettings
           ? strip.length - 1
-          : onPullRequest
-            ? rows.findIndex((row) => row.key === workspace.data?.activeKey) + 1
-            : 0;
+          : onLocal !== undefined
+            ? localIndex(onLocal)
+            : onPullRequest
+              ? rows.findIndex((row) => row.key === workspace.data?.activeKey) + 1
+              : 0;
         select(strip[(index + direction + strip.length) % strip.length]);
       };
       switch (id) {
@@ -69,6 +81,7 @@ export function WorkspaceShortcuts() {
           event.preventDefault();
           if (session.paletteOpen) return;
           if (onSettings) workspace.closeSettings();
+          else if (onLocal !== undefined) workspace.closeLocal(onLocal);
           else if (onPullRequest && workspace.data?.activeKey)
             workspace.close(workspace.data.activeKey);
           return;
@@ -79,7 +92,7 @@ export function WorkspaceShortcuts() {
           return;
         case "inbox":
         case "selectPullRequest":
-          // Numbers count the Inbox and PR tabs only; Settings has Cmd+, instead.
+          // Numbers count the Inbox and PR tabs only; Settings has Cmd+, and local reviews the palette.
           if (session.paletteOpen) return;
           event.preventDefault();
           select(Number(event.key) === 1 ? "inbox" : rows[Number(event.key) - 2]?.key);
@@ -102,6 +115,6 @@ export function WorkspaceShortcuts() {
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [workspace, navigate, path, guide]);
+  }, [workspace, navigate, path, shownLocal, guide]);
   return null;
 }

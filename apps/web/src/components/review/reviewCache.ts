@@ -1,4 +1,10 @@
-import type { PullRequestKey, ReviewSnapshot, ReviewWatchEvent } from "@prkit/contracts";
+import type {
+  AttemptSummary,
+  PullRequestKey,
+  ReviewActivity,
+  ReviewSnapshot,
+  ReviewWatchEvent,
+} from "@prkit/contracts";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { pullRequestDetailQuery, reviewQuery } from "~/rpc/queries";
@@ -13,6 +19,22 @@ const isOlder = (incoming: ReviewSnapshot, current: ReviewSnapshot | undefined) 
   if (incoming.review.updatedAt !== current.review.updatedAt)
     return incoming.review.updatedAt < current.review.updatedAt;
   return incoming.attempt?.id === current.attempt?.id && lastLine(incoming) < lastLine(current);
+};
+
+type Progress = {
+  readonly attempt: AttemptSummary | null;
+  readonly activity: ReadonlyArray<ReviewActivity>;
+};
+
+/** The lines an update adds to those kept for its attempt; another attempt starts over. */
+export const mergeActivity = (current: Progress | undefined, update: Progress) => {
+  const attemptId = update.attempt?.id ?? null;
+  const known = current?.attempt?.id === attemptId ? (current?.activity ?? []) : [];
+  const seen = new Set(known.map((line) => line.id));
+  const fresh = update.activity.filter(
+    (line) => line.attemptId === attemptId && !seen.has(line.id),
+  );
+  return [...known, ...fresh].slice(-MAX_LINES);
 };
 
 /** Puts a whole snapshot (a `reviews.*` result or the stream's opening event) in the cache. */
@@ -40,19 +62,11 @@ export const applyReviewEvent = (
       queryKey: pullRequestDetailQuery(key, event.review.accountId).queryKey,
     });
   }
-  client.setQueryData(reviewQuery(key).queryKey, (current) => {
-    const attemptId = event.attempt?.id ?? null;
-    const known = current?.attempt?.id === attemptId ? (current?.activity ?? []) : [];
-    const seen = new Set(known.map((line) => line.id));
-    const fresh = event.activity.filter(
-      (line) => line.attemptId === attemptId && !seen.has(line.id),
-    );
-    return {
-      key,
-      review: event.review,
-      attempt: event.attempt,
-      revisions: event.revisions,
-      activity: [...known, ...fresh].slice(-MAX_LINES),
-    };
-  });
+  client.setQueryData(reviewQuery(key).queryKey, (current) => ({
+    key,
+    review: event.review,
+    attempt: event.attempt,
+    revisions: event.revisions,
+    activity: mergeActivity(current, event),
+  }));
 };

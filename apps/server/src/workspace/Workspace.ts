@@ -49,6 +49,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const open =
         yield* sql`SELECT key, account_id AS accountId, position FROM open_pull_requests ORDER BY position`;
+      const local = yield* sql`SELECT key, position FROM open_local_reviews ORDER BY position`;
       const rows =
         yield* sql`SELECT active_key AS activeKey, inbox_filters AS inboxFilters FROM workspace WHERE id = 1`.pipe(
           Effect.flatMap(
@@ -64,6 +65,7 @@ export const make = Effect.gen(function* () {
         );
       return yield* Schema.decodeUnknownEffect(WorkspaceSchema)({
         open,
+        local,
         activeKey: rows[0]?.activeKey ?? null,
         inboxFilters: decodeFilters(rows[0]?.inboxFilters ?? null),
       });
@@ -71,13 +73,14 @@ export const make = Effect.gen(function* () {
       Effect.mapError(
         () =>
           new WorkspaceError({
-            message: "Couldn't read your open pull requests. Retry or restart prkit.",
+            message: "Couldn't read your open tabs. Retry or restart prkit.",
           }),
       ),
     );
   /**
-   * Applies one change to the open PRs. A change no window asked for (an outside agent's)
-   * is `announce`d, so every window shows it; `focus` asks them to show that PR.
+   * Applies one change to the open PRs or local reviews. A change no window asked for (an
+   * outside agent's) is `announce`d, so every window shows it; `focus` asks them to show that
+   * PR. A local review's tab never takes focus, and removing the review drops its row.
    */
   const command = (input: WorkspaceCommand, announce?: { readonly focus: boolean }) =>
     gate.withPermits(1)(
@@ -92,6 +95,15 @@ export const make = Effect.gen(function* () {
                   message: "This pull request and GitHub account must belong to the same host.",
                 });
             }
+            if (
+              input.kind === "open-local" &&
+              (yield* sql`SELECT 1 FROM reviews WHERE pr_key = ${input.key} AND local IS NOT NULL`)
+                .length === 0
+            )
+              return yield* new WorkspaceError({
+                message:
+                  "This local review was removed. Run `prkit local guide` in its folder for a new one.",
+              });
             if (input.kind === "activate" && !current.open.some((row) => row.key === input.key))
               return yield* new WorkspaceError({
                 message: "This pull request is no longer open. Open it again from the inbox.",
@@ -111,6 +123,11 @@ export const make = Effect.gen(function* () {
             for (const row of next.open)
               yield* sql`INSERT INTO open_pull_requests (key, account_id, position) VALUES (${row.key}, ${row.accountId}, ${row.position})`;
             yield* sql`UPDATE workspace SET active_key = ${next.activeKey} WHERE id = 1`;
+            if (next.local !== current.local) {
+              yield* sql`DELETE FROM open_local_reviews`;
+              for (const row of next.local)
+                yield* sql`INSERT INTO open_local_reviews (key, position) VALUES (${row.key}, ${row.position})`;
+            }
             return next;
           }),
         )
@@ -133,7 +150,7 @@ export const make = Effect.gen(function* () {
           Effect.catchTag("SqlError", () =>
             Effect.fail(
               new WorkspaceError({
-                message: "Couldn't save your open pull requests. Retry or restart prkit.",
+                message: "Couldn't save your open tabs. Retry or restart prkit.",
               }),
             ),
           ),

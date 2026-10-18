@@ -1,4 +1,10 @@
-import type { AttemptSummary, AttemptTrigger, DoneReason, FailureReason } from "@prkit/contracts";
+import type {
+  AttemptSummary,
+  AttemptTrigger,
+  DoneReason,
+  FailureReason,
+  RevisionSummary,
+} from "@prkit/contracts";
 
 export const FAILURE_TITLES: Record<FailureReason, string> = {
   account: "GitHub refused this pull request's account",
@@ -51,6 +57,25 @@ export const updateLine = (attempt: AttemptSummary) => {
     case "retry":
       return "Writing the guide again";
   }
+};
+
+/** How the status line and the revision switcher word a review's state and history. */
+export interface ReviewWords {
+  /** Nothing is running and the guide is current. */
+  readonly current: string;
+  /** What a running attempt does to the guide that exists. */
+  readonly update: (attempt: AttemptSummary) => string;
+  readonly ended: Record<DoneReason, string>;
+  /** One accepted revision in the switcher. */
+  readonly revision: (revision: RevisionSummary) => string;
+}
+
+export const PULL_REQUEST_WORDS: ReviewWords = {
+  current: "Watching for new commits",
+  update: updateLine,
+  ended: ENDED_LINES,
+  revision: (revision) =>
+    `r${revision.revision} · ${shortSha(revision.headSha)} · ${TRIGGER_LABELS[revision.trigger]}`,
 };
 
 /** "just now", "3 min ago", "2 h ago": coarse on purpose, so the text changes rarely. */

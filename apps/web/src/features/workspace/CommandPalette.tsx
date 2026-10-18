@@ -1,4 +1,10 @@
-import { PullRequestRef, pullRequestKey, refFromKey, type PullRequestKey } from "@prkit/contracts";
+import {
+  type LocalReviewKey,
+  PullRequestRef,
+  pullRequestKey,
+  refFromKey,
+  type PullRequestKey,
+} from "@prkit/contracts";
 import { Dialog } from "@base-ui/react/dialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
@@ -12,14 +18,16 @@ import { ListSkeleton } from "~/components/ListSkeleton";
 import {
   accountsQuery,
   inboxQuery,
+  localReviewsQuery,
   pullRequestDetailQuery,
   pullRequestStackQuery,
 } from "~/rpc/queries";
 
+import { LocalReviewsPaletteGroup } from "./LocalReviewsPaletteGroup";
 import { PaletteBranch } from "./PaletteBranch";
 import { useCliInstall } from "~/features/settings/outsideAgents/useCliInstall";
 import { SettingsAlert } from "~/features/settings/SettingsAlert";
-import { searchPalette, type PaletteEntry } from "./paletteSearch";
+import { searchLocalReviews, searchPalette, type PaletteEntry } from "./paletteSearch";
 import { useWorkspaceSession } from "./sessionStore";
 import { useWorkspace } from "./workspaceContext";
 
@@ -135,6 +143,15 @@ export function CommandPalette() {
     setOpen(false);
     form.reset();
   };
+  // Local reviews aren't pull requests, so "Open a pull request" (Cmd+T) leaves them out.
+  const locals = useQuery({ ...localReviewsQuery, enabled: mode === "all" });
+  const localResults =
+    mode === "all" ? searchLocalReviews(locals.data ?? [], input).slice(0, 20) : [];
+  const chooseLocal = (key: LocalReviewKey) => {
+    workspace.openLocal(key);
+    setOpen(false);
+    form.reset();
+  };
   return (
     <Dialog.Root
       open={open}
@@ -184,6 +201,7 @@ export function CommandPalette() {
                   form.reset();
                 }
               } else if (first) choose(first);
+              else if (localResults[0]) chooseLocal(localResults[0].key);
               else if (showSettings) {
                 workspace.openSettings();
                 form.reset();
@@ -320,6 +338,7 @@ export function CommandPalette() {
               </div>
             )}
             {results.length === 0 &&
+              localResults.length === 0 &&
               !inbox.isPending &&
               !pastedRef &&
               !showSettings &&
@@ -351,6 +370,16 @@ export function CommandPalette() {
                 </span>
               </button>
             ))}
+            {mode === "all" && (
+              <LocalReviewsPaletteGroup
+                entries={localResults}
+                open={new Set((workspace.data?.local ?? []).map((row) => row.key))}
+                pending={locals.isPending}
+                error={locals.error}
+                onRetry={() => void locals.refetch()}
+                onChoose={chooseLocal}
+              />
+            )}
           </div>
         </Dialog.Popup>
       </Dialog.Portal>

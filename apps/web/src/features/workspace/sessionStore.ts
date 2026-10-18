@@ -1,4 +1,9 @@
-import { type OpenPullRequest, PullRequestKey, type WorkspaceCommand } from "@prkit/contracts";
+import {
+  type LocalReviewKey,
+  type OpenPullRequest,
+  PullRequestKey,
+  type WorkspaceCommand,
+} from "@prkit/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { create } from "zustand";
@@ -45,8 +50,8 @@ const restoreSettingsTab = (): SettingsTab => {
   };
 };
 
-/** A closed tab Cmd+Shift+T can bring back: a PR, or Settings. */
-type ClosedTab = OpenPullRequest | "settings";
+/** A closed tab Cmd+Shift+T can bring back: a PR, a local review, or Settings. */
+type ClosedTab = OpenPullRequest | { readonly local: LocalReviewKey } | "settings";
 
 type Session = {
   closed: readonly ClosedTab[];

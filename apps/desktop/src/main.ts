@@ -61,11 +61,18 @@ let updates: ReturnType<typeof startDesktopUpdates> | undefined;
 let windowOptions: Parameters<typeof createMainWindow>[0] | undefined;
 let quitting = false;
 
+/** What a click opens: a PR's tab (Guide when absent), or a local review's page. */
+const GuideTarget = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("pull-request"),
+    key: Schema.String,
+    accountId: Schema.String,
+    tab: Schema.optionalKey(Schema.Literals(["guide", "fixes"])),
+  }),
+  Schema.Struct({ kind: Schema.Literal("local"), key: Schema.String }),
+]);
 const GuideNotification = Schema.Struct({
-  key: Schema.String,
-  accountId: Schema.String,
-  /** The PR tab a click opens; Guide when absent. */
-  tab: Schema.optionalKey(Schema.Literals(["guide", "fixes"])),
+  target: GuideTarget,
   title: Schema.String,
   body: Schema.String,
 });
@@ -85,12 +92,8 @@ const bringForward = () => {
   return { window, fresh: existing === undefined };
 };
 
-/** Brings a window forward and opens a PR's Guide (or Fixes) tab in it. */
-const openGuide = (target: {
-  readonly key: string;
-  readonly accountId: string;
-  readonly tab?: "guide" | "fixes";
-}) => {
+/** Brings a window forward and opens a PR's Guide (or Fixes) tab, or a local review, in it. */
+const openGuide = (target: typeof GuideTarget.Type) => {
   const forward = bringForward();
   if (forward === undefined) return;
   const { window, fresh } = forward;
@@ -105,12 +108,12 @@ ipcMain.on("prkit:notify", (event, payload) => {
   if (windowOptions === undefined || origin !== windowOptions.url.origin) return;
   const notification = decodeNotification(payload);
   if (Option.isNone(notification) || !Notification.isSupported()) return;
-  const { key, accountId, tab, title, body } = notification.value;
+  const { target, title, body } = notification.value;
   const native = new Notification({ title, body });
   shown.add(native);
   native.on("click", () => {
     shown.delete(native);
-    openGuide({ key, accountId, ...(tab === undefined ? {} : { tab }) });
+    openGuide(target);
   });
   native.on("close", () => shown.delete(native));
   native.show();

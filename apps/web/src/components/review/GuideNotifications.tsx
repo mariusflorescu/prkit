@@ -1,4 +1,11 @@
-import { AccountId, PullRequestKey, type ReviewFeedEvent, refFromKey } from "@prkit/contracts";
+import {
+  AccountId,
+  type LocalReviewFeedEvent,
+  LocalReviewKey,
+  PullRequestKey,
+  type ReviewFeedEvent,
+  refFromKey,
+} from "@prkit/contracts";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouterState } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
@@ -7,17 +14,20 @@ import { useEffect, useRef } from "react";
 import { toastManager } from "~/components/ui/toast";
 import { useWorkspaceSession } from "~/features/workspace/sessionStore";
 import { useWorkspace } from "~/features/workspace/workspaceContext";
+import { applyLocalFeedEvent } from "~/features/localReviews/localReviewCache";
 import { desktopBridge } from "~/lib/desktop";
-import { watchReviewFeed } from "~/rpc/client";
+import { watchLocalReviewFeed, watchReviewFeed } from "~/rpc/client";
 import { reviewFeedQuery } from "~/rpc/queries";
 
 const isKey = Schema.is(PullRequestKey);
+const isLocalKey = Schema.is(LocalReviewKey);
 const isAccount = Schema.is(AccountId);
+const chaptersOf = (count: number) => `${count} chapter${count === 1 ? "" : "s"}`;
 
 /**
- * Follows every review for the whole app: keeps the review index (inbox marks)
- * current, and says "Guide ready" with a toast and a macOS notification unless
- * the user is already looking at that guide.
+ * Follows every review for the whole app: keeps the review index (inbox marks) and the
+ * local reviews' list current, and says "Guide ready" with a toast and a macOS notification
+ * unless the user is already looking at that guide.
  */
 export function GuideNotifications() {
   const client = useQueryClient();
@@ -45,6 +55,27 @@ export function GuideNotifications() {
       const tab = current.search.tab ?? useWorkspaceSession.getState().views[key]?.tab;
       return onPage && tab === "guide";
     };
+    const viewingLocal = (key: LocalReviewKey) =>
+      document.hasFocus() &&
+      decodeURIComponent(latest.current.location.pathname) === `/local/${key}`;
+    const onLocalEvent = (event: LocalReviewFeedEvent) => {
+      applyLocalFeedEvent(client, event);
+      if (event._tag !== "ready") return;
+      void client.invalidateQueries({ queryKey: ["typicalDuration"] });
+      if (viewingLocal(event.key)) return;
+      const title = event.revision === 1 ? "Guide ready" : "Guide updated";
+      const body = `${event.title} · ${chaptersOf(event.chapters)}`;
+      toastManager.add({
+        title,
+        description: body,
+        type: "success",
+        actionProps: {
+          children: "Open",
+          onClick: () => latest.current.workspace.openLocal(event.key),
+        },
+      });
+      desktopBridge?.notify({ target: { kind: "local", key: event.key }, title, body });
+    };
     const onEvent = (event: ReviewFeedEvent) => {
       switch (event._tag) {
         case "index":
@@ -62,7 +93,7 @@ export function GuideNotifications() {
           // A new accepted guide is a new sample for "usually about N min".
           void client.invalidateQueries({ queryKey: ["typicalDuration"] });
           if (viewing(event.key)) return;
-          const chapters = `${event.chapters} chapter${event.chapters === 1 ? "" : "s"}`;
+          const chapters = chaptersOf(event.chapters);
           toastManager.add({
             title: event.revision === 1 ? "Guide ready" : "Guide updated",
             description: `${event.title} · ${chapters}`,
@@ -73,8 +104,7 @@ export function GuideNotifications() {
             },
           });
           desktopBridge?.notify({
-            key: event.key,
-            accountId: event.accountId,
+            target: { kind: "pull-request", key: event.key, accountId: event.accountId },
             title: event.revision === 1 ? "Guide ready" : "Guide updated",
             body: `${event.title} · ${chapters}`,
           });
@@ -102,18 +132,29 @@ export function GuideNotifications() {
               onClick: () => openGuide(event.key, event.accountId),
             },
           });
-          desktopBridge?.notify({ key: event.key, accountId: event.accountId, title, body });
+          desktopBridge?.notify({
+            target: { kind: "pull-request", key: event.key, accountId: event.accountId },
+            title,
+            body,
+          });
         }
       }
     };
     const stopFeed = watchReviewFeed(onEvent);
+    const stopLocalFeed = watchLocalReviewFeed(onLocalEvent);
     const stopClicks = desktopBridge?.onOpenGuide((target) => {
+      if (target.kind === "local") {
+        if (isLocalKey(target.key)) latest.current.workspace.openLocal(target.key);
+        return;
+      }
       // Fix notices ask for the Fixes tab; see FixerNotifications.
-      if (isKey(target.key) && isAccount(target.accountId))
+      // A local review's key is a string too; it never opens through the PR path.
+      if (isKey(target.key) && !isLocalKey(target.key) && isAccount(target.accountId))
         openGuide(target.key, target.accountId, target.tab);
     });
     return () => {
       stopFeed();
+      stopLocalFeed();
       stopClicks?.();
     };
   }, [client]);

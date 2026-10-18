@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-import { AccountId, PullRequestKey } from "./ids.ts";
+import { AccountId, LocalReviewKey, PullRequestKey } from "./ids.ts";
 import { PullRequestRef } from "./inbox.ts";
 import { DEFAULT_INBOX_SORT, InboxSort } from "./inboxTriage.ts";
 
@@ -10,6 +10,9 @@ export const OpenPullRequest = Schema.Struct({
   position: Schema.Int,
 });
 export type OpenPullRequest = typeof OpenPullRequest.Type;
+/** A local review's tab, after the PR tabs. It is never the server's active tab. */
+export const OpenLocalReview = Schema.Struct({ key: LocalReviewKey, position: Schema.Int });
+export type OpenLocalReview = typeof OpenLocalReview.Type;
 /** The repository the Inbox shows; its open pull requests are read through the first account. */
 export const RepositoryFilter = Schema.Struct({
   host: Schema.String,
@@ -40,6 +43,7 @@ export const SavedInboxFilters = Schema.Struct({
 export type SavedInboxFilters = typeof SavedInboxFilters.Type;
 export const Workspace = Schema.Struct({
   open: Schema.Array(OpenPullRequest),
+  local: Schema.Array(OpenLocalReview),
   activeKey: Schema.NullOr(PullRequestKey),
   inboxFilters: SavedInboxFilters,
 });
@@ -55,6 +59,8 @@ export const WorkspaceCommand = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("close"), key: PullRequestKey }),
   Schema.Struct({ kind: Schema.Literal("activate"), key: PullRequestKey }),
   Schema.Struct({ kind: Schema.Literal("reorder"), keys: Schema.Array(PullRequestKey) }),
+  Schema.Struct({ kind: Schema.Literal("open-local"), key: LocalReviewKey }),
+  Schema.Struct({ kind: Schema.Literal("close-local"), key: LocalReviewKey }),
 ]);
 export type WorkspaceCommand = typeof WorkspaceCommand.Type;
 export class WorkspaceError extends Schema.TaggedError<WorkspaceError>()("WorkspaceError", {
@@ -117,5 +123,28 @@ export const applyWorkspaceCommand = (current: Workspace, command: WorkspaceComm
         }),
       };
     }
+    case "open-local":
+      return current.local.some((row) => row.key === command.key)
+        ? current
+        : {
+            ...current,
+            // After the last one: removing a review drops its row without renumbering the rest.
+            local: [
+              ...current.local,
+              {
+                key: command.key,
+                position: Math.max(-1, ...current.local.map((row) => row.position)) + 1,
+              },
+            ],
+          };
+    case "close-local":
+      return current.local.some((row) => row.key === command.key)
+        ? {
+            ...current,
+            local: current.local
+              .filter((row) => row.key !== command.key)
+              .map((row, position) => ({ key: row.key, position })),
+          }
+        : current;
   }
 };

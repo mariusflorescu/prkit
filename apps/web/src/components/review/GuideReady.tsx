@@ -138,10 +138,13 @@ export function GuideReady({
       {picked === "draft" && draft !== null ? (
         <div className="min-h-0 flex-1">
           <DraftView
-            detail={detail}
+            reviewKey={detail.key}
             attemptId={draft.attempt.id}
             version={draft.version}
             growing={draft.growing}
+            source={{ _tag: "attempt", key: detail.key, attemptId: draft.attempt.id }}
+            prUrl={detail.url}
+            prDescription={detail.body}
           />
         </div>
       ) : guide.isPending || drafts.isPending || reviewed.status === "pending" ? (

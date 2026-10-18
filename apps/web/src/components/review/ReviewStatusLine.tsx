@@ -1,25 +1,29 @@
-import type { AttemptSummary, Review } from "@prkit/contracts";
+import type { AttemptSummary, LocalReviewStatus, ReviewStatus } from "@prkit/contracts";
 
 import { CheckedAgo } from "./CheckedAgo";
 import { ElapsedTime } from "./ElapsedTime";
 import { guideProgress } from "./progressModel";
-import { ENDED_LINES, updateLine } from "./reviewPresentation";
+import type { ReviewWords } from "./reviewPresentation";
 
 /** What the review is doing now, in one line over a guide that already exists. */
 export function ReviewStatusLine({
   status,
   watchProblem,
   attempt,
+  words,
 }: {
-  status: Review["status"];
+  status: ReviewStatus | LocalReviewStatus;
   watchProblem: string | null;
   attempt: AttemptSummary | null;
+  words: ReviewWords;
 }) {
   switch (status._tag) {
+    case "ready":
+      return <span className="min-w-0 truncate">{words.current}</span>;
     case "watching":
       return (
         <span className="min-w-0 truncate" title={watchProblem ?? undefined}>
-          Watching for new commits ·{" "}
+          {words.current} ·{" "}
           {watchProblem === null ? (
             <CheckedAgo at={status.checkedAt} />
           ) : (
@@ -31,7 +35,7 @@ export function ReviewStatusLine({
     case "writing":
       return (
         <span className="min-w-0 truncate" title={attempt?.narration ?? undefined}>
-          {attempt === null ? "Updating the guide" : updateLine(attempt)}
+          {attempt === null ? "Updating the guide" : words.update(attempt)}
           {attempt !== null && (
             <>
               {" · "}
@@ -45,6 +49,6 @@ export function ReviewStatusLine({
     case "failed":
       return <span className="min-w-0 truncate">The guide couldn't be updated</span>;
     case "done":
-      return <span className="min-w-0 truncate">{ENDED_LINES[status.reason]}</span>;
+      return <span className="min-w-0 truncate">{words.ended[status.reason]}</span>;
   }
 }

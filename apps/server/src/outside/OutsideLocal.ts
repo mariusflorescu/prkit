@@ -5,6 +5,7 @@ import * as Stream from "effect/Stream";
 
 import { Agents } from "../agents/Agents.ts";
 import { Reviews } from "../reviews/Reviews.ts";
+import { Workspace } from "../workspace/Workspace.ts";
 import { requestedAgent } from "./agentSelection.ts";
 import { asFailure, fail } from "./errors.ts";
 import { makePager } from "./paging.ts";
@@ -99,6 +100,7 @@ const statusOf = (snapshot: LocalReviewSnapshot): LocalGuideStatus | null => {
 export const makeOutsideLocal = Effect.gen(function* () {
   const reviews = yield* Reviews;
   const agents = yield* Agents;
+  const workspace = yield* Workspace;
   const page = yield* makePager;
 
   const keyOf = (input: LocalTargetInput) =>
@@ -143,6 +145,16 @@ export const makeOutsideLocal = Effect.gen(function* () {
       const status = statusOf(result.snapshot);
       if (status === null)
         return yield* fail("failed", "prkit couldn't save the review. Try again.");
+      // Its tab shows in the app's strip, without taking the user away from what they read.
+      yield* workspace
+        .command({ kind: "open-local", key: status.key }, { focus: false })
+        .pipe(
+          Effect.catchTag("WorkspaceError", (error) =>
+            Effect.logWarning("Local review tab not opened").pipe(
+              Effect.annotateLogs({ reason: error.message }),
+            ),
+          ),
+        );
       return {
         outcome: result.outcome,
         message: result.message,

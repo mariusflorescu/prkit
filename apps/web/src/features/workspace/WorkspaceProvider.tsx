@@ -1,11 +1,12 @@
 import {
   applyWorkspaceCommand,
+  type LocalReviewKey,
   type OpenPullRequest,
   refFromKey,
   type WorkspaceCommand,
 } from "@prkit/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useRouterState } from "@tanstack/react-router";
+import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, type ReactNode } from "react";
 
 import { changeWorkspace } from "~/rpc/client";
@@ -23,6 +24,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const query = useQuery(workspaceQuery);
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const shownLocal = useParams({ strict: false }).key;
   const restore = useRef(pathname === "/");
   const mutation = useMutation({
     mutationKey,
@@ -59,6 +61,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         const row = before.open.find((row) => row.key === command.key);
         if (row) useWorkspaceSession.getState().rememberClosed(row);
       }
+      if (command.kind === "close-local" && before.local.some((row) => row.key === command.key))
+        useWorkspaceSession.getState().rememberClosed({ local: command.key });
     }
     useWorkspaceSession.setState({ failed: null });
     mutation.mutate(command);
@@ -85,6 +89,26 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const row = current()?.open.find((row) => row.key === session.settingsTab.returnKey);
     if (row) activate(row.key);
     else void navigate({ to: "/" });
+  };
+  const showLocal = (key: LocalReviewKey) => {
+    useWorkspaceSession.getState().setPaletteOpen(false);
+    void navigate({ to: "/local/$key", params: { key } });
+  };
+  const openLocal = (key: LocalReviewKey) => {
+    if (!current()?.local.some((row) => row.key === key)) send({ kind: "open-local", key });
+    showLocal(key);
+  };
+  // Closing the local review on screen shows the local tab that takes its place, else the
+  // active PR, else the Inbox.
+  const closeLocal = (key: LocalReviewKey) => {
+    const before = current();
+    if (before?.local.some((row) => row.key === key)) send({ kind: "close-local", key });
+    if (shownLocal !== key) return;
+    const index = before?.local.findIndex((row) => row.key === key) ?? -1;
+    const rest = before?.local.filter((row) => row.key !== key) ?? [];
+    const next = index < 0 ? undefined : rest[Math.min(index, rest.length - 1)];
+    if (next) return showLocal(next.key);
+    go(before?.open.find((row) => row.key === before.activeKey) ?? null);
   };
   const closeMany = (keys: readonly OpenPullRequest["key"][]) => {
     const before = current();
@@ -146,12 +170,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           const index = session.closed.findLastIndex((tab) =>
             tab === "settings"
               ? !session.settingsTab.open && !isSettingsPath(pathname)
-              : !current()?.open.some((row) => row.key === tab.key),
+              : "local" in tab
+                ? !current()?.local.some((row) => row.key === tab.local)
+                : !current()?.open.some((row) => row.key === tab.key),
           );
           const last = session.closed[index];
           useWorkspaceSession.setState({ closed: session.closed.slice(0, Math.max(index, 0)) });
           if (!last) return;
           if (last === "settings") return openSettings();
+          if ("local" in last) return openLocal(last.local);
           send({ kind: "open", key: last.key, accountId: last.accountId });
           go(last);
         },
@@ -166,6 +193,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             if (workspace.activeKey !== key) send({ kind: "activate", key });
             if (existing.accountId !== accountId) go(existing);
           }
+        },
+        openLocal,
+        closeLocal,
+        ensureLocal: (key) => {
+          const workspace = current();
+          if (workspace && !workspace.local.some((row) => row.key === key))
+            send({ kind: "open-local", key });
         },
       }}
     >

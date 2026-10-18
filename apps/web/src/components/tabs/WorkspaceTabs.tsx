@@ -3,7 +3,7 @@ import { restrictToFirstScrollableAncestor, restrictToHorizontalAxis } from "@dn
 import { arrayMove, horizontalListSortingStrategy, SortableContext } from "@dnd-kit/sortable";
 import { pullRequestKey } from "@prkit/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useParams, useRouterState } from "@tanstack/react-router";
 import { ChevronLeftIcon, ChevronRightIcon, InboxIcon, PlusIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { BrandMark } from "~/components/BrandMark";
@@ -17,6 +17,7 @@ import { inboxQuery } from "~/rpc/queries";
 import { isSettingsPath } from "~/features/settings/settingsSections";
 import { useWorkspaceSession } from "~/features/workspace/sessionStore";
 import { useWorkspace } from "~/features/workspace/workspaceContext";
+import { LocalReviewWorkspaceTab } from "./LocalReviewWorkspaceTab";
 import { PullRequestWorkspaceTab } from "./PullRequestWorkspaceTab";
 import { SettingsWorkspaceTab } from "./SettingsWorkspaceTab";
 import { ShortcutTooltip } from "./ShortcutTooltip";
@@ -28,6 +29,8 @@ export function WorkspaceTabs() {
   const inbox = useQuery(inboxQuery);
   const path = useRouterState({ select: (state) => state.location.pathname });
   const rows = workspace.data?.open ?? [];
+  const locals = workspace.data?.local ?? [];
+  const shownLocal = useParams({ strict: false }).key;
   const keys = rows.map((row) => row.key);
   const onSettings = isSettingsPath(path);
   const settingsOpen = useWorkspaceSession((state) => state.settingsTab.open) || onSettings;
@@ -72,7 +75,11 @@ export function WorkspaceTabs() {
       node.removeEventListener("wheel", wheel);
     };
   }, []);
-  const activeTab = onSettings ? "settings" : path === "/" ? "inbox" : workspace.data?.activeKey;
+  const activeTab = onSettings
+    ? "settings"
+    : path === "/"
+      ? "inbox"
+      : (shownLocal ?? workspace.data?.activeKey);
   useEffect(() => {
     if (!workspace.data || activeTab === undefined) return;
     viewport.current
@@ -110,7 +117,7 @@ export function WorkspaceTabs() {
               <InboxIcon aria-hidden="true" className="size-3" /> Inbox
             </Link>
           </ShortcutTooltip>
-          {(rows.length > 0 || settingsOpen) && (
+          {(rows.length > 0 || locals.length > 0 || settingsOpen) && (
             <Separator orientation="vertical" className="mx-1 h-4" />
           )}
           <DndContext
@@ -139,6 +146,9 @@ export function WorkspaceTabs() {
               ))}
             </SortableContext>
           </DndContext>
+          {locals.map((row) => (
+            <LocalReviewWorkspaceTab key={row.key} row={row} active={shownLocal === row.key} />
+          ))}
           {workspace.pending && (
             <span aria-busy="true" aria-label="Loading open pull requests" className="flex gap-1">
               <Skeleton className="h-6 w-12" />

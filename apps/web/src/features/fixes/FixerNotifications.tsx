@@ -64,9 +64,12 @@ export function FixerNotifications() {
             },
           });
           desktopBridge?.notify({
-            key: event.key,
-            accountId: event.accountId,
-            tab: "fixes",
+            target: {
+              kind: "pull-request",
+              key: event.key,
+              accountId: event.accountId,
+              tab: "fixes",
+            },
             title: event.title,
             body: event.body,
           });

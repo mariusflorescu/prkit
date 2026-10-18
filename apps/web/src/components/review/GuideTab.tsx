@@ -10,12 +10,14 @@ import { GuideProgress } from "./GuideProgress";
 import { GuideReady } from "./GuideReady";
 import { GuideSkeleton } from "./GuideSkeleton";
 import { ReviewAlert } from "./ReviewAlert";
+import { useReviewActions } from "./useReviewActions";
 import { useReviewWatch } from "./useReviewWatch";
 
 /** The PR view's Guide tab: one screen per review state. */
 export function GuideTab({ detail }: { detail: PullRequestDetail }) {
   useReviewWatch(detail.key);
   const review = useQuery(reviewQuery(detail.key));
+  const { stop } = useReviewActions(detail.key);
   if (review.isPending) return <GuideSkeleton />;
   if (review.isError)
     return (
@@ -49,10 +51,16 @@ export function GuideTab({ detail }: { detail: PullRequestDetail }) {
         <GuideSkeleton />
       ) : (
         <GuideProgress
-          detail={detail}
+          reviewKey={detail.key}
           review={snapshot.review}
-          snapshot={snapshot}
           attempt={snapshot.attempt}
+          activity={snapshot.activity}
+          subject="this PR"
+          expectedFiles={detail.changedFiles}
+          stop={{ pending: stop.isPending, error: stop.error, run: () => stop.mutate() }}
+          source={{ _tag: "attempt", key: detail.key, attemptId: snapshot.attempt.id }}
+          prUrl={detail.url}
+          prDescription={detail.body}
         />
       );
     case "failed":

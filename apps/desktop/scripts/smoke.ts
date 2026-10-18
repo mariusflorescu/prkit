@@ -252,8 +252,11 @@ try {
   });
   await window.evaluate(() =>
     Reflect.get(window, "prkitDesktop").notify({
-      key: "github.com/octocat/prkit-fixtures#1",
-      accountId: "github.com/octocat",
+      target: {
+        kind: "pull-request",
+        key: "github.com/octocat/prkit-fixtures#1",
+        accountId: "github.com/octocat",
+      },
       title: "Guide ready",
       body: "Validate links and count clicks · 3 chapters",
     }),
@@ -282,9 +285,12 @@ try {
   // "Fixes ready" names the Fixes tab, and its click opens that one instead.
   await window.evaluate(() =>
     Reflect.get(window, "prkitDesktop").notify({
-      key: "github.com/octocat/prkit-fixtures#1",
-      accountId: "github.com/octocat",
-      tab: "fixes",
+      target: {
+        kind: "pull-request",
+        key: "github.com/octocat/prkit-fixtures#1",
+        accountId: "github.com/octocat",
+        tab: "fixes",
+      },
       title: "Fixes ready",
       body: "Validate links and count clicks · 2 fixed",
     }),
@@ -303,6 +309,27 @@ try {
     timeout: 15_000,
   });
   step(`a Fixes notice opened the Fixes tab: ${new URL(window.url()).search}`);
+
+  // A local review's "Guide ready" has no account: its click opens the local review's page.
+  await window.evaluate(() =>
+    Reflect.get(window, "prkitDesktop").notify({
+      target: { kind: "local", key: "local:0123456789abcdef" },
+      title: "Guide ready",
+      body: "widgets · feature/limits · 1 chapter",
+    }),
+  );
+  for (
+    let tries = 0;
+    tries < 50 &&
+    (await app.evaluate(({ Notification }) => Reflect.get(Notification, "smokeShown").length)) < 3;
+    tries++
+  )
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  await app.evaluate(({ Notification }) =>
+    Reflect.get(Notification, "smokeShown")[2].emit("click"),
+  );
+  await window.waitForURL(/\/local\/local(:|%3A)0123456789abcdef$/, { timeout: 15_000 });
+  step(`a local review's notice opened its page: ${new URL(window.url()).pathname}`);
 
   // Settings > Appearance: the page tells main the theme and native chrome follows it. Main
   // ignores anything that is not one of the three choices.

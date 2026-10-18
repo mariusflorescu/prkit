@@ -1,4 +1,4 @@
-import type { AttemptId, PullRequestDetail } from "@prkit/contracts";
+import type { AttemptId, DiffSource, ReviewKey } from "@prkit/contracts";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import { GuideView } from "~/components/guide";
@@ -12,22 +12,29 @@ import { ReviewAlert } from "./ReviewAlert";
  * lands, with planned chapters faded. A newer draft replaces the older one in place.
  */
 export function DraftView({
-  detail,
+  reviewKey,
   attemptId,
   version,
   growing,
+  source,
+  prUrl,
+  prDescription,
 }: {
-  detail: PullRequestDetail;
+  reviewKey: ReviewKey;
   attemptId: AttemptId;
   version: number;
   /** The agent is still adding chapters to a streamed guide. */
   growing: boolean;
+  /** Where the diff's scope lines read the new side; null reads none. */
+  source: DiffSource | null;
+  prUrl?: string;
+  prDescription?: string;
 }) {
   const draft = useQuery({
-    ...draftQuery(detail.key, attemptId, version),
+    ...draftQuery(reviewKey, attemptId, version),
     placeholderData: keepPreviousData,
   });
-  const diff = useQuery(attemptDiffQuery(detail.key, attemptId));
+  const diff = useQuery(attemptDiffQuery(reviewKey, attemptId));
   if (draft.isPending || diff.isPending) return <GuideSkeleton label="Loading the draft" />;
   if (draft.isError || diff.isError)
     return (
@@ -50,9 +57,9 @@ export function DraftView({
       key={attemptId}
       guide={draft.data.normalized}
       snapshot={diff.data}
-      source={{ _tag: "attempt", key: detail.key, attemptId }}
-      prUrl={detail.url}
-      prDescription={detail.body}
+      source={source}
+      {...(prUrl === undefined ? {} : { prUrl })}
+      {...(prDescription === undefined ? {} : { prDescription })}
       pendingChapterIds={pending}
       draft={{ growing }}
     />

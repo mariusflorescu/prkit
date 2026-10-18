@@ -3,13 +3,15 @@ import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 
 import { Tooltip } from "~/components/ui/tooltip";
 
+/** A tab's short name at once, then its details after a moment's hover. */
 export function TabTooltip({
   children,
-  number,
+  label,
   details,
 }: {
   children: ReactElement;
-  number: number;
+  /** "#42", or a local review's "widgets · feature/limits". */
+  label: string;
   details: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -34,7 +36,7 @@ export function TabTooltip({
             role="tooltip"
             className="max-w-80 rounded-md border border-border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-md"
           >
-            <span>#{number}</span>
+            <span>{label}</span>
             {expanded && <div className="mt-1 space-y-1">{details}</div>}
           </TooltipPrimitive.Popup>
         </TooltipPrimitive.Positioner>

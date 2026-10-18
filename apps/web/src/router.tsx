@@ -21,6 +21,7 @@ import { KeyboardShortcutsSettings } from "~/features/settings/shortcuts/Keyboar
 import { UpdatesSettings } from "~/features/updates/UpdatesSettings";
 import { updatesBridge } from "~/lib/desktop";
 import { InboxPage } from "~/routes/InboxPage";
+import { LocalReviewPage } from "~/routes/LocalReviewPage";
 import { SettingsPage } from "~/routes/SettingsPage";
 import { PullRequestPage } from "~/routes/PullRequestPage";
 import { PullRequestTab, useWorkspaceSession } from "~/features/workspace/sessionStore";
@@ -101,6 +102,13 @@ const pullRequestRoute = createRoute({
   component: PullRequestPage,
 });
 
+// A guide of local changes; `key` is the review's own key (`local:<16 hex>`).
+const localReviewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/local/$key",
+  component: LocalReviewPage,
+});
+
 const devRoutes = import.meta.env.DEV
   ? [
       createRoute({
@@ -131,6 +139,7 @@ export const router = createRouter({
     inboxRoute,
     settingsRoute.addChildren([settingsIndexRoute, ...settingsSectionRoutes]),
     pullRequestRoute,
+    localReviewRoute,
     ...devRoutes,
   ]),
 });

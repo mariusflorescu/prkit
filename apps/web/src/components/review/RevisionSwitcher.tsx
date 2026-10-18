@@ -8,26 +8,25 @@ import {
   SelectValue,
 } from "~/components/ui/select";
 
-import { shortSha, TRIGGER_LABELS } from "./reviewPresentation";
+import type { ReviewWords } from "./reviewPresentation";
 
 /** A revision number, or the draft an update is writing right now. */
 export type GuideChoice = number | "draft";
 
-const labelOf = (revision: RevisionSummary) =>
-  `r${revision.revision} · ${shortSha(revision.headSha)} · ${TRIGGER_LABELS[revision.trigger]}`;
-
-/** Picks which accepted revision the Guide tab shows, newest first, with the live draft on top. */
+/** Picks which accepted revision the guide shows, newest first, with the live draft on top. */
 export function RevisionSwitcher({
   revisions,
   selected,
   onSelect,
   draft,
+  words,
 }: {
   revisions: ReadonlyArray<RevisionSummary>;
   selected: GuideChoice;
   onSelect: (choice: GuideChoice) => void;
   /** The update being written, while it has shared a draft. */
   draft: { readonly revision: number } | null;
+  words: ReviewWords;
 }) {
   const items: ReadonlyArray<{ value: GuideChoice; label: string }> = [
     ...(draft === null
@@ -35,7 +34,7 @@ export function RevisionSwitcher({
       : [{ value: "draft" as const, label: `r${draft.revision} · draft, being written` }]),
     ...revisions
       .toReversed()
-      .map((revision) => ({ value: revision.revision, label: labelOf(revision) })),
+      .map((revision) => ({ value: revision.revision, label: words.revision(revision) })),
   ];
   return (
     <Select<GuideChoice>

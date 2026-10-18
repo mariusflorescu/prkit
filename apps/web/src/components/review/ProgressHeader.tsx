@@ -16,7 +16,8 @@ export function ProgressHeader({
   label: string;
   startedAt: string;
   stopping: boolean;
-  onStop: () => void;
+  /** Absent when the page has its own Stop. */
+  onStop?: () => void;
 }) {
   return (
     <div className="flex items-start justify-between gap-4">
@@ -30,9 +31,11 @@ export function ProgressHeader({
         <span data-progress-label="">{label}</span>
         <span aria-hidden="true">·</span>
         <ElapsedTime since={startedAt} />
-        <Button variant="ghost-muted" size="compact" disabled={stopping} onClick={onStop}>
-          Stop
-        </Button>
+        {onStop !== undefined && (
+          <Button variant="ghost-muted" size="compact" disabled={stopping} onClick={onStop}>
+            Stop
+          </Button>
+        )}
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import type { AccountId, PullRequestKey, PullRequestRef } from "@prkit/contracts";
+import type { AccountId, LocalReviewEntry, PullRequestKey, PullRequestRef } from "@prkit/contracts";
 
 export type PaletteEntry = {
   key: PullRequestKey;
@@ -39,4 +39,21 @@ export const searchPalette = (entries: readonly PaletteEntry[], query: string) =
       return words.every((word) => haystack.some((field) => field.includes(word)));
     })
     .toSorted((a, b) => Number(exact(b)) - Number(exact(a)));
+};
+
+/** Local reviews whose folder, branch or path holds every word of the query, newest first. */
+export const searchLocalReviews = (entries: readonly LocalReviewEntry[], query: string) => {
+  const words = query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((word) => word.length > 0);
+  return entries
+    .filter((entry) => {
+      const haystack = [entry.source.name, entry.source.branch ?? "", entry.source.path].map(
+        (field) => field.toLowerCase(),
+      );
+      return words.every((word) => haystack.some((field) => field.includes(word)));
+    })
+    .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 };
