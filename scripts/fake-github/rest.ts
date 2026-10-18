@@ -13,6 +13,7 @@ import {
   position,
   pulls,
   REPO,
+  servedFiles,
   sha,
   STACK,
   start,
@@ -138,15 +139,16 @@ export const rest = (
         body:
           page > 1
             ? []
-            : pull.number === 9
-              ? [LIMITS_FILE]
-              : pull.heads.map((commit, index) => ({
-                  filename: `src/change-${index}.ts`,
-                  status: "added",
-                  additions: 1,
-                  deletions: 0,
-                  patch: `@@ -0,0 +1 @@\n+export const change${index} = "${commit.message}";`,
-                })),
+            : (servedFiles.get(pull.number) ??
+              (pull.number === 9
+                ? [LIMITS_FILE]
+                : pull.heads.map((commit, index) => ({
+                    filename: `src/change-${index}.ts`,
+                    status: "added",
+                    additions: 1,
+                    deletions: 0,
+                    patch: `@@ -0,0 +1 @@\n+export const change${index} = "${commit.message}";`,
+                  })))),
       };
     if (tail === "reviews" && method === "POST") {
       const input = decodeBody(text || "{}");

@@ -91,6 +91,17 @@ export const startFakeGitHub = async (
     resetStats: () => post("reset-stats"),
     comment: (pr: number, size = 0) => post(`comment?pr=${pr}&size=${size}`),
     push: (pr: number) => post(`push?pr=${pr}`),
+    gitHead: (pr: number, sha: string) => post(`git-head?pr=${pr}&sha=${sha}`),
+    files: (
+      pr: number,
+      files: ReadonlyArray<{
+        filename: string;
+        status: string;
+        additions: number;
+        deletions: number;
+        patch: string;
+      }>,
+    ) => fetch(`${url}/__fake/files?pr=${pr}`, { method: "POST", body: JSON.stringify(files) }),
     conflict: (pr: number) => post(`conflict?pr=${pr}`),
     checking: (pr: number) => post(`checking?pr=${pr}`),
     require: (pr: number) => post(`require?pr=${pr}`),

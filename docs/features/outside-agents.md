@@ -19,7 +19,7 @@ Before writing launchers, prkit checks `bin` and every ancestor using the shared
 
 Read tools are available at **Read only** and **Read and start work**. Local state changes and agent starts are available only at **Read and start work** (Work below). Every tool has typed parameters and a typed success schema in `apps/server/src/outside/`, used by the MCP toolkit and available to the CLI.
 
-The inventory covers every WebSocket RPC and the app's local presentation actions. Exclusion A means a GitHub write; B means changing settings, identity or trust; C means a destructive local action. Reads of settings are allowed, except environment and sensitive values, which never leave the server. Excluded actions have no tool declaration, so admitting one later requires an explicit declaration at the work level and its handler check.
+The inventory covers every WebSocket RPC and the app's local presentation actions. Exclusion A means a GitHub write; B means changing settings, identity or trust; C means a destructive local action; D means putting the guide agent's words into a review, which only a person confirming them in the app may do. Reads of settings are allowed, except environment and sensitive values, which never leave the server. Excluded actions have no tool declaration, so admitting one later requires an explicit declaration at the work level and its handler check.
 
 | App action | RPC / app surface | Tool or exclusion | Level |
 | --- | --- | --- | --- |
@@ -53,6 +53,7 @@ The inventory covers every WebSocket RPC and the app's local presentation action
 | Agent identity, configuration and installation | agents.signIn, agents.signOut, agents.create, agents.update, agents.remove, agents.reset, agents.installCursor | Excluded B: sign-in/out, instances, environment, sensitive values and SDK installation | Excluded |
 | Read/add local drafts | reviewComments.list, reviewComments.add | `list_review_comments`, `add_review_comment` | Read / Work |
 | Edit/move local drafts | reviewComments.edit, reviewComments.move | `edit_review_comment`, `move_review_comment` | Work |
+| Draft from a guide note | reviewComments.addFromNote | Excluded D: an outside agent writes its own drafts with `add_review_comment` | Excluded |
 | Delete drafts | reviewComments.delete | Excluded C | Excluded |
 | Submit GitHub review | reviewComments.submit | Excluded A | Excluded |
 | Read GitHub threads | reviewThreads.list | `read_threads`, `list_review_comments` | Read |

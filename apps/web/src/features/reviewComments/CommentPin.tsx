@@ -8,6 +8,7 @@ import type {
 
 import { NewCommentComposer } from "./NewCommentComposer";
 import { PendingCommentCard } from "./PendingCommentCard";
+import type { NoteDraft } from "./reviewCommentsStore";
 import { ReviewThreadCard } from "./ReviewThreadCard";
 
 /** Everything under one diff line: GitHub's threads, then drafts, then the composer. */
@@ -20,7 +21,7 @@ export function CommentPin({
   pr: { key: PullRequestKey; accountId: AccountId };
   threads: ReadonlyArray<ReviewThread>;
   drafts: ReadonlyArray<PendingComment>;
-  composer: CommentPlacement | null;
+  composer: { placement: CommentPlacement; note: NoteDraft | null } | null;
 }) {
   return (
     <div data-comment-pin="" className="py-1">
@@ -30,7 +31,20 @@ export function CommentPin({
       {drafts.map((comment) => (
         <PendingCommentCard key={comment.id} comment={comment} pr={pr} />
       ))}
-      {composer && <NewCommentComposer pr={pr} placement={composer} />}
+      {composer && (
+        <NewCommentComposer
+          // Pierre keys its annotation slots by position, so one note's words would stay
+          // in the field when the composer moves to another note.
+          key={
+            composer.note === null
+              ? "lines"
+              : `${composer.note.ref.revision}:${composer.note.ref.path}:${composer.note.ref.index}`
+          }
+          pr={pr}
+          placement={composer.placement}
+          note={composer.note}
+        />
+      )}
     </div>
   );
 }

@@ -52,6 +52,7 @@ import {
   type StackGuidesResult,
   type ReviewWatchEvent,
   type CommentPlacement,
+  type NoteRef,
   type PendingComments,
   type ReviewCommentId,
   type ReviewEvent,
@@ -405,6 +406,13 @@ export const addPendingComment = (input: {
   placement: CommentPlacement;
   body: string;
 }): Promise<PendingComments> => call((client) => client[WS_METHODS.reviewCommentsAdd](input));
+export const addNoteComment = (input: {
+  key: PullRequestKey;
+  accountId: AccountId;
+  note: NoteRef;
+  body: string;
+}): Promise<PendingComments> =>
+  call((client) => client[WS_METHODS.reviewCommentsAddFromNote](input));
 export const editPendingComment = (id: ReviewCommentId, body: string): Promise<PendingComments> =>
   call((client) => client[WS_METHODS.reviewCommentsEdit]({ id, body }));
 export const movePendingComment = (

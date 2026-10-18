@@ -91,6 +91,21 @@ process.exit(result.status ?? 1);
   };
   return {
     start,
+    head: (number: number) => git("rev-parse", `refs/pull/${number}/head`).trim(),
+    commit: (number: number, files: Record<string, string>) => {
+      git("checkout", "-q", `feature-${number}`);
+      for (const [path, content] of Object.entries(files))
+        NodeFS.writeFileSync(NodePath.join(source, path), content);
+      git("add", ".");
+      git("commit", "-qm", `Change fixture ${number}`);
+      git("update-ref", `refs/pull/${number}/head`, "HEAD");
+      return git("rev-parse", "HEAD").trim();
+    },
+    /** A file's patch in the PR's diff as GitHub's files API has it: the hunks alone. */
+    patch: (number: number, path: string) => {
+      const diff = git("diff", `main...refs/pull/${number}/head`, "--", path);
+      return diff.slice(diff.indexOf("@@")).replace(/\n$/, "");
+    },
     pushes: () =>
       NodeFS.existsSync(pushLog)
         ? NodeFS.readFileSync(pushLog, "utf8")

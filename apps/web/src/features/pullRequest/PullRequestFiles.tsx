@@ -65,6 +65,7 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
     commitSha: query.data?.headSha ?? detail.headSha,
     threads: true,
     outdated: true,
+    guideRevision: null,
   });
   useLayoutEffect(() => {
     const viewport = root.current?.closest<HTMLDivElement>("[data-pr-scroll]");

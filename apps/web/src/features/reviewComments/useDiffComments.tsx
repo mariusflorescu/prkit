@@ -21,9 +21,10 @@ import { toastManager } from "~/components/ui/toast";
 import { movePendingComment } from "~/rpc/client";
 import { pendingCommentsQuery, reviewThreadsQuery } from "~/rpc/queries";
 import { CommentPin } from "./CommentPin";
+import { NoteCommentFooter } from "./NoteCommentFooter";
 import { OutdatedComments } from "./OutdatedComments";
 import { storePending } from "./reviewCommentsCache";
-import { useReviewCommentsStore } from "./reviewCommentsStore";
+import { type NoteDraft, useReviewCommentsStore } from "./reviewCommentsStore";
 
 export type CommentScope = {
   /** The head commit of the diff on screen. */
@@ -32,13 +33,15 @@ export type CommentScope = {
   threads: boolean;
   /** Whether drafts and threads whose lines are gone are listed under each file. */
   outdated: boolean;
+  /** The guide revision on screen, whose question and risk notes can become drafts. Null on Files. */
+  guideRevision: number | null;
 };
 
 type Pin = {
   point: LinePoint;
   threads: Array<ReviewThread>;
   drafts: Array<PendingComment>;
-  composer: CommentPlacement | null;
+  composer: { placement: CommentPlacement; note: NoteDraft | null } | null;
 };
 
 const locate = (
@@ -93,8 +96,14 @@ export function useDiffComments(
       }),
   });
   const moveComment = move.mutate;
-  const { commitSha, outdated: showOutdated } = scope;
+  const { commitSha, outdated: showOutdated, guideRevision } = scope;
   const drafts = pending.data?.comments;
+  const fromNotes = pending.data?.fromNotes;
+  // A note's composer sits on its revision's line numbers, so only that revision shows it.
+  const visibleComposer =
+    composer !== null && (composer.note === null || composer.note.ref.revision === guideRevision)
+      ? composer
+      : null;
   // GitHub numbers threads against the head it had when they were read, so they are
   // placed only on a diff of that head, and read again once the diff moves on.
   const threadsHead = threads.data?.headSha;
@@ -106,6 +115,7 @@ export function useDiffComments(
   }, [staleThreads, client, key, accountId]);
   return useMemo(() => {
     const owner = { key, accountId };
+    const byNote = new Map((fromNotes ?? []).map((comment) => [comment.note, comment]));
     const build = (file: DiffFile): DiffComments | undefined => {
       if (drafts === undefined || file.patch._tag !== "text") return undefined;
       const rows = diffRows(file.patch.patch);
@@ -142,8 +152,11 @@ export function useDiffComments(
         }
       }
       const open =
-        composer?.path === file.path ? locate(rows, file.path, composer.range, commitSha) : null;
-      if (open) pinAt(open.anchor.end).composer = open;
+        visibleComposer?.path === file.path
+          ? locate(rows, file.path, visibleComposer.range, commitSha)
+          : null;
+      if (open)
+        pinAt(open.anchor.end).composer = { placement: open, note: visibleComposer?.note ?? null };
       return {
         pins: [...pins.values()].map((pin) => pin.point),
         render: (point) => {
@@ -174,6 +187,7 @@ export function useDiffComments(
               key,
               path: file.path,
               range: { start: placement.anchor.start, end: placement.anchor.end },
+              note: null,
             });
         },
         footer:
@@ -186,6 +200,24 @@ export function useDiffComments(
             />
           ) : null,
         count: fileDrafts.length + fileThreads.length,
+        noteFooter:
+          guideRevision === null
+            ? undefined
+            : (note, index) => (
+                <NoteCommentFooter
+                  pr={owner}
+                  path={file.path}
+                  rows={rows}
+                  revision={guideRevision}
+                  note={note}
+                  index={index}
+                  fromNotes={byNote}
+                  composing={
+                    visibleComposer?.note?.ref.path === file.path &&
+                    visibleComposer.note.ref.index === index
+                  }
+                />
+              ),
       };
     };
     const layers = new Map(files.map((file) => [file.path, build(file)]));
@@ -195,11 +227,13 @@ export function useDiffComments(
     accountId,
     files,
     drafts,
+    fromNotes,
     threadList,
-    composer,
+    visibleComposer,
     moving,
     commitSha,
     showOutdated,
+    guideRevision,
     compose,
     moveComment,
   ]);

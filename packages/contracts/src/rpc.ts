@@ -65,6 +65,7 @@ import {
 } from "./pullRequest.ts";
 import {
   CommentPlacement,
+  NoteRef,
   PendingComments,
   ReviewCommentsError,
   ReviewEvent,
@@ -140,6 +141,7 @@ export const WS_METHODS = {
   guidesGet: "guides.get",
   reviewCommentsList: "reviewComments.list",
   reviewCommentsAdd: "reviewComments.add",
+  reviewCommentsAddFromNote: "reviewComments.addFromNote",
   reviewCommentsEdit: "reviewComments.edit",
   reviewCommentsMove: "reviewComments.move",
   reviewCommentsDelete: "reviewComments.delete",
@@ -535,6 +537,16 @@ export const WsRpcGroup = RpcGroup.make(
       key: PullRequestKey,
       accountId: AccountId,
       placement: CommentPlacement,
+      body: Schema.NonEmptyString,
+    }),
+    success: PendingComments,
+    error: ReviewCommentsError,
+  }),
+  Rpc.make(WS_METHODS.reviewCommentsAddFromNote, {
+    payload: Schema.Struct({
+      key: PullRequestKey,
+      accountId: AccountId,
+      note: NoteRef,
       body: Schema.NonEmptyString,
     }),
     success: PendingComments,

@@ -1,4 +1,11 @@
-import type { CommentAnchor, LinePoint } from "./reviewComments.ts";
+import type { NormalizedGuide } from "./guide.ts";
+import type { PullRequestFiles } from "./pullRequest.ts";
+import {
+  type CommentAnchor,
+  type CommentPlacement,
+  type LinePoint,
+  NoteKey,
+} from "./reviewComments.ts";
 
 /** One row of a unified diff with the numbers GitHub uses for each side. */
 export type DiffRow = {
@@ -85,4 +92,103 @@ export const findSnippet = (rows: ReadonlyArray<DiffRow>, path: string, snippet:
     found = { path, start: pointOf(first), end: pointOf(last) };
   }
   return found;
+};
+
+type LineNote = NormalizedGuide["chapters"][number]["files"][number]["annotations"][number];
+
+/** A note's line as a comment point: `additions` is GitHub's new side, `deletions` its old. */
+export const notePoint = (note: Pick<LineNote, "side" | "line">): LinePoint => ({
+  side: note.side === "additions" ? "new" : "old",
+  line: note.line,
+});
+
+/** The note's identity, or null when its row isn't in `rows`; a stored note's row always is. */
+export const noteKey = (
+  path: string,
+  rows: ReadonlyArray<DiffRow>,
+  note: Pick<LineNote, "side" | "line" | "text">,
+) => {
+  const row = rows[rowIndex(rows, notePoint(note))];
+  return row === undefined
+    ? null
+    : NoteKey.make(JSON.stringify([path, note.side, snippetOf([row]), note.text]));
+};
+
+/** Rows on each side of a note's row that must read the same for the note to land. */
+const CONTEXT_ROWS = 3;
+
+/** Why a note can't land in GitHub's diff now, as the user reads it. */
+export const NOTE_LOST = {
+  file: {
+    title: "GitHub shows no diff for this file now",
+    description: "prkit can only place a comment on a line GitHub shows in the diff.",
+  },
+  lines: {
+    title: "This line changed after the guide was written",
+    description: "prkit won't guess where the comment goes. Comment on the latest code in Files.",
+  },
+} as const;
+
+export type NotePlacement =
+  | { _tag: "placed"; placement: CommentPlacement; moved: boolean }
+  /** `file`: GitHub shows no text diff for it now. `lines`: its code changed, or reads the same in two places. */
+  | { _tag: "lost"; reason: keyof typeof NOTE_LOST };
+
+/**
+ * Where a note written on one diff goes in GitHub's diff now, or why it can't go anywhere.
+ * The note's row and up to three rows on each side of it, inside its hunk, must read the
+ * same, at the note's own numbers first, otherwise in exactly one place. The side stays
+ * the note's, so a note on an old line of context stays on the old side.
+ */
+export const placeNote = (input: {
+  path: string;
+  point: LinePoint;
+  writtenRows: ReadonlyArray<DiffRow>;
+  /** GitHub's files at the PR's head now. */
+  files: PullRequestFiles;
+}): NotePlacement => {
+  const { path, point, writtenRows, files } = input;
+  const lost = (reason: "file" | "lines"): NotePlacement => ({ _tag: "lost", reason });
+  const file = files.files.find((candidate) => candidate.path === path);
+  const current = file?.patch._tag === "text" ? diffRows(file.patch.patch) : [];
+  if (current.length === 0) return lost("file");
+  const at = rowIndex(writtenRows, point);
+  const hunk = writtenRows[at]?.hunk;
+  if (hunk === undefined) return lost("lines");
+  let from = at;
+  while (at - from < CONTEXT_ROWS && writtenRows[from - 1]?.hunk === hunk) from--;
+  let to = at;
+  while (to - at < CONTEXT_ROWS && writtenRows[to + 1]?.hunk === hunk) to++;
+  const window = writtenRows.slice(from, to + 1);
+  const text = snippetOf(window);
+  const offset = at - from;
+  const readsAt = (start: number) => {
+    if (start < 0) return false;
+    const slice = current.slice(start, start + window.length);
+    return (
+      slice.length === window.length &&
+      slice[0]?.hunk === slice.at(-1)?.hunk &&
+      snippetOf(slice) === text
+    );
+  };
+  const land = (start: number) => {
+    const target = current[start + offset];
+    const line = target === undefined ? null : point.side === "new" ? target.new : target.old;
+    if (target === undefined || line === null) return lost("lines");
+    const lands = { side: point.side, line };
+    return {
+      _tag: "placed",
+      placement: {
+        anchor: { path, start: lands, end: lands },
+        snippet: snippetOf([target]),
+        commitSha: files.headSha,
+      },
+      moved: line !== point.line,
+    } satisfies NotePlacement;
+  };
+  const here = rowIndex(current, point);
+  if (here >= 0 && readsAt(here - offset)) return land(here - offset);
+  const elsewhere = current.flatMap((_, start) => (readsAt(start) ? [start] : []));
+  const [only] = elsewhere;
+  return elsewhere.length === 1 && only !== undefined ? land(only) : lost("lines");
 };
