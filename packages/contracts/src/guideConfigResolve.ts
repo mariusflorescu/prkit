@@ -25,7 +25,8 @@ export const SCOPE_LABELS: Record<GuideScopeName, string> = {
 };
 
 type Layer = { readonly scope: GuideScopeName; readonly config: ScopeConfig };
-type ItemKind = "ignore" | "focus";
+type PathRulesKind = "ignore" | "sensitive";
+type ItemKind = PathRulesKind | "focus";
 
 const layersOf = (input: GuideConfigLayers): ReadonlyArray<Layer> => [
   { scope: "global", config: input.global },
@@ -38,9 +39,9 @@ const layersOf = (input: GuideConfigLayers): ReadonlyArray<Layer> => [
 ];
 
 const itemIds = (config: ScopeConfig, kind: ItemKind): ReadonlyArray<GuideItemId> =>
-  kind === "ignore"
-    ? config.ignore.rules.map((rule) => rule.id)
-    : config.focus.areas.map((area) => area.id);
+  kind === "focus"
+    ? config.focus.areas.map((area) => area.id)
+    : config[kind].rules.map((rule) => rule.id);
 
 /** The most specific explicit on/off below the item's own scope wins; no override means on. */
 const stateOf = (
@@ -64,13 +65,18 @@ const handleOf = (label: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "area";
 
-/** Only what reaches the guide counts: items switched off and dropped guidance don't. */
+/**
+ * Only what reaches the guide counts: items switched off and dropped guidance don't.
+ * Look-closely paths join only when one is on, so every hash from before them still matches.
+ */
 const hashOf = (
   ignore: ReadonlyArray<EffectiveIgnoreRule>,
+  sensitive: ReadonlyArray<EffectiveIgnoreRule>,
   focusAreas: ReadonlyArray<EffectiveFocusArea>,
   guidance: ReadonlyArray<EffectiveGuidance>,
-) =>
-  fnv1a64(
+) => {
+  const close = sensitive.filter((rule) => rule.active).map((rule) => rule.pattern);
+  return fnv1a64(
     JSON.stringify([
       ignore.filter((rule) => rule.active).map((rule) => rule.pattern),
       focusAreas
@@ -79,8 +85,10 @@ const hashOf = (
       guidance
         .filter((block) => block.replacedBy === null)
         .map((block) => [block.scope, block.text]),
+      ...(close.length === 0 ? [] : [close]),
     ]),
   );
+};
 
 /**
  * Resolves the scopes into what one pull request's guide uses (docs/internals/architecture.md
@@ -88,14 +96,17 @@ const hashOf = (
  */
 export const resolveGuideConfig = (input: GuideConfigLayers): ResolvedGuideConfig => {
   const layers = layersOf(input);
-  const ignore = layers.flatMap((layer, owner) =>
-    layer.config.ignore.rules.map((rule): EffectiveIgnoreRule => ({
-      id: rule.id,
-      pattern: rule.pattern,
-      scope: layer.scope,
-      ...stateOf(layers, owner, "ignore", rule.id),
-    })),
-  );
+  const pathRules = (kind: PathRulesKind) =>
+    layers.flatMap((layer, owner) =>
+      layer.config[kind].rules.map((rule): EffectiveIgnoreRule => ({
+        id: rule.id,
+        pattern: rule.pattern,
+        scope: layer.scope,
+        ...stateOf(layers, owner, kind, rule.id),
+      })),
+    );
+  const ignore = pathRules("ignore");
+  const sensitive = pathRules("sensitive");
   const taken = new Set<string>();
   const focusAreas = layers.flatMap((layer, owner) =>
     layer.config.focus.areas.map((area): EffectiveFocusArea => {
@@ -116,7 +127,7 @@ export const resolveGuideConfig = (input: GuideConfigLayers): ResolvedGuideConfi
     return [{ scope: layer.scope, text, replacedBy: index < replacing ? replacer : null }];
   });
   const dangling = layers.flatMap((layer, index) =>
-    (["ignore", "focus"] as const).flatMap((kind) =>
+    (["ignore", "sensitive", "focus"] as const).flatMap((kind) =>
       layer.config[kind].overrides
         .filter(
           (override) =>
@@ -127,7 +138,14 @@ export const resolveGuideConfig = (input: GuideConfigLayers): ResolvedGuideConfi
         .map((override) => ({ scope: layer.scope, kind, itemId: override.itemId })),
     ),
   );
-  return { ignore, focusAreas, guidance, dangling, hash: hashOf(ignore, focusAreas, guidance) };
+  return {
+    ignore,
+    sensitive,
+    focusAreas,
+    guidance,
+    dangling,
+    hash: hashOf(ignore, sensitive, focusAreas, guidance),
+  };
 };
 
 // Ignore patterns: repository-relative and case-sensitive. A rule that matches a folder
@@ -292,6 +310,20 @@ export const ignoreMatcher = (rules: ReadonlyArray<EffectiveIgnoreRule>) => {
       sides,
       skipped: sides.every((side) => side.skipped),
     };
+  };
+};
+
+/**
+ * Look-closely paths read like ignore patterns, but one matching side is enough: a file
+ * renamed out of a look-closely folder still gets the careful read. Returns the side and
+ * the rule that decided it, or null when no rule did or a `!pattern` left it out.
+ */
+export const sensitiveMatcher = (rules: ReadonlyArray<EffectiveIgnoreRule>) => {
+  const decide = ignoreMatcher(rules);
+  return (file: { readonly path: string; readonly previousPath: string | null }) => {
+    const side = decide(file).sides.find((candidate) => candidate.skipped);
+    if (side === undefined || side.winner === null) return null;
+    return { path: side.path, pattern: side.winner.pattern, scope: side.winner.scope };
   };
 };
 

@@ -65,7 +65,12 @@ export default Effect.gen(function* () {
           ? null
           : { ...emptyScopeConfig, guidance: { version: 1, text, mode: "append" } },
     });
-    const config = yield* encodeConfig({ ...resolved, repository: null, skipped: [] });
+    const config = yield* encodeConfig({
+      ...resolved,
+      repository: null,
+      skipped: [],
+      signals: null,
+    });
     yield* sql`
       UPDATE review_attempts SET config = ${config}, config_hash = ${resolved.hash}
       WHERE review_id = ${review.id} AND snapshot IS NOT NULL`;

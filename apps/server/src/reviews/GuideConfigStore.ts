@@ -138,6 +138,7 @@ const editProblem = (scope: GuideScope, edit: GuideSectionEdit): string | null =
 const trimmed = (edit: GuideSectionEdit): GuideSectionEdit => {
   switch (edit._tag) {
     case "ignore":
+    case "sensitive":
       return {
         ...edit,
         rules: edit.rules.map((rule) => ({ ...rule, pattern: rule.pattern.trim() })),
@@ -239,6 +240,7 @@ export const make = Effect.gen(function* () {
             ignore === undefined
               ? emptyScopeConfig.ignore
               : { version: ignore.version, ...(yield* decodeIgnore(ignore.value)) },
+          sensitive: emptyScopeConfig.sensitive,
           focus:
             focus === undefined
               ? emptyScopeConfig.focus

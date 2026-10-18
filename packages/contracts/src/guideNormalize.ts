@@ -19,6 +19,7 @@ import {
   type Mode,
   type Report,
   asList,
+  chapterKey,
   didYouMean,
   hunkRanges,
   listRanges,
@@ -30,6 +31,7 @@ import {
   words,
 } from "./guideCheck.ts";
 import { checkFlowLengths, flowTexts, normalizeFlow } from "./guideFlow.ts";
+import { normalizeRisk, riskTexts } from "./guideRisk.ts";
 
 export type { GuideCheckContext };
 
@@ -45,6 +47,7 @@ export const checkContextOf = (config: AttemptConfig): GuideCheckContext => ({
       : [{ handle: area.handle, label: area.label, question: area.question }],
   ),
   skipped: config.skipped,
+  signals: config.signals,
 });
 
 /** The chapter prkit appends for skipped files; an agent's chapter can't take its id. */
@@ -188,6 +191,7 @@ const normalizeChapters = (
       pseudocode: raw.pseudocode || null,
       callouts,
       files: [],
+      risk: null,
     };
     chapters.push(chapter);
     for (const rawEntry of raw.files ?? []) {
@@ -300,6 +304,7 @@ function* guideTexts(guide: NormalizedGuide) {
       for (const annotation of file.annotations) yield annotation.text;
     }
   }
+  yield* riskTexts(guide);
   if (guide.flow !== null) yield* flowTexts(guide.flow);
   for (const item of guide.focus) yield item.text;
   for (const area of guide.focusAreas) yield area.text;
@@ -398,7 +403,14 @@ const normalize = (
     report.errors.push(
       "`summary` is required - explain what this PR does so someone new to the code knows what they're looking at.",
     );
-  const chapters = normalizeChapters(guide.chapters ?? [], snapshot, report, mode, context);
+  const { risk, chapters } = normalizeRisk({
+    raw: { risk: guide.risk, chapters: guide.chapters ?? [] },
+    chapters: normalizeChapters(guide.chapters ?? [], snapshot, report, mode, context),
+    snapshot,
+    mode,
+    context,
+    report,
+  });
   const chapterIds = chapters.map((chapter) => chapter.id);
   const focus = (guide.focus ?? []).map((item) => {
     let tone = item.tone ?? "note";
@@ -419,6 +431,8 @@ const normalize = (
     background: paragraphs(guide.background),
     steps: [...asList(guide.steps)],
     chapters,
+    risk,
+    signals: context?.signals ?? [],
     flow: normalizeFlow(guide.flow, chapterIds, snapshot, mode, context, report),
     focus,
     focusAreas:
@@ -488,6 +502,7 @@ export const withSkippedChapter = (
         pseudocode: null,
         callouts: [],
         files,
+        risk: null,
       },
     ],
   };
@@ -512,7 +527,6 @@ export const coverageProblems = (guide: NormalizedGuide, snapshot: DiffSnapshot)
   return problems;
 };
 
-const chapterKey = (chapter: RawChapter) => slugify(chapter.id || chapter.title);
 const isPlanned = (chapter: RawChapter) =>
   (chapter.files ?? []).length === 0 && asList(chapter.body).length === 0;
 
@@ -547,6 +561,9 @@ export const withoutUnwrittenChapters = (draft: DraftGuide): DraftGuide => {
           },
         }),
     ...(draft.focus === undefined ? {} : { focus: draft.focus.map(unlinked) }),
+    ...(draft.risk?.reasons === undefined
+      ? {}
+      : { risk: { ...draft.risk, reasons: draft.risk.reasons.map(unlinked) } }),
   };
 };
 

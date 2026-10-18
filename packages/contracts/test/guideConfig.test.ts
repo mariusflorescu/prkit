@@ -13,12 +13,15 @@ import {
   ignorePatternProblem,
   projectSnapshot,
   resolveGuideConfig,
+  sensitiveMatcher,
 } from "../src/guideConfigResolve.ts";
 
 const id = GuideItemId.make;
 const scope = (parts: {
   rules?: ReadonlyArray<readonly [string, string]>;
   ignoreOverrides?: ReadonlyArray<GuideOverride>;
+  close?: ReadonlyArray<readonly [string, string]>;
+  closeOverrides?: ReadonlyArray<GuideOverride>;
   areas?: ReadonlyArray<readonly [string, string, string]>;
   focusOverrides?: ReadonlyArray<GuideOverride>;
   guidance?: { text: string; mode: "append" | "replace" };
@@ -27,6 +30,11 @@ const scope = (parts: {
     version: 1,
     rules: (parts.rules ?? []).map(([ruleId, pattern]) => ({ id: id(ruleId), pattern })),
     overrides: parts.ignoreOverrides ?? [],
+  },
+  sensitive: {
+    version: 1,
+    rules: (parts.close ?? []).map(([ruleId, pattern]) => ({ id: id(ruleId), pattern })),
+    overrides: parts.closeOverrides ?? [],
   },
   focus: {
     version: 1,
@@ -336,5 +344,70 @@ describe("focus areas and guidance across scopes", () => {
       pullRequest: null,
     }).focusAreas.map((area) => area.handle);
     expect(handles).toEqual(["security", "security-2"]);
+  });
+});
+
+describe("look-closely paths", () => {
+  const layers = {
+    global: scope({
+      rules: [["g-dist", "dist/"]],
+      areas: [["g-sec", "Security", "Is any input trusted without checks?"]],
+      guidance: { text: "Keep chapters very short", mode: "append" },
+    }),
+    repository: null,
+    pullRequest: null,
+  };
+  /** What these settings hashed to before look-closely paths existed. */
+  const hashBefore = "5bb868e86613e6b1";
+
+  it("keeps every settings hash from before them until one is on", () => {
+    expect(resolveGuideConfig(layers).hash).toBe(hashBefore);
+    expect(
+      resolveGuideConfig({
+        ...layers,
+        repository: scope({ close: [["r-auth", "src/auth/"]] }),
+        pullRequest: scope({ closeOverrides: [off("r-auth")] }),
+      }).hash,
+    ).toBe(hashBefore);
+    expect(
+      resolveGuideConfig({ ...layers, repository: scope({ close: [["r-auth", "src/auth/"]] }) })
+        .hash,
+    ).not.toBe(hashBefore);
+  });
+
+  it("resolve like ignore rules across scopes, and match a rename by either path", () => {
+    const resolved = resolveGuideConfig({
+      global: scope({
+        close: [
+          ["g-auth", "src/auth/"],
+          ["g-billing", "billing/"],
+        ],
+      }),
+      repository: scope({
+        close: [["r-readme", "!src/auth/README.md"]],
+        closeOverrides: [off("g-billing"), off("g-deleted")],
+      }),
+      pullRequest: null,
+    });
+    const match = sensitiveMatcher(resolved.sensitive);
+    expect(
+      [
+        { path: "src/auth/session.ts", previousPath: null },
+        { path: "src/auth/README.md", previousPath: null },
+        { path: "billing/charge.ts", previousPath: null },
+        { path: "lib/session.ts", previousPath: "src/auth/session.ts" },
+        { path: "src/app.ts", previousPath: null },
+      ].map(match),
+    ).toEqual([
+      { path: "src/auth/session.ts", pattern: "src/auth/", scope: "global" },
+      null,
+      null,
+      { path: "src/auth/session.ts", pattern: "src/auth/", scope: "global" },
+      null,
+    ]);
+    expect(resolved.ignore).toEqual([]);
+    expect(resolved.dangling).toEqual([
+      { scope: "repository", kind: "sensitive", itemId: "g-deleted" },
+    ]);
   });
 });

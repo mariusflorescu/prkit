@@ -1346,7 +1346,12 @@ export const make = Effect.gen(function* () {
       )
         return yield* settleUnchanged(review, attemptId, previous);
       const { reviewed, skipped } = projectSnapshot(settings.ignore, ready.snapshot);
-      const config: AttemptConfig = { ...settings, repository: plan.repository, skipped };
+      const config: AttemptConfig = {
+        ...settings,
+        repository: plan.repository,
+        skipped,
+        signals: null,
+      };
       // A guide written under other settings is written again from scratch, not updated on top.
       const changedSince =
         previous !== null && previous.config_hash !== settings.hash ? previous : null;

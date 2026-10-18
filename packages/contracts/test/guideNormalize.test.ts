@@ -388,7 +388,7 @@ describe("agent correction messages", () => {
       }),
       snapshot: flowSnapshot,
       errors: [
-        "flow row 1: `src/legacy.js` is deleted, so it has no new-side lines. Point the row at a file that still exists, such as the code that used to call it.",
+        "flow row 1: `src/legacy.js` is deleted, so it has no new-side lines. Point it at a file that still exists, such as the code that used to call it.",
       ],
     },
     {
@@ -431,6 +431,7 @@ describe("checks that depend on the attempt's settings", () => {
       { handle: "security", label: "Security", question: "Is any input trusted without checks?" },
     ],
     skipped: [skippedTest],
+    signals: null,
   };
   const check = (guide: object, withContext: GuideCheckContext | null = context) =>
     normalizeGuide(Schema.decodeUnknownSync(Guide)(guide), snapshot, withContext);
@@ -514,7 +515,7 @@ describe("checks that depend on the attempt's settings", () => {
         },
       },
       errors: [
-        "flow row 1: `test/a.test.ts` is skipped by the reviewer's ignore rules (`test/` (Global)). Point the row at a reviewed file.",
+        "flow row 1: `test/a.test.ts` is skipped by the reviewer's ignore rules (`test/` (Global)). Point it at a reviewed file.",
       ],
     },
     {
@@ -560,6 +561,7 @@ describe("checks that depend on the attempt's settings", () => {
           annotations: [],
         },
       ],
+      risk: null,
     });
     expect(coverageProblems(full, { files: [textFile, testFile] })).toEqual([]);
     expect(coverageProblems(accepted, { files: [textFile, testFile] })).toEqual([
