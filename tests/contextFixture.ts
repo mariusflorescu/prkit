@@ -47,7 +47,8 @@ export const FIX = {
 export const seed = ({
   fixed = false,
   longIssue = false,
-}: { fixed?: boolean; longIssue?: boolean } = {}): ContextSeed => ({
+  extraIssues = 0,
+}: { fixed?: boolean; longIssue?: boolean; extraIssues?: number } = {}): ContextSeed => ({
   checks: [
     fixed
       ? { id: 101, name: "unit tests", status: "completed", conclusion: "success" }
@@ -103,5 +104,12 @@ export const seed = ({
           },
         ]
       : []),
+    ...Array.from({ length: extraIssues }, (_, index) => ({
+      repository: "budget/fixtures",
+      number: 40 + index,
+      title: `Follow-up ${index + 1}`,
+      body: "A short issue.",
+      state: "OPEN" as const,
+    })),
   ],
 });

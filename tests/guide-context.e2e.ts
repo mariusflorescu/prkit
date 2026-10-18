@@ -164,7 +164,7 @@ test(
 
       const changesBefore = changedLines(NodeFS.readFileSync(run.log, "utf8"));
       await fake.comment(9);
-      await fake.context(9, seed({ fixed: true }));
+      await fake.context(9, seed({ fixed: true, extraIssues: 6 }));
       await waitForWatcherReads(run.home, 2);
       expect(changedLines(NodeFS.readFileSync(run.log, "utf8"))).toBeGreaterThan(changesBefore);
       expect(reviewState(run.home)).toEqual([{ revision: 1, state: "watching" }]);
@@ -185,8 +185,14 @@ test(
       const update = decodeFile(second.context);
       expect(update.checks).toMatchObject({ failing: 0, pending: 1 });
       expect(update.threads).toMatchObject({ open: 1, listed: [{ comments: 2 }] });
+      if (!("linked" in update.issues)) throw new Error("The issues were not read.");
+      expect(update.issues.linked).toBe(7);
+      expect(update.issues.listed).toHaveLength(5);
       expect(second.prompt).toContain(
-        "It holds 1 pending check, 1 open review thread and 1 linked issue. Read it before you write the guide.",
+        "It holds 1 pending check, 1 open review thread and 7 linked issues (the first 5 are listed). Read it before you write the guide.",
+      );
+      expect(notes(run.home)).toContain(
+        "Gave the agent 1 pending check, 1 open review thread and 7 linked issues (the first 5 listed)",
       );
       await app.screenshot("guide-context-r2");
     } finally {
