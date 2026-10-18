@@ -164,6 +164,17 @@ export const makeActions = (reads: {
               "conflict",
               "The pull request changed after you opened this action. Refresh and review the new head before retrying.",
             );
+          if (
+            command.kind === "edit" &&
+            command.expectedBody !== undefined &&
+            command.expectedBody !== detail.body
+          )
+            return yield* fail(
+              key,
+              accountId,
+              "conflict",
+              "The description changed on GitHub after prkit read it. Refresh to see the new one, then try again.",
+            );
           const reason = pullRequestActionReason(detail, command.kind);
           if (reason !== null)
             return yield* fail(
@@ -298,7 +309,7 @@ export const makeActions = (reads: {
             }
             case "edit":
               yield* api.restWrite(accountId, "PATCH", pullPath, Empty, {
-                title: command.title,
+                ...(command.title === undefined ? {} : { title: command.title }),
                 body: command.body,
               });
               break;

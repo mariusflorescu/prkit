@@ -85,8 +85,8 @@ const PULL = {
   html_url: "https://github.com/acme/widgets/pull/1",
   state: "open",
   merged_at: null,
-  user: { login: "octocat" },
-  author_association: "OWNER",
+  user: { login: "hubot" },
+  author_association: "MEMBER",
   head: { sha: HEAD, ref: "feat/limits", repo: { full_name: "acme/widgets" } },
   base: {
     sha: BASE,

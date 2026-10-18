@@ -222,6 +222,22 @@ For a PR that makes password reset links expire after an hour:
 }
 ```
 
+## The author's pre-flight
+
+When the prompt says the account reading the guide opened the pull request, the guide is for its own author, and you add `preflight`. Only the author sees it. Many authors open pull requests an agent wrote for them without knowing exactly what is inside. The pre-flight shows them what reviewers will notice, before reviewers arrive. It has three short lists of up to 4 items each:
+
+- **`questions`**: what a reviewer will probably ask, the way a careful teammate would: "Why does `retry()` stop after 3 tries instead of reading the configured limit?" Point each one at what it is about: `chapter`, and `at` (`{ "path", "line" }`, a new-side line inside a hunk) when it is about one line. A line alone is enough, since its file's chapter is the question's chapter.
+- **`description`**: where the author's description and the code disagree. Each item has a `kind`:
+  - `missing-from-description`: the code does something the description doesn't mention. Point at that code with `chapter` or `at`: "The description doesn't mention the new retry in `fetchUser()`."
+  - `missing-from-code`: the description claims something that nothing in the diff does. Copy the claim's words into `quote`, exactly as the prompt quotes the description, and leave `chapter` and `at` out: "The description says empty input is handled, but nothing in the diff checks for it."
+  - `differs`: the description says one thing and the code does another. `quote` the claim and point at the code: "The description says the limit is 2048, but chapter 1 sets it to 4096."
+
+  List only what a reviewer would trip over: a behavior change nobody mentioned, a claim that isn't true, a side effect. Not wording, and not details too small for a description. When the prompt says the description is empty, leave `description` out.
+
+- **`tests`**: tests that look missing. Each names a changed source file (`path`) and says in `text` which new behavior no test covers: "`parseLimit()` now accepts `"unlimited"`, and no test sends it." Check before you claim it: Grep the checkout for tests of the file's exported names, and read the tests this pull request changes. `line` (optional) points at the untested code, a new-side line inside a hunk. Leave out files where a test adds nothing, like config, docs, generated code or a rename.
+
+Never pad. Every item carries its evidence, and prkit checks it: every reference must resolve, every quote must be the description's own words, and every test entry must name a changed file outside the tests, docs and generated chapters. If nothing stands out, send `"preflight": {}`. Nothing to flag is a real answer, and a made-up concern costs the author time. Don't retell the guide: an item says what the author should check or fix, and points at where the guide explains it. `text` takes inline markdown, and you can speak to the author as "you".
+
 ## The guide format
 
 `submit_guide` takes the guide as its arguments. Anything marked optional can be left out. Write `summary`, `background` and every `body` as a list, even when it holds one paragraph.
@@ -237,6 +253,7 @@ Top level:
 - `focus` (object[], optional): "Worth a closer look" items.
 - `focusAreas` (object[], only when the prompt lists the reviewer's focus areas): exactly one entry per listed area, `{ "id", "verdict": "notable" | "nothing-notable" | "not-assessed", "text", "chapter" }`. A notable answer names the chapter where the reader finds it; a not-assessed one says why in `text`. These are the reviewer's own questions, so answer them plainly, and don't invent concerns to fill one.
 - `guidanceNote` (string, optional): when the prompt's guidance blocks pull in different directions, one sentence on how you settled it. Leave it out otherwise.
+- `preflight` (object, only when the prompt says the account reading the guide opened the pull request): `{ "questions": [{ "text", "chapter", "at" }], "description": [{ "kind", "text", "quote", "chapter", "at" }], "tests": [{ "text", "path", "line" }] }`, every list optional. See "The author's pre-flight".
 
 **Markdown.** These fields take inline markdown (`` `code` ``, `**bold**`, `[label](https://...)`): `summary`, `background`, `steps`, chapter `body`, callouts, line notes, file `note`, `focus`, `flow.subtitle`, flow row `text` and risk reason `text`. Everything else is plain text, so don't put backticks in titles, labels, `detail` or `pseudocode`.
 

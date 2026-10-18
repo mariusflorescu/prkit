@@ -32,6 +32,7 @@ import {
 } from "./guideCheck.ts";
 import { checkFlowLengths, flowTexts, normalizeFlow } from "./guideFlow.ts";
 import { normalizeRisk, riskTexts } from "./guideRisk.ts";
+import { normalizePreflight, preflightTexts } from "./guidePreflight.ts";
 
 export type { GuideCheckContext };
 
@@ -48,6 +49,7 @@ export const checkContextOf = (config: AttemptConfig): GuideCheckContext => ({
   ),
   skipped: config.skipped,
   signals: config.signals,
+  preflight: config.preflight,
 });
 
 /** The chapter prkit appends for skipped files; an agent's chapter can't take its id. */
@@ -309,6 +311,7 @@ function* guideTexts(guide: NormalizedGuide) {
   for (const item of guide.focus) yield item.text;
   for (const area of guide.focusAreas) yield area.text;
   yield guide.guidanceNote ?? "";
+  yield* preflightTexts(guide.preflight);
 }
 
 const checkDashes = (guide: NormalizedGuide, report: Report) => {
@@ -392,7 +395,7 @@ const normalizeGuidanceNote = (raw: string | undefined, report: Report) => {
 };
 
 const normalize = (
-  guide: DraftGuide & Pick<Guide, "focusAreas" | "guidanceNote">,
+  guide: DraftGuide & Pick<Guide, "focusAreas" | "guidanceNote" | "preflight">,
   snapshot: DiffSnapshot,
   mode: Mode,
   context: GuideCheckContext | null,
@@ -438,6 +441,10 @@ const normalize = (
     focusAreas:
       mode === "draft" ? [] : normalizeFocusAreas(guide.focusAreas, chapterIds, context, report),
     guidanceNote: mode === "draft" ? null : normalizeGuidanceNote(guide.guidanceNote, report),
+    preflight:
+      mode === "draft"
+        ? null
+        : normalizePreflight({ raw: guide.preflight, chapters, snapshot, context, report }),
   };
   checkLengths(normalized, report);
   checkDashes(normalized, report);

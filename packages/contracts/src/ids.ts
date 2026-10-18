@@ -7,6 +7,9 @@ const makeEntityId = <Brand extends string>(brand: Parameters<typeof Schema.bran
 export const AccountId = makeEntityId("AccountId");
 export type AccountId = typeof AccountId.Type;
 export const loginOf = (id: AccountId) => id.slice(id.indexOf("/") + 1);
+/** Whether `login` is this account's own. GitHub logins ignore case. */
+export const isAccountLogin = (id: AccountId, login: string | null) =>
+  login !== null && loginOf(id).toLowerCase() === login.toLowerCase();
 
 /** `${host}/${owner}/${repo}#${number}`: the stable key for tabs, reviews and caches. */
 export const PullRequestKey = makeEntityId("PullRequestKey");

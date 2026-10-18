@@ -6,8 +6,10 @@ import { FlowCard } from "./FlowCard";
 import { FocusAreasSection } from "./FocusAreasSection";
 import { FocusList } from "./FocusList";
 import { RiskOverview } from "./RiskOverview";
+import { PreflightSection } from "./PreflightSection";
 import { SummaryPanel } from "./SummaryPanel";
 import { indexFlowNodes, layoutFlow } from "./flowLayout";
+import type { PreflightView } from "./types";
 
 export function GuideOverview({
   guide,
@@ -19,6 +21,7 @@ export function GuideOverview({
   prUrl,
   prDescription,
   pendingChapterIds,
+  preflight,
 }: {
   guide: NormalizedGuide;
   files: ReadonlyMap<string, DiffFile>;
@@ -29,6 +32,8 @@ export function GuideOverview({
   prUrl?: string | undefined;
   prDescription?: string | undefined;
   pendingChapterIds: ReadonlySet<string>;
+  /** Only for the pull request's own author. */
+  preflight?: PreflightView | undefined;
 }) {
   const flow =
     guide.flow && (guide.flow._tag === "graph" ? guide.flow.nodes : guide.flow.rows).length > 0
@@ -69,6 +74,18 @@ export function GuideOverview({
           />
         )}
       </div>
+      {preflight !== undefined && guide.preflight !== null && (
+        <PreflightSection
+          preflight={guide.preflight}
+          chapters={guide.chapters}
+          files={files}
+          onChapter={onChapter}
+          onLine={onLine}
+          prUrl={prUrl}
+          note={preflight.note}
+          action={preflight.action}
+        />
+      )}
       <FocusAreasSection guide={guide} onChapter={onChapter} prUrl={prUrl} />
       <ChapterRoadmap
         chapters={guide.chapters}

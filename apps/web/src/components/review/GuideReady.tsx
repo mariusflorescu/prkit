@@ -1,9 +1,11 @@
-import type {
-  AttemptSummary,
-  DiffFile,
-  PullRequestDetail,
-  Review,
-  RevisionSummary,
+import {
+  type AttemptConfig,
+  type AttemptSummary,
+  type DiffFile,
+  isAccountLogin,
+  type PullRequestDetail,
+  type Review,
+  type RevisionSummary,
 } from "@prkit/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
@@ -19,6 +21,7 @@ import { getFileContents } from "~/rpc/client";
 import { guideQuery, pendingCommentsQuery } from "~/rpc/queries";
 
 import { GuidanceNoteLine } from "./config/GuidanceNoteLine";
+import { DescriptionFromGuide } from "./description/DescriptionFromGuide";
 import { DraftView } from "./DraftView";
 import { GuideSkeleton } from "./GuideSkeleton";
 import { GuideStatusBar } from "./GuideStatusBar";
@@ -28,6 +31,14 @@ import type { GuideChoice } from "./RevisionSwitcher";
 import { useReviewActions } from "./useReviewActions";
 
 const noFiles: ReadonlyArray<DiffFile> = [];
+
+/** What the pre-flight says about the description itself, if anything. */
+const descriptionNote = (detail: PullRequestDetail, config: AttemptConfig) =>
+  detail.body.trim() === ""
+    ? "Your pull request has no description yet."
+    : config.preflight !== null && config.preflight.description !== detail.body.trim()
+      ? "You changed the description after this guide was written, so what it says about the description may be out of date."
+      : null;
 
 /**
  * A review with at least one accepted revision. The guide stays readable whatever
@@ -153,6 +164,14 @@ export function GuideReady({
             {...(current ? { loadContents } : {})}
             reviewed={reviewed.status === "ready" ? reviewed : undefined}
             count={<ReviewedCount reviewed={reviewed} files={guide.data.snapshot.files} />}
+            preflight={
+              isAccountLogin(detail.accountId, detail.author?.login ?? null)
+                ? {
+                    note: descriptionNote(detail, guide.data.config),
+                    action: <DescriptionFromGuide detail={detail} guide={guide.data.normalized} />,
+                  }
+                : undefined
+            }
           />
         </>
       )}

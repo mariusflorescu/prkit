@@ -39,6 +39,9 @@ const Prompt = Schema.fromJsonString(
  * notes, `fileNotes` file notes, `split` gives each file of their guides a chapter of its own,
  * `chapters` splits them into named chapters (with a kind and level when given), `edits` has its next fixes write files, and `plant` has its next fixes
  * and resolutions leave something behind (scripts/fake-claude.ts lists what).
+ * notes, `split` gives each file of their guides a chapter of its own, `preflight` is the
+ * author's pre-flight their guides send when the prompt asks for one, and `plant` has its
+ * next fixes and resolutions leave something behind (scripts/fake-claude.ts lists what).
  */
 export const setUpFakeClaude = (name: string) => {
   const dir = NodePath.join(repoRoot, ".e2e", "fake", `${name}-claude`);
@@ -70,6 +73,11 @@ export const setUpFakeClaude = (name: string) => {
     /** Whole files, by path in the checkout, that the next fixes write. */
     edits: (files: Record<string, string>) =>
       NodeFS.writeFileSync(NodePath.join(dir, "edits"), JSON.stringify(files)),
+    /** `null` goes back to `{}`, nothing to flag. */
+    preflight: (preflight: object | null) =>
+      preflight === null
+        ? NodeFS.rmSync(NodePath.join(dir, "preflight"), { force: true })
+        : NodeFS.writeFileSync(NodePath.join(dir, "preflight"), JSON.stringify(preflight)),
     /** `nested` takes the path for the repository; `null` stops planting it. */
     plant: (what: "nested" | "todo" | "linger", value: string | null) =>
       value === null
