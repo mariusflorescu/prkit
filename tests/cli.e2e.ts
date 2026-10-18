@@ -13,7 +13,7 @@ import {
   GuideSettingsResult,
 } from "../apps/server/src/outside/paritySchemas.ts";
 import { ResponseFragment } from "../apps/server/src/outside/responseSchemas.ts";
-import { InboxListResult } from "../apps/server/src/outside/schemas.ts";
+import { InboxListResult, PullRequestResult } from "../apps/server/src/outside/schemas.ts";
 import { repoRoot } from "../scripts/verify-run.ts";
 import { cliFixture } from "./cliFixture.ts";
 import { setUpFakeClaude } from "./fakeClaude.ts";
@@ -406,6 +406,9 @@ test(
       const guide = cli(["guide", "read", "budget/fixtures#9", "--json"]);
       expect(guide.code).toBe(0);
       expect(guide.stdout).toContain("A guide written by the stand-in agent.");
+      const { headSha } = Schema.decodeSync(Schema.fromJsonString(PullRequestResult))(
+        cli(["pr", "read", "budget/fixtures#9", "--json"]).stdout,
+      );
       expect(
         cli([
           "comments",
@@ -415,6 +418,8 @@ test(
           "src/limits.ts",
           "--line",
           "2",
+          "--head-sha",
+          headSha,
           "--body",
           "Name the limit.",
           "--request-id",
