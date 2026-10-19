@@ -12,11 +12,12 @@ import { PlacementTag } from "./PlacementTag";
 import { storePending } from "./reviewCommentsCache";
 import { rangeLabel } from "./reviewCommentPresentation";
 import { type Composer, composerForm, useReviewCommentsStore } from "./reviewCommentsStore";
+import { sendingKey, useFormSending } from "./useFormSending";
 
 /** Why a comment being written has no line on this diff, as its card says it. */
-const lostWhy = (placed: Outdated, path: string) =>
+const lostWhy = (placed: Outdated) =>
   placed.why === "file"
-    ? `GitHub shows no diff for ${path} now. Add the comment to keep it with your drafts.`
+    ? "GitHub shows no diff for this file now. Add the comment to keep it with your drafts."
     : "A new commit changed these lines while you were writing. Add the comment to keep it with your drafts, then move it to a current line.";
 
 /**
@@ -38,9 +39,12 @@ export function NewCommentComposer({
   const close = () => closeComposer(composer);
   const ask = useAskTarget();
   const { placement, note } = composer;
+  const form = composerForm(pr);
+  const sending = useFormSending(form);
   // GitHub's diff no longer has the note's line, so the server would refuse it as the note's.
   const fromNote = placed._tag === "outdated" ? null : note;
   const add = useMutation({
+    mutationKey: sendingKey(form),
     mutationFn: (body: string) =>
       fromNote === null
         ? addPendingComment({ ...pr, placement, body })
@@ -77,7 +81,7 @@ export function NewCommentComposer({
         {placed._tag === "moved" && <p>A new commit moved this code, and your comment with it.</p>}
         {placed._tag === "outdated" && (
           <>
-            <p>{lostWhy(placed, placement.anchor.path)}</p>
+            <p>{lostWhy(placed)}</p>
             <DiffSnippet
               text={placement.snippet}
               context={placement.context}
@@ -88,12 +92,12 @@ export function NewCommentComposer({
         {fromNote !== null && <p>Starts as the guide's note. Edit it before you add it.</p>}
       </div>
       <CommentForm
-        form={composerForm(pr)}
+        form={form}
         label={label}
         submitLabel="Add review comment"
         pendingLabel="Adding..."
         error={add.error?.message ?? null}
-        pending={add.isPending}
+        pending={sending}
         onSubmit={(body) => add.mutate(body)}
         onCancel={close}
         {...(ask === null || note !== null || placed._tag === "outdated"

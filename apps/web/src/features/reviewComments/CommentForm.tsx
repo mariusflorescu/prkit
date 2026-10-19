@@ -60,9 +60,9 @@ export function CommentForm({
       shown.disconnect();
       const { focus, words } = useReviewCommentsStore.getState();
       const lost = document.activeElement === null || document.activeElement === document.body;
-      if (focus?.form !== form || (focus.restore && !lost)) return;
+      if (focus?.form !== form || (focus.take === "lost" && !lost)) return;
       const caret = words.get(form);
-      node.focus({ preventScroll: focus.restore });
+      node.focus({ preventScroll: focus.take === "lost" });
       node.setSelectionRange(caret?.start ?? node.value.length, caret?.end ?? node.value.length);
     });
     shown.observe(node);

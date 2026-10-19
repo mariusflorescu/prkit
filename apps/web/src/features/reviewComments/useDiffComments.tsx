@@ -169,7 +169,6 @@ export function useDiffComments(
         const placed = filesNotes?.byShown.get(note);
         return placed === undefined ? null : { on: "files", ...placed, rows, head: commitSha };
       };
-      // Placed like a draft, so a push moves it with its code or leaves it waiting under the file.
       const writing: Placed | null =
         visibleComposer?.placement.anchor.path === file.path
           ? place(visibleComposer.placement, rows, commitSha)

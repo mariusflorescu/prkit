@@ -22,12 +22,8 @@ import { useGuideNotesOnFiles } from "~/features/guideNotes/useGuideNotesOnFiles
 import { ReviewedCount } from "~/features/reviewedFiles/ReviewedCount";
 import { useReviewedFiles, versionOf } from "~/features/reviewedFiles/useReviewedFiles";
 import { ReviewCommentsAlerts } from "~/features/reviewComments/ReviewCommentsAlerts";
-import { NewCommentComposer } from "~/features/reviewComments/NewCommentComposer";
-import {
-  composerOn,
-  useReviewCommentsStore,
-  writingOn,
-} from "~/features/reviewComments/reviewCommentsStore";
+import { CommentsWithoutDiff } from "~/features/reviewComments/CommentsWithoutDiff";
+import { useReviewCommentsStore, writingOn } from "~/features/reviewComments/reviewCommentsStore";
 import { useDiffComments } from "~/features/reviewComments/useDiffComments";
 import {
   pendingCommentsQuery,
@@ -44,7 +40,6 @@ import { useFilterKey } from "./useFilterKey";
 import "./pullRequest.css";
 
 const noNotes: FileGuideNotes["annotations"] = [];
-const noDiff = { _tag: "outdated", why: "file", suggestion: null } as const;
 
 const toDiffFiles = (files: Files["files"]): DiffFile[] =>
   files.map((file) => {
@@ -105,15 +100,6 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
   const filterRequest = useFilterKey(root, revealTree);
   const notesShown = useGuideNotesOnFiles();
   const writing = useReviewCommentsStore(writingOn(detail));
-  const composer = useReviewCommentsStore(composerOn(detail));
-  // A comment being written on a file that has no text diff now has no card to wait in.
-  const stray =
-    composer?.site.on === "files" &&
-    !files.some(
-      (file) => file.path === composer.placement.anchor.path && file.patch._tag === "text",
-    )
-      ? composer
-      : null;
   const guideNotes = useFilesGuideNotes(detail, query.data, notesShown.shown, writing);
   const notes = guideNotes._tag === "ready" ? guideNotes.notes : null;
   const commentsFor = useDiffComments(detail, files, {
@@ -220,11 +206,7 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
       </TabActions>
       <ReviewCommentsAlerts pr={detail} />
       <FilesGuideNotesStatus state={guideNotes} />
-      {stray && (
-        <section aria-label={`Comment on ${stray.placement.anchor.path}`} className="py-1">
-          <NewCommentComposer pr={detail} composer={stray} placed={noDiff} />
-        </section>
-      )}
+      <CommentsWithoutDiff pr={detail} files={files} />
       {snapshot.changedFiles > files.length && (
         <p
           role="status"

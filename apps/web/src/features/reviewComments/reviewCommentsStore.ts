@@ -35,10 +35,10 @@ export type FormKey = `composer:${string}` | `edit:${string}` | `reply:${string}
 /** What a form holds and where its caret was, read back when the diff remounts the field. */
 export type Words = { readonly text: string; readonly start: number; readonly end: number };
 /**
- * The form to focus when its field shows. A form just opened takes focus; a field the diff
- * remounted takes it back only if nothing else took it meanwhile.
+ * The form to focus when its field shows: always, for one just opened, or only if focus went
+ * nowhere, for one whose field had it before the diff remounted it.
  */
-type Focus = { readonly form: FormKey; readonly restore: boolean };
+type Focus = { readonly form: FormKey; readonly take: "opened" | "lost" };
 
 const ownerOf = ({ key, accountId }: Owner) => `${accountId} ${key}`;
 export const composerForm = (pr: Owner): FormKey => `composer:${ownerOf(pr)}`;
@@ -107,7 +107,7 @@ export const useReviewCommentsStore = create<
         composers: new Map(state.composers).set(ownerOf(composer.pr), composer),
         moving: null,
         words: new Map(state.words).set(form, carried ? typed : wordsOf(composer.note?.text ?? "")),
-        focus: { form, restore: false },
+        focus: { form, take: "opened" },
       };
     }),
   closeComposer: (composer) =>
@@ -123,7 +123,7 @@ export const useReviewCommentsStore = create<
   beginWriting: (form, text) =>
     set((state) => ({
       words: new Map(state.words).set(form, wordsOf(text)),
-      focus: { form, restore: false },
+      focus: { form, take: "opened" },
     })),
   stopWriting: (form) =>
     set((state) => ({
@@ -135,7 +135,7 @@ export const useReviewCommentsStore = create<
     set((state) =>
       state.words.has(form) ? { words: new Map(state.words).set(form, words) } : state,
     ),
-  focusForm: (form) => set({ focus: { form, restore: true } }),
+  focusForm: (form) => set({ focus: { form, take: "lost" } }),
   blurForm: (form) => set((state) => (state.focus?.form === form ? { focus: null } : state)),
   startMove: (moving) => set({ moving }),
   stopMove: () => set({ moving: null }),

@@ -61,6 +61,7 @@ const EDITING = "Does short need a test of its own, maybe";
 const REPLYING = "Agreed, and the title limit should";
 const HEADING = "Should heading trim before it";
 const LEAVING = "These comments say where slugs went, but";
+const REEDITING = "Should heading trim before it counts, or after";
 /** The base's limits, so a push that writes them takes the file out of the PR. */
 const BASE_LIMITS =
   'export const limits = {\n  url: 1024,\n  title: 120,\n};\n\nexport const schemes = ["http", "https"];\n';
@@ -254,7 +255,14 @@ test(
         { body: `${HEADING} counts?`, line: 25 },
       ]);
 
-      // A push that takes the file out of the PR leaves the composer above the list of files.
+      // A push that takes the file out of the PR leaves its comments, the one being written and
+      // a draft being edited included, above the list of files.
+      const headingDraft = file.getByRole(
+        "article",
+        `Pending comment on ${LIMITS} line 22, written on line 25`,
+      );
+      await headingDraft.getByRole("button", "Edit pending comment").tap();
+      await headingDraft.getByRole("textbox", "Edit pending comment").fill(REEDITING);
       await lineNumber(browser, 1).tap();
       await screen.getByRole("textbox", "Comment on line 1").fill(LEAVING);
       const before = await filesRead(fake);
@@ -266,21 +274,36 @@ test(
       await fake.gitHead(9, reverted);
       await expect.poll(() => filesRead(fake), { timeout: 60_000 }).toBeGreaterThan(before);
       await expect(file).toHaveCount(0, { timeout: 30_000 });
-      const stray = screen.getByRole("region", `Comment on ${LIMITS}`);
+      const stray = screen
+        .getByRole("region", "Comments on files without a diff")
+        .getByRole("group", `Comments on ${LIMITS}`);
       const strayField = stray.getByRole("textbox", "Comment written on line 1");
       await expect(strayField).toHaveValue(LEAVING);
       await expect(strayField).toBeFocused();
       await expect(stray).toContainText(
-        `GitHub shows no diff for ${LIMITS} now. Add the comment to keep it with your drafts.`,
+        "GitHub shows no diff for this file now. Add the comment to keep it with your drafts.",
       );
       await expect(stray).toContainText("+// Slugs are checked in slugs.ts now.");
+      await expect(stray.getByRole("article")).toHaveCount(4);
+      const strayDraft = stray.getByRole("article", `Pending comment on ${LIMITS} line 25`);
+      await expect(strayDraft.getByRole("textbox", "Edit pending comment")).toHaveValue(REEDITING);
+      await expect(stray.getByRole("button", "Pick a new line")).toHaveCount(0);
       await screenshotLightAndDark(app, browser, "file-left-composer");
       await browser.setViewport({ width: 760, height: 900 });
       await screenshotLightAndDark(app, browser, "file-left-composer-narrow");
       await browser.setViewport({ width: 1280, height: 900 });
       await strayField.press("Meta+Enter");
-      await expect(stray).toHaveCount(0);
-      expect(draftRows(run.home).at(-1)).toEqual({ body: LEAVING, line: 1 });
+      await expect(stray.getByRole("article", `Pending comment on ${LIMITS} line 1`)).toContainText(
+        LEAVING,
+      );
+      await strayDraft.getByRole("button", "Save").tap();
+      await expect(strayDraft).toContainText(REEDITING);
+      expect(draftRows(run.home)).toEqual([
+        { body: EDITING, line: 17 },
+        { body: COMPOSED, line: 7 },
+        { body: REEDITING, line: 25 },
+        { body: LEAVING, line: 1 },
+      ]);
       expect(await fake.writes()).toEqual([]);
     } finally {
       stopFakeInstance(name, { keepHome: false });
@@ -444,8 +467,16 @@ test(
       );
       await centre(browser, slugCard);
       await screenshotLightAndDark(app, browser, "moved-note-composer");
+      // GitHub answers slowly, so the add is still on its way when the user leaves and comes back.
+      await fake.latency(4_000, "core");
       await slugMoved.press("Meta+Enter");
-      await expect(slug.getByRole("status")).toHaveText("In your review.");
+      await expect(screen.getByRole("button", "Adding...")).toBeVisible();
+      await tabs.getByRole("link", "Conversation").tap();
+      await tabs.getByRole("link", "Files").tap();
+      await expect(screen.getByRole("button", "Adding...")).toBeVisible();
+      await expect(slugMoved).toBeDisabled();
+      await expect(slug.getByRole("status")).toHaveText("In your review.", { timeout: 60_000 });
+      await fake.latency(0, "core");
 
       // A note's comment whose line a push deletes waits under the file with its words.
       const brace = noteIn(browser, BRACE);

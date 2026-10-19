@@ -14,6 +14,7 @@ import { ThreadComment } from "./ThreadComment";
 import { storeThreads } from "./reviewCommentsCache";
 import { hunkTail, rangeLabel } from "./reviewCommentPresentation";
 import { replyForm, useReviewCommentsStore } from "./reviewCommentsStore";
+import { sendingKey, useFormSending } from "./useFormSending";
 import { useOpenForm } from "./useOpenForm";
 
 /**
@@ -40,7 +41,9 @@ export function ReviewThreadCard({
   const stopWriting = useReviewCommentsStore((state) => state.stopWriting);
   const [open, setOpen] = useState(!thread.resolved || replying);
   useOpenForm(pr.key, open && thread.canReply && replying);
+  const sending = useFormSending(form);
   const reply = useMutation({
+    mutationKey: sendingKey(form),
     mutationFn: (body: string) => replyToThread({ ...pr, threadId: thread.id, body }),
     onSuccess: (threads) => {
       store(threads);
@@ -138,7 +141,7 @@ export function ReviewThreadCard({
                 submitLabel="Reply"
                 pendingLabel="Replying..."
                 error={reply.error?.message ?? null}
-                pending={reply.isPending}
+                pending={sending}
                 onSubmit={(body) => reply.mutate(body)}
                 onCancel={() => stopWriting(form)}
               />

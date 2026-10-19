@@ -20,6 +20,7 @@ import { PlacementTag } from "./PlacementTag";
 import { storePending } from "./reviewCommentsCache";
 import { OUTDATED_WHY, rangeLabel, suggestionLabel } from "./reviewCommentPresentation";
 import { editForm, useReviewCommentsStore } from "./reviewCommentsStore";
+import { sendingKey, useFormSending } from "./useFormSending";
 import { useOpenForm } from "./useOpenForm";
 
 /**
@@ -47,7 +48,9 @@ export function PendingCommentCard({
   const startMove = useReviewCommentsStore((state) => state.startMove);
   const stopMove = useReviewCommentsStore((state) => state.stopMove);
   const here = placed._tag === "outdated" ? null : placed.placement;
+  const sending = useFormSending(form);
   const edit = useMutation({
+    mutationKey: sendingKey(form),
     mutationFn: (body: string) => editPendingComment(comment.id, body),
     onSuccess: (comments) => {
       store(comments);
@@ -123,38 +126,40 @@ export function PendingCommentCard({
             context={comment.context}
             label="Lines this comment was written on"
           />
-          <div className="flex flex-wrap items-center gap-2">
-            {placed.suggestion && (
-              <Button
-                size="xs"
-                variant="outline"
-                disabled={move.isPending}
-                onClick={() => placed.suggestion && move.mutate(placed.suggestion)}
-              >
-                {suggestionLabel(comment.anchor, placed.suggestion.anchor)}
-              </Button>
-            )}
-            {moving ? (
-              <>
-                <span role="status" className="text-xs text-foreground">
-                  Click a line in this file to move the comment there.
-                </span>
-                <Button size="xs" variant="ghost" onClick={stopMove}>
-                  Cancel
+          {placed.why !== "file" && (
+            <div className="flex flex-wrap items-center gap-2">
+              {placed.suggestion && (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={move.isPending}
+                  onClick={() => placed.suggestion && move.mutate(placed.suggestion)}
+                >
+                  {suggestionLabel(comment.anchor, placed.suggestion.anchor)}
                 </Button>
-              </>
-            ) : (
-              <Button
-                size="xs"
-                variant="ghost"
-                onClick={() =>
-                  startMove({ key: pr.key, path: comment.anchor.path, id: comment.id })
-                }
-              >
-                Pick a new line
-              </Button>
-            )}
-          </div>
+              )}
+              {moving ? (
+                <>
+                  <span role="status" className="text-xs text-foreground">
+                    Click a line in this file to move the comment there.
+                  </span>
+                  <Button size="xs" variant="ghost" onClick={stopMove}>
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() =>
+                    startMove({ key: pr.key, path: comment.anchor.path, id: comment.id })
+                  }
+                >
+                  Pick a new line
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       )}
       <div className="mt-2">
@@ -165,7 +170,7 @@ export function PendingCommentCard({
             submitLabel="Save"
             pendingLabel="Saving..."
             error={edit.error?.message ?? null}
-            pending={edit.isPending}
+            pending={sending}
             onSubmit={(body) => edit.mutate(body)}
             onCancel={() => stopWriting(form)}
           />
