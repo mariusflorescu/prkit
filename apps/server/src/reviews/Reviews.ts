@@ -2700,16 +2700,27 @@ export const make = Effect.gen(function* () {
       Effect.map((rows) => rows.map(toFeedEntry)),
     );
 
-  /** Every review of a pull request as the feed opens with it. */
-  const index = () =>
-    sql`
+  const readIndex = sql`
       SELECT r.pr_key, r.account_id, r.status, r.latest_revision, json_extract(v.guide, '$.risk.level') AS risk
       FROM reviews r LEFT JOIN review_revisions v ON v.review_id = r.id AND v.revision = r.latest_revision
       WHERE r.local IS NULL`.pipe(
-      Effect.flatMap(decodeFeed),
-      Effect.map((rows) => rows.map(toFeedEntry)),
-      Effect.catchTags(dbFailures),
-    );
+    Effect.flatMap(decodeFeed),
+    Effect.map((rows) => rows.map(toFeedEntry)),
+  );
+  /** Every review of a pull request as the feed opens with it. */
+  const index = () => readIndex.pipe(Effect.catchTags(dbFailures));
+  /** The feed reads every guide at once, so its failures speak of all of them. */
+  const feedFailures = {
+    SqlError: () =>
+      Effect.fail(new ReviewError({ message: "prkit can't read your guides right now." })),
+    SchemaError: () =>
+      Effect.fail(
+        new ReviewError({
+          message:
+            "prkit can't read your guides right now, because one of their records is damaged.",
+        }),
+      ),
+  };
 
   /**
    * Every review's state for the whole app (inbox marks, tabs, notifications):
@@ -2721,10 +2732,10 @@ export const make = Effect.gen(function* () {
         // Subscribe before reading, so nothing that lands in between is lost.
         const changed = yield* PubSub.subscribe(changes);
         const ready = yield* PubSub.subscribe(notices);
-        const all = yield* index();
+        const all = yield* readIndex.pipe(Effect.catchTags(feedFailures));
         const sent = new Map(all.map((entry) => [entry.key, JSON.stringify(entry)]));
         const updates = Stream.fromSubscription(changed).pipe(
-          Stream.mapEffect((change) => feedEntry(change.key).pipe(Effect.catchTags(dbFailures))),
+          Stream.mapEffect((change) => feedEntry(change.key).pipe(Effect.catchTags(feedFailures))),
           Stream.flatMap((entries) =>
             Stream.fromIterable(
               entries.flatMap((review): ReadonlyArray<ReviewFeedEvent> => {

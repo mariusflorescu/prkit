@@ -6,7 +6,7 @@ import { cn } from "~/lib/utils";
 
 import { LAYER_GUIDE_LABELS, type LayerGuide } from "./stackPresentation";
 
-/** One layer of the stack strip: its state, number, title and guide. */
+/** One layer of the stack strip: its state, number, title and guide, when prkit knows it. */
 export function StackLayerButton({
   layer,
   size,
@@ -17,7 +17,7 @@ export function StackLayerButton({
   layer: StackLayer;
   size: number;
   current: boolean;
-  guide: LayerGuide;
+  guide: LayerGuide | null;
   onOpen: () => void;
 }) {
   const state = pullRequestState(layer);
@@ -25,9 +25,9 @@ export function StackLayerButton({
     <button
       type="button"
       aria-current={current ? "page" : undefined}
-      aria-label={`Layer ${layer.position} of ${size}: #${layer.number} ${layer.title}, ${state.label}, ${LAYER_GUIDE_LABELS[guide]}`}
+      aria-label={`Layer ${layer.position} of ${size}: #${layer.number} ${layer.title}, ${state.label}${guide === null ? "" : `, ${LAYER_GUIDE_LABELS[guide]}`}`}
       data-stack-layer={layer.number}
-      data-layer-guide={guide}
+      data-layer-guide={guide ?? "unknown"}
       onClick={onOpen}
       className={cn(
         "flex h-7 max-w-64 min-w-0 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
@@ -42,7 +42,7 @@ export function StackLayerButton({
       <state.Icon aria-hidden className={cn("size-3.5 shrink-0", state.tone)} />
       <span className="shrink-0 font-mono text-2xs">#{layer.number}</span>
       <span className="min-w-0 truncate">{layer.title}</span>
-      {guide !== "none" && (
+      {(guide === "ready" || guide === "writing") && (
         <BookOpenTextIcon
           aria-hidden
           className={cn(

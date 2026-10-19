@@ -21,7 +21,11 @@ export function StackStrip({ detail }: { detail: PullRequestDetail }) {
     ...pullRequestStackQuery(detail.key, detail.accountId),
     enabled: detail.stack !== null,
   });
-  const reviews = useQuery(reviewFeedQuery).data;
+  // Only a feed read now says which layers have a guide.
+  const reviews = useQuery({
+    ...reviewFeedQuery,
+    select: (feed) => (feed._tag === "live" ? feed.reviews : null),
+  }).data;
   if (detail.stack === null) return null;
   const frame = "flex h-10 min-w-0 items-center gap-1 overflow-x-auto px-4";
   if (stack.isPending)
@@ -60,7 +64,7 @@ export function StackStrip({ detail }: { detail: PullRequestDetail }) {
               layer={layer}
               size={layers.length}
               current={layer.number === detail.ref.number}
-              guide={layerGuide(reviews?.get(key))}
+              guide={reviews == null ? null : layerGuide(reviews.get(key))}
               onOpen={() => workspace.open(key, detail.accountId)}
             />
           </Fragment>

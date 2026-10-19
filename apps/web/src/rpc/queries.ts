@@ -270,11 +270,19 @@ export const typicalDurationQuery = (instance: AgentInstanceId | null, lines: nu
     retry: false,
   });
 /**
- * Every review by PR key, kept current by `reviews.feed`; see `GuideNotifications`. Undefined
- * until the feed's first index, or empty when the feed failed before one. Nothing can fetch it
- * again, so it is never collected.
+ * Every review by PR key, kept current by `reviews.feed`, or why prkit can't read them now with
+ * what it read before, if anything; see `GuideNotifications`. Undefined until the feed's first
+ * answer.
  */
-export const reviewFeedQuery = queryOptions<ReadonlyMap<PullRequestKey, ReviewFeedEntry>>({
+export type ReviewFeed =
+  | { readonly _tag: "live"; readonly reviews: ReadonlyMap<PullRequestKey, ReviewFeedEntry> }
+  | {
+      readonly _tag: "failed";
+      readonly reviews: ReadonlyMap<PullRequestKey, ReviewFeedEntry> | null;
+      readonly message: string;
+    };
+/** Nothing can fetch the review feed again, so it is never collected. */
+export const reviewFeedQuery = queryOptions<ReviewFeed>({
   queryKey: ["reviewFeed"],
   queryFn: skipToken,
   staleTime: Infinity,

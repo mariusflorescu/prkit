@@ -45,9 +45,12 @@ export function InboxRow({
   const workspace = useWorkspace();
   const guide = useStartGuide();
   const key = pullRequestKey(entry.ref);
-  const review = useQuery({ ...reviewFeedQuery, select: (reviews) => reviews.get(key) }).data;
+  const review = useQuery({ ...reviewFeedQuery, select: (feed) => feed.reviews?.get(key) }).data;
+  // Only a feed read now can say a PR has no guide, so an unread or failed one offers none.
+  const live = useQuery({ ...reviewFeedQuery, select: (feed) => feed._tag === "live" }).data;
   const canGenerate =
     entry.state === "open" &&
+    live === true &&
     (review === undefined ||
       (review.latestRevision === null && (review.status === "failed" || review.status === "done")));
   const size = pullRequestSize(entry);
