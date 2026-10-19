@@ -309,6 +309,7 @@ const StaleRow = Schema.Struct({
 const decodeReviews = Schema.decodeUnknownEffect(Schema.Array(ReviewRow));
 /** Lists read every row they can and leave a damaged one out (logged), so it fails alone. */
 const readableReviews = decodeReadable("reviews", ReviewRow);
+const decodeEachReview = decodeEach("reviews", ReviewRow);
 const readablePullRequests = decodeReadable("reviews", PullRequestRow);
 const readableLocals = decodeReadable("reviews", LocalRow);
 const readableFeed = decodeReadable("reviews", FeedRow);
@@ -2896,12 +2897,10 @@ export const make = Effect.gen(function* () {
   const reconcile = Effect.gen(function* () {
     const at = yield* now;
     yield* stopUnreadableReviews(at);
-    const stored = new Map(
-      (yield* sql`SELECT * FROM reviews`.pipe(Effect.flatMap(readableReviews))).map((row) => [
-        row.id,
-        toStored(row),
-      ]),
+    const [readable, unreadable] = yield* sql`SELECT * FROM reviews`.pipe(
+      Effect.flatMap(decodeEachReview),
     );
+    const stored = new Map(readable.map((row) => [row.id, toStored(row)]));
     const stale = yield* sql`
       SELECT id, review_id, agent_pid, agent_started FROM review_attempts
       WHERE finished_at IS NULL AND run_id != ${runId}`.pipe(Effect.flatMap(decodeStale));
@@ -2957,8 +2956,10 @@ export const make = Effect.gen(function* () {
       )).map((row) => row.id),
     );
     let removed = 0;
+    // A review whose record can't be read keeps its checkout.
+    const kept = new Set(unreadable.map((row) => row.id));
     for (const name of yield* repo.listWorktrees()) {
-      if (live.has(name)) continue;
+      if (live.has(name) || kept.has(name)) continue;
       const reviewId = ReviewId.make(name);
       // The cache to prune comes from prkit's own record of the review, never the checkout.
       const review = stored.get(reviewId);

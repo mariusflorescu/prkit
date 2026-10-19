@@ -69,19 +69,14 @@ const ask = async ({ screen }: Page, question: string) => {
   });
 };
 
-/** Sends one comment on #9 to the fix agent; the PR merges first, so the turn ends at once. */
-const sendFix = async (
-  { app, screen, browser }: Page,
-  url: string,
-  merge: () => Promise<Response>,
-) => {
-  await app.open(pull(url, 9, "files"));
-  const file = screen.getByRole("region", "src/limits.ts");
+/** Sends one comment on #6's change to the fix agent. */
+const sendFix = async ({ app, screen, browser }: Page, url: string, comment: string) => {
+  await app.open(pull(url, 6, "files"));
+  const file = screen.getByRole("region", "src/change-0.ts");
   await expect(file.getByRole("button", "Comment on line 1")).toBeVisible({ timeout: 30_000 });
   await file.getByRole("button", "Comment on line 1").focus();
-  await browser.keyboard.press("ArrowDown");
   await browser.keyboard.press("Enter");
-  await browser.keyboard.type("Name the limit.");
+  await browser.keyboard.type(comment);
   await browser.keyboard.press("Meta+Enter");
   await screen.getByRole("button", "Review, 1 pending").first().tap();
   await screen
@@ -90,10 +85,16 @@ const sendFix = async (
     .tap();
   const send = screen.getByRole("dialog", "Send to agent");
   await expect(send.getByRole("button", /^Agent and model: /)).toBeVisible({ timeout: 30_000 });
-  await merge();
   await send.getByRole("button", "Send 1 comment to agent").tap();
-  await expect(screen.getByText("Sent to the agent")).toBeVisible({ timeout: 30_000 });
+  await expect(send).toHaveCount(0, { timeout: 30_000 });
 };
+
+const turnsOf6 = (home: string) =>
+  readRows(
+    home,
+    `SELECT t.id, json_extract(t.status, '$._tag') AS state FROM fixer_turns t
+     JOIN fixers f ON f.id = t.fixer_id WHERE f.pr_key = '${keyOf(6)}' ORDER BY t.created_at, t.rowid`,
+  );
 
 const failure = (screen: Page["screen"]) => screen.getByRole("alert").filter({ hasText: TITLE });
 
@@ -116,7 +117,8 @@ test(
       await switchOn(page, run.openUrl);
 
       // A local review written from a terminal, guides for #4 and #6, two answered questions
-      // on #6, a fix sent on #9, and a tab for #3.
+      // on #6, a fix the agent is still writing on #6 with another queued behind it, and tabs
+      // for #3 and #9.
       const fixture = localRepoFixture(root);
       fixture.write("docs/handbook.md", handbook({ 15: "Limits are set per team." }));
       const local = cliIn(NodePath.join(run.home, "bin/prkit"), fake.home, log);
@@ -136,7 +138,19 @@ test(
       });
       await ask(page, FIRST);
       await ask(page, SECOND);
-      await sendFix(page, run.url, () => fake.merge(9));
+      claude.hold();
+      await sendFix(page, run.url, "Name the change.");
+      await expect
+        .poll(() => turnsOf6(run.home).map((turn) => turn.state), { timeout: 60_000 })
+        .toEqual(["running"]);
+      await sendFix(page, run.url, "Say why it starts here.");
+      await expect
+        .poll(() => turnsOf6(run.home).map((turn) => turn.state), { timeout: 30_000 })
+        .toEqual(["running", "queued"]);
+      await app.open(pull(run.url, 9, "conversation"));
+      await expect(screen.getByRole("link", /#9 Keyboard fixture 9/).first()).toBeVisible({
+        timeout: 30_000,
+      });
       await app.open(pull(run.url, 3, "conversation"));
       await expect(screen.getByRole("link", /#3 Budget fixture 3/).first()).toBeVisible({
         timeout: 30_000,
@@ -144,14 +158,13 @@ test(
       const tabsBefore = readRows(run.home, "SELECT key FROM open_pull_requests ORDER BY key");
       expect(tabsBefore).toEqual([{ key: keyOf(3) }, { key: keyOf(6) }, { key: keyOf(9) }]);
 
-      // While prkit is closed, one row of each kind is damaged.
+      // While prkit is closed, one row of each kind is damaged. The held agent then finishes on
+      // its own, with no prkit to report to.
       stopFakeInstance(name, { keepHome: true });
-      const turn = readRows(
-        run.home,
-        `SELECT t.id FROM fixer_turns t JOIN fixers f ON f.id = t.fixer_id WHERE f.pr_key = '${keyOf(9)}'`,
-      );
-      expect(turn).toHaveLength(1);
-      const turnId = String(turn[0]?.id);
+      claude.release();
+      const [running, queued] = turnsOf6(run.home);
+      const turnId = String(running?.id);
+      const queuedId = String(queued?.id);
       const [first] = readRows(
         run.home,
         `SELECT q.id FROM ask_questions q WHERE q.text = '${FIRST}'`,
@@ -205,12 +218,17 @@ test(
       await expect(dock.getByRole("article", FIRST)).toHaveCount(0);
       await app.screenshot("damaged-review-with-guide");
 
-      // The fix whose state can't be read is left as it was, and its tab says why.
-      await app.open(pull(run.url, 9, "fixes"));
+      // The fix whose state can't be read is left as it was, its tab says why, and the fix
+      // queued behind it waits: the agent prkit can't account for may still be in the checkout.
+      await app.open(pull(run.url, 6, "fixes"));
       await expect(screen.getByRole("alert")).toContainText(
         "prkit read a damaged fix record. Try again.",
         { timeout: 30_000 },
       );
+      expect(turnsOf6(run.home)).toEqual([
+        { id: turnId, state: null },
+        { id: queuedId, state: "queued" },
+      ]);
 
       // The damaged tab steps aside; the others are still open.
       const tabs = screen.getByRole("navigation", "Workspace tabs");
@@ -245,6 +263,7 @@ test(
       expect(readRows(run.home, `SELECT status FROM fixer_turns WHERE id = '${turnId}'`)).toEqual([
         { status: '"garbage"' },
       ]);
+      expect(turnsOf6(run.home)[1]).toEqual({ id: queuedId, state: "queued" });
       expect(
         readRows(run.home, `SELECT scope FROM ask_questions WHERE id = '${String(first?.id)}'`),
       ).toEqual([{ scope: "not json" }]);
@@ -266,6 +285,8 @@ test(
       });
       await expect(failure(screen)).toHaveCount(0);
       expect(attemptsOf(run.home, keyOf(6))).toBe(attemptsOf6);
+
+      expect(turnsOf6(run.home)[1]).toEqual({ id: queuedId, state: "queued" });
 
       // Opening #3 again replaces its damaged tab.
       await app.open(pull(run.url, 3, "conversation"));

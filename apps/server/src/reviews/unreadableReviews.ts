@@ -1,5 +1,6 @@
 import { AttemptId, ReviewId, ReviewStatus } from "@prkit/contracts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
@@ -19,6 +20,7 @@ const decodeUnfinished = decodeEach(
   }),
 );
 const decodeLatest = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ id: AttemptId })));
+const decodeAttemptId = Schema.decodeUnknownOption(AttemptId);
 const encodeStatus = Schema.encodeSync(Schema.fromJsonString(ReviewStatus));
 
 const stopped = (attemptId: AttemptId | null) =>
@@ -67,7 +69,9 @@ export const stopUnreadableReviews = (at: string) =>
             UPDATE review_attempts SET finished_at = ${at}, outcome = 'failed', error = 'damaged'
             WHERE id = ${attempt.id} AND finished_at IS NULL`;
           yield* sql`
-            UPDATE reviews SET status = ${stopped(null)}, current_attempt_id = NULL,
+            UPDATE reviews
+            SET status = ${stopped(Option.getOrNull(decodeAttemptId(attempt.id)))},
+              current_attempt_id = NULL,
               updated_at = ${at}
             WHERE current_attempt_id = ${attempt.id}`;
         }),

@@ -9,7 +9,10 @@ export class DamagedRow extends Schema.TaggedError<DamagedRow>()("DamagedRow", {
   problem: Schema.String,
 }) {}
 
-const decodeId = Schema.decodeUnknownOption(Schema.Struct({ id: Schema.String }));
+/** A row's `id`, or its `key` where that is what names it (open tabs). */
+const decodeId = Schema.decodeUnknownOption(
+  Schema.Union([Schema.Struct({ id: Schema.String }), Schema.Struct({ key: Schema.String })]),
+);
 
 /** Decodes each row on its own, as `[rows, damaged]`, so one row's damage fails alone. */
 export const decodeEach = <A, I>(table: string, schema: Schema.Codec<A, I>) => {
@@ -21,7 +24,9 @@ export const decodeEach = <A, I>(table: string, schema: Schema.Codec<A, I>) => {
           (error) =>
             new DamagedRow({
               table,
-              id: Option.getOrNull(Option.map(decodeId(row), (stored) => stored.id)),
+              id: Option.getOrNull(
+                Option.map(decodeId(row), (stored) => ("id" in stored ? stored.id : stored.key)),
+              ),
               problem: error.message,
             }),
         ),

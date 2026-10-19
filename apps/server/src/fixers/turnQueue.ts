@@ -4,6 +4,7 @@ import {
   type FixerId,
   type FixerTrigger,
   FixerTurnId,
+  type FixerTurnState,
   refFromKey,
 } from "@prkit/contracts";
 import * as Deferred from "effect/Deferred";
@@ -30,6 +31,18 @@ import {
 import { encodeStatus, encodeWork, type FixerRow, type WorkRequest } from "./fixerRows.ts";
 import { decodeCount, type FixerState, TurnFailure } from "./fixerState.ts";
 import type { TurnLeftovers } from "./turnLeftovers.ts";
+
+const STATES = {
+  queued: true,
+  preparing: true,
+  running: true,
+  ready: true,
+  pushing: true,
+  pushed: true,
+  unchanged: true,
+  discarded: true,
+  failed: true,
+} satisfies Record<FixerTurnState, true>;
 
 /** What a turn does once it holds the checkout and an agent slot. */
 export type TurnBody = Effect.Effect<
@@ -91,8 +104,11 @@ export const makeTurnQueue = (
           Effect.gen(function* () {
             const fixer = yield* fixerById(fixerId);
             if (fixer === null || fixer.ended !== null) return null;
+            // An unfinished turn whose state prkit can't read may still hold the checkout.
             const busy = yield* sql`SELECT COUNT(*) AS count FROM fixer_turns
-              WHERE fixer_id = ${fixerId} AND json_extract(status, '$._tag') IN ${sql.in(FIXER_BUSY)}`.pipe(
+              WHERE fixer_id = ${fixerId} AND (json_extract(status, '$._tag') IN ${sql.in(FIXER_BUSY)}
+                OR (finished_at IS NULL
+                  AND coalesce(json_extract(status, '$._tag'), '') NOT IN ${sql.in(Object.keys(STATES))}))`.pipe(
               Effect.flatMap(decodeCount),
             );
             if ((busy[0]?.count ?? 0) > 0) return null;
