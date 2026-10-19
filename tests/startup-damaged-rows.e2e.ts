@@ -8,6 +8,7 @@ import * as Schema from "effect/Schema";
 
 import { GenerateLocalGuideResult } from "../apps/server/src/outside/schemas.ts";
 import { setUpFakeClaude } from "./fakeClaude.ts";
+import { sendLineToAgent } from "./fixActions.ts";
 import { startFakeGitHub, startFakeInstance, stopFakeInstance } from "./fakeGitHub.ts";
 import { readRows } from "./fixturePr.ts";
 import { cliIn, dismissToasts, scratchRoot, switchOn } from "./localGuideSession.ts";
@@ -69,36 +70,14 @@ const ask = async ({ screen }: Page, question: string) => {
   });
 };
 
-/** Sends one comment on a pull request's change to the fix agent. */
-const sendFix = async (
-  { app, screen, browser }: Page,
+const sendFix = (
+  page: Page,
   url: string,
   number: number,
   file: string,
   comment: string,
   beforeSend: (() => Promise<Response>) | null = null,
-) => {
-  await app.open(pull(url, number, "files"));
-  const line = screen
-    .getByRole("region", file)
-    .getByRole("button", /^Comment on line \d+$/)
-    .first();
-  await expect(line).toBeVisible({ timeout: 30_000 });
-  await line.focus();
-  await browser.keyboard.press("Enter");
-  await browser.keyboard.type(comment);
-  await browser.keyboard.press("Meta+Enter");
-  await screen.getByRole("button", "Review, 1 pending").first().tap();
-  await screen
-    .getByRole("group", "Where your comments go")
-    .getByRole("button", "Send to agent")
-    .tap();
-  const send = screen.getByRole("dialog", "Send to agent");
-  await expect(send.getByRole("button", /^Agent and model: /)).toBeVisible({ timeout: 30_000 });
-  if (beforeSend !== null) await beforeSend();
-  await send.getByRole("button", "Send 1 comment to agent").tap();
-  await expect(send).toHaveCount(0, { timeout: 30_000 });
-};
+) => sendLineToAgent(page, pull(url, number, "files"), file, comment, beforeSend);
 
 const turnsOf = (home: string, number: number) =>
   readRows(
@@ -358,12 +337,14 @@ test(
       // Opening #3 again replaces its damaged tab.
       await app.open(pull(run.url, 3, "conversation"));
       await expect(tabs.getByRole("link", /#3 /)).toBeVisible({ timeout: 30_000 });
-      expect(
-        readRows(
-          run.home,
-          `SELECT typeof(position) AS kind FROM open_pull_requests WHERE key = '${keyOf(3)}'`,
-        ),
-      ).toEqual([{ kind: "integer" }]);
+      await expect
+        .poll(() =>
+          readRows(
+            run.home,
+            `SELECT typeof(position) AS kind FROM open_pull_requests WHERE key = '${keyOf(3)}'`,
+          ),
+        )
+        .toEqual([{ kind: "integer" }]);
     } finally {
       stopFakeInstance(name, { keepHome: false });
       fake.stop();

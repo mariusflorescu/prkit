@@ -71,6 +71,30 @@ export const openSendToAgent = async ({ screen }: Fixtures, pending: number) => 
   return dialog;
 };
 
+/** Comments on a file's first commentable line from a Files tab at `filesUrl`, and sends it to the agent. */
+export const sendLineToAgent = async (
+  { app, screen, browser }: Fixtures,
+  filesUrl: string,
+  file: string,
+  comment: string,
+  beforeSend: (() => Promise<Response>) | null = null,
+) => {
+  await app.open(filesUrl);
+  const line = screen
+    .getByRole("region", file)
+    .getByRole("button", /^Comment on line \d+$/)
+    .first();
+  await expect(line).toBeVisible({ timeout: 30_000 });
+  await line.focus();
+  await browser.keyboard.press("Enter");
+  await browser.keyboard.type(comment);
+  await browser.keyboard.press("Meta+Enter");
+  const send = await openSendToAgent({ app, screen, browser }, 1);
+  if (beforeSend !== null) await beforeSend();
+  await send.getByRole("button", "Send 1 comment to agent").tap();
+  await expect(send).toHaveCount(0, { timeout: 30_000 });
+};
+
 export const pickModel = async (
   { screen }: Fixtures,
   scope: ReturnType<TestFixtures["screen"]["getByRole"]>,

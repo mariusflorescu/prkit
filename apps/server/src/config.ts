@@ -32,6 +32,8 @@ export class ServerConfig extends Context.Service<
      * can't ask real people to request a review. The desktop app never sets it.
      */
     readonly devReviewRequested: ReadonlyArray<string>;
+    /** Verification only: an e2e instance (PRKIT_E2E=1), which honors a journey's holds (`e2eHold.ts`). */
+    readonly e2e: boolean;
     readonly version: string;
     readonly startedAt: string;
   }
@@ -76,6 +78,7 @@ export const resolve = Effect.fn("ServerConfig.resolve")(function* (flags: Serve
       .split(",")
       .map((key) => key.trim())
       .filter((key) => key !== ""),
+    e2e: env.e2e,
     version: Option.getOrElse(env.appVersion, () => packageJson.version),
     startedAt,
   });

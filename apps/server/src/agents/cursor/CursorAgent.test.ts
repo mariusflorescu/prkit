@@ -166,6 +166,7 @@ const Config = Layer.sync(ServerConfig.ServerConfig, () =>
     authToken: Redacted.make("test"),
     watchIntervalMs: 60_000,
     devReviewRequested: [],
+    e2e: false,
     version: "0.0.0",
     startedAt: "2026-10-15T00:00:00.000Z",
   }),
