@@ -1,5 +1,4 @@
 import {
-  FIXER_BUSY,
   type FixerError,
   type FixerId,
   type FixerTrigger,
@@ -91,8 +90,11 @@ export const makeTurnQueue = (
           Effect.gen(function* () {
             const fixer = yield* fixerById(fixerId);
             if (fixer === null || fixer.ended !== null) return null;
+            // Every unfinished turn but a queued one holds the checkout: the busy states, and
+            // one whose state prkit can't read, since its agent may still be in it.
             const busy = yield* sql`SELECT COUNT(*) AS count FROM fixer_turns
-              WHERE fixer_id = ${fixerId} AND json_extract(status, '$._tag') IN ${sql.in(FIXER_BUSY)}`.pipe(
+              WHERE fixer_id = ${fixerId} AND finished_at IS NULL
+                AND coalesce(json_extract(status, '$._tag'), '') != 'queued'`.pipe(
               Effect.flatMap(decodeCount),
             );
             if ((busy[0]?.count ?? 0) > 0) return null;

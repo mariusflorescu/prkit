@@ -16,7 +16,6 @@ import {
   everythingSkippedMessage,
   type DraftGuideResult,
   effectiveSelection,
-  FailureReason,
   findAgentEntry,
   findAgentModel,
   type GuidanceEdit,
@@ -97,6 +96,7 @@ import { GitHubApi, GitHubPriority } from "../github/GitHubApi.ts";
 import { makeKeyedGate } from "../github/keyedGate.ts";
 import { boundPort } from "../listenAddress.ts";
 import { McpTokens } from "../mcp/McpTokens.ts";
+import { decodeEach, decodeReadable } from "../persistence/damagedRows.ts";
 import { PullRequests } from "../pullRequests/PullRequests.ts";
 import { LocalCapture } from "../repo/localCapture.ts";
 import {
@@ -123,6 +123,7 @@ import {
   type PromptSubject,
 } from "./prompt.ts";
 import { reviewTarget } from "./reviewTarget.ts";
+import { stopUnreadableReviews } from "./unreadableReviews.ts";
 import { StartedBy } from "../outside/StartedBy.ts";
 
 export const SubmitGuideReceipt = Schema.Struct({
@@ -168,7 +169,7 @@ class AttemptFailure extends Schema.TaggedError<AttemptFailure>()("AttemptFailur
   ]),
   message: Schema.String,
 }) {}
-const fail = (reason: FailureReason, message: string) =>
+const fail = (reason: AttemptFailure["reason"], message: string) =>
   Effect.fail(new AttemptFailure({ reason, message }));
 
 const ReviewFields = {
@@ -306,6 +307,12 @@ const StaleRow = Schema.Struct({
 });
 
 const decodeReviews = Schema.decodeUnknownEffect(Schema.Array(ReviewRow));
+/** Lists read every row they can and leave a damaged one out (logged), so it fails alone. */
+const readableReviews = decodeReadable("reviews", ReviewRow);
+const decodeEachReview = decodeEach("reviews", ReviewRow);
+const readablePullRequests = decodeReadable("reviews", PullRequestRow);
+const readableLocals = decodeReadable("reviews", LocalRow);
+const readableFeed = decodeReadable("reviews", FeedRow);
 const decodePullRequests = Schema.decodeUnknownEffect(Schema.Array(PullRequestRow));
 const decodeLocals = Schema.decodeUnknownEffect(Schema.Array(LocalRow));
 const decodeAttempts = Schema.decodeUnknownEffect(Schema.Array(AttemptRow));
@@ -322,7 +329,6 @@ const decodeDraftOnly = Schema.decodeUnknownEffect(
 const decodeHeads = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ head_sha: Schema.NullOr(Schema.String) })),
 );
-const decodeFeed = Schema.decodeUnknownEffect(Schema.Array(FeedRow));
 const decodeDurations = Schema.decodeUnknownEffect(Schema.Array(DurationRow));
 const decodeCount = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ count: Schema.Int })));
 const decodeGuides = Schema.decodeUnknownEffect(Schema.Array(GuideRow));
@@ -348,9 +354,7 @@ const decodeOutcomes = Schema.decodeUnknownEffect(
 const decodeCaptures = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ capture: Schema.NullOr(Schema.fromJsonString(LocalCapture)) })),
 );
-const decodeLocalKeys = Schema.decodeUnknownEffect(
-  Schema.Array(Schema.Struct({ pr_key: LocalReviewKey })),
-);
+const decodeLocalKeys = decodeEach("reviews", Schema.Struct({ pr_key: LocalReviewKey }));
 const decodeClaimed = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ origin_key: PullRequestKey, account_id: AccountIdSchema })),
 );
@@ -752,7 +756,7 @@ export const make = Effect.gen(function* () {
     subject.kind === "pull-request" ? findReview(subject.key) : findLocal(subject.key);
   /** Every local review, the latest changed first. */
   const locals = sql`SELECT * FROM reviews WHERE local IS NOT NULL ORDER BY updated_at DESC`.pipe(
-    Effect.flatMap(decodeLocals),
+    Effect.flatMap(readableLocals),
     Effect.map((rows) => rows.map(toLocalReview)),
   );
   /** The review a key names, among its own kind. */
@@ -2242,7 +2246,7 @@ export const make = Effect.gen(function* () {
   /** Every review the watcher reads: all pull requests' that are not done. */
   const watched = sql`
     SELECT * FROM reviews WHERE json_extract(status, '$._tag') != 'done' AND local IS NULL`.pipe(
-    Effect.flatMap(decodePullRequests),
+    Effect.flatMap(readablePullRequests),
     Effect.map((rows): ReadonlyArray<WatchedReview> => rows.map(toPullRequestReview)),
   );
 
@@ -2693,33 +2697,26 @@ export const make = Effect.gen(function* () {
 
   const feedEntry = (key: ReviewKey) =>
     sql`
-      SELECT r.pr_key, r.account_id, r.status, r.latest_revision, json_extract(v.guide, '$.risk.level') AS risk
+      SELECT r.id, r.pr_key, r.account_id, r.status, r.latest_revision, json_extract(v.guide, '$.risk.level') AS risk
       FROM reviews r LEFT JOIN review_revisions v ON v.review_id = r.id AND v.revision = r.latest_revision
       WHERE r.pr_key = ${key} AND r.local IS NULL`.pipe(
-      Effect.flatMap(decodeFeed),
+      Effect.flatMap(readableFeed),
       Effect.map((rows) => rows.map(toFeedEntry)),
     );
 
   const readIndex = sql`
-      SELECT r.pr_key, r.account_id, r.status, r.latest_revision, json_extract(v.guide, '$.risk.level') AS risk
+      SELECT r.id, r.pr_key, r.account_id, r.status, r.latest_revision, json_extract(v.guide, '$.risk.level') AS risk
       FROM reviews r LEFT JOIN review_revisions v ON v.review_id = r.id AND v.revision = r.latest_revision
       WHERE r.local IS NULL`.pipe(
-    Effect.flatMap(decodeFeed),
+    Effect.flatMap(readableFeed),
     Effect.map((rows) => rows.map(toFeedEntry)),
   );
   /** Every review of a pull request as the feed opens with it. */
-  const index = () => readIndex.pipe(Effect.catchTags(dbFailures));
+  const index = () => readIndex.pipe(Effect.catchTag("SqlError", dbFailures.SqlError));
   /** The feed reads every guide at once, so its failures speak of all of them. */
   const feedFailures = {
     SqlError: () =>
       Effect.fail(new ReviewError({ message: "prkit can't read your guides right now." })),
-    SchemaError: () =>
-      Effect.fail(
-        new ReviewError({
-          message:
-            "prkit can't read your guides right now, because one of their records is damaged.",
-        }),
-      ),
   };
 
   /**
@@ -2897,6 +2894,11 @@ export const make = Effect.gen(function* () {
    */
   const reconcile = Effect.gen(function* () {
     const at = yield* now;
+    yield* stopUnreadableReviews(at);
+    const [readable, unreadable] = yield* sql`SELECT * FROM reviews`.pipe(
+      Effect.flatMap(decodeEachReview),
+    );
+    const stored = new Map(readable.map((row) => [row.id, toStored(row)]));
     const stale = yield* sql`
       SELECT id, review_id, agent_pid, agent_started FROM review_attempts
       WHERE finished_at IS NULL AND run_id != ${runId}`.pipe(Effect.flatMap(decodeStale));
@@ -2912,12 +2914,12 @@ export const make = Effect.gen(function* () {
             Effect.annotateLogs({ attemptId: attempt.id, pid: attempt.agent_pid }),
           );
       }
-      yield* sql.withTransaction(
+      const restarts = yield* sql.withTransaction(
         Effect.gen(function* () {
           yield* sql`
             UPDATE review_attempts SET finished_at = ${at}, outcome = 'failed', error = 'interrupted'
             WHERE id = ${attempt.id} AND finished_at IS NULL`;
-          yield* setStatus(
+          return yield* setStatus(
             attempt.review_id,
             attempt.id,
             { _tag: "failed", reason: "interrupted", message, attemptId: attempt.id },
@@ -2925,13 +2927,13 @@ export const make = Effect.gen(function* () {
           );
         }),
       );
-      const review = yield* findReviewById(attempt.review_id);
-      if (review !== null)
+      const review = stored.get(attempt.review_id);
+      if (restarts && review !== undefined)
         yield* appendActivity(review.key, review.id, attempt.id, "error", message);
     }
     const interrupted = yield* sql`
       SELECT * FROM reviews WHERE json_extract(status, '$._tag') = 'failed'
-        AND json_extract(status, '$.reason') = 'interrupted'`.pipe(Effect.flatMap(decodeReviews));
+        AND json_extract(status, '$.reason') = 'interrupted'`.pipe(Effect.flatMap(readableReviews));
     for (const row of interrupted) {
       const review = toStored(row);
       const attemptId = review.status._tag === "failed" ? review.status.attemptId : null;
@@ -2939,7 +2941,17 @@ export const make = Effect.gen(function* () {
       const batch = attemptId === null ? null : yield* batchOf(attemptId);
       // Local changes are written again from the snapshot that attempt took, not the folder now.
       const capture =
-        review.kind === "local" && attemptId !== null ? yield* captureOf(attemptId) : null;
+        review.kind === "local" && attemptId !== null
+          ? yield* captureOf(attemptId).pipe(
+              // A snapshot prkit can't read leaves the review failed, and its Retry says so.
+              Effect.catchTag("SchemaError", (error) =>
+                Effect.logWarning("Left a local review failed: prkit can't read its snapshot").pipe(
+                  Effect.annotateLogs({ attemptId, problem: error.message }),
+                  Effect.as(null),
+                ),
+              ),
+            )
+          : null;
       if (review.kind === "local" && capture === null) continue;
       yield* unattended(startAttempt(review, "retry", { batch, capture }));
     }
@@ -2952,12 +2964,15 @@ export const make = Effect.gen(function* () {
       )).map((row) => row.id),
     );
     let removed = 0;
+    // A review whose record can't be read keeps its checkout.
+    const kept = new Set(unreadable.map((row) => row.id));
     for (const name of yield* repo.listWorktrees()) {
-      if (live.has(name)) continue;
+      if (live.has(name) || kept.has(name)) continue;
       const reviewId = ReviewId.make(name);
       // The cache to prune comes from prkit's own record of the review, never the checkout.
-      const review = yield* findReviewById(reviewId);
-      if (yield* repo.removeWorktree(reviewId, review === null ? null : cacheOf(review))) removed++;
+      const review = stored.get(reviewId);
+      if (yield* repo.removeWorktree(reviewId, review === undefined ? null : cacheOf(review)))
+        removed++;
     }
     const unfinished = new Set(
       (yield* sql`SELECT id FROM review_attempts WHERE finished_at IS NULL`.pipe(
@@ -2970,12 +2985,14 @@ export const make = Effect.gen(function* () {
         yield* fs.remove(turnTmpDir(path, name), { recursive: true, force: true });
         yield* fs.remove(path.join(diffsDir, name), { recursive: true, force: true });
       }
-    const locals = yield* sql`SELECT pr_key FROM reviews WHERE local IS NOT NULL`.pipe(
-      Effect.flatMap(decodeLocalKeys),
-    );
-    yield* repo.local
-      .sweep(new Set(locals.map((row) => row.pr_key)))
-      .pipe(Effect.catchTag("RepoError", (error) => Effect.logWarning(error.message)));
+    const [locals, unreadableLocals] = yield* sql`
+      SELECT id, pr_key FROM reviews WHERE local IS NOT NULL`.pipe(Effect.flatMap(decodeLocalKeys));
+    // A copy whose review's key can't be read looks like one whose review is gone: keep them all.
+    yield* unreadableLocals.length > 0
+      ? Effect.logWarning("Kept every local review's copy: prkit can't read a review's key")
+      : repo.local
+          .sweep(new Set(locals.map((row) => row.pr_key)))
+          .pipe(Effect.catchTag("RepoError", (error) => Effect.logWarning(error.message)));
     yield* Effect.logInfo("Reconciled reviews").pipe(
       Effect.annotateLogs({
         interrupted: stale.length,

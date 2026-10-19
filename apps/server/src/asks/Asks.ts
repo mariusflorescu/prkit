@@ -54,6 +54,7 @@ import { makeKeyedGate } from "../github/keyedGate.ts";
 import { boundPort } from "../listenAddress.ts";
 import { McpTokens } from "../mcp/McpTokens.ts";
 import { StartedBy } from "../outside/StartedBy.ts";
+import { decodeEach, decodeReadable, logDamaged } from "../persistence/damagedRows.ts";
 import { type Checkout, RepoCache } from "../repo/RepoCache.ts";
 import { numberedDiff } from "../reviews/prompt.ts";
 import { type RevisionContext, Reviews } from "../reviews/Reviews.ts";
@@ -114,15 +115,17 @@ const QuestionRow = Schema.Union([
 type QuestionRow = typeof QuestionRow.Type;
 
 const decodeQuestions = Schema.decodeUnknownEffect(Schema.Array(QuestionRow));
+/** A review's questions read every one they can, and leave a damaged one out (logged). */
+const readableQuestions = decodeReadable("ask_questions", QuestionRow);
 const decodeIds = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ id: QuestionId })));
-const decodeStale = Schema.decodeUnknownEffect(
-  Schema.Array(
-    Schema.Struct({
-      id: QuestionId,
-      agent_pid: Schema.NullOr(Schema.Int),
-      agent_started: Schema.NullOr(Schema.String),
-    }),
-  ),
+/** Each unfinished question on its own: one whose agent can't be read still fails as interrupted. */
+const decodeStale = decodeEach(
+  "ask_questions",
+  Schema.Struct({
+    id: QuestionId,
+    agent_pid: Schema.NullOr(Schema.Int),
+    agent_started: Schema.NullOr(Schema.String),
+  }),
 );
 const decodePrevious = Schema.decodeUnknownEffect(
   Schema.Array(
@@ -309,7 +312,7 @@ export const make = Effect.gen(function* () {
   /** The review's questions, oldest first. */
   const questionsOf = (reviewId: ReviewId) =>
     sql`SELECT * FROM ask_questions WHERE review_id = ${reviewId} ORDER BY asked_at, rowid`.pipe(
-      Effect.flatMap(decodeQuestions),
+      Effect.flatMap(readableQuestions),
       Effect.map((rows) => rows.map(toQuestion)),
     );
   /** Refuses a question because another on the review is still being answered, naming that one. */
@@ -904,7 +907,7 @@ export const make = Effect.gen(function* () {
           ? questions
           : questions.filter((question) => question.revision === revision),
       ),
-      Effect.catchTags(storeFailures),
+      Effect.catchTag("SqlError", storeFailures.SqlError),
     );
 
   /** The review's questions, then every change and every new piece of an answer. */
@@ -922,7 +925,7 @@ export const make = Effect.gen(function* () {
             Stream.map((change) => change.event),
           ),
         );
-      }).pipe(Effect.catchTags(storeFailures)),
+      }).pipe(Effect.catchTag("SqlError", storeFailures.SqlError)),
     );
 
   /**
@@ -931,18 +934,27 @@ export const make = Effect.gen(function* () {
    * next question makes them again. A second run changes nothing.
    */
   const reconcile = Effect.gen(function* () {
-    const stale = yield* sql`SELECT id, agent_pid, agent_started FROM ask_questions
+    const [stale, unreadable] = yield* sql`SELECT id, agent_pid, agent_started FROM ask_questions
       WHERE state IN ${sql.in(ACTIVE)} AND run_id != ${runId}`.pipe(Effect.flatMap(decodeStale));
     const at = yield* now;
+    const interrupt = (id: string) =>
+      Effect.gen(function* () {
+        yield* sql`UPDATE ask_questions SET state = 'failed', failure = 'interrupted',
+            message = ${INTERRUPTED}, finished_at = ${at}
+          WHERE id = ${id} AND state IN ${sql.in(ACTIVE)}`;
+        yield* fs.remove(turnTmpDir(path, id), { recursive: true, force: true });
+      });
     for (const question of stale) {
       if (question.agent_pid !== null && question.agent_started !== null)
         yield* reapAgentGroup(question.agent_pid, question.agent_started).pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         );
-      yield* sql`UPDATE ask_questions SET state = 'failed', failure = 'interrupted',
-          message = ${INTERRUPTED}, finished_at = ${at}
-        WHERE id = ${question.id} AND state IN ${sql.in(ACTIVE)}`;
-      yield* fs.remove(turnTmpDir(path, question.id), { recursive: true, force: true });
+      yield* interrupt(question.id);
+    }
+    // Its agent can't be told apart from another process, so it is left alone.
+    for (const question of unreadable) {
+      yield* logDamaged(question);
+      if (question.id !== null) yield* interrupt(question.id);
     }
     yield* fs.remove(asksDir, { recursive: true, force: true });
     yield* Effect.logInfo("Reconciled questions").pipe(
