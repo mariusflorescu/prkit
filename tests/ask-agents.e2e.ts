@@ -70,7 +70,8 @@ const questionRows = (home: string) =>
   readRows(
     home,
     `SELECT q.id, q.text, q.state, q.basis, q.failure, q.message, q.answer, q.agent_pid AS pid,
-       q.session_id AS session, q.pinned_at AS pinnedAt
+       q.session_id AS session, q.pinned_at AS pinnedAt,
+       (julianday(q.finished_at) - julianday(q.asked_at)) * 86400.0 AS seconds
      FROM ask_questions q JOIN reviews r ON r.id = q.review_id
      WHERE r.pr_key = '${FIXTURE_KEY}' ORDER BY q.asked_at, q.rowid`,
   );
@@ -268,6 +269,14 @@ const journey = (agent: Agent) => async (page: Page) => {
       ),
     };
     note("contained", contained);
+    note(
+      "guideSettings",
+      readRows(run.home, "SELECT model, model_options FROM review_attempts ORDER BY rowid LIMIT 1"),
+    );
+    note(
+      "answerSeconds",
+      asked.map((row) => ({ text: row.text, state: row.state, seconds: row.seconds })),
+    );
     note("refusals", refusals);
     note("sessionSha", { before: sessionBefore, after: sessionAfter });
     note("sessions", { guide: review.session, questions: asked.map((row) => row.session ?? null) });
