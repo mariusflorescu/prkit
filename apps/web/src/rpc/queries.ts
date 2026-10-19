@@ -212,6 +212,8 @@ export type AsksState =
   | {
       readonly _tag: "ready";
       readonly questions: ReadonlyArray<Question>;
+      /** Stored questions prkit couldn't read, left out of `questions`. */
+      readonly damaged: ReadonlyArray<string>;
       readonly problem: string | null;
     };
 /** Written only by `asks.watch`; see `useAsks`. */

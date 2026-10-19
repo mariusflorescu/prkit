@@ -54,7 +54,7 @@ import { makeKeyedGate } from "../github/keyedGate.ts";
 import { boundPort } from "../listenAddress.ts";
 import { McpTokens } from "../mcp/McpTokens.ts";
 import { StartedBy } from "../outside/StartedBy.ts";
-import { decodeEach, decodeReadable, logDamaged } from "../persistence/damagedRows.ts";
+import { decodeEach, logDamaged } from "../persistence/damagedRows.ts";
 import { type Checkout, RepoCache } from "../repo/RepoCache.ts";
 import { numberedDiff } from "../reviews/prompt.ts";
 import { type RevisionContext, Reviews } from "../reviews/Reviews.ts";
@@ -115,8 +115,8 @@ const QuestionRow = Schema.Union([
 type QuestionRow = typeof QuestionRow.Type;
 
 const decodeQuestions = Schema.decodeUnknownEffect(Schema.Array(QuestionRow));
-/** A review's questions read every one they can, and leave a damaged one out (logged). */
-const readableQuestions = decodeReadable("ask_questions", QuestionRow);
+/** A review's questions read every one they can, and leave a damaged one out (logged and named). */
+const decodeEachQuestion = decodeEach("ask_questions", QuestionRow);
 const decodeIds = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ id: QuestionId })));
 /** Each unfinished question on its own: one whose agent can't be read still fails as interrupted. */
 const decodeStale = decodeEach(
@@ -309,11 +309,16 @@ export const make = Effect.gen(function* () {
       Effect.flatMap(decodeQuestions),
       Effect.map((rows) => (rows[0] === undefined ? null : toQuestion(rows[0]))),
     );
-  /** The review's questions, oldest first. */
+  /** The review's questions, oldest first, and the ones prkit couldn't read. */
   const questionsOf = (reviewId: ReviewId) =>
     sql`SELECT * FROM ask_questions WHERE review_id = ${reviewId} ORDER BY asked_at, rowid`.pipe(
-      Effect.flatMap(readableQuestions),
-      Effect.map((rows) => rows.map(toQuestion)),
+      Effect.flatMap(decodeEachQuestion),
+      Effect.tap(([, damaged]) => Effect.forEach(damaged, logDamaged, { discard: true })),
+      Effect.map(([rows, damaged]) => ({
+        _tag: "snapshot" as const,
+        questions: rows.map(toQuestion),
+        damaged: damaged.flatMap((row) => (row.id === null ? [] : [row.id])),
+      })),
     );
   /** Refuses a question because another on the review is still being answered, naming that one. */
   const refuseBusy = (reviewId: ReviewId) =>
@@ -902,7 +907,7 @@ export const make = Effect.gen(function* () {
   /** The review's questions, oldest first, with what is being written right now. */
   const list = (reviewId: ReviewId, revision?: number) =>
     questionsOf(reviewId).pipe(
-      Effect.map((questions) =>
+      Effect.map(({ questions }) =>
         revision === undefined
           ? questions
           : questions.filter((question) => question.revision === revision),
@@ -916,8 +921,7 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         // Subscribe before reading, so nothing that lands in between is lost.
         const subscription = yield* PubSub.subscribe(changes);
-        const questions = yield* questionsOf(reviewId);
-        const opening: AskWatchEvent = { _tag: "snapshot", questions };
+        const opening: AskWatchEvent = yield* questionsOf(reviewId);
         return Stream.concat(
           Stream.succeed(opening),
           Stream.fromSubscription(subscription).pipe(
@@ -988,9 +992,26 @@ export const make = Effect.gen(function* () {
       );
     }).pipe(Effect.uninterruptible);
 
+  /**
+   * Deletes the named questions of the review that prkit still can't read, never one it can,
+   * and sends every window watching the review its questions again.
+   */
+  const removeDamaged = (reviewId: ReviewId, ids: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      yield* sql.withTransaction(
+        Effect.gen(function* () {
+          const { damaged } = yield* questionsOf(reviewId);
+          const gone = ids.filter((id) => damaged.includes(id));
+          if (gone.length > 0)
+            yield* sql`DELETE FROM ask_questions WHERE review_id = ${reviewId} AND id IN ${sql.in(gone)}`;
+        }),
+      );
+      yield* PubSub.publish(changes, { reviewId, event: yield* questionsOf(reviewId) });
+    }).pipe(Effect.catchTag("SqlError", storeFailures.SqlError));
+
   yield* reconcile;
 
-  return { watch, list, ask, stop, retry, pin, removeLocalReview };
+  return { watch, list, ask, stop, retry, pin, removeDamaged, removeLocalReview };
 });
 
 export const layer = Layer.effect(Asks, make);

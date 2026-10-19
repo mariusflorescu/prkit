@@ -41,6 +41,7 @@ The inventory covers every WebSocket RPC and the app's local presentation action
 | Open/reopen a PR tab | workspace.open | `open_pull_request` | Work |
 | Close/focus/reorder tabs | workspace.close, workspace.activate, workspace.reorder | `close_pull_request_tab`, `focus_pull_request_tab`, `reorder_pull_request_tabs` | Work |
 | Save Inbox presentation filters and sort | workspace.saveInboxFilters | `save_inbox_filters` | Work |
+| Remove stored tabs prkit couldn't read | workspace.removeDamaged | Excluded C: deleting a stored tab | Excluded |
 | Generate, regenerate and retry a guide | reviews.generate, reviews.retry | `generate_guide` with instance, model, options, guidance, focus and version checks; retries use the same generation service | Work |
 | Generate stack guides | reviews.generateStack | `generate_guide` with stack this-pr / whole-stack / chosen-layers, layers and regenerate | Work |
 | Stop guide and watcher | reviews.stop | `stop_guide` | Work |
@@ -51,6 +52,7 @@ The inventory covers every WebSocket RPC and the app's local presentation action
 | Ask about a guide, and retry an answer | asks.ask, asks.retry | `ask_about_pull_request`: revision (the latest by default), scope (whole PR, chapter or lines), question and `clientRequestId`; a retry is asking again | Work |
 | Stop an answer | asks.stop | `stop_question`, which keeps the answer so far | Work |
 | Pin an answer to its chapter | asks.pin | `pin_answer` with `pinned` | Work |
+| Remove questions prkit couldn't read | asks.removeDamaged | Excluded C: deleting a stored question | Excluded |
 | Guide defaults and auto mode | guideSettings.get | `read_settings` | Read |
 | Change default agent or auto mode | guideSettings.update | Excluded B | Excluded |
 | Resolved guide settings and preview | guideConfig.pullRequest | `read_guide_settings`: scope versions, active guidance/focus/ignore rules/look-closely paths, skipped files | Read |

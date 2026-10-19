@@ -29,12 +29,28 @@ const MESSAGE =
 const LOCAL_TAB = "Open the local review of widgets · feature/limits";
 const FIRST = "What does this pull request change?";
 const SECOND = "Which file should I read first?";
+const THIRD = "What should I test by hand?";
 
 /** Writes one stored value while prkit is closed, the way a crash, an edit or a newer prkit might. */
 const damage = (home: string, query: string, ...values: ReadonlyArray<SQLInputValue>) => {
   const db = new DatabaseSync(NodePath.join(home, "prkit.sqlite"));
   try {
     expect(db.prepare(query).run(...values).changes).toBe(1);
+  } finally {
+    db.close();
+  }
+};
+
+/** While it stands, deleting from `table` fails the way a full disk or a busy database would. */
+const refuseDeletes = (home: string, table: string, on: boolean) => {
+  const db = new DatabaseSync(NodePath.join(home, "prkit.sqlite"));
+  try {
+    db.exec(
+      on
+        ? `CREATE TRIGGER e2e_refuse_${table} BEFORE DELETE ON ${table}
+           BEGIN SELECT RAISE(ABORT, 'e2e: no deletes'); END`
+        : `DROP TRIGGER e2e_refuse_${table}`,
+    );
   } finally {
     db.close();
   }
@@ -91,6 +107,9 @@ const turnsOf6 = (home: string) =>
 const NEWER_FAILURE = '{"_tag":"failed","reason":"newer-reason","message":"From a newer prkit."}';
 
 const failure = (screen: Page["screen"]) => screen.getByRole("alert").filter({ hasText: TITLE });
+type Scope = ReturnType<Page["screen"]["getByRole"]>;
+const questionsNotice = (dock: Scope) => dock.getByRole("status", "Questions prkit couldn't read");
+const tabsNotice = (tabs: Scope) => tabs.getByRole("status", "Open tabs prkit couldn't restore");
 
 test(
   "one damaged row fails alone: prkit starts, the damaged reviews, question, fix and tab say so or step aside, and everything else works across a relaunch",
@@ -132,6 +151,7 @@ test(
       });
       await ask(page, FIRST);
       await ask(page, SECOND);
+      await ask(page, THIRD);
       await sendFix(page, run.url, 9, "src/limits.ts", "Name the limit.", () => fake.merge(9));
       await expect
         .poll(
@@ -211,7 +231,20 @@ test(
         "UPDATE ask_questions SET scope = 'not json' WHERE id = ?",
         String(first?.id),
       );
+      // An empty id is still a stored question: it gets the notice and Remove like the other.
+      damage(
+        run.home,
+        "UPDATE ask_questions SET scope = 'not json', id = '' WHERE text = ?",
+        THIRD,
+      );
       damage(run.home, "UPDATE open_pull_requests SET position = 'first' WHERE key = ?", keyOf(3));
+      damage(run.home, "UPDATE open_pull_requests SET position = 'last' WHERE key = ?", keyOf(2));
+      // A damaged pull request tab under the local review's key; Remove must keep the local tab.
+      damage(
+        run.home,
+        "INSERT INTO open_pull_requests (key, account_id, position) VALUES (?, 'github.com/budget-test', 'bad')",
+        localKey,
+      );
       const attemptsOf6 = attemptsOf(run.home, keyOf(6));
 
       // prkit starts, and the Inbox lists every pull request.
@@ -244,7 +277,22 @@ test(
         timeout: 30_000,
       });
       await expect(dock.getByRole("article", FIRST)).toHaveCount(0);
+      await expect(dock.getByRole("article", THIRD)).toHaveCount(0);
+      await expect(questionsNotice(dock)).toContainText(
+        "2 questions couldn't be read. A newer prkit may have saved them, or the record was damaged.",
+      );
       await app.screenshot("damaged-review-with-guide");
+      // The history follows its newest answer; the notice sits where the oldest questions are.
+      await questionsNotice(dock).scrollIntoView();
+      await app.screenshot("damaged-question-light");
+      await setOsColorScheme(browser, "dark");
+      await app.screenshot("damaged-question-dark");
+      await setOsColorScheme(browser, "light");
+      await browser.setViewport({ width: 600, height: 720 });
+      await questionsNotice(dock).scrollIntoView();
+      await expect(questionsNotice(dock).getByRole("button", "Remove")).toBeVisible();
+      await app.screenshot("damaged-question-narrow");
+      await browser.setViewport({ width: 1280, height: 720 });
 
       // The fix whose state can't be read is left as it was, its tab says why, and the fix
       // queued behind it waits: the agent prkit can't account for may still be in the checkout.
@@ -266,11 +314,17 @@ test(
         .toEqual([{ ended: "merged" }]);
       expect(NodeFS.existsSync(checkout)).toBe(true);
 
-      // The damaged tab steps aside; the others are still open.
+      // The damaged tabs step aside for a notice where they would be; the others are still open.
       const tabs = screen.getByRole("navigation", "Workspace tabs");
       await expect(tabs.getByRole("link", /#6 /)).toBeVisible();
       await expect(tabs.getByRole("link", /#9 /)).toBeVisible();
       await expect(tabs.getByRole("link", /#3 /)).toHaveCount(0);
+      await expect(tabs.getByRole("link", /#2 /)).toHaveCount(0);
+      await expect(tabsNotice(tabs)).toContainText("3 open tabs couldn't be restored");
+      await app.screenshot("damaged-tabs-light");
+      await setOsColorScheme(browser, "dark");
+      await app.screenshot("damaged-tabs-dark");
+      await setOsColorScheme(browser, "light");
 
       // The local review says so too, and Retry writes that run's snapshot again.
       await screen.getByRole("link", LOCAL_TAB).tap();
@@ -310,11 +364,23 @@ test(
       ).toEqual([{ state: "running", work: "not json" }]);
       expect(turnsOf6(run.home)[1]).toEqual({ id: queuedId, state: "queued" });
       expect(
-        readRows(run.home, `SELECT scope FROM ask_questions WHERE id = '${String(first?.id)}'`),
-      ).toEqual([{ scope: "not json" }]);
+        readRows(
+          run.home,
+          `SELECT id, scope FROM ask_questions WHERE scope = 'not json' ORDER BY id`,
+        ),
+      ).toEqual([
+        { id: "", scope: "not json" },
+        { id: String(first?.id), scope: "not json" },
+      ]);
       expect(
-        readRows(run.home, `SELECT position FROM open_pull_requests WHERE key = '${keyOf(3)}'`),
-      ).toEqual([{ position: "first" }]);
+        readRows(
+          run.home,
+          `SELECT key, position FROM open_pull_requests WHERE key IN ('${keyOf(2)}', '${keyOf(3)}') ORDER BY key`,
+        ),
+      ).toEqual([
+        { key: keyOf(2), position: "last" },
+        { key: keyOf(3), position: "first" },
+      ]);
       const serverLog = NodeFS.readFileSync(run.log, "utf8");
       expect(serverLog).toContain("Stopped a review whose state prkit can't read");
       expect(serverLog).toContain("Left a fix turn whose state prkit can't read as it was");
@@ -345,6 +411,54 @@ test(
           ),
         )
         .toEqual([{ kind: "integer" }]);
+
+      // #2's damaged tab and the one under the local review's key are still there to Remove. A
+      // failed save keeps them and says so, and Retry then deletes only those stored tabs.
+      await expect(tabsNotice(tabs)).toContainText("2 open tabs couldn't be restored");
+      const tabsBefore = readRows(
+        run.home,
+        `SELECT key FROM open_pull_requests WHERE key NOT IN ('${keyOf(2)}', '${localKey}') ORDER BY key`,
+      );
+      refuseDeletes(run.home, "open_pull_requests", true);
+      await tabsNotice(tabs).getByRole("button", "Remove").tap();
+      const tabsFailed = screen
+        .getByRole("alert")
+        .filter({ hasText: "Couldn't save your open tabs. Retry or restart prkit." });
+      await expect(tabsFailed).toBeVisible({ timeout: 30_000 });
+      await expect(tabsNotice(tabs)).toContainText("2 open tabs couldn't be restored");
+      refuseDeletes(run.home, "open_pull_requests", false);
+      await tabsFailed.getByRole("button", "Retry").tap();
+      await expect(tabsNotice(tabs)).toHaveCount(0, { timeout: 30_000 });
+      await expect(tabsFailed).toHaveCount(0);
+      await expect
+        .poll(() => readRows(run.home, "SELECT key FROM open_pull_requests ORDER BY key"))
+        .toEqual(tabsBefore);
+      await expect(screen.getByRole("link", LOCAL_TAB)).toBeVisible();
+      expect(
+        readRows(run.home, `SELECT key FROM open_local_reviews WHERE key = '${localKey}'`),
+      ).toEqual([{ key: localKey }]);
+
+      // Remove on the damaged questions deletes them, and only them.
+      await app.open(pull(run.url, 6, "guide"));
+      await dock.getByRole("textbox", "Your question").tap();
+      await expect(questionsNotice(dock)).toBeVisible({ timeout: 30_000 });
+      refuseDeletes(run.home, "ask_questions", true);
+      await questionsNotice(dock).getByRole("button", "Remove").tap();
+      await expect(screen.getByRole("dialog", "Couldn't remove it")).toContainText(
+        "prkit couldn't read or save the question.",
+        { timeout: 30_000 },
+      );
+      await expect(questionsNotice(dock)).toBeVisible();
+      refuseDeletes(run.home, "ask_questions", false);
+      await questionsNotice(dock).getByRole("button", "Remove").tap();
+      await expect(questionsNotice(dock)).toHaveCount(0, { timeout: 30_000 });
+      await expect(dock.getByRole("article", SECOND)).toContainText("Claude answered");
+      expect(
+        readRows(run.home, `SELECT id FROM ask_questions WHERE id IN ('', '${String(first?.id)}')`),
+      ).toEqual([]);
+      expect(readRows(run.home, `SELECT text FROM ask_questions WHERE text = '${SECOND}'`)).toEqual(
+        [{ text: SECOND }],
+      );
     } finally {
       stopFakeInstance(name, { keepHome: false });
       fake.stop();

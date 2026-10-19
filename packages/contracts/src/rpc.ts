@@ -154,6 +154,7 @@ export const WS_METHODS = {
   workspaceReorder: "workspace.reorder",
   workspaceOpenLocal: "workspace.openLocal",
   workspaceCloseLocal: "workspace.closeLocal",
+  workspaceRemoveDamaged: "workspace.removeDamaged",
   workspaceSaveInboxFilters: "workspace.saveInboxFilters",
   workspaceChanges: "workspace.changes",
   reviewedFilesGet: "reviewedFiles.get",
@@ -186,6 +187,7 @@ export const WS_METHODS = {
   asksStop: "asks.stop",
   asksRetry: "asks.retry",
   asksPin: "asks.pin",
+  asksRemoveDamaged: "asks.removeDamaged",
   reviewCommentsList: "reviewComments.list",
   reviewCommentsAdd: "reviewComments.add",
   reviewCommentsAddFromNote: "reviewComments.addFromNote",
@@ -406,6 +408,11 @@ export const WsRpcGroup = RpcGroup.make(
     success: Workspace,
     error: WorkspaceError,
   }),
+  Rpc.make(WS_METHODS.workspaceRemoveDamaged, {
+    payload: Schema.Struct({ keys: Schema.Array(Schema.String) }),
+    success: Workspace,
+    error: WorkspaceError,
+  }),
   // The tabs with the saved filters, versioned like every other copy of them.
   Rpc.make(WS_METHODS.workspaceSaveInboxFilters, {
     payload: InboxFilters,
@@ -620,6 +627,12 @@ export const WsRpcGroup = RpcGroup.make(
   Rpc.make(WS_METHODS.asksPin, {
     payload: Schema.Struct({ questionId: QuestionId, pinned: Schema.Boolean }),
     success: Question,
+    error: AskError,
+  }),
+  /** Deletes the questions named that prkit still can't read; the rest stay. */
+  Rpc.make(WS_METHODS.asksRemoveDamaged, {
+    payload: Schema.Struct({ reviewId: ReviewId, questionIds: Schema.Array(Schema.String) }),
+    success: Schema.Void,
     error: AskError,
   }),
   Rpc.make(WS_METHODS.guideSettingsGet, {

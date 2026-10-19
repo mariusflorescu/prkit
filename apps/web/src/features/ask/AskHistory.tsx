@@ -6,6 +6,7 @@ import type { AsksState } from "~/rpc/queries";
 
 import { askWords } from "./askPresentation";
 import type { AskTarget } from "./askTarget";
+import { DamagedQuestionsNotice } from "./DamagedQuestionsNotice";
 import { QuestionCard } from "./QuestionCard";
 import type { AskActions } from "./useAskActions";
 
@@ -28,6 +29,7 @@ export function AskHistory({
   const content = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
   const questions = state._tag === "ready" ? state.questions : [];
+  const damaged = state._tag === "ready" ? state.damaged : [];
   const newest = questions.at(-1)?.id;
   useEffect(() => {
     const region = scroller.current;
@@ -69,14 +71,26 @@ export function AskHistory({
           </div>
         ) : state._tag === "error" ? (
           <ReviewAlert title="Couldn't load your questions" message={state.message} retry={retry} />
-        ) : questions.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">
-            {askWords(target.key).empty}
-          </p>
         ) : (
-          questions.map((question) => (
-            <QuestionCard key={question.id} question={question} target={target} actions={actions} />
-          ))
+          <>
+            {damaged.length > 0 && (
+              <DamagedQuestionsNotice ids={damaged} removeDamaged={actions.removeDamaged} />
+            )}
+            {questions.length === 0 && damaged.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                {askWords(target.key).empty}
+              </p>
+            ) : (
+              questions.map((question) => (
+                <QuestionCard
+                  key={question.id}
+                  question={question}
+                  target={target}
+                  actions={actions}
+                />
+              ))
+            )}
+          </>
         )}
       </div>
     </div>

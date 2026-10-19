@@ -139,6 +139,9 @@ const layerHandlers = WsRpcGroup.toLayer(
       [WS_METHODS.workspaceOpenLocal]: ({ key }) => workspace.command({ kind: "open-local", key }),
       [WS_METHODS.workspaceCloseLocal]: ({ key }) =>
         workspace.command({ kind: "close-local", key }),
+      // Announced, so every window drops the notice, not just the one that asked.
+      [WS_METHODS.workspaceRemoveDamaged]: ({ keys }) =>
+        workspace.command({ kind: "remove-damaged", keys }, { focus: false }),
       [WS_METHODS.workspaceSaveInboxFilters]: (filters) =>
         workspace.saveInboxFilters(filters).pipe(Effect.map((saved) => saved.workspace)),
       [WS_METHODS.workspaceChanges]: () => workspace.changes(),
@@ -200,6 +203,8 @@ const layerHandlers = WsRpcGroup.toLayer(
       [WS_METHODS.asksStop]: ({ questionId }) => asks.stop(questionId),
       [WS_METHODS.asksRetry]: ({ questionId }) => asks.retry(questionId),
       [WS_METHODS.asksPin]: ({ questionId, pinned }) => asks.pin(questionId, pinned),
+      [WS_METHODS.asksRemoveDamaged]: ({ reviewId, questionIds }) =>
+        asks.removeDamaged(reviewId, questionIds),
       // Pending review comments and GitHub review threads.
       [WS_METHODS.reviewCommentsList]: ({ key, accountId }) => reviewComments.list(key, accountId),
       [WS_METHODS.reviewCommentsAdd]: ({ key, accountId, placement, body }) =>

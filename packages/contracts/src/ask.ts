@@ -155,9 +155,13 @@ export type Question = typeof Question.Type;
  * reads, so a `text` event can repeat text the snapshot already has: `at` is where the delta
  * starts in its part, and only what lies past the part's length is new. A `question` event
  * carries the whole row; after a retry its answer is empty again and new parts count from 0.
+ * `damaged` holds the stored ids of questions prkit couldn't read, which the snapshot leaves out.
  */
 export const AskWatchEvent = Schema.Union([
-  Schema.TaggedStruct("snapshot", { questions: Schema.Array(Question) }),
+  Schema.TaggedStruct("snapshot", {
+    questions: Schema.Array(Question),
+    damaged: Schema.Array(Schema.String),
+  }),
   Schema.TaggedStruct("question", { question: Question }),
   Schema.TaggedStruct("text", {
     questionId: QuestionId,

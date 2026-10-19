@@ -44,6 +44,8 @@ export type SavedInboxFilters = typeof SavedInboxFilters.Type;
 export const Workspace = Schema.Struct({
   open: Schema.Array(OpenPullRequest),
   local: Schema.Array(OpenLocalReview),
+  /** The keys of stored tabs prkit couldn't read, which `open` and `local` leave out. */
+  damaged: Schema.Array(Schema.String),
   activeKey: Schema.NullOr(PullRequestKey),
   inboxFilters: SavedInboxFilters,
   /** Grows with every change, so a window never shows an older copy over a newer one. */
@@ -69,6 +71,8 @@ export const WorkspaceCommand = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("reorder"), keys: Schema.Array(PullRequestKey) }),
   Schema.Struct({ kind: Schema.Literal("open-local"), key: LocalReviewKey }),
   Schema.Struct({ kind: Schema.Literal("close-local"), key: LocalReviewKey }),
+  /** Deletes the named tabs prkit still can't read. */
+  Schema.Struct({ kind: Schema.Literal("remove-damaged"), keys: Schema.Array(Schema.String) }),
 ]);
 export type WorkspaceCommand = typeof WorkspaceCommand.Type;
 /** An outside agent's open without focus: the tab joins the strip, the active PR stays. */
@@ -102,6 +106,8 @@ export const applyWorkspaceCommand = (
     case "open":
       return {
         ...current,
+        // Opening it again replaces a stored tab prkit couldn't read.
+        damaged: current.damaged.filter((key) => key !== command.key),
         open: current.open.some((row) => row.key === command.key)
           ? current.open
           : [
@@ -159,6 +165,7 @@ export const applyWorkspaceCommand = (
         ? current
         : {
             ...current,
+            damaged: current.damaged.filter((key) => key !== command.key),
             // After the last one: removing a review drops its row without renumbering the rest.
             local: [
               ...current.local,
@@ -177,5 +184,10 @@ export const applyWorkspaceCommand = (
               .map((row, position) => ({ key: row.key, position })),
           }
         : current;
+    case "remove-damaged":
+      return {
+        ...current,
+        damaged: current.damaged.filter((key) => !command.keys.includes(key)),
+      };
   }
 };
