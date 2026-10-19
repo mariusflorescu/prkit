@@ -89,6 +89,7 @@ export const RepositoriesResult = Schema.Struct({
 export const RepositoryPullRequestsResult = Schema.Struct({
   ...pageSchema(PullRequestSummary).fields,
   githubTotal: Schema.Int,
+  githubLeftOut: RepositoryPullRequests.fields.leftOut,
   freshness: RepositoryPullRequests.fields.freshness,
 });
 

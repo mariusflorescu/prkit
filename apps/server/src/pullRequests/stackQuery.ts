@@ -1,6 +1,8 @@
 import type { PullRequestStack, StackMembership } from "@prkit/contracts";
 import * as Schema from "effect/Schema";
 
+import { nodesOf } from "../github/connection.ts";
+
 /** A PR's place in its stack, for a pull request selection on a host with stacks. */
 export const stackSelection = (stacks: boolean) =>
   stacks ? "stack { number size baseRefName } stackEntry { position }" : "";
@@ -30,9 +32,9 @@ export const membershipOf = (node: typeof StackNode.Type): StackMembership | nul
 export const RestStack = Schema.optionalKey(
   Schema.NullOr(
     Schema.Struct({
-      number: Schema.Int,
-      size: Schema.Int,
-      position: Schema.Int,
+      number: Schema.optionalKey(Schema.Int),
+      size: Schema.optionalKey(Schema.Int),
+      position: Schema.optionalKey(Schema.Int),
       base: Schema.Struct({ ref: Schema.String }),
     }),
   ),
@@ -41,7 +43,10 @@ export const RestStack = Schema.optionalKey(
 export const restMembership = (
   stack: Schema.Schema.Type<typeof RestStack> | undefined,
 ): StackMembership | null =>
-  stack == null
+  stack == null ||
+  stack.number === undefined ||
+  stack.size === undefined ||
+  stack.position === undefined
     ? null
     : { number: stack.number, size: stack.size, position: stack.position, base: stack.base.ref };
 
@@ -72,24 +77,22 @@ export const StackResponse = Schema.Struct({
               number: Schema.Int,
               baseRefName: Schema.String,
               entries: Schema.Struct({
-                nodes: Schema.Array(
-                  Schema.NullOr(
-                    Schema.Struct({
-                      position: Schema.Int,
-                      pullRequest: Schema.NullOr(
-                        Schema.Struct({
-                          number: Schema.Int,
-                          title: Schema.String,
-                          state: Schema.Literals(["OPEN", "CLOSED", "MERGED"]),
-                          isDraft: Schema.Boolean,
-                          headRefName: Schema.String,
-                          baseRefName: Schema.String,
-                          additions: Schema.Int,
-                          deletions: Schema.Int,
-                        }),
-                      ),
-                    }),
-                  ),
+                nodes: nodesOf(
+                  Schema.Struct({
+                    position: Schema.Int,
+                    pullRequest: Schema.NullOr(
+                      Schema.Struct({
+                        number: Schema.Int,
+                        title: Schema.String,
+                        state: Schema.Literals(["OPEN", "CLOSED", "MERGED"]),
+                        isDraft: Schema.Boolean,
+                        headRefName: Schema.String,
+                        baseRefName: Schema.String,
+                        additions: Schema.Int,
+                        deletions: Schema.Int,
+                      }),
+                    ),
+                  }),
                 ),
               }),
             }),
@@ -108,7 +111,7 @@ export const stackOf = (response: typeof StackResponse.Type): PullRequestStack |
     base: stack.baseRefName,
     layers: stack.entries.nodes
       .flatMap((entry) =>
-        entry?.pullRequest == null
+        entry.pullRequest === null
           ? []
           : [
               {

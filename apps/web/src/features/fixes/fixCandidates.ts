@@ -1,5 +1,6 @@
 import type { FixTarget, PendingComment, ReviewThread } from "@prkit/contracts";
 
+import { personName } from "~/features/github/personName";
 import { rangeLabel } from "~/features/reviewComments/reviewCommentPresentation";
 
 /** One comment the user may hand to the agent: a prkit draft, or an open GitHub thread. */
@@ -50,7 +51,7 @@ export const fixCandidates = (
         id: candidateId(target),
         target,
         kind: "thread",
-        label: `Thread by ${thread.comments[0]?.author?.login ?? "ghost"}`,
+        label: `Thread by ${personName(thread.comments[0]?.author)}`,
         where: `${thread.path} ${thread.anchor === null ? "(outdated)" : rangeLabel(thread.anchor)}`,
         excerpt: excerpt(thread.comments.at(-1)?.body ?? ""),
         awaitsReply: thread.comments.at(-1)?.author?.login !== login,

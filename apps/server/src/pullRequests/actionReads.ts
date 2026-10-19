@@ -8,7 +8,8 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { GitHubApi } from "../github/GitHubApi.ts";
+import { nodesOf } from "../github/connection.ts";
+import { GitHubApi, GitHubRequestError } from "../github/GitHubApi.ts";
 
 const Method = Schema.Literals(["MERGE", "SQUASH", "REBASE"]);
 const Pull = Schema.Struct({
@@ -39,7 +40,7 @@ const Pull = Schema.Struct({
   squashTitle: Schema.String,
   squashBody: Schema.String,
   commits: Schema.Struct({
-    nodes: Schema.Array(
+    nodes: nodesOf(
       Schema.Struct({
         commit: Schema.Struct({
           statusCheckRollup: Schema.NullOr(Schema.Struct({ state: Schema.String })),
@@ -49,16 +50,18 @@ const Pull = Schema.Struct({
   }),
 });
 const Response = Schema.Struct({
-  repository: Schema.Struct({
-    mergeCommitAllowed: Schema.Boolean,
-    squashMergeAllowed: Schema.Boolean,
-    rebaseMergeAllowed: Schema.Boolean,
-    autoMergeAllowed: Schema.Boolean,
-    isArchived: Schema.Boolean,
-    viewerPermission: Schema.NullOr(Schema.String),
-    viewerDefaultMergeMethod: Method,
-    pullRequest: Pull,
-  }),
+  repository: Schema.NullOr(
+    Schema.Struct({
+      mergeCommitAllowed: Schema.Boolean,
+      squashMergeAllowed: Schema.Boolean,
+      rebaseMergeAllowed: Schema.Boolean,
+      autoMergeAllowed: Schema.Boolean,
+      isArchived: Schema.Boolean,
+      viewerPermission: Schema.NullOr(Schema.String),
+      viewerDefaultMergeMethod: Method,
+      pullRequest: Schema.NullOr(Pull),
+    }),
+  ),
 });
 const QUERY = `query PrkitPullRequestActions($owner: String!, $name: String!, $number: Int!, $headRef: String!) {
   repository(owner: $owner, name: $name) {
@@ -102,7 +105,14 @@ export const makeActionReads = Effect.gen(function* () {
         number: ref.number,
         headRef: `refs/pull/${ref.number}/head`,
       });
-      const pull = repository.pullRequest;
+      const pull = repository?.pullRequest;
+      if (repository == null || pull == null)
+        return yield* new GitHubRequestError({
+          accountId,
+          reason: "not-found",
+          status: null,
+          message: `${ref.owner}/${ref.repo}#${ref.number} wasn't found, or ${accountId} has no access to it.`,
+        });
       const canWrite =
         !repository.isArchived &&
         ["ADMIN", "MAINTAIN", "WRITE"].includes(repository.viewerPermission ?? "");

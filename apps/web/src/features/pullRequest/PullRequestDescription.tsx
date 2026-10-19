@@ -2,6 +2,7 @@ import { pullRequestActionReason, type PullRequestDetail } from "@prkit/contract
 import { GitPullRequestIcon, PencilIcon } from "lucide-react";
 
 import { Button } from "~/components/ui/button";
+import { personName } from "~/features/github/personName";
 import { usePullRequestActions } from "./actionContext";
 import { PullRequestMarkdown } from "./PullRequestMarkdown";
 import { relativeTime } from "./pullRequestPresentation";
@@ -18,7 +19,7 @@ export function PullRequestDescription({ detail }: { detail: PullRequestDetail }
       </TimelineMarker>
       <div className="min-w-0 overflow-hidden rounded-lg border border-border/60 bg-background">
         <div className="flex min-h-9 flex-wrap items-center gap-x-2 bg-muted/25 py-1 pr-1 pl-3 text-xs">
-          <span className="font-semibold">{detail.author?.login ?? "ghost"}</span>
+          <span className="font-semibold">{personName(detail.author)}</span>
           <span className="text-muted-foreground">opened this pull request</span>
           <a
             href={detail.url}

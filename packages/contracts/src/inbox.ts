@@ -63,8 +63,19 @@ export const primaryInboxReason = (reasons: InboxEntry["reasons"]) =>
     (best, reason) => (inboxReasonPriority[reason] < inboxReasonPriority[best] ? reason : best),
     reasons[0],
   );
+/**
+ * A pull request an account's inbox searches found and left out: prkit couldn't read what GitHub
+ * sent for it, or GitHub refused it with `message`. `pullRequest` names it when the answer does.
+ */
+export const InboxLeftOut = Schema.Struct({
+  accountId: AccountId,
+  pullRequest: Schema.NullOr(Schema.Struct({ ref: PullRequestRef, url: Schema.String })),
+  message: Schema.NullOr(Schema.String),
+});
+export type InboxLeftOut = typeof InboxLeftOut.Type;
 export const InboxResult = Schema.Struct({
   entries: Schema.Array(InboxEntry),
+  leftOut: Schema.Array(InboxLeftOut),
   /** One row per account: how old its entries are, and why they weren't read again. */
   accounts: Schema.Array(
     Schema.Struct({

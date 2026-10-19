@@ -24,7 +24,7 @@ export const PullRequestFingerprint = Schema.Struct({
   reviewDecision: Schema.NullOr(Schema.String),
   mergeStateStatus: Schema.String,
   comments: Schema.Struct({ totalCount: Schema.Int }),
-  reviews: Schema.Struct({ totalCount: Schema.Int }),
+  reviews: Schema.NullOr(Schema.Struct({ totalCount: Schema.Int })),
 });
 export type PullRequestFingerprint = typeof PullRequestFingerprint.Type;
 

@@ -6,6 +6,7 @@ import { ListSkeleton } from "~/components/ListSkeleton";
 import { FreshnessNotice } from "~/features/github/FreshnessNotice";
 import { repositoryPullRequestsQuery } from "~/rpc/queries";
 
+import { InboxLeftOutNotice } from "./InboxLeftOutNotice";
 import { updatedClock } from "./inboxPresentation";
 import { InboxRow } from "./InboxRow";
 
@@ -31,7 +32,7 @@ export function RepositoryPullRequestList({ repository }: { repository: Reposito
         retry={() => void query.refetch()}
       />
     );
-  const { entries, total, freshness } = query.data;
+  const { entries, leftOut, total, freshness } = query.data;
   return (
     <section aria-label={`Open in ${name}`} className="mb-6">
       <h2 className="flex items-center gap-2 px-3 py-3 font-medium text-xs text-muted-foreground">
@@ -50,10 +51,17 @@ export function RepositoryPullRequestList({ repository }: { repository: Reposito
           />
         </div>
       )}
+      {leftOut.length > 0 && (
+        <div className="px-3 pb-3">
+          <InboxLeftOutNotice accountId={reader} items={leftOut} />
+        </div>
+      )}
       {entries.length === 0 ? (
-        <p role="status" className="px-3 py-6 text-center text-xs text-muted-foreground">
-          No open pull requests in {name}.
-        </p>
+        leftOut.length > 0 ? null : (
+          <p role="status" className="px-3 py-6 text-center text-xs text-muted-foreground">
+            No open pull requests in {name}.
+          </p>
+        )
       ) : (
         <ul>
           {entries.map((entry) => (

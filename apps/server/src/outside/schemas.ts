@@ -194,6 +194,7 @@ export const InboxPullRequest = Schema.Struct({
 export const InboxListResult = Schema.Struct({
   ...PageInfo,
   githubTruncated: InboxResult.fields.truncated,
+  githubLeftOut: InboxResult.fields.leftOut,
   configDirProblems: ConfigDirProblems,
   accounts: Schema.Array(
     Schema.Struct({

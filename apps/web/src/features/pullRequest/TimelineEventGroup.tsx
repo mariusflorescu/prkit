@@ -2,6 +2,7 @@ import type { TimelineReviewer } from "@prkit/contracts";
 import { EyeIcon, TagIcon, UserRoundIcon } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
 
+import { personName } from "~/features/github/personName";
 import { eventFamily, type GroupedEvent } from "./conversationModel";
 import { LabelChip } from "./LabelChip";
 import { TimelineEventRow } from "./TimelineEventRow";
@@ -25,8 +26,9 @@ const name = (id: string, login: string) => (
     {login}
   </span>
 );
+/** GitHub names no reviewer for a deleted team or a kind of reviewer prkit doesn't read. */
 const reviewerName = (reviewer: TimelineReviewer | null) =>
-  reviewer === null ? "ghost" : reviewer.kind === "team" ? reviewer.slug : reviewer.login;
+  reviewer === null ? "someone" : reviewer.kind === "team" ? reviewer.slug : reviewer.login;
 
 type Events = readonly GroupedEvent[];
 const sentences = {
@@ -63,10 +65,10 @@ const sentences = {
     if (events.length === 1 && first?.kind === "unassigned" && first.assignee?.login === actor)
       return "removed their assignment";
     const assigned = events.flatMap((event) =>
-      event.kind === "assigned" ? [name(event.id, event.assignee?.login ?? "ghost")] : [],
+      event.kind === "assigned" ? [name(event.id, personName(event.assignee))] : [],
     );
     const unassigned = events.flatMap((event) =>
-      event.kind === "unassigned" ? [name(event.id, event.assignee?.login ?? "ghost")] : [],
+      event.kind === "unassigned" ? [name(event.id, personName(event.assignee))] : [],
     );
     return andList([...phrase("assigned", assigned), ...phrase("unassigned", unassigned)]);
   },
@@ -82,7 +84,7 @@ export function TimelineEventGroup({
   const family = eventFamily[first.kind];
   return (
     <TimelineEventRow kind={family} icon={icons[family]} author={first.author} at={first.at}>
-      {sentences[family](events, first.author?.login ?? "ghost")}
+      {sentences[family](events, personName(first.author))}
     </TimelineEventRow>
   );
 }

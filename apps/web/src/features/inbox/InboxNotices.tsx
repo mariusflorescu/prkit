@@ -7,6 +7,7 @@ import { retryReviewFeed } from "~/rpc/client";
 import { reviewFeedQuery } from "~/rpc/queries";
 
 import { ConfigDirNotice } from "./ConfigDirNotice";
+import { InboxLeftOutNotice } from "./InboxLeftOutNotice";
 import { INBOX_GROUPS } from "./inboxPresentation";
 import { useInboxStore } from "./inboxStore";
 
@@ -67,6 +68,14 @@ export function InboxNotices({
                 />,
               ],
         )}
+      {result.accounts
+        .filter((row) => account === null || account === row.accountId)
+        .flatMap((row) => {
+          const items = result.leftOut.filter((item) => item.accountId === row.accountId);
+          return items.length === 0
+            ? []
+            : [<InboxLeftOutNotice key={row.accountId} accountId={row.accountId} items={items} />];
+        })}
       {result.truncated
         .filter((item) => account === null || account === item.accountId)
         .map((item) => (

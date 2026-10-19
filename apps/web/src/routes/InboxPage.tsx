@@ -104,7 +104,10 @@ export function InboxPage() {
   // A notice above says why rows may be missing, so no empty state claims nothing needs you.
   const noticeInsteadOfEmpty =
     inView.some((row) => row.problem !== null && row.count === 0) ||
-    (!filtered && (inbox.data?.configDirProblems.length ?? 0) > 0);
+    (!filtered && (inbox.data?.configDirProblems.length ?? 0) > 0) ||
+    (!filtered &&
+      (inbox.data?.leftOut.some((item) => account === null || item.accountId === account) ??
+        false));
   const oldest =
     inView
       .flatMap((row) => (row.fetchedAt === null ? [] : [row.fetchedAt]))

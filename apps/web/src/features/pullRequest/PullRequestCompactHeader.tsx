@@ -3,6 +3,7 @@ import { ArrowLeftIcon, ExternalLinkIcon, FileDiffIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { UserAvatar } from "~/components/UserAvatar";
+import { personName } from "~/features/github/personName";
 import { pullRequestState } from "~/lib/pullRequestState";
 import { relativeTime } from "./pullRequestPresentation";
 import { PullRequestHeaderActions } from "./PullRequestHeaderActions";
@@ -50,10 +51,7 @@ export function PullRequestCompactHeader({
         <PullRequestHeaderActions detail={detail} reviewAction={reviewAction} />
       </div>
       <div className="mt-1 flex min-w-0 items-center gap-2 text-2xs text-muted-foreground">
-        <UserAvatar
-          login={detail.author?.login ?? "ghost"}
-          url={detail.author?.avatarUrl ?? null}
-        />
+        <UserAvatar login={personName(detail.author)} url={detail.author?.avatarUrl ?? null} />
         <time dateTime={detail.updatedAt} className="shrink-0">
           {relativeTime(detail.updatedAt)}
         </time>

@@ -7,6 +7,7 @@ import { Button } from "~/components/ui/button";
 import { ButtonLabel } from "~/components/ui/button-label";
 import { SendToAgentButton } from "~/features/fixes/SendToAgentButton";
 import { replyToThread, resolveThread } from "~/rpc/client";
+import { personName } from "~/features/github/personName";
 import { CommentCard } from "./CommentCard";
 import { CommentForm } from "./CommentForm";
 import { DiffSnippet } from "./DiffSnippet";
@@ -64,7 +65,7 @@ export function ReviewThreadCard({
   const where = thread.anchor
     ? rangeLabel(thread.anchor)
     : `line ${thread.originalLine ?? "?"} (outdated)`;
-  const author = thread.comments[0]?.author?.login ?? "ghost";
+  const author = personName(thread.comments[0]?.author);
   const count = thread.commentCount;
   return (
     <CommentCard inset={inset} label={`Thread by ${author} on ${thread.path} ${where}`}>

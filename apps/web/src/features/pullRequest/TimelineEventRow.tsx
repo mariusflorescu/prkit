@@ -2,6 +2,7 @@ import type { PullRequestAuthor } from "@prkit/contracts";
 import type { ReactNode } from "react";
 
 import { UserAvatar } from "~/components/UserAvatar";
+import { personName } from "~/features/github/personName";
 import { TimelineMarker } from "./TimelineMarker";
 import { relativeTime } from "./pullRequestPresentation";
 
@@ -27,9 +28,9 @@ export function TimelineEventRow({
       <p className="py-1.5 text-xs leading-5 text-muted-foreground">
         <span className="inline-flex items-center gap-1.5 align-top font-semibold text-foreground">
           <span className="flex h-5 items-center">
-            <UserAvatar login={author?.login ?? "ghost"} url={author?.avatarUrl ?? null} />
+            <UserAvatar login={personName(author)} url={author?.avatarUrl ?? null} />
           </span>
-          {author?.login ?? "ghost"}
+          {personName(author)}
         </span>{" "}
         {children}{" "}
         <time dateTime={at} title={new Date(at).toLocaleString()} className="whitespace-nowrap">

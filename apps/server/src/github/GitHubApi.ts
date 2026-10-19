@@ -191,7 +191,7 @@ export const operationOf = (query: string) => {
 
 const issues = SchemaIssue.makeFormatterStandardSchemaV1();
 /** Where the first decode failure is and what was expected, without any value from the response. */
-const decodeProblem = (error: Schema.SchemaError) => {
+export const decodeProblem = (error: Schema.SchemaError) => {
   const [first] = issues(error.issue).issues;
   return {
     path: (first?.path ?? [])
@@ -500,6 +500,8 @@ export const make = Effect.gen(function* () {
                 }),
               );
             }
+            // GitHub nulls what its errors broke, so a partial answer fails in GitHub's words.
+            if (errors.length > 0) return { data: null, errors };
             return yield* new GitHubRequestError({
               accountId: id,
               reason: "network",
