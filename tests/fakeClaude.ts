@@ -92,6 +92,8 @@ export const setUpFakeClaude = (name: string) => {
     holdAnswers: () => flag("hold-ask", true),
     releaseAnswers: () => flag("hold-ask", false),
     failing: (on: boolean) => flag("fail", on),
+    /** Its next guides, fixes and answers end with an error that says `message`. */
+    failingWith: (message: string) => NodeFS.writeFileSync(NodePath.join(dir, "fail"), message),
     /** Has its next answers write `made-by-agent.txt` where they run and stage it with git. */
     writingAnswers: (on: boolean) => flag("ask-writes", on),
     notes: (notes: Record<string, ReadonlyArray<FakeNote>>) =>
