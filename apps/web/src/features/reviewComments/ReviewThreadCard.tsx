@@ -39,16 +39,19 @@ export function ReviewThreadCard({
   const replying = useReviewCommentsStore((state) => state.words.has(form));
   const beginWriting = useReviewCommentsStore((state) => state.beginWriting);
   const stopWriting = useReviewCommentsStore((state) => state.stopWriting);
+  const sendFailed = useReviewCommentsStore((state) => state.sendFailed);
   const [open, setOpen] = useState(!thread.resolved || replying);
   useOpenForm(pr.key, open && thread.canReply && replying);
   const sending = useFormSending(form);
   const reply = useMutation({
     mutationKey: sendingKey(form),
     mutationFn: (body: string) => replyToThread({ ...pr, threadId: thread.id, body }),
+    onMutate: () => sendFailed(form, null),
     onSuccess: (threads) => {
       store(threads);
       stopWriting(form);
     },
+    onError: (error) => sendFailed(form, error.message),
   });
   const resolve = useMutation({
     mutationFn: (resolved: boolean) => resolveThread({ ...pr, threadId: thread.id, resolved }),
@@ -140,7 +143,6 @@ export function ReviewThreadCard({
                 label={`Reply to ${author}`}
                 submitLabel="Reply"
                 pendingLabel="Replying..."
-                error={reply.error?.message ?? null}
                 pending={sending}
                 onSubmit={(body) => reply.mutate(body)}
                 onCancel={() => stopWriting(form)}

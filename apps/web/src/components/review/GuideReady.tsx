@@ -17,7 +17,11 @@ import { AskDock } from "~/features/ask/AskDock";
 import { AskTargetContext } from "~/features/ask/askTarget";
 import { useAsks } from "~/features/ask/useAsks";
 import { useGuideAskTarget } from "~/features/ask/useGuideAskTarget";
-import { composerOn, useReviewCommentsStore } from "~/features/reviewComments/reviewCommentsStore";
+import { CommentsWithoutDiff } from "~/features/reviewComments/CommentsWithoutDiff";
+import {
+  useComposers,
+  useReviewCommentsStore,
+} from "~/features/reviewComments/reviewCommentsStore";
 import { useDiffComments } from "~/features/reviewComments/useDiffComments";
 import { useManualCheckTicks } from "~/features/manualCheck/useManualCheckTicks";
 import { ReviewedCount } from "~/features/reviewedFiles/ReviewedCount";
@@ -71,10 +75,12 @@ export function GuideReady({
     running && attempt?.draft != null
       ? { attempt, version: attempt.draft.version, growing: attempt.draft.growing }
       : null;
-  // A comment being written holds the revision it is on, so a new one doesn't swap its diff out.
-  const composer = useReviewCommentsStore(composerOn(detail));
-  const composingRevision = composer?.site.on === "guide" ? composer.site.revision : null;
-  const closeComposer = useReviewCommentsStore((state) => state.closeComposer);
+  // Comments being written hold the revision they are on, so a new one doesn't swap their diff
+  // out. Picking another revision takes them along, placed on its diff like after a push.
+  const composers = useComposers(detail);
+  const composingRevision =
+    composers.flatMap(({ site }) => (site.on === "guide" ? [site.revision] : []))[0] ?? null;
+  const moveToRevision = useReviewCommentsStore((state) => state.moveToRevision);
   // Nor a description being edited from the guide: the revision it drafts from holds until it closes.
   const [describing, setDescribing] = useState<number | null>(null);
   const revision =
@@ -84,12 +90,11 @@ export function GuideReady({
     latest;
   const pick = useCallback(
     (next: GuideChoice) => {
-      if (composer !== null && composingRevision !== null && next !== composingRevision)
-        closeComposer(composer);
+      if (next !== "draft") moveToRevision({ key: detail.key, accountId: detail.accountId }, next);
       if (describing !== null && next !== describing) setDescribing(null);
       setPicked(next === latest.revision ? null : next);
     },
-    [composer, composingRevision, closeComposer, describing, latest.revision],
+    [detail.key, detail.accountId, moveToRevision, describing, latest.revision],
   );
   const target = useGuideAskTarget({
     key: detail.key,
@@ -201,6 +206,11 @@ export function GuideReady({
               {guide.data.normalized.guidanceNote !== null && (
                 <GuidanceNoteLine note={guide.data.normalized.guidanceNote} />
               )}
+              <CommentsWithoutDiff
+                pr={detail}
+                files={guide.data.snapshot.files}
+                site={{ on: "guide", revision: revision.revision }}
+              />
               <GuideView
                 key={revision.revision}
                 revision={revision.revision}

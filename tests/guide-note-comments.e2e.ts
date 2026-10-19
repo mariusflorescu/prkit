@@ -178,20 +178,18 @@ test(
       await screenshotLightAndDark(app, browser, "prefilled-composer-narrow");
       await browser.setViewport(size);
       await slugField.fill("Words that belong to the slug note");
+      // Another note's comment opens beside this one and leaves its words alone.
       await url.getByRole("button", "Add as comment, risk on old line 2").tap();
-      await expect(screen.getByRole("textbox", "Comment on old line 2")).toHaveValue(URL_RISK);
-      await expect(slugField).toBeHidden();
-      await addSlug.tap();
-      await expect(slugField).toHaveValue(SLUG);
+      const urlField = screen.getByRole("textbox", "Comment on old line 2");
+      await expect(urlField).toHaveValue(URL_RISK);
+      await expect(slugField).toHaveValue("Words that belong to the slug note");
       await slugField.fill("Could the slug limit live in the shared config instead?");
-      await screen.getByRole("button", "Add review comment").tap();
+      await slugField.press("Meta+Enter");
       await expect(
         file.getByRole("article", "Pending comment on src/limits.ts line 3"),
       ).toContainText("Could the slug limit live in the shared config instead?");
       await expect(slug.getByRole("status")).toHaveText("In your review.");
 
-      await url.getByRole("button", "Add as comment, risk on old line 2").tap();
-      const urlField = screen.getByRole("textbox", "Comment on old line 2");
       await expect(urlField).toHaveValue(URL_RISK);
       await urlField.press("Escape");
       await expect(urlField).toBeHidden();

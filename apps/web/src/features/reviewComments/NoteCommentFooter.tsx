@@ -22,12 +22,20 @@ export function NoteCommentFooter({
   pr: { key: PullRequestKey; accountId: AccountId };
   note: ShownNote;
   fromNotes: ReadonlyMap<NoteKey, NoteComment>;
-  composing: boolean;
+  composing: ReadonlySet<NoteKey>;
 }) {
   if (!COMMENTABLE[note.written.tone]) return null;
   const key = noteKey(note.ref.path, note.writtenRows, note.written);
   const comment = key === null ? undefined : fromNotes.get(key);
-  if (comment === undefined) return <NoteCommentButton pr={pr} note={note} composing={composing} />;
+  if (comment === undefined)
+    return (
+      <NoteCommentButton
+        pr={pr}
+        note={note}
+        noteKey={key}
+        composing={key !== null && composing.has(key)}
+      />
+    );
   const placed = place(comment, note.rows, note.head);
   // Files shows GitHub's diff at the head, where a draft that no longer reads the same is outdated.
   const where =

@@ -10,14 +10,14 @@ import { NewCommentComposer } from "./NewCommentComposer";
 import { PendingCommentCard } from "./PendingCommentCard";
 import {
   type Composer,
-  composerKey,
+  composerForm,
   replyForm,
   useReviewCommentsStore,
 } from "./reviewCommentsStore";
 import { ReviewThreadCard } from "./ReviewThreadCard";
 
 /**
- * Comments whose lines are no longer in this diff. Drafts and a comment being written stay
+ * Comments whose lines are no longer in this diff. Drafts and comments being written stay
  * in view because they need a new line before they can be sent; GitHub's outdated threads
  * fold away, unless a reply to one is being written.
  */
@@ -26,13 +26,13 @@ export function OutdatedComments({
   path,
   drafts,
   threads,
-  composer,
+  composers,
 }: {
   pr: { key: PullRequestKey; accountId: AccountId };
   path: string;
   drafts: ReadonlyArray<{ comment: PendingComment; placed: Outdated }>;
   threads: ReadonlyArray<ReviewThread>;
-  composer: { composer: Composer; placed: Outdated } | null;
+  composers: ReadonlyArray<{ composer: Composer; placed: Outdated }>;
 }) {
   const replying = useReviewCommentsStore((state) =>
     threads.some((thread) => state.words.has(replyForm(pr, thread.id))),
@@ -43,14 +43,14 @@ export function OutdatedComments({
       data-outdated-comments=""
       className="border-t border-border/60 py-1"
     >
-      {composer && (
+      {composers.map(({ composer, placed }) => (
         <NewCommentComposer
-          key={composerKey(composer.composer)}
+          key={composerForm(composer)}
           pr={pr}
-          composer={composer.composer}
-          placed={composer.placed}
+          composer={composer}
+          placed={placed}
         />
-      )}
+      ))}
       {drafts.map(({ comment, placed }) => (
         <PendingCommentCard key={comment.id} comment={comment} pr={pr} placed={placed} />
       ))}

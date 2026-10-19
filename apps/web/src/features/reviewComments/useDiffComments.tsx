@@ -7,10 +7,10 @@ import {
   inOneHunk,
   type Landed,
   type LinePoint,
+  type NoteKey,
   notePoint,
   type Outdated,
   type PendingComment,
-  type Placed,
   place,
   type PullRequestKey,
   type ReviewCommentId,
@@ -30,11 +30,12 @@ import { OutdatedComments } from "./OutdatedComments";
 import { storePending } from "./reviewCommentsCache";
 import {
   type Composer,
-  composerOn,
   type ComposerSite,
+  onSite,
+  useComposers,
   useReviewCommentsStore,
 } from "./reviewCommentsStore";
-import { sameRef, type ShownNote } from "./shownNote";
+import type { ShownNote } from "./shownNote";
 
 /**
  * Where the guide notes on screen come from, so their question and risk notes can become
@@ -59,7 +60,7 @@ type Pin = {
   point: LinePoint;
   threads: Array<ReviewThread>;
   drafts: Array<{ comment: PendingComment; placed: Landed }>;
-  composer: { composer: Composer; placed: Landed } | null;
+  composers: Array<{ composer: Composer; placed: Landed }>;
 };
 
 /**
@@ -76,7 +77,7 @@ export function useDiffComments(
   const client = useQueryClient();
   const pending = useQuery(pendingCommentsQuery(key, accountId));
   const threads = useQuery({ ...reviewThreadsQuery(key, accountId), enabled: scope.threads });
-  const composer = useReviewCommentsStore(composerOn(pr));
+  const composers = useComposers(pr);
   const moving = useReviewCommentsStore((state) =>
     state.moving?.key === key ? state.moving : null,
   );
@@ -104,14 +105,13 @@ export function useDiffComments(
   const filesNotes = scope.notes.on === "files" ? scope.notes.notes : null;
   const drafts = pending.data?.comments;
   const fromNotes = pending.data?.fromNotes;
-  // A composer's lines are the diff it was opened on, so only that surface shows it, and on
-  // the Guide only that revision.
-  const visibleComposer =
-    composer !== null &&
-    composer.site.on === noteOn &&
-    (composer.site.on === "files" || composer.site.revision === guideRevision)
-      ? composer
-      : null;
+  const site = useMemo<ComposerSite>(
+    () => (guideRevision === null ? { on: "files" } : { on: "guide", revision: guideRevision }),
+    [guideRevision],
+  );
+  // A composer's lines are read against the diff it is on, so only that surface shows it, and
+  // on the Guide only that revision.
+  const visibleComposers = useMemo(() => composers.filter(onSite(site)), [composers, site]);
   // GitHub numbers threads against the head it had when they were read, so they are
   // placed only on a diff of that head, and read again once the diff moves on.
   const threadsHead = threads.data?.headSha;
@@ -123,16 +123,17 @@ export function useDiffComments(
   }, [staleThreads, client, key, accountId]);
   return useMemo(() => {
     const owner = { key, accountId };
-    const site: ComposerSite =
-      guideRevision === null ? { on: "files" } : { on: "guide", revision: guideRevision };
     const byNote = new Map((fromNotes ?? []).map((comment) => [comment.note, comment]));
+    const composing = new Set<NoteKey>(
+      visibleComposers.flatMap(({ note }) => (note === null ? [] : [note.remark])),
+    );
     const build = (file: DiffFile): DiffComments | undefined => {
       if (drafts === undefined || file.patch._tag !== "text") return undefined;
       const rows = diffRows(file.patch.patch);
       const pins = new Map<string, Pin>();
       const pinAt = (point: LinePoint) => {
         const id = `${point.side}:${point.line}`;
-        const pin = pins.get(id) ?? { point, threads: [], drafts: [], composer: null };
+        const pin = pins.get(id) ?? { point, threads: [], drafts: [], composers: [] };
         pins.set(id, pin);
         return pin;
       };
@@ -169,14 +170,19 @@ export function useDiffComments(
         const placed = filesNotes?.byShown.get(note);
         return placed === undefined ? null : { on: "files", ...placed, rows, head: commitSha };
       };
-      const writing: Placed | null =
-        visibleComposer?.placement.anchor.path === file.path
-          ? place(visibleComposer.placement, rows, commitSha)
-          : null;
-      const open = writing?._tag === "outdated" ? null : writing;
-      const lost = writing?._tag === "outdated" ? writing : null;
-      if (visibleComposer && open)
-        pinAt(open.placement.anchor.end).composer = { composer: visibleComposer, placed: open };
+      const open: Array<{ composer: Composer; placed: Landed }> = [];
+      const lost: Array<{ composer: Composer; placed: Outdated }> = [];
+      for (const composer of visibleComposers) {
+        if (composer.placement.anchor.path !== file.path) continue;
+        const placed = place(composer.placement, rows, commitSha);
+        if (placed._tag === "outdated") lost.push({ composer, placed });
+        else {
+          open.push({ composer, placed });
+          pinAt(placed.placement.anchor.end).composers.push({ composer, placed });
+        }
+      }
+      // Pierre shows one picked range per file: the lines being commented on, else a note's line.
+      const picked = (open.find(({ composer }) => composer.note === null) ?? open[0])?.placed;
       return {
         kind: "comment",
         pins: [...pins.values()].map((pin) => pin.point),
@@ -188,12 +194,14 @@ export function useDiffComments(
                 pr={owner}
                 threads={pin.threads}
                 drafts={pin.drafts}
-                composer={pin.composer}
+                composers={pin.composers}
               />
             )
           );
         },
-        selection: open && { start: open.placement.anchor.start, end: open.placement.anchor.end },
+        selection: picked
+          ? { start: picked.placement.anchor.start, end: picked.placement.anchor.end }
+          : null,
         onSelect: (range) => {
           const placement = capture(rows, { path: file.path, ...range }, commitSha);
           if (placement === null)
@@ -206,14 +214,14 @@ export function useDiffComments(
           else compose({ pr: owner, site, placement, note: null });
         },
         footer:
-          showOutdated &&
-          (outdatedDrafts.length > 0 || outdatedThreads.length > 0 || lost !== null) ? (
+          (showOutdated && (outdatedDrafts.length > 0 || outdatedThreads.length > 0)) ||
+          lost.length > 0 ? (
             <OutdatedComments
               pr={owner}
               path={file.path}
-              drafts={outdatedDrafts}
-              threads={outdatedThreads}
-              composer={visibleComposer && lost && { composer: visibleComposer, placed: lost }}
+              drafts={showOutdated ? outdatedDrafts : []}
+              threads={showOutdated ? outdatedThreads : []}
+              composers={lost}
             />
           ) : null,
         count: fileDrafts.length + fileThreads.length,
@@ -228,10 +236,7 @@ export function useDiffComments(
                       pr={owner}
                       note={shown}
                       fromNotes={byNote}
-                      composing={
-                        visibleComposer?.note != null &&
-                        sameRef(visibleComposer.note.ref, shown.ref)
-                      }
+                      composing={composing}
                     />
                   )
                 );
@@ -247,12 +252,13 @@ export function useDiffComments(
     drafts,
     fromNotes,
     threadList,
-    visibleComposer,
+    visibleComposers,
     moving,
     commitSha,
     showOutdated,
     noteOn,
     guideRevision,
+    site,
     filesNotes,
     compose,
     moveComment,

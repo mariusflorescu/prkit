@@ -43,6 +43,7 @@ export function PendingCommentCard({
   const editing = useReviewCommentsStore((state) => state.words.has(form));
   const beginWriting = useReviewCommentsStore((state) => state.beginWriting);
   const stopWriting = useReviewCommentsStore((state) => state.stopWriting);
+  const sendFailed = useReviewCommentsStore((state) => state.sendFailed);
   useOpenForm(pr.key, editing);
   const moving = useReviewCommentsStore((state) => state.moving?.id === comment.id);
   const startMove = useReviewCommentsStore((state) => state.startMove);
@@ -52,10 +53,12 @@ export function PendingCommentCard({
   const edit = useMutation({
     mutationKey: sendingKey(form),
     mutationFn: (body: string) => editPendingComment(comment.id, body),
+    onMutate: () => sendFailed(form, null),
     onSuccess: (comments) => {
       store(comments);
       stopWriting(form);
     },
+    onError: (error) => sendFailed(form, error.message),
   });
   const remove = useMutation({
     mutationFn: () => deletePendingComment(comment.id),
@@ -169,7 +172,6 @@ export function PendingCommentCard({
             label="Edit pending comment"
             submitLabel="Save"
             pendingLabel="Saving..."
-            error={edit.error?.message ?? null}
             pending={sending}
             onSubmit={(body) => edit.mutate(body)}
             onCancel={() => stopWriting(form)}

@@ -100,7 +100,10 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
   const filterRequest = useFilterKey(root, revealTree);
   const notesShown = useGuideNotesOnFiles();
   const writing = useReviewCommentsStore(writingOn(detail));
-  const guideNotes = useFilesGuideNotes(detail, query.data, notesShown.shown, writing);
+  // Notes that come with the first paint never push a diff down; ones turned on later say so
+  // above the list instead. Until that paint no form is on screen for them to move.
+  const [painted, setPainted] = useState(false);
+  const guideNotes = useFilesGuideNotes(detail, query.data, notesShown.shown, writing && painted);
   const notes = guideNotes._tag === "ready" ? guideNotes.notes : null;
   const commentsFor = useDiffComments(detail, files, {
     commitSha: query.data?.headSha ?? detail.headSha,
@@ -108,9 +111,6 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
     outdated: true,
     notes: { on: "files", notes },
   });
-  // Notes that come with the first paint never push a diff down; ones turned on later say so
-  // above the list instead.
-  const [painted, setPainted] = useState(false);
   const waiting =
     query.isPending ||
     pending.isPending ||
@@ -206,7 +206,7 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
       </TabActions>
       <ReviewCommentsAlerts pr={detail} />
       <FilesGuideNotesStatus state={guideNotes} />
-      <CommentsWithoutDiff pr={detail} files={files} />
+      <CommentsWithoutDiff pr={detail} files={files} site={{ on: "files" }} />
       {snapshot.changedFiles > files.length && (
         <p
           role="status"
