@@ -8,25 +8,12 @@ import type { GenerateGuideInput } from "./schemas.ts";
 
 type SelectionInput = Pick<typeof GenerateGuideInput.Type, "instance" | "model" | "options">;
 
-/** Reject partial selections instead of silently dropping model flags. */
-export const requestedAgent = (
+export const checkedAgent = (
   agents: Context.Service.Shape<typeof Agents>,
-  input: SelectionInput,
+  selection: AgentSelection,
 ) =>
   Effect.gen(function* () {
-    if (input.instance === undefined && input.model === undefined && input.options === undefined)
-      return undefined;
-    if (input.instance === undefined || input.model === undefined)
-      return yield* fail(
-        "invalid",
-        "Pass instance and model together. list_agents lists the models and options each instance offers.",
-      );
     const catalog = yield* agents.catalog();
-    const selection: AgentSelection = {
-      instance: input.instance,
-      model: input.model,
-      options: input.options ?? [],
-    };
     const problem = selectionProblem(catalog, selection);
     if (problem !== null) return yield* fail("not-ready", problem);
     const descriptors =
@@ -43,4 +30,24 @@ export const requestedAgent = (
       ids.add(option.id);
     }
     return selection;
+  });
+
+/** Reject partial selections instead of silently dropping model flags. */
+export const requestedAgent = (
+  agents: Context.Service.Shape<typeof Agents>,
+  input: SelectionInput,
+) =>
+  Effect.gen(function* () {
+    if (input.instance === undefined && input.model === undefined && input.options === undefined)
+      return undefined;
+    if (input.instance === undefined || input.model === undefined)
+      return yield* fail(
+        "invalid",
+        "Pass instance and model together. list_agents lists the models and options each instance offers.",
+      );
+    return yield* checkedAgent(agents, {
+      instance: input.instance,
+      model: input.model,
+      options: input.options ?? [],
+    });
   });

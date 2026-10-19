@@ -18,6 +18,7 @@ import {
   AGENT_RUNS,
   AGENT_SKIP,
   FIXTURE_REPO,
+  GUIDE_WAIT,
   NEEDS_FIXTURE,
   openFixtureGuide,
   readRows,
@@ -470,7 +471,7 @@ const REFACTOR = {
 describe("a real Claude guide says how to check it", { tags: ["agent"] }, () => {
   test(
     "the fixture pull request gets concrete steps that point at its chapters",
-    { skip: NEEDS_FIXTURE, timeout: 900_000 },
+    { skip: NEEDS_FIXTURE, timeout: GUIDE_WAIT + 60_000 },
     async ({ app, screen, browser }) => {
       test.skip(!AGENT_RUNS, AGENT_SKIP);
       const run = runForUrl(app.baseUrl);
@@ -479,7 +480,7 @@ describe("a real Claude guide says how to check it", { tags: ["agent"] }, () => 
       await openFixtureGuide({ app, screen });
       await screen.getByRole("button", "Generate guide").tap({ timeout: 30_000 });
       await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r1 · ", {
-        timeout: 840_000,
+        timeout: GUIDE_WAIT,
       });
       const guide = acceptedGuide(run.home, `github.com/${FIXTURE_REPO}#1`, "fixture");
       const plan = guide.manualCheck;
@@ -525,7 +526,7 @@ describe("a real Claude guide says how to check it", { tags: ["agent"] }, () => 
 
   test(
     "a refactor gets nothing to check by hand",
-    { timeout: 900_000 },
+    { timeout: GUIDE_WAIT + 60_000 },
     async ({ app, screen, browser }) => {
       test.skip(!AGENT_RUNS, AGENT_SKIP);
       const name = "manual-check-refactor";
@@ -558,7 +559,7 @@ describe("a real Claude guide says how to check it", { tags: ["agent"] }, () => 
                 ? review.state
                 : "running";
             },
-            { timeout: 840_000, interval: 1_000 },
+            { timeout: GUIDE_WAIT, interval: 1_000 },
           )
           .toBe("watching");
         const guide = acceptedGuide(run.home, KEY, "refactor");

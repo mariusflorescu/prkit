@@ -1,7 +1,14 @@
 import { describe, test } from "@e2e-dev/web";
 import { expect, type TestFixtures } from "e2e";
 
-import { FIXTURE_LOGIN, FIXTURE_REPO, NEEDS_FIXTURE, prPath, readRows } from "./fixturePr.ts";
+import {
+  FIXTURE_LOGIN,
+  FIXTURE_REPO,
+  GUIDE_WAIT,
+  NEEDS_FIXTURE,
+  prPath,
+  readRows,
+} from "./fixturePr.ts";
 import { choose, METHOD_LABELS } from "./pickers.ts";
 import { runForUrl } from "../scripts/verify-run.ts";
 import { startFakeGitHub, startFakeInstance, stopFakeInstance } from "./fakeGitHub.ts";
@@ -347,7 +354,7 @@ test(
 
 test(
   "the watcher ends a real guide after a header merge",
-  { tags: ["agent"], timeout: 660_000, skip: NEEDS_FIXTURE },
+  { tags: ["agent"], timeout: GUIDE_WAIT + 60_000, skip: NEEDS_FIXTURE },
   async ({ app, screen, browser }) => {
     test.skip(
       process.env.PRKIT_E2E_AGENT !== "1",
@@ -359,7 +366,7 @@ test(
       await screen.getByRole("navigation", "Pull request tabs").getByRole("link", "Guide").tap();
       await screen.getByRole("button", "Generate guide").tap({ timeout: 30_000 });
       await expect(browser.locator('[data-review-status="watching"]')).toBeAttached({
-        timeout: 600_000,
+        timeout: GUIDE_WAIT,
       });
       await app.screenshot("watcher-before-merge");
       await waitForMerge(screen);

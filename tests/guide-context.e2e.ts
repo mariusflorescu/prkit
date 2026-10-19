@@ -23,7 +23,7 @@ import {
 } from "./contextFixture.ts";
 import { setUpFakeClaude } from "./fakeClaude.ts";
 import { startFakeGitHub, startFakeInstance, stopFakeInstance } from "./fakeGitHub.ts";
-import { AGENT_RUNS, AGENT_SKIP, readRows } from "./fixturePr.ts";
+import { AGENT_RUNS, AGENT_SKIP, GUIDE_WAIT, readRows } from "./fixturePr.ts";
 import { setUpRealClaude } from "./realClaude.ts";
 import { savedScreenshots } from "./savedScreenshots.ts";
 
@@ -372,7 +372,7 @@ const CLAIMS_ALL_PASS =
 describe("a real Claude guide on the fake GitHub", { tags: ["agent"] }, () => {
   test(
     "a Claude guide uses the failing check, points at the thread, judges the linked issue and ignores the injected instruction",
-    { timeout: 1_500_000 },
+    { timeout: GUIDE_WAIT + 15 * 60_000 },
     async ({ app, screen }) => {
       test.skip(!AGENT_RUNS, AGENT_SKIP);
       const started = Date.now();
@@ -391,7 +391,7 @@ describe("a real Claude guide on the fake GitHub", { tags: ["agent"] }, () => {
               const state = reviewState(run.home)[0]?.state;
               return state === "watching" || state === "failed" ? state : "running";
             },
-            { timeout: 600_000, interval: 500 },
+            { timeout: GUIDE_WAIT, interval: 500 },
           )
           .not.toBe("running");
         expect(reviewState(run.home)).toEqual([{ revision: 1, state: "watching" }]);

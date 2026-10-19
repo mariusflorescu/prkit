@@ -44,7 +44,8 @@
  *   linger    a `sleep` that a command left in the background; the command runs in a session
  *             of its own for a second, as Claude Code runs commands. Its PID goes in `linger.pid`
  *
- * Every turn appends `{configDir, cwd, session, resumed, forked}` to `runs.log` there, and its prompt
+ * Every turn appends `{configDir, cwd, session, resumed, forked, model, effort}` to `runs.log` there
+ * (`model` and `effort` as the Agent SDK's `--model` and `--effort` flags gave them, null without), and its prompt
  * to `prompts.jsonl` with a copy of the context file the prompt names (`context-<turn>.json`). A
  * fork (`--fork-session`) gets a new session, as Claude Code's does. With CLAUDE_CONFIG_DIR set to
  * a folder under `.e2e/`, it also saves the session as Claude Code does, under `projects/` in the
@@ -191,13 +192,16 @@ const resumed =
   args.find((arg) => arg.startsWith("--resume="))?.slice("--resume=".length) ??
   (args.includes("--resume") ? (args[args.indexOf("--resume") + 1] ?? null) : null);
 const forked = args.includes("--fork-session");
+const flagValue = (flag: string) =>
+  args.find((arg) => arg.startsWith(`${flag}=`))?.slice(flag.length + 1) ??
+  (args.includes(flag) ? (args[args.indexOf(flag) + 1] ?? null) : null);
 const sessionId = resumed !== null && !forked ? resumed : NodeCrypto.randomUUID();
 /** Which folder this turn ran with, and the session it saved there as Claude Code would. */
 const record = () => {
   if (control !== "")
     NodeFS.appendFileSync(
       NodePath.join(control, "runs.log"),
-      `${JSON.stringify({ configDir, cwd: process.cwd(), session: sessionId, resumed: resumed !== null, forked })}\n`,
+      `${JSON.stringify({ configDir, cwd: process.cwd(), session: sessionId, resumed: resumed !== null, forked, model: flagValue("--model"), effort: flagValue("--effort") })}\n`,
     );
   const scratch = NodePath.resolve(import.meta.dirname, "..", ".e2e") + NodePath.sep;
   if (configDir === null || !NodePath.resolve(configDir).startsWith(scratch)) return;

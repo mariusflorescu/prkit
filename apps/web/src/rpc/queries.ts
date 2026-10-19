@@ -2,7 +2,7 @@ import { queryOptions, replaceEqualDeep, skipToken } from "@tanstack/react-query
 
 import {
   type AccountId,
-  type AgentInstanceId,
+  type AgentSelection,
   type AttemptId,
   type DiffSource,
   type PullRequestKey,
@@ -274,10 +274,10 @@ export const draftQuery = (key: ReviewKey, attemptId: AttemptId, version: number
     staleTime: Infinity,
     retry: false,
   });
-export const typicalDurationQuery = (instance: AgentInstanceId | null, lines: number) =>
+export const typicalDurationQuery = (agent: AgentSelection | null, lines: number) =>
   queryOptions({
-    queryKey: ["typicalDuration", instance, lines],
-    queryFn: instance === null ? skipToken : () => getTypicalDuration(instance, lines),
+    queryKey: ["typicalDuration", agent, lines],
+    queryFn: agent === null ? skipToken : () => getTypicalDuration(agent, lines),
     staleTime: 5 * 60_000,
     retry: false,
   });

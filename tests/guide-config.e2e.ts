@@ -10,6 +10,7 @@ import {
   AGENT_SKIP,
   FIXTURE_NAME,
   FIXTURE_REPO,
+  GUIDE_WAIT,
   NEEDS_FIXTURE,
   openFixtureGuide,
   readRows,
@@ -464,7 +465,7 @@ describe("guide settings", { serial: true, skip: NEEDS_FIXTURE }, () => {
 describe("guide settings with the user's agent", { tags: ["agent"], skip: NEEDS_FIXTURE }, () => {
   test(
     "an attempt keeps the settings it started with; changed settings write the next one fresh",
-    { timeout: 1_500_000 },
+    { timeout: 2 * GUIDE_WAIT + 3 * 60_000 },
     async ({ app, screen, browser }) => {
       test.skip(!AGENT_RUNS, AGENT_SKIP);
       const run = runForUrl(app.baseUrl);
@@ -521,7 +522,7 @@ describe("guide settings with the user's agent", { tags: ["agent"], skip: NEEDS_
         .tap();
 
       await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r1 · ", {
-        timeout: 660_000,
+        timeout: GUIDE_WAIT,
       });
       const areas = screen.getByRole("region", "Your focus areas");
       await expect(areas.getByRole("listitem")).toHaveCount(1);
@@ -571,7 +572,7 @@ describe("guide settings with the user's agent", { tags: ["agent"], skip: NEEDS_
         .tap();
       await again.getByRole("button", "Generate again").tap();
       await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r2 · ", {
-        timeout: 660_000,
+        timeout: GUIDE_WAIT,
       });
       await expect(browser.locator("[data-revision-settings]")).toHaveText(
         "Written with 1 focus area · skipped 1 file",

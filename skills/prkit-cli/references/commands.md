@@ -44,24 +44,24 @@ Each file in `prkit pr reviewed` is `reviewed`, `changed` (reviewed before, then
 
 ## Guides
 
-| Command                                                                 | What it returns or changes                                                                 |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `prkit guide list --json`                                               | Paged guide sessions, including stopped and failed ones, each with its latest `risk`.      |
-| `prkit guide read <pr> --json`                                          | State and latest accepted guide.                                                           |
-| `prkit guide generate <pr> --stack this`                                | Starts a guide using the PR agent or app default.                                          |
-| `prkit guide stop <pr>`                                                 | Stops guide work and watching; accepted guides remain readable.                            |
-| `prkit guide revisions <pr> --json`                                     | Paged accepted revisions and their attempt ids, oldest first.                              |
-| `prkit guide revision <pr> --revision 1 --json`                         | One accepted guide and its frozen configuration.                                           |
-| `prkit guide progress <pr> --json`                                      | Current narration, files read, draft and paged activity, without polling GitHub.           |
-| `prkit guide duration --agent <instance> --lines 500 --json`            | Typical duration, or null without enough samples.                                          |
-| `prkit guide settings <pr> --json`                                      | Three scopes and versions, resolved settings, skipped files.                               |
-| `prkit guide scope --scope '{"_tag":"global"}' --json`                  | One scope's versioned sections. Also accepts repository or pull-request tagged scope JSON. |
-| `prkit guide repositories --json`                                       | Paged repositories with guide configuration.                                               |
-| `prkit guide repository owner/repo --account github.com/octocat --json` | Stable repository id for a repository scope.                                               |
+| Command                                                                      | What it returns or changes                                                                  |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `prkit guide list --json`                                                    | Paged guide sessions, including stopped and failed ones, each with its latest `risk`.       |
+| `prkit guide read <pr> --json`                                               | State and latest accepted guide.                                                            |
+| `prkit guide generate <pr> --stack this`                                     | Starts a guide using the PR agent or app default.                                           |
+| `prkit guide stop <pr>`                                                      | Stops guide work and watching; accepted guides remain readable.                             |
+| `prkit guide revisions <pr> --json`                                          | Paged accepted revisions and their attempt ids, oldest first.                               |
+| `prkit guide revision <pr> --revision 1 --json`                              | One accepted guide and its frozen configuration.                                            |
+| `prkit guide progress <pr> --json`                                           | Current narration, files read, draft and paged activity, without polling GitHub.            |
+| `prkit guide duration --agent <instance> --model <model> --lines 500 --json` | Typical duration at that model and its `--option` settings, or null without enough samples. |
+| `prkit guide settings <pr> --json`                                           | Three scopes and versions, resolved settings, skipped files.                                |
+| `prkit guide scope --scope '{"_tag":"global"}' --json`                       | One scope's versioned sections. Also accepts repository or pull-request tagged scope JSON.  |
+| `prkit guide repositories --json`                                            | Paged repositories with guide configuration.                                                |
+| `prkit guide repository owner/repo --account github.com/octocat --json`      | Stable repository id for a repository scope.                                                |
 
 A guide's `content.flow` is its before/after: `null`, `{ "_tag": "graph", nodes, edges }` or `{ "_tag": "behavior", rows }`, where each row has `status`, `text`, `depth`, `at` and `chapter`, and `at` is a new-side `{ path, line }` in that revision's own diff, so read it with the attempt's diff (`prkit pr diff <pr> --attempt-id <attempt-id> --json`), not today's.
 
-Generation accepts `--agent <instance> --model <slug>` and repeated `--option key=value`. Use only catalog-supported selections from `prkit agents --json`. For a stack, read its layers first: `--stack this`, `--stack all` or `--stack 1,3`; `--regenerate` includes layers with guides. Use `--stack` once; numbered selection cannot be combined with `--layers`. Native values `this-pr`, `whole-stack` and `chosen-layers` are also accepted; the last takes repeated `--layers <number>`:
+Generation accepts `--agent <instance> --model <slug>` and repeated `--option key=value`. `prkit guide duration` takes the same three, with `--agent` and `--model` required, because a typical time is for one model at one set of settings. Use only catalog-supported selections from `prkit agents --json`. For a stack, read its layers first: `--stack this`, `--stack all` or `--stack 1,3`; `--regenerate` includes layers with guides. Use `--stack` once; numbered selection cannot be combined with `--layers`. Native values `this-pr`, `whole-stack` and `chosen-layers` are also accepted; the last takes repeated `--layers <number>`:
 
 ```sh
 prkit guide generate <pr> --stack chosen-layers --layers 1 --layers 3

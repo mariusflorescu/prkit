@@ -22,7 +22,7 @@ import {
   TURN_ENDED,
   transcriptOf,
 } from "./fixActions.ts";
-import { AGENT_RUNS, AGENT_SKIP, NEEDS_FIXTURE, readRows } from "./fixturePr.ts";
+import { AGENT_RUNS, AGENT_SKIP, GUIDE_WAIT, NEEDS_FIXTURE, readRows } from "./fixturePr.ts";
 import { LIMITS_PATH } from "./reviewFixture.ts";
 import {
   closeSymlinkFixture,
@@ -58,7 +58,7 @@ const proveContained = async (
   await screen.getByRole("option", agent.option).first().tap();
   await screen.getByRole("button", "Generate guide").tap();
   await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r1 · ", {
-    timeout: 600_000,
+    timeout: GUIDE_WAIT,
   });
   await expect(browser.locator("[data-guide-view]")).toContainText(NOTES_PATH);
   await app.screenshot("guide-with-symlinks");
@@ -148,7 +148,7 @@ const readIfFile = (dir: string, file: string) => {
 describe("symlinks in a pull request with Claude", { tags: ["agent"], skip: NEEDS_FIXTURE }, () => {
   test(
     "the guide and a fix never read or change the files the PR's symlinks point at",
-    { timeout: 1_500_000 },
+    { timeout: GUIDE_WAIT + 15 * 60_000 },
     async (fixtures) => {
       test.skip(!AGENT_RUNS, AGENT_SKIP);
       const fixture = createSymlinkFixture(`${Date.now()}`);
@@ -164,7 +164,7 @@ describe("symlinks in a pull request with Claude", { tags: ["agent"], skip: NEED
 describe("symlinks in a pull request with Codex", { tags: ["codex"], skip: NEEDS_FIXTURE }, () => {
   test(
     "the guide and a fix never read or change the files the PR's symlinks point at",
-    { timeout: 1_500_000 },
+    { timeout: GUIDE_WAIT + 15 * 60_000 },
     async (fixtures) => {
       test.skip(!CODEX_RUNS, CODEX_SKIP);
       const fixture = createSymlinkFixture(`${Date.now()}`);

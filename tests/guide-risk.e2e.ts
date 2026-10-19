@@ -10,7 +10,7 @@ import { repoRoot } from "../scripts/verify-run.ts";
 import { cliFixture } from "./cliFixture.ts";
 import { setUpFakeClaude } from "./fakeClaude.ts";
 import { startFakeGitHub, startFakeInstance, stopFakeInstance } from "./fakeGitHub.ts";
-import { AGENT_RUNS, AGENT_SKIP, readRows } from "./fixturePr.ts";
+import { AGENT_RUNS, AGENT_SKIP, GUIDE_WAIT, readRows } from "./fixturePr.ts";
 import { lineOpener } from "./guideLines.ts";
 import { emulateOsColorScheme, screenshotLightAndDark } from "./osColorScheme.ts";
 import { pickGuideRepository } from "./pickers.ts";
@@ -349,7 +349,7 @@ describe("a real Claude guide rates how carefully to read", { tags: ["agent"] },
   for (const entry of CASES)
     test(
       `a ${entry.name} pull request comes out ${entry.level}, and every reason opens its evidence`,
-      { timeout: 900_000 },
+      { timeout: GUIDE_WAIT + 60_000 },
       async ({ app, screen, browser }) => {
         test.skip(!AGENT_RUNS, AGENT_SKIP);
         const name = `guide-risk-${entry.name}`;
@@ -392,7 +392,7 @@ describe("a real Claude guide rates how carefully to read", { tags: ["agent"] },
                   ? review.state
                   : "running";
               },
-              { timeout: 840_000, interval: 1_000 },
+              { timeout: GUIDE_WAIT, interval: 1_000 },
             )
             .toBe("watching");
 

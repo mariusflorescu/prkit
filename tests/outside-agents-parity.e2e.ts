@@ -204,7 +204,7 @@ test(
         ["list_reviews", {}],
         ["list_guide_revisions", pr],
         ["read_guide_progress", pr],
-        ["read_guide_duration", { instance: agent.instance, lines: 10 }],
+        ["read_guide_duration", { ...selection, lines: 10 }],
         ["read_guide_scope", { scope: { _tag: "global" } }],
         ["list_guide_repositories", {}],
         ["find_guide_repository", repo],

@@ -11,6 +11,7 @@ import {
   agentPid,
   FIXTURE_REPO,
   fixturePr,
+  GUIDE_WAIT,
   NEEDS_FIXTURE,
   openFixtureGuide,
   prPath,
@@ -48,7 +49,7 @@ const attemptsOf = (home: string, key: string) =>
 describe("the review watcher", { tags: ["agent"], skip: NEEDS_FIXTURE }, () => {
   test(
     "a push writes revision 2 within two ticks, and a force-push starts a fresh guide",
-    { timeout: 1_500_000 },
+    { timeout: 2 * GUIDE_WAIT + 5 * 60_000 },
     async ({ app, screen, browser }) => {
       test.skip(!AGENT_RUNS, AGENT_SKIP);
       const run = runForUrl(app.baseUrl);
@@ -63,7 +64,7 @@ describe("the review watcher", { tags: ["agent"], skip: NEEDS_FIXTURE }, () => {
         await app.open(run.openUrl);
         await app.open(`${run.url}${prPath(FIXTURE_REPO, fixture.number, "guide")}`);
         await screen.getByRole("button", "Generate guide").tap({ timeout: 60_000 });
-        await expect(status).toContainText("Watching for new commits", { timeout: 600_000 });
+        await expect(status).toContainText("Watching for new commits", { timeout: GUIDE_WAIT });
         await expect(revision).toContainText("r1 · ");
         await app.screenshot("watching-r1");
 
@@ -74,7 +75,7 @@ describe("the review watcher", { tags: ["agent"], skip: NEEDS_FIXTURE }, () => {
         await expect(status).toContainText("Updating for 1 new commit", { timeout: 60_000 });
         await expect(screen.getByRole("heading", "Overview")).toBeVisible();
         await app.screenshot("updating-for-1-new-commit");
-        await expect(status).toContainText("Watching for new commits", { timeout: 600_000 });
+        await expect(status).toContainText("Watching for new commits", { timeout: GUIDE_WAIT });
         const pushedHead = headSha(fixture.number);
         await expect(revision).toContainText(`r2 · ${pushedHead.slice(0, 7)} · new commits`);
         await app.screenshot("watching-r2");
@@ -115,7 +116,7 @@ describe("the review watcher", { tags: ["agent"], skip: NEEDS_FIXTURE }, () => {
 
   test(
     "a server killed while writing marks the attempt interrupted, and its restart writes the guide",
-    { timeout: 900_000 },
+    { timeout: GUIDE_WAIT + 5 * 60_000 },
     async ({ app, screen, browser }) => {
       test.skip(!AGENT_RUNS, AGENT_SKIP);
       const stamp = `${Date.now()}`;
@@ -150,7 +151,7 @@ describe("the review watcher", { tags: ["agent"], skip: NEEDS_FIXTURE }, () => {
         const restarted = startInstance(name, WATCH);
         await openGuide(restarted.url, restarted.openUrl);
         const status = screen.getByRole("status", "Guide status");
-        await expect(status).toContainText("Watching for new commits", { timeout: 600_000 });
+        await expect(status).toContainText("Watching for new commits", { timeout: GUIDE_WAIT });
         await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r1 · ");
         await app.screenshot("written-after-the-restart");
         expect(attemptsOf(restarted.home, key)).toEqual([
@@ -183,7 +184,7 @@ describe("the review watcher", { tags: ["agent"], skip: NEEDS_FIXTURE }, () => {
 
   test(
     "a closed PR ends its review, and Generate again after reopening brings it back",
-    { timeout: 1_260_000 },
+    { timeout: 2 * GUIDE_WAIT + 60_000 },
     async ({ app, screen, browser }) => {
       test.skip(!AGENT_RUNS, AGENT_SKIP);
       const run = runForUrl(app.baseUrl);
@@ -192,7 +193,7 @@ describe("the review watcher", { tags: ["agent"], skip: NEEDS_FIXTURE }, () => {
       await openFixtureGuide({ app, screen });
       // Tests in a run share one instance, so an earlier journey may have left a stopped review.
       await screen.getByRole("button", /^Generate (guide|again)$/).tap({ timeout: 30_000 });
-      await expect(status).toContainText("Watching for new commits", { timeout: 600_000 });
+      await expect(status).toContainText("Watching for new commits", { timeout: GUIDE_WAIT });
       await expect(
         browser.locator('[data-active-tab="true"] [data-review-status="watching"]'),
       ).toBeVisible();
@@ -231,7 +232,7 @@ describe("the review watcher", { tags: ["agent"], skip: NEEDS_FIXTURE }, () => {
       ).toBeAttached();
       await expect(screen.getByRole("heading", "Overview")).toBeVisible();
       await app.screenshot("generating-again-over-the-last-guide");
-      await expect(status).toContainText("Watching for new commits", { timeout: 600_000 });
+      await expect(status).toContainText("Watching for new commits", { timeout: GUIDE_WAIT });
       await expect(screen.getByRole("combobox", "Guide revision")).toContainText(
         `r${before + 1} · `,
       );

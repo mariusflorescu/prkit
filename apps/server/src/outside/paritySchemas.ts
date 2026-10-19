@@ -58,6 +58,7 @@ import {
   AddCommentInput,
   GuideStatus,
   FixResult,
+  GenerateGuideInput,
   HOST_NAME,
   ManualCheckChanged,
   ManualCheckTicked,
@@ -251,7 +252,11 @@ export const ProgressResult = Schema.Struct({
 });
 export const DurationInput = Schema.Struct({
   ...ResponseFields,
-  instance: AgentInstanceId,
+  instance: AgentInstanceId.annotate({
+    description: "The agent instance, as list_agents lists them.",
+  }),
+  model: Schema.NonEmptyString.annotate({ description: "A model slug that instance offers." }),
+  options: GenerateGuideInput.fields.options,
   lines: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 export const DurationResult = Schema.Struct({ duration: Schema.NullOr(TypicalDuration) });

@@ -7,6 +7,7 @@
  *   node scripts/verify-app.ts start  [--name verify] [--port 0] [--rm] [--detach] [--watch-interval <ms>]
  *                                     [--dev-review-requested <pr key>] [--e2e]
  *                                     [--github-api <url> --gh-home <dir>] [--claude <file>]
+ *                                     [--codex <file>]
  *   node scripts/verify-app.ts doctor [--name <name>]
  *   node scripts/verify-app.ts stop   [--name verify] [--keep-home]
  *
@@ -22,7 +23,8 @@
  * instance at a fake GitHub from scripts/fake-github.ts: its HOME holds the fake's gh
  * config and gh binary, so the real accounts and tokens on this machine are never read.
  * `--claude <file>` runs that file as Claude Code (the server's PRKIT_CLAUDE_PATH), such as
- * the stand-in `tests/fakeClaude.ts` sets up, so a guide spends no subscription.
+ * the stand-in `tests/fakeClaude.ts` sets up, so a guide spends no subscription. `--codex <file>`
+ * does the same for Codex (the server's PRKIT_CODEX_PATH), with `tests/fakeCodex.ts`.
  * `--cursor-manifest <file>` installs the stand-in Cursor SDK packages it lists instead of
  * npm's (the server's PRKIT_CURSOR_SDK_MANIFEST, read only with `--e2e`), as
  * `tests/fakeCursor.ts` lays them out. `--cursor-sdk <dir>` loads Cursor's SDK from that package
@@ -140,6 +142,7 @@ interface StartOptions {
   readonly githubApi: string | undefined;
   readonly ghHome: string | undefined;
   readonly claude: string | undefined;
+  readonly codex: string | undefined;
   readonly cursorManifest: string | undefined;
   readonly cursorSdk: string | undefined;
 }
@@ -207,6 +210,7 @@ const start = async (options: StartOptions) => {
               PRKIT_GITHUB_API_URL: options.githubApi,
             }),
         ...(options.claude === undefined ? {} : { PRKIT_CLAUDE_PATH: options.claude }),
+        ...(options.codex === undefined ? {} : { PRKIT_CODEX_PATH: options.codex }),
         ...(options.cursorManifest === undefined
           ? {}
           : { PRKIT_CURSOR_SDK_MANIFEST: options.cursorManifest }),
@@ -291,6 +295,7 @@ const startDetached = async (options: StartOptions) => {
     ...(options.githubApi === undefined ? [] : ["--github-api", options.githubApi]),
     ...(options.ghHome === undefined ? [] : ["--gh-home", options.ghHome]),
     ...(options.claude === undefined ? [] : ["--claude", options.claude]),
+    ...(options.codex === undefined ? [] : ["--codex", options.codex]),
     ...(options.cursorManifest === undefined ? [] : ["--cursor-manifest", options.cursorManifest]),
     ...(options.cursorSdk === undefined ? [] : ["--cursor-sdk", options.cursorSdk]),
   ];
@@ -402,6 +407,7 @@ const { positionals, values } = NodeUtil.parseArgs({
     "github-api": { type: "string" },
     "gh-home": { type: "string" },
     claude: { type: "string" },
+    codex: { type: "string" },
     "cursor-manifest": { type: "string" },
     "cursor-sdk": { type: "string" },
   },
@@ -432,6 +438,7 @@ switch (command) {
       githubApi: values["github-api"],
       ghHome: values["gh-home"] === undefined ? undefined : NodePath.resolve(values["gh-home"]),
       claude: values.claude === undefined ? undefined : NodePath.resolve(values.claude),
+      codex: values.codex === undefined ? undefined : NodePath.resolve(values.codex),
       cursorManifest:
         values["cursor-manifest"] === undefined
           ? undefined

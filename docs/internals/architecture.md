@@ -132,7 +132,8 @@ The review keeps the agent the user picked (the agent instance, with its kind in
 
 ```ts
 Attempt = { id: AttemptId, reviewId, revision, trigger: "first" | "new-commits" | "rewritten" | "retargeted" | "retry",
-            provider, instance, model, headSha, baseSha, baseRef, mergeBaseSha, snapshot: DiffSnapshot, changedLines,
+            provider, instance, model, modelOptions: Array<{ id, value }> | null,  // the settings it ran with
+            headSha, baseSha, baseRef, mergeBaseSha, snapshot: DiffSnapshot, changedLines,
             batch: string | null,                           // the stack batch it was started in
             startedBy: string | null,                       // the outside MCP client that started it, by the name it gave
             config: AttemptConfig, configHash,              // the guide settings it froze
@@ -147,7 +148,7 @@ DiffSnapshot = { files: Array<{ path, previousPath: string | null,
 
 The snapshot comes from the local repository cache (`git diff --find-renames <mergeBase> <head>`), not the GitHub files API, which caps at 3,000 files and drops patches for large files. Validation and rendering of that revision both use this snapshot.
 
-`provider`, `model` and `changedLines` let the guide setup show a typical time ("usually about 4 min for PRs this size"): the median of past accepted full guides by the same provider on diffs of half to double the size, shown only when at least two exist. `narration` is the agent's latest `report_progress` line, replaced each time. `draft` is every `submit_draft` call merged by chapter id, and `draftVersion` grows by one per accepted call, so the client refetches the draft only when it changed.
+`instance`, `model`, `modelOptions` and `changedLines` let the guide setup show a typical time ("usually about 4 min for PRs this size"): the median of past accepted full guides by the same agent instance and model, at the same settings, on diffs of half to double the size, shown only when at least two exist. `modelOptions` is every setting the model takes (effort, service tier, fast mode) with the value the turn ran with, sorted by id, written when the attempt starts its turn. Attempts from before that stay null and never count, and a model the catalog no longer lists has no estimate. `narration` is the agent's latest `report_progress` line, replaced each time. `draft` is every `submit_draft` call merged by chapter id, and `draftVersion` grows by one per accepted call, so the client refetches the draft only when it changed.
 
 **Attempt files.** One row per reviewed file of the snapshot (the ignore rules' skipped files are left out), in diff order: `{ path, previousPath, status, additions, deletions, readAt, note }`. `readAt` is set from the agent's own tool calls once they return: a `Read` of a changed file, or a shell command that printed that file's whole part of the numbered diff. What the agent says it read never counts. `note` is its `note_file` line. The progress view checks files off from these rows.
 

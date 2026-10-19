@@ -11,7 +11,7 @@ import { repoRoot } from "../scripts/verify-run.ts";
 import { cliFixture } from "./cliFixture.ts";
 import { setUpFakeClaude } from "./fakeClaude.ts";
 import { startFakeGitHub, startFakeInstance, stopFakeInstance } from "./fakeGitHub.ts";
-import { AGENT_RUNS, AGENT_SKIP, readRows } from "./fixturePr.ts";
+import { AGENT_RUNS, AGENT_SKIP, GUIDE_WAIT, readRows } from "./fixturePr.ts";
 import { emulateOsColorScheme, screenshotLightAndDark } from "./osColorScheme.ts";
 import { outsideGit } from "./outsideGit.ts";
 import { setUpRealClaude } from "./realClaude.ts";
@@ -188,7 +188,7 @@ describe(
   () => {
     test(
       "a rename and a new helper get no before/after",
-      { timeout: 900_000 },
+      { timeout: GUIDE_WAIT + 60_000 },
       async ({ app, screen, browser }) => {
         test.skip(!AGENT_RUNS, AGENT_SKIP);
         const name = "chapter-before-after-none";
@@ -221,7 +221,7 @@ describe(
                   ? review.state
                   : "running";
               },
-              { timeout: 840_000, interval: 1_000 },
+              { timeout: GUIDE_WAIT, interval: 1_000 },
             )
             .toBe("watching");
 

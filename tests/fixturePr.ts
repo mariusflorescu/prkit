@@ -35,6 +35,7 @@ export const FIXTURE_FILES = [
 export const AGENT_RUNS = process.env.PRKIT_E2E_AGENT === "1";
 export const AGENT_SKIP =
   "Spends your Claude subscription. Run with PRKIT_E2E_AGENT=1 --tag agent.";
+export const GUIDE_WAIT = 30 * 60_000;
 
 export const openFixtureGuide = async ({ app, screen }: Pick<TestFixtures, "app" | "screen">) => {
   await app.open(runForUrl(app.baseUrl).openUrl);

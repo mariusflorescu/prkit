@@ -378,7 +378,7 @@ const WaitForQuestion = read(
 const ReadGuideDuration = read(
   Tool.make("read_guide_duration", {
     description:
-      "The app’s duration estimate for an agent instance and changed-line count, or null when samples are insufficient.",
+      "The app’s typical guide duration for an agent instance, a model it offers and that model’s options (as list_agents lists them; a setting left out uses the model’s default) on a diff of a changed-line count, or null when fewer than two past guides match.",
     parameters: Parity.DurationInput,
     success: limited(Parity.DurationResult),
     failure: OutsideToolFailure,
