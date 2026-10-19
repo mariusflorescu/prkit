@@ -8,6 +8,7 @@ import { ChevronDownIcon, GitMergeIcon } from "lucide-react";
 import { useId } from "react";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { Group, GroupSeparator } from "~/components/ui/group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { ResolveConflictsButton } from "~/features/fixes/ResolveConflictsButton";
@@ -51,8 +52,11 @@ export function PullRequestPrimaryAction({ detail }: { detail: PullRequestDetail
             />
           }
         >
-          <GitMergeIcon />
-          {actions.pending ? "Working..." : pullRequestActionLabels[primary]}
+          <ButtonLabel
+            icon={<GitMergeIcon />}
+            shown={actions.pending ? "working" : "idle"}
+            labels={{ idle: pullRequestActionLabels[primary], working: "Working..." }}
+          />
         </TooltipTrigger>
         {reason !== null && <TooltipPopup>{reason}</TooltipPopup>}
       </Tooltip>

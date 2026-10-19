@@ -5,11 +5,18 @@ import { GitMergeIcon } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import { fixerQuery } from "~/rpc/queries";
 
 import { ResolveConflictsForm } from "./ResolveConflictsForm";
 import { useFixerWatch } from "./useFixerWatch";
+
+const LABELS = {
+  resolve: "Resolve conflicts",
+  resolving: "Resolving conflicts…",
+  review: "Review the resolution",
+};
 
 /** The header's primary action on a conflicting PR: the agent resolves, or it shows that it is. */
 export function ResolveConflictsButton({ detail }: { detail: PullRequestDetail }) {
@@ -39,15 +46,17 @@ export function ResolveConflictsButton({ detail }: { detail: PullRequestDetail }
           />
         }
       >
-        <GitMergeIcon />
-        {active.status._tag === "ready" ? "Review the resolution" : "Resolving conflicts…"}
+        <ButtonLabel
+          icon={<GitMergeIcon />}
+          shown={active.status._tag === "ready" ? "review" : "resolving"}
+          labels={LABELS}
+        />
       </Button>
     );
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={<Button size="xs" variant="outline" />}>
-        <GitMergeIcon />
-        Resolve conflicts
+        <ButtonLabel icon={<GitMergeIcon />} shown="resolve" labels={LABELS} />
       </PopoverTrigger>
       <PopoverPopup width="xl" align="end">
         <p className="mb-3 text-sm font-medium">Resolve conflicts with the agent</p>

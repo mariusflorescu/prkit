@@ -9,6 +9,7 @@ import { ChevronDownIcon, RefreshCwIcon } from "lucide-react";
 import { Fragment } from "react";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { ComboboxFooter, ComboboxStatus } from "~/components/ui/combobox";
 import { SearchPicker } from "~/components/ui/search-picker";
 
@@ -104,8 +105,11 @@ export function AgentModelPicker({
       footer={
         <ComboboxFooter>
           <Button variant="ghost-muted" size="micro" disabled={checking} onClick={onCheckAgain}>
-            <RefreshCwIcon />
-            {checking ? "Checking…" : "Check again"}
+            <ButtonLabel
+              icon={<RefreshCwIcon />}
+              shown={checking ? "checking" : "check"}
+              labels={{ check: "Check again", checking: "Checking…" }}
+            />
           </Button>
         </ComboboxFooter>
       }

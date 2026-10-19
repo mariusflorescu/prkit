@@ -3,6 +3,7 @@ import { ArrowDownToLineIcon, RotateCwIcon } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { ago } from "~/features/github/freshness";
 import { useNow } from "~/features/github/useNow";
 import { SettingsAlert } from "~/features/settings/SettingsAlert";
@@ -67,7 +68,10 @@ export function UpdateStatusRow({ state }: { state: DesktopUpdateState }) {
               aria-busy={state.status === "checking"}
               onClick={() => check.mutate()}
             >
-              {state.status === "checking" ? "Checking…" : "Check for updates"}
+              <ButtonLabel
+                shown={state.status === "checking" ? "checking" : "check"}
+                labels={{ check: "Check for updates", checking: "Checking…" }}
+              />
             </Button>
           )}
         </div>

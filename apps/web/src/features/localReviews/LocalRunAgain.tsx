@@ -3,6 +3,7 @@ import { ChevronDownIcon } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 
 import { LocalRunAgainForm } from "./LocalRunAgainForm";
@@ -28,7 +29,10 @@ export function LocalRunAgain({
         disabled={generate.isPending}
         onClick={() => generate.mutate({})}
       >
-        {generate.isPending ? "Starting…" : "Run again"}
+        <ButtonLabel
+          shown={generate.isPending ? "starting" : "run"}
+          labels={{ run: "Run again", starting: "Starting…" }}
+        />
       </Button>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger

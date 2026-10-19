@@ -1747,14 +1747,14 @@ export const make = Effect.gen(function* () {
           Effect.fail(
             new AttemptFailure({
               reason: "agent",
-              message: "prkit couldn't save the review. Retry.",
+              message: "prkit couldn't save the review.",
             }),
           ),
         SchemaError: () =>
           Effect.fail(
             new AttemptFailure({
               reason: "agent",
-              message: "prkit read a damaged review record. Retry.",
+              message: "prkit read a damaged review record.",
             }),
           ),
         PlatformError: () =>
@@ -1791,7 +1791,7 @@ export const make = Effect.gen(function* () {
                 attemptId,
                 new AttemptFailure({
                   reason: "agent",
-                  message: "prkit hit an internal error. Retry.",
+                  message: "prkit hit an internal error.",
                 }),
               ),
             ),

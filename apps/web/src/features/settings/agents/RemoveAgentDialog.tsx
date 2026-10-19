@@ -2,6 +2,7 @@ import { AlertDialog } from "@base-ui/react/alert-dialog";
 import { AGENT_KIND_NAMES, type AgentCatalogEntry, type AgentProviderKind } from "@prkit/contracts";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 
 import { configOf } from "./instanceConfig";
 import { useAgentInstanceActions } from "./useAgentInstanceActions";
@@ -79,7 +80,10 @@ export function RemoveAgentDialog({
                 remove.mutate(configOf(entry), { onSuccess: () => onOpenChange(false) })
               }
             >
-              {remove.isPending ? "Removing…" : "Remove"}
+              <ButtonLabel
+                shown={remove.isPending ? "removing" : "remove"}
+                labels={{ remove: "Remove", removing: "Removing…" }}
+              />
             </Button>
           </div>
           {remove.error !== null && !remove.isPending && (

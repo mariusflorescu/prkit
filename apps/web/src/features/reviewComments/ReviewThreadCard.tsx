@@ -4,6 +4,7 @@ import { CircleCheckIcon, MessageSquareIcon } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { SendToAgentButton } from "~/features/fixes/SendToAgentButton";
 import { replyToThread, resolveThread } from "~/rpc/client";
 import { CommentCard } from "./CommentCard";
@@ -100,11 +101,14 @@ export function ReviewThreadCard({
             disabled={resolve.isPending}
             onClick={() => resolve.mutate(!thread.resolved)}
           >
-            {resolve.isPending
-              ? "Saving..."
-              : thread.resolved
-                ? "Unresolve conversation"
-                : "Resolve conversation"}
+            <ButtonLabel
+              shown={resolve.isPending ? "saving" : thread.resolved ? "unresolve" : "resolve"}
+              labels={{
+                resolve: "Resolve conversation",
+                unresolve: "Unresolve conversation",
+                saving: "Saving...",
+              }}
+            />
           </Button>
         )}
       </div>

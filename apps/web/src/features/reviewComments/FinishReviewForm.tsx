@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useForm, useWatch } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { toastManager } from "~/components/ui/toast";
 import { refreshPullRequestReads } from "~/features/github/pullRequestReads";
 import { submitReview } from "~/rpc/client";
@@ -195,13 +196,15 @@ export function FinishReviewForm({
           Cancel
         </Button>
         <Button type="submit" size="sm" disabled={submit.isPending}>
-          {submit.isPending
-            ? "Submitting..."
-            : event === "approve"
-              ? "Approve"
-              : event === "request-changes"
-                ? "Request changes"
-                : "Submit review"}
+          <ButtonLabel
+            shown={submit.isPending ? "submitting" : event}
+            labels={{
+              comment: "Submit review",
+              approve: "Approve",
+              "request-changes": "Request changes",
+              submitting: "Submitting...",
+            }}
+          />
         </Button>
       </div>
     </form>

@@ -2,6 +2,7 @@ import { AlertDialog } from "@base-ui/react/alert-dialog";
 import type { DesktopUpdateState } from "@prkit/contracts";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 
 import { updateErrorMessage, useUpdateAction } from "./updateQueries";
 
@@ -59,11 +60,14 @@ export function InstallUpdateDialog({
               aria-busy={install.isPending}
               onClick={() => install.mutate()}
             >
-              {install.isPending
-                ? "Restarting…"
-                : failure !== null
-                  ? "Try again"
-                  : "Install and restart"}
+              <ButtonLabel
+                shown={install.isPending ? "restarting" : failure !== null ? "retry" : "install"}
+                labels={{
+                  install: "Install and restart",
+                  restarting: "Restarting…",
+                  retry: "Try again",
+                }}
+              />
             </Button>
           </div>
         </AlertDialog.Popup>

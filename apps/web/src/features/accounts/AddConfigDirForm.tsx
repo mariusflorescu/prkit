@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { toastManager } from "~/components/ui/toast";
 import { addConfigDir } from "~/rpc/client";
 import { accountsQuery, inboxQuery } from "~/rpc/queries";
@@ -69,7 +70,10 @@ export function AddConfigDirForm() {
           )}
         </div>
         <Button type="submit" variant="outline" disabled={add.isPending}>
-          {add.isPending ? "Adding..." : "Add directory"}
+          <ButtonLabel
+            shown={add.isPending ? "adding" : "add"}
+            labels={{ add: "Add directory", adding: "Adding..." }}
+          />
         </Button>
       </div>
     </form>

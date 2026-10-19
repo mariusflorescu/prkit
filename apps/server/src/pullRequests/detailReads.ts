@@ -439,7 +439,7 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
                       key,
                       accountId,
                       "github",
-                      "Couldn't read pull request action preferences. Retry.",
+                      "Couldn't read pull request action preferences.",
                     ),
               ),
             ),
@@ -539,7 +539,7 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
         key,
         accountId,
         "Pull request detail",
-        "GitHub took too long to load this pull request. Retry.",
+        "GitHub took too long to load this pull request.",
       ),
     );
   const detail = (key: PullRequestKey, accountId: AccountId) =>
@@ -725,12 +725,7 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
       const cached = yield* textsCache.read(
         { accountId, configDir: account.configDir, key: `${key}:${sha}:${paths.join("\0")}` },
         readTexts(accountId, ref, sha, paths).pipe(
-          deadline(
-            key,
-            accountId,
-            "File text read",
-            "GitHub took too long to send the code. Retry.",
-          ),
+          deadline(key, accountId, "File text read", "GitHub took too long to send the code."),
         ),
       );
       return cached.value;

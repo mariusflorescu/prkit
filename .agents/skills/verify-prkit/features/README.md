@@ -42,6 +42,7 @@ One line per feature, kept in this order. Add or edit only your own line (no tab
 - [Desktop app](./desktop-app.md). Route: the packaged `.app`. Journeys: `pnpm dist:desktop:artifact`, `smoke:desktop --app`. Covers: Stable and nightly artifacts, update feed, signing preflight, packaged run from a Dock-like PATH, one app per home.
 - [Desktop updates](./desktop-updates.md). Route: title bar update button, `/settings/updates`, app menu. Journeys: `updates.e2e.ts`, unit tests in `apps/desktop/src/updates`, the mock feed by hand. Covers: Checks, What's new, download, confirm, track switch, post-update toast, disabled reasons, web build without update UI, SIGTERM.
 - [Website](./www.md). Route: `apps/www` build. Journeys: `www.e2e.ts`. Covers: Page, self-hosted assets, intro once per session, the figure harness (mount near view, offscreen stop, reduced motion); dark and shots by hand.
+- [Steady buttons](./steady-buttons.md). Route: Settings > Guides, PR Fixes, a local review. Journeys: `steady-buttons.e2e.ts`. Covers: A button that reads Saving…, Pushing… or Removing… while a held save waits, and its failure words after, keeps its size and its neighbours stay put, in light and dark (on the fake GitHub).
 
 Journey files live under `tests/`. The default suite leaves subscription journeys skipped. Run them separately with the environment flag and matching tag in their feature file.
 

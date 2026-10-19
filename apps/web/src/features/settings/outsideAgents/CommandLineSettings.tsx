@@ -4,6 +4,7 @@ import type { OutsideAccess } from "@prkit/contracts";
 import { ListError } from "~/components/ListError";
 import { ListSkeleton } from "~/components/ListSkeleton";
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { FixCommand } from "~/features/settings/agents/FixCommand";
 import { FailedSave } from "~/features/settings/FailedSave";
 import { SettingsAlert } from "~/features/settings/SettingsAlert";
@@ -80,9 +81,13 @@ export function CommandLineSettings({
                 change.mutate(state.data.status === "installed" ? "uninstall" : "install")
               }
             >
-              {state.data.status === "installed"
-                ? "Uninstall command line tool"
-                : "Install command line tool"}
+              <ButtonLabel
+                shown={state.data.status === "installed" ? "uninstall" : "install"}
+                labels={{
+                  install: "Install command line tool",
+                  uninstall: "Uninstall command line tool",
+                }}
+              />
             </Button>
             <Button
               size="sm"

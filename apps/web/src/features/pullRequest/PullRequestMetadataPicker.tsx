@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Controller, useForm, useWatch } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import {
   Combobox,
   ComboboxEmpty,
@@ -186,13 +187,14 @@ export function PullRequestMetadataPicker({
             actions.pending || !candidates.data || (kind === "reviewers" && selected.length === 0)
           }
         >
-          {actions.pending
-            ? "Saving..."
-            : actions.error
-              ? "Retry"
-              : kind === "labels"
-                ? "Save labels"
-                : "Request review"}
+          <ButtonLabel
+            shown={actions.pending ? "saving" : actions.error ? "retry" : "save"}
+            labels={{
+              save: kind === "labels" ? "Save labels" : "Request review",
+              saving: "Saving...",
+              retry: "Retry",
+            }}
+          />
         </Button>
       </div>
     </form>

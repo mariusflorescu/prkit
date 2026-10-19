@@ -631,7 +631,7 @@ export const make = Effect.gen(function* () {
       if (finished.outcome !== "completed")
         return yield* new AnswerFailure({
           reason: "agent",
-          message: finished.message ?? `${provider.label} stopped before it answered. Retry.`,
+          message: finished.message ?? `${provider.label} stopped before it answered.`,
         });
       if (answerText(live.parts) === "")
         return yield* new AnswerFailure({
@@ -646,7 +646,7 @@ export const make = Effect.gen(function* () {
     const saveFailed = Effect.suspend(() =>
       move(
         question.id,
-        { _tag: "failed", reason: "agent", message: "prkit couldn't save this answer. Retry." },
+        { _tag: "failed", reason: "agent", message: "prkit couldn't save this answer." },
         live.parts,
       ).pipe(Effect.ignore),
     );
@@ -695,7 +695,7 @@ export const make = Effect.gen(function* () {
           Effect.andThen(
             move(
               question.id,
-              { _tag: "failed", reason: "agent", message: "prkit hit an internal error. Retry." },
+              { _tag: "failed", reason: "agent", message: "prkit hit an internal error." },
               live.parts,
             ),
           ),

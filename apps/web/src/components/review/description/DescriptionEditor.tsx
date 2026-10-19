@@ -4,6 +4,7 @@ import { useForm, useWatch } from "react-hook-form";
 
 import { SegmentedToggle } from "~/components/SegmentedToggle";
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { DescriptionChanges } from "./DescriptionChanges";
 import { type DescriptionMode, draftDescription } from "./descriptionDraft";
 import type { useUpdateDescription } from "./useUpdateDescription";
@@ -125,7 +126,10 @@ export function DescriptionEditor({
           Cancel
         </Button>
         <Button type="submit" size="sm" disabled={pending || body === before}>
-          {pending ? "Saving..." : failed !== null ? "Retry" : "Save to GitHub"}
+          <ButtonLabel
+            shown={pending ? "saving" : failed !== null ? "retry" : "save"}
+            labels={{ save: "Save to GitHub", saving: "Saving...", retry: "Retry" }}
+          />
         </Button>
       </div>
     </form>

@@ -2,6 +2,7 @@ import type { AgentCatalogEntry } from "@prkit/contracts";
 import { Controller, useForm } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 
 import { SettingsAlert } from "../SettingsAlert";
 import { AccentField } from "./AccentField";
@@ -113,7 +114,10 @@ export function AgentInstanceEditor({
           disabled={update.isPending || !isDirty}
           aria-busy={update.isPending}
         >
-          {update.isPending ? "Saving…" : "Save"}
+          <ButtonLabel
+            shown={update.isPending ? "saving" : "save"}
+            labels={{ save: "Save", saving: "Saving…" }}
+          />
         </Button>
       </div>
       {update.error !== null && (

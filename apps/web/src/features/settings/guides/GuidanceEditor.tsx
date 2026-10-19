@@ -8,6 +8,7 @@ import { useEffect } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 
 import { GuidanceModeControl } from "./GuidanceModeControl";
 import { InheritedGuidance } from "./InheritedGuidance";
@@ -123,7 +124,10 @@ export function GuidanceEditor({
       {isDirty && (
         <div className="flex items-center gap-2">
           <Button type="submit" size="sm" disabled={save.isPending}>
-            {save.isPending ? "Saving…" : "Save guidance"}
+            <ButtonLabel
+              shown={save.isPending ? "saving" : "save"}
+              labels={{ save: "Save guidance", saving: "Saving…" }}
+            />
           </Button>
           <Button
             size="sm"
