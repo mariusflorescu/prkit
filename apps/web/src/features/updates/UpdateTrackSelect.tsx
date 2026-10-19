@@ -50,7 +50,8 @@ export function UpdateTrackSelect({ state }: { state: DesktopUpdateState }) {
         </Select>
       </div>
       <p className="text-xs text-muted-foreground">
-        Nightly gets each day's build first, before it ships to Stable, and may have rough edges.
+        Nightly gets each change within a few hours, before it ships to Stable, and may have rough
+        edges.
       </p>
       <FailedSave save={setChannel} describe={updateErrorMessage} />
     </div>
