@@ -17,7 +17,7 @@ export function InboxGroup({
   sort: InboxSort;
   showAccount: boolean;
 }) {
-  const reviews = useQuery(reviewFeedQuery).data;
+  const reviews = useQuery(reviewFeedQuery).data?.reviews;
   return (
     <section aria-label={title} className="mb-6">
       <h2 className="flex items-center gap-2 px-3 py-3 font-medium text-xs text-muted-foreground">

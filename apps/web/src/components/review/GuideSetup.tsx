@@ -69,7 +69,10 @@ export function GuideSetup({
     ...pullRequestStackQuery(detail.key, detail.accountId),
     enabled: detail.stack !== null,
   });
-  const reviews = useQuery(reviewFeedQuery).data;
+  const feed = useQuery(reviewFeedQuery).data;
+  // Which layers already have a guide is known only from a feed read now, so a stack scope
+  // starts nothing until then.
+  const reviews = feed?._tag === "live" ? feed.reviews : null;
   const form = useForm<ComposerValues>({
     defaultValues: {
       guidance: "",
@@ -136,7 +139,7 @@ export function GuideSetup({
     selection !== null &&
     problem === null &&
     saved !== undefined &&
-    (stacked ? starting.length > 0 : blocked === null) &&
+    (stacked ? reviews !== null && starting.length > 0 : blocked === null) &&
     !pending;
   const start = (values: ComposerValues, wholeScope: boolean) => {
     if (selection === null || problem !== null || saved === undefined) return;
@@ -213,12 +216,7 @@ export function GuideSetup({
         </GuideSetupRow>
         {detail.stack !== null && stack.data != null && (
           <GuideSetupRow label="Write for">
-            <StackScopeControl
-              form={form}
-              stack={stack.data}
-              pullRequest={detail.ref}
-              reviews={reviews}
-            />
+            <StackScopeControl form={form} stack={stack.data} pullRequest={detail.ref} />
           </GuideSetupRow>
         )}
       </div>

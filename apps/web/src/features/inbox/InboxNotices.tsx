@@ -1,8 +1,12 @@
 import type { AccountId, GitHubProblem, InboxResult } from "@prkit/contracts";
+import { useQuery } from "@tanstack/react-query";
 
+import { ReviewFeedNotice } from "~/components/review/ReviewFeedNotice";
 import { FreshnessNotice } from "~/features/github/FreshnessNotice";
+import { reviewFeedQuery } from "~/rpc/queries";
 
 import { INBOX_GROUPS } from "./inboxPresentation";
+import { useInboxStore } from "./inboxStore";
 
 export function InboxNotices({
   result,
@@ -15,8 +19,20 @@ export function InboxNotices({
   retry: (accountId: AccountId, problem: GitHubProblem) => void;
   retrying: AccountId | null;
 }) {
+  const failed = useQuery({
+    ...reviewFeedQuery,
+    select: (feed) => (feed._tag === "failed" ? feed : null),
+  }).data;
+  const riskiest = useInboxStore((state) => state.sort === "risk");
   return (
     <div className="space-y-2 px-3">
+      {failed && (
+        <ReviewFeedNotice message={failed.message}>
+          {failed.reviews === null
+            ? `Guide marks and risk levels are hidden until it can${riskiest ? ", and Riskiest first orders by wait" : ""}.`
+            : "Guide marks and risk levels may be out of date until it can."}
+        </ReviewFeedNotice>
+      )}
       {result.accounts
         .filter((row) => account === null || account === row.accountId)
         .flatMap((row) =>

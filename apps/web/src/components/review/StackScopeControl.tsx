@@ -1,12 +1,15 @@
-import type { PullRequestRef, PullRequestStack, ReviewFeedEntry } from "@prkit/contracts";
+import type { PullRequestRef, PullRequestStack } from "@prkit/contracts";
+import { useQuery } from "@tanstack/react-query";
 import { useWatch, type UseFormReturn } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
 import { LAYER_GUIDE_LABELS, layerGuide, layerKey } from "~/features/stack/stackPresentation";
 import { pullRequestState } from "~/lib/pullRequestState";
 import { cn } from "~/lib/utils";
+import { reviewFeedQuery } from "~/rpc/queries";
 
 import { chosenLayers, type ComposerValues, type GuideScopeChoice } from "./composerValues";
+import { ReviewFeedNotice } from "./ReviewFeedNotice";
 
 /**
  * This PR, the whole stack, or chosen layers. A layer that already has a guide is
@@ -16,17 +19,19 @@ export function StackScopeControl({
   form,
   stack,
   pullRequest,
-  reviews,
 }: {
   form: UseFormReturn<ComposerValues>;
   stack: PullRequestStack;
   pullRequest: PullRequestRef;
-  reviews: ReadonlyMap<string, ReviewFeedEntry> | undefined;
 }) {
+  const feed = useQuery(reviewFeedQuery).data;
+  // Only a feed read now says which layers have a guide, so none is named until then.
+  const reviews = feed?._tag === "live" ? feed.reviews : null;
   const scope = useWatch({ control: form.control, name: "scope" });
   const ticked = useWatch({ control: form.control, name: "layers" });
   const open = stack.layers.filter((layer) => layer.state === "open");
-  const guideOf = (number: number) => layerGuide(reviews?.get(layerKey(pullRequest, { number })));
+  const guideOf = (number: number) =>
+    reviews === null ? null : layerGuide(reviews.get(layerKey(pullRequest, { number })));
   const chosen = chosenLayers(stack, scope, ticked);
   const written = chosen.filter((layer) => guideOf(layer.number) === "ready");
   const choices: ReadonlyArray<{ value: GuideScopeChoice; label: string }> = [
@@ -66,6 +71,11 @@ export function StackScopeControl({
           </label>
         )}
       </div>
+      {scope !== "this" && feed?._tag === "failed" && (
+        <ReviewFeedNotice message={feed.message}>
+          Which layers already have a guide is unknown until it can.
+        </ReviewFeedNotice>
+      )}
       {scope === "layers" && (
         <fieldset aria-label="Layers to write guides for" className="space-y-0.5">
           {stack.layers.map((layer) => {
@@ -109,7 +119,7 @@ export function StackScopeControl({
                   )}
                 </span>
                 <span className="shrink-0 text-2xs text-muted-foreground">
-                  {disabled ? state.label : LAYER_GUIDE_LABELS[guide]}
+                  {disabled ? state.label : guide === null ? "" : LAYER_GUIDE_LABELS[guide]}
                 </span>
               </label>
             );

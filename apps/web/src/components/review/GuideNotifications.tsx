@@ -17,7 +17,7 @@ import { useWorkspace } from "~/features/workspace/workspaceContext";
 import { applyLocalFeedEvent } from "~/features/localReviews/localReviewCache";
 import { desktopBridge } from "~/lib/desktop";
 import { watchLocalReviewFeed, watchReviewFeed } from "~/rpc/client";
-import { reviewFeedQuery } from "~/rpc/queries";
+import { type ReviewFeed, reviewFeedQuery } from "~/rpc/queries";
 
 const isKey = Schema.is(PullRequestKey);
 const isLocalKey = Schema.is(LocalReviewKey);
@@ -79,14 +79,19 @@ export function GuideNotifications() {
     const onEvent = (event: ReviewFeedEvent) => {
       switch (event._tag) {
         case "index":
-          client.setQueryData(
-            reviewFeedQuery.queryKey,
-            new Map(event.reviews.map((review) => [review.key, review])),
-          );
+          client.setQueryData(reviewFeedQuery.queryKey, {
+            _tag: "live",
+            reviews: new Map(event.reviews.map((review) => [review.key, review])),
+          });
           return;
         case "changed":
-          client.setQueryData(reviewFeedQuery.queryKey, (previous) =>
-            new Map(previous).set(event.review.key, event.review),
+          client.setQueryData(reviewFeedQuery.queryKey, (previous): ReviewFeed | undefined =>
+            previous?._tag === "live"
+              ? {
+                  _tag: "live",
+                  reviews: new Map(previous.reviews).set(event.review.key, event.review),
+                }
+              : previous,
           );
           return;
         case "ready": {
@@ -140,9 +145,14 @@ export function GuideNotifications() {
         }
       }
     };
-    // A feed that fails before its first index reads as no reviews, so nothing waits on it forever.
-    const stopFeed = watchReviewFeed(onEvent, () =>
-      client.setQueryData(reviewFeedQuery.queryKey, (previous) => previous ?? new Map()),
+    // A failed feed keeps what it read before and says why, so nothing waits on it and a feed
+    // prkit couldn't read never looks like one with no reviews.
+    const stopFeed = watchReviewFeed(onEvent, (message) =>
+      client.setQueryData(reviewFeedQuery.queryKey, (previous): ReviewFeed => ({
+        _tag: "failed",
+        reviews: previous?.reviews ?? null,
+        message,
+      })),
     );
     const stopLocalFeed = watchLocalReviewFeed(onLocalEvent);
     const stopClicks = desktopBridge?.onOpenGuide((target) => {

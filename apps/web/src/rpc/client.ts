@@ -93,6 +93,7 @@ import {
 } from "@prkit/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -624,33 +625,69 @@ export const watchGitHub = (onEvent: (event: GitHubEvent) => void): (() => void)
   };
 };
 
+/** Asks the review feed being followed to try again now; set while `watchReviewFeed` runs. */
+let retryFeed: (() => void) | null = null;
+
 /**
- * Follows every review app-wide (inbox marks, tab indicators, notifications) until
- * the returned function is called. Each subscription opens with the full index.
+ * Follows every review app-wide (inbox marks, tab indicators, notifications) until the
+ * returned function is called. Each subscription opens with the full index. When prkit can't
+ * read the reviews, `onFailed` gets its message and the feed tries again after 2 seconds, then
+ * less often, up to a minute apart, or at once on `retryReviewFeed`. A dropped connection only
+ * tries again.
  */
-/** `onLost` runs each time the feed ends or fails, before it is opened again. */
 export const watchReviewFeed = (
   onEvent: (event: ReviewFeedEvent) => void,
-  onLost: () => void,
+  onFailed: (message: string) => void,
 ): (() => void) => {
   const current = getRuntime();
   if (current === null) return () => {};
-  const fiber = current.runFork(
-    WsClient.use((client) =>
-      client[WS_METHODS.reviewsFeed]({}).pipe(
-        Stream.runForEach((event) => Effect.sync(() => onEvent(event))),
+  let failures = 0;
+  // A retry asked for while a try is under way skips the wait after it.
+  let wake: (() => void) | null = null;
+  let skipWait = false;
+  retryFeed = () => {
+    if (wake === null) skipWait = true;
+    else wake();
+  };
+  const follow = WsClient.use((client) =>
+    client[WS_METHODS.reviewsFeed]({}).pipe(
+      Stream.runForEach((event) =>
+        Effect.sync(() => {
+          failures = 0;
+          onEvent(event);
+        }),
       ),
-    ).pipe(
-      Effect.ignore,
-      Effect.andThen(Effect.sync(onLost)),
-      Effect.andThen(Effect.sleep("2 seconds")),
-      Effect.forever,
     ),
+  ).pipe(
+    Effect.catchTag("ReviewError", (error) =>
+      Effect.sync(() => {
+        failures += 1;
+        onFailed(error.message);
+      }),
+    ),
+    Effect.ignore,
   );
+  const wait = Effect.gen(function* () {
+    if (skipWait) {
+      skipWait = false;
+      return;
+    }
+    const woken = yield* Deferred.make<void>();
+    wake = () => current.runFork(Deferred.succeed(woken, undefined));
+    yield* Effect.race(
+      Effect.sleep(Math.min(2_000 * 2 ** Math.max(0, failures - 1), 60_000)),
+      Deferred.await(woken),
+    );
+    wake = null;
+  });
+  const fiber = current.runFork(follow.pipe(Effect.andThen(wait), Effect.forever));
   return () => {
+    retryFeed = null;
     current.runFork(Fiber.interrupt(fiber));
   };
 };
+/** Tries the review feed again now: at once while it waits, or right after a try under way. */
+export const retryReviewFeed = () => retryFeed?.();
 
 // Guides of local changes: no account, and nothing reaches GitHub.
 export const listLocalReviews = (): Promise<ReadonlyArray<LocalReviewEntry>> =>
