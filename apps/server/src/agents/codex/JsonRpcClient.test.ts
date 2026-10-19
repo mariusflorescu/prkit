@@ -112,7 +112,7 @@ describe("Codex requests", () => {
           "Codex took too long to sign out prkit's login.",
         );
         expect(yield* silence(codex.request("thread/start", {}, Schema.Json))).toBe(
-          "Codex took too long to answer thread/start. Retry the guide.",
+          "Codex took too long to answer thread/start.",
         );
       }),
     ));

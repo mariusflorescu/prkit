@@ -331,7 +331,7 @@ const turn = async (sdk: Sdk, request: TurnRequest) => {
         : result.status === "cancelled"
           ? "interrupted"
           : "failed",
-    message: result.status === "error" ? "Cursor stopped with an error. Retry." : null,
+    message: result.status === "error" ? "Cursor stopped with an error." : null,
   });
 };
 

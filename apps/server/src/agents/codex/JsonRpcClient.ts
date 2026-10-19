@@ -40,7 +40,7 @@ const inTurn = (method: string): RequestWording => ({
     }),
   tooSlow: new AgentError({
     reason: "agent",
-    message: `Codex took too long to answer ${method}. Retry the guide.`,
+    message: `Codex took too long to answer ${method}.`,
   }),
 });
 
@@ -154,7 +154,7 @@ export const make = Effect.fn("CodexJsonRpcClient.make")(function* (options: {
     terminate(
       new AgentError({
         reason: "agent",
-        message: "Codex's connection stopped unexpectedly. Retry the guide.",
+        message: "Codex's connection stopped unexpectedly.",
       }),
     );
   yield* Stream.fromQueue(outgoing).pipe(
