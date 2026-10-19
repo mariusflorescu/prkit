@@ -913,11 +913,15 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
           expect(await tops(), "nothing moves when the error shows").toEqual(before);
           await screenshotLightAndDark(app, browser, "outside-agents-failed-save");
 
+          await browser.setViewport({ width: 860, height: 720 });
+          const narrow = await tops();
           await screen.getByRole("radio", "Read and start work").tap();
           await expect(screen.getByRole("radio", "Read only")).toBeEnabled({ timeout: 15_000 });
           await expect(screen.getByRole("radio", "Read only")).toBeChecked();
           await expect(screen.getByText(failure, { exact: true })).toBeVisible();
-          expect(await tops()).toEqual(before);
+          expect(await tops(), "nothing moves in a narrow window either").toEqual(narrow);
+          await app.screenshot("outside-agents-failed-save-narrow");
+          await browser.setViewport({ width: 1280, height: 720 });
           expect(discovery(run.home), "clients still read prkit as off").toBe("off");
         } finally {
           NodeFS.chmodSync(run.home, 0o755);

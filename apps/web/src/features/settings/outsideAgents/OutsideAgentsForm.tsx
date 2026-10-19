@@ -1,4 +1,4 @@
-import type { OutsideAccess, OutsideAgentsSettings } from "@prkit/contracts";
+import type { OutsideAccess, OutsideAgentsSettings, OutsideAgentsState } from "@prkit/contracts";
 import { useId } from "react";
 import { Controller, useForm } from "react-hook-form";
 
@@ -26,12 +26,13 @@ export function OutsideAgentsForm({
 }: {
   settings: OutsideAgentsSettings;
   saving: boolean;
-  onSave: (settings: OutsideAgentsSettings) => void;
+  onSave: (settings: OutsideAgentsSettings) => Promise<OutsideAgentsState>;
 }) {
-  // `values` keeps the form on what the server last said, including after a failed save.
+  // `values` moves the form to what the server says after each read and save.
   const form = useForm<OutsideAgentsSettings>({ values: settings });
   const detailId = useId();
-  const save = form.handleSubmit((values) => onSave(values));
+  // A failed save leaves the server and `values` as they were, so only this takes the form back.
+  const save = form.handleSubmit((values) => onSave(values).catch(() => form.reset()));
   return (
     <form
       noValidate

@@ -13,7 +13,6 @@ import { useOutsideAgents } from "./useOutsideAgents";
 /** Settings > Outside agents: let the owner's own MCP client read prkit and start work in it. */
 export function OutsideAgentsSettings() {
   const { state, update, reset } = useOutsideAgents();
-  const failed = update.error ?? reset.error;
   return (
     <SettingsSection
       title="Outside agents"
@@ -32,17 +31,12 @@ export function OutsideAgentsSettings() {
         )
       }
     >
-      {failed !== null && (
+      {reset.error !== null && (
         <SettingsAlert
-          message={failed.message}
+          message={reset.error.message}
           retry={() => {
-            if (reset.error !== null) {
-              reset.reset();
-              return reset.mutate();
-            }
-            const last = update.variables;
-            update.reset();
-            if (last !== undefined) update.mutate(last);
+            reset.reset();
+            reset.mutate();
           }}
         />
       )}
@@ -59,8 +53,19 @@ export function OutsideAgentsSettings() {
           <OutsideAgentsForm
             settings={{ enabled: state.data.enabled, access: state.data.access }}
             saving={update.isPending}
-            onSave={(settings) => update.mutate(settings)}
+            onSave={(settings) => update.mutateAsync(settings)}
           />
+          {/* Below the switch and the level, so neither moves when a save fails. */}
+          {update.error !== null && (
+            <SettingsAlert
+              message={update.error.message}
+              retry={() => {
+                const last = update.variables;
+                update.reset();
+                if (last !== undefined) update.mutate(last);
+              }}
+            />
+          )}
           <CommandLineSettings enabled={state.data.enabled} access={state.data.access} />
           {state.data.launcherProblem !== null && (
             <SettingsAlert
