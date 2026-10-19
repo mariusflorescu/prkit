@@ -1,7 +1,7 @@
-import type { CliInstallState } from "@prkit/contracts";
+import type { CliInstallState, SkillInstallerOpened } from "@prkit/contracts";
 import { queryOptions } from "@tanstack/react-query";
 
-import { getCliInstall, installCli, uninstallCli, installCliSkill } from "./client";
+import { getCliInstall, installCli, uninstallCli, openSkillInstaller } from "./client";
 
 export const cliInstallQuery = queryOptions({
   queryKey: ["cliInstall"],
@@ -10,5 +10,5 @@ export const cliInstallQuery = queryOptions({
 
 export const changeCliInstall = (
   action: "install" | "uninstall" | "skill",
-): Promise<CliInstallState | void> =>
-  action === "skill" ? installCliSkill() : action === "install" ? installCli() : uninstallCli();
+): Promise<CliInstallState | SkillInstallerOpened> =>
+  action === "skill" ? openSkillInstaller() : action === "install" ? installCli() : uninstallCli();

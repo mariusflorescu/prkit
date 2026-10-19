@@ -108,17 +108,11 @@ test(
     const localGit = await cliFixture(fake);
     const claude = setUpFakeClaude(name);
     const install = NodePath.join(fake.home, "local-bin", "prkit");
-    const terminal = NodePath.join(fake.home, "terminal");
-    const terminalLog = NodePath.join(fake.home, "terminal-call.txt");
     const evidence = NodePath.join(repoRoot, ".e2e/evidence/u71");
     NodeFS.mkdirSync(evidence, { recursive: true });
-    NodeFS.writeFileSync(terminal, `#!/bin/sh\nprintf '%s\\n' "$@" > '${terminalLog}'\n`, {
-      mode: 0o700,
-    });
     const variables = {
       PATH: localGit.path,
       PRKIT_CLI_INSTALL_PATH: install,
-      PRKIT_TERMINAL_PATH: terminal,
       CODEX_HOME: NodePath.join(fake.home, ".codex"),
       CLAUDE_CONFIG_DIR: NodePath.join(fake.home, ".claude"),
     };
@@ -184,14 +178,6 @@ test(
       expect(NodeFS.readlinkSync(install)).toBe(launcher);
       await expect(screen.getByText("Installed · Not on PATH", { exact: true })).toBeVisible();
       await app.screenshot("cli-installed-not-on-path");
-      await screen.getByRole("button", "Open skill installer in Terminal").tap();
-      await expect(screen.getByText("Skill installer opened in Terminal")).toBeVisible();
-      const terminalCall = NodeFS.readFileSync(terminalLog, "utf8");
-      expect(terminalCall).toContain("npx skills@1.7.2 add https://github.com/");
-      expect(terminalCall).toContain("/tree/main/skills --skill prkit-cli");
-      log.push(`Terminal stand-in:\n${terminalCall}`);
-      // The application writes no skill files and never runs the installer itself.
-      expect(NodeFS.existsSync(NodePath.join(fake.home, ".agents/skills/prkit-cli"))).toBe(false);
       await screen.getByRole("switch", "Let my coding agents use prkit").tap();
       await expect(screen.getByText("Outside agents can read", { exact: true })).toBeVisible();
       const status = cli(["status", "--json"]);

@@ -1,4 +1,4 @@
-import type { CliInstallState } from "@prkit/contracts";
+import type { CliInstallState, SkillInstallerOpened } from "@prkit/contracts";
 /**
  * The only module in the web app that builds or runs Effects. It owns the RPC
  * client over `/ws` and hands the rest of the UI plain promise functions.
@@ -874,5 +874,5 @@ export const installCli = (): Promise<CliInstallState> =>
   call((client) => client[WS_METHODS.cliInstall]({}));
 export const uninstallCli = (): Promise<CliInstallState> =>
   call((client) => client[WS_METHODS.cliUninstall]({}));
-export const installCliSkill = (): Promise<void> =>
+export const openSkillInstaller = (): Promise<SkillInstallerOpened> =>
   call((client) => client[WS_METHODS.cliSkillInstall]({}));

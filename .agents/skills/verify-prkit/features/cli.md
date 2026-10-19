@@ -5,7 +5,7 @@ Settings > Outside agents installs the app's CLI launcher link and offers the te
 ## Sub-features
 
 - `cli.install`: safe link installation, missing PATH instructions, uninstall and foreign-file refusal.
-- `cli.skill`: the build-matched, pinned skill command and a request to open Terminal.
+- `cli.skill`: the build-matched, pinned skill command, opened in the default terminal, then Terminal, then a copy message.
 - `cli.tools`: schema-derived help and flags, human output, JSON parity, exit codes and client provenance.
 - `cli.sandbox`: loopback access with and without Codex sandbox network access.
 
@@ -13,15 +13,16 @@ Settings > Outside agents installs the app's CLI launcher link and offers the te
 
 - Settings (Cmd+,) > Outside agents > Command line > Install command line tool.
 - Cmd+K > search `Install command line tool` > Enter.
-- Settings > Outside agents > Teach your coding agent > Open skill installer in Terminal, or Copy.
+- Settings > Outside agents > Teach your coding agent > Open skill installer in terminal, or Copy.
 - A terminal: `prkit --help`, `prkit status`, `prkit inbox`, then PR, guide, comments and fix commands.
 
 ## Driving it with e2e
 
-Preconditions: `pnpm build`. All install journeys set `PRKIT_CLI_INSTALL_PATH` under their fake GitHub's temporary HOME. The terminal launcher is a stand-in. Never run npx or open Terminal during verification.
+Preconditions: `pnpm build`. All install journeys set `PRKIT_CLI_INSTALL_PATH` under their fake GitHub's temporary HOME. `PRKIT_TERMINAL_BIN` points at stand-in `osascript` and `open` tools. Never run npx or open a real terminal during verification.
 
 - **Install:** `pnpm e2e run tests/cli.e2e.ts --trace=on --output .e2e/proof/u71`. The journey opens `screen.getByRole("link", "Outside agents")`, then `screen.getByRole("button", "Install command line tool", { exact: true })`. The link resolves to this instance's `bin/prkit`; Settings reports `Installed · Not on PATH` and offers Copy for the PATH line.
-- **Skill:** `screen.getByRole("button", "Open skill installer in Terminal")` produces a stand-in call containing the pinned npx command. No agent skill folder is written.
+- **Skill:** `pnpm e2e run tests/default-terminal.e2e.ts --trace=on --output .e2e/proof/default-terminal` (fake GitHub only, no fixture lock). The stand-in `osascript` answers the default terminal and the stand-in `open` records `-b <bundle id> <file>` with the folder and file modes, then runs the file with a stand-in `npx`. Ghostty as default opens Ghostty; `com.apple.terminal` in lower case opens Terminal as the default; TextEdit, Warp, an empty answer and a failed lookup open Terminal with "prkit couldn't use your default terminal."; a Ghostty that won't open falls back to Terminal; when both fail the alert says to copy the command, no installer file is left, and Retry opens Ghostty. The installer runs the pinned words from HOME and removes itself. No agent skill folder is written. Frames: `default-terminal-settings-{light,dark}`, `default-terminal-opened-ghostty`, `default-terminal-opened-fallback`, `default-terminal-failed-{light,dark,narrow}`.
+- **Installer script:** `pnpm exec vp test --run apps/server/src/cli/skillCommand.test.ts` runs the script from a folder whose name holds quotes, `$()` and backticks: the words reach `npx` as written and nothing else runs.
 - **Commands:** the journey runs the launcher in a temporary HOME. Inbox JSON equals the MCP tool's structured result; `--reason review-requested` and `--reason authored` each return the requested group. Agent discovery and repository PR reads use the same fake account. A stand-in agent completes a guide with versioned focus and guidance JSON and `--stack this` from local git objects; draft comments go to a fix turn with `prkit CLI` provenance. Help, completions, invalid usage, closed/off access and read-only refusal are checked. The home lock is unchanged and fake GitHub writes are empty.
 - **Questions:** `prkit questions ask` twice with one `--request-id` returns the same question, and `prkit questions wait <pr> --question-id <id>` returns that question answered. With answers held, a second question's `questions wait` runs in the background while the first's returns at once with its own; the background one returns only when its answer is released. `prkit wait <pr> --for question` exits 2.
 - **Paging:** `prkit pr files` with `--limit 1` matches MCP JSON, follows `nextCursor` to the second file and prints the continuation in human output. The journey runs that printed command through a shell with the PR target after `--` and checks the second file. A large conversation is read as response fragments using `nextResponseCursor`; joining their text by offset reconstructs the complete JSON without omissions.
