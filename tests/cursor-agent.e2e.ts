@@ -114,9 +114,9 @@ test(
   { timeout: 240_000 },
   async ({ app, screen, browser }) => {
     // On the fake GitHub: the PR merges just before its turn starts, so the turn ends at once.
+    const cursor = setUpFakeCursor(NAME);
     const fake = await startFakeGitHub(NAME);
     const claude = setUpFakeClaude(NAME);
-    const cursor = setUpFakeCursor(NAME);
     try {
       const run = startFakeInstance(NAME, fake, [
         "--claude",

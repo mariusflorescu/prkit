@@ -8,7 +8,7 @@ import * as Schema from "effect/Schema";
 
 import { AgentsResult } from "../apps/server/src/outside/paritySchemas.ts";
 import { GenerateLocalGuideResult, LocalWaitResult } from "../apps/server/src/outside/schemas.ts";
-import { type RunFile, repoRoot } from "../scripts/verify-run.ts";
+import type { RunFile } from "../scripts/verify-run.ts";
 import {
   alive,
   cardStates,
@@ -129,7 +129,6 @@ const journey = (agent: Agent) => async (page: Page) => {
   const evidence: Array<string> = [];
   const note = (label: string, value: object | string | null) =>
     evidence.push(`${label}: ${JSON.stringify(value)}`);
-  NodeFS.rmSync(NodePath.join(repoRoot, ".e2e", "homes", name), { recursive: true, force: true });
   const root = scratchRoot();
   const log: Array<string> = [];
   try {

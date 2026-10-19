@@ -7,6 +7,7 @@ import * as NodeUrl from "node:url";
 import * as Schema from "effect/Schema";
 
 import { repoRoot } from "../scripts/verify-run.ts";
+import { instanceHome } from "./fakeGitHub.ts";
 
 const VERSION = "1.0.37";
 
@@ -60,7 +61,7 @@ export const setUpFakeCursor = (name: string) => {
   NodeFS.rmSync(dir, { recursive: true, force: true });
   // The stand-in runs in the runner's sandbox: it reads `control/` in the SDK it was installed as,
   // and logs to `stand-in/` in each instance's home (fake-cursor-sdk.mjs).
-  const home = NodePath.join(repoRoot, ".e2e", "homes", name);
+  const home = instanceHome(name);
   const control = NodePath.join(
     home,
     "cursor-sdk",
