@@ -16,6 +16,8 @@ import { OutsideAgents } from "../outside/OutsideAgents.ts";
 import { shellQuote } from "../outside/launcher.ts";
 import { make, preferredInstallDirectory } from "./CliInstall.ts";
 
+vi.mock("./skillBuild.ts", () => ({ skillBuild: { repository: "acme/widgets", ref: "main" } }));
+
 const withHome = async (test: (home: string, install: string) => Promise<void>) => {
   const directory = NodePath.resolve(".e2e/unit-cli");
   NodeFs.mkdirSync(directory, { recursive: true });
@@ -390,3 +392,41 @@ it("keeps a startup launcher problem visible and refuses install after the folde
     );
     expect(NodeFs.existsSync(install)).toBe(false);
   }));
+
+it.runIf(process.platform === "darwin")(
+  "never hands a terminal a path whose control characters it would type as keys",
+  () =>
+    withHome(async (home) => {
+      const tools = NodePath.join(home, "tools");
+      const opened = NodePath.join(home, "opened.txt");
+      NodeFs.mkdirSync(tools);
+      NodeFs.writeFileSync(
+        NodePath.join(tools, "osascript"),
+        "#!/bin/sh\necho com.apple.Terminal\n",
+        {
+          mode: 0o700,
+        },
+      );
+      NodeFs.writeFileSync(
+        NodePath.join(tools, "open"),
+        `#!/bin/sh\nprintf '%s\\n' "$3" >> '${opened}'\n`,
+        { mode: 0o700 },
+      );
+      vi.stubEnv("PRKIT_TERMINAL_BIN", tools);
+      const hostile = NodePath.join(home, "x\u0015touch made\rx");
+      NodeFs.mkdirSync(hostile, { mode: 0o700 });
+      expect(
+        await run(hostile, (installer) => installer.openSkillInstaller().pipe(Effect.result)),
+      ).toMatchObject({ _tag: "Failure", failure: { _tag: "CliInstallError" } });
+      expect(NodeFs.existsSync(opened)).toBe(false);
+      expect(NodeFs.existsSync(NodePath.join(hostile, "terminal"))).toBe(false);
+
+      expect(await run(home, (installer) => installer.openSkillInstaller())).toEqual({
+        terminal: "Terminal",
+        isDefault: true,
+      });
+      const [file = ""] = NodeFs.readFileSync(opened, "utf8").split("\n");
+      expect(NodePath.dirname(NodePath.dirname(file))).toBe(NodePath.join(home, "terminal"));
+      expect(NodePath.basename(file)).toBe("prkit-skill-installer");
+    }),
+);

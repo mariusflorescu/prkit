@@ -1,11 +1,32 @@
+import { shellQuote } from "../outside/launcher.ts";
+
 export const SKILLS_VERSION = "1.7.2";
 
-export const skillInstallCommand = (repository: string, ref: string) => {
+/** The installer's words, or null when the build metadata could hold shell input. */
+export const skillInstallWords = (repository: string, ref: string) => {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) return null;
   if (ref !== "main" && !/^[a-f0-9]{40}$/.test(ref)) return null;
-  return `npx skills@${SKILLS_VERSION} add https://github.com/${repository}/tree/${ref}/skills --skill prkit-cli`;
+  return [
+    "npx",
+    `skills@${SKILLS_VERSION}`,
+    "add",
+    `https://github.com/${repository}/tree/${ref}/skills`,
+    "--skill",
+    "prkit-cli",
+  ];
 };
 
-/** AppleScript string literals do not interpret shell quoting. Escape this boundary too. */
-export const skillTerminalScript = (command: string) =>
-  `tell application "Terminal"\nactivate\ndo script "${command.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"\nend tell`;
+/**
+ * The file a terminal runs. It removes itself and its folder first and names no path of its own,
+ * and it starts in the home folder as a new terminal does, since Ghostty starts an opened file in
+ * its folder.
+ */
+export const skillInstallerScript = (words: ReadonlyArray<string>) =>
+  [
+    "#!/bin/sh",
+    'rm -f -- "$0"',
+    'rmdir -- "${0%/*}"',
+    "cd || exit",
+    `exec ${words.map(shellQuote).join(" ")}`,
+    "",
+  ].join("\n");

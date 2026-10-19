@@ -1,4 +1,4 @@
-import { CliInstallError, CliInstallState } from "./cliInstall.ts";
+import { CliInstallError, CliInstallState, SkillInstallerOpened } from "./cliInstall.ts";
 import * as Schema from "effect/Schema";
 import { PullRequestTimeline } from "./pullRequestTimeline.ts";
 import * as Rpc from "effect/rpc/Rpc";
@@ -952,7 +952,7 @@ export const WsRpcGroup = RpcGroup.make(
   }),
   Rpc.make(WS_METHODS.cliSkillInstall, {
     payload: Schema.Struct({}),
-    success: Schema.Void,
+    success: SkillInstallerOpened,
     error: CliInstallError,
   }),
 );

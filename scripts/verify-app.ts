@@ -190,9 +190,9 @@ const start = async (options: StartOptions) => {
         ...(process.env.PRKIT_CLI_INSTALL_PATH === undefined
           ? {}
           : { PRKIT_CLI_INSTALL_PATH: process.env.PRKIT_CLI_INSTALL_PATH }),
-        ...(process.env.PRKIT_TERMINAL_PATH === undefined
+        ...(process.env.PRKIT_TERMINAL_BIN === undefined
           ? {}
-          : { PRKIT_TERMINAL_PATH: process.env.PRKIT_TERMINAL_PATH }),
+          : { PRKIT_TERMINAL_BIN: process.env.PRKIT_TERMINAL_BIN }),
         PRKIT_HOME: paths.home,
         PRKIT_AUTH_TOKEN: token,
         ...(options.watchInterval === null

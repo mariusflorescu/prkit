@@ -12,6 +12,12 @@ export const CliInstallState = Schema.Struct({
 });
 export type CliInstallState = typeof CliInstallState.Type;
 
+export const SkillInstallerOpened = Schema.Struct({
+  terminal: Schema.String,
+  isDefault: Schema.Boolean,
+});
+export type SkillInstallerOpened = typeof SkillInstallerOpened.Type;
+
 export class CliInstallError extends Schema.TaggedError<CliInstallError>()("CliInstallError", {
   message: Schema.String,
 }) {}
