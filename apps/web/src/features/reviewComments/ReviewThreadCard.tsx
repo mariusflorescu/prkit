@@ -12,6 +12,7 @@ import { DiffSnippet } from "./DiffSnippet";
 import { ThreadComment } from "./ThreadComment";
 import { storeThreads } from "./reviewCommentsCache";
 import { hunkTail, rangeLabel } from "./reviewCommentPresentation";
+import { replyForm, useReviewCommentsStore } from "./reviewCommentsStore";
 import { useOpenForm } from "./useOpenForm";
 
 /**
@@ -32,14 +33,17 @@ export function ReviewThreadCard({
 }) {
   const client = useQueryClient();
   const store = storeThreads(client, pr.key, pr.accountId);
-  const [open, setOpen] = useState(!thread.resolved);
-  const [replying, setReplying] = useState(false);
+  const form = replyForm(pr, thread.id);
+  const replying = useReviewCommentsStore((state) => state.words.has(form));
+  const beginWriting = useReviewCommentsStore((state) => state.beginWriting);
+  const stopWriting = useReviewCommentsStore((state) => state.stopWriting);
+  const [open, setOpen] = useState(!thread.resolved || replying);
   useOpenForm(pr.key, open && thread.canReply && replying);
   const reply = useMutation({
     mutationFn: (body: string) => replyToThread({ ...pr, threadId: thread.id, body }),
     onSuccess: (threads) => {
       store(threads);
-      setReplying(false);
+      stopWriting(form);
     },
   });
   const resolve = useMutation({
@@ -130,16 +134,17 @@ export function ReviewThreadCard({
           {thread.canReply &&
             (replying ? (
               <CommentForm
+                form={form}
                 label={`Reply to ${author}`}
                 submitLabel="Reply"
                 pendingLabel="Replying..."
                 error={reply.error?.message ?? null}
                 pending={reply.isPending}
                 onSubmit={(body) => reply.mutate(body)}
-                onCancel={() => setReplying(false)}
+                onCancel={() => stopWriting(form)}
               />
             ) : (
-              <Button size="xs" variant="outline" onClick={() => setReplying(true)}>
+              <Button size="xs" variant="outline" onClick={() => beginWriting(form, "")}>
                 Reply
               </Button>
             ))}

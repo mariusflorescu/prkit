@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import { toastManager } from "~/components/ui/toast";
-import { useNoteComposerHold } from "~/features/reviewComments/useNoteComposerHold";
 import { guideQuery, reviewQuery } from "~/rpc/queries";
 import { type FilesGuideNotes, placeGuideNotes } from "./placeGuideNotes";
 
@@ -47,7 +46,6 @@ export function useFilesGuideNotes(
   const client = useQueryClient();
   const review = useQuery(reviewQuery(detail.key));
   const latest = review.data?.revisions.at(-1)?.revision ?? null;
-  useNoteComposerHold(detail.key, "files");
   const [taken, setTaken] = useState<number | null>(null);
   const wanted = shown ? (taken ?? latest) : null;
   // Pierre keys a diff's annotations by position, so notes that came or went under an open

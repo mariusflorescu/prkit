@@ -17,10 +17,9 @@ import { askAside } from "~/features/ask/askAside";
 import { AskDock } from "~/features/ask/AskDock";
 import { type AskTarget, AskTargetContext } from "~/features/ask/askTarget";
 import { useAsks } from "~/features/ask/useAsks";
-import { useReviewCommentsStore } from "~/features/reviewComments/reviewCommentsStore";
+import { composerOn, useReviewCommentsStore } from "~/features/reviewComments/reviewCommentsStore";
 import { useDiffComments } from "~/features/reviewComments/useDiffComments";
 import { useManualCheckTicks } from "~/features/manualCheck/useManualCheckTicks";
-import { useNoteComposerHold } from "~/features/reviewComments/useNoteComposerHold";
 import { ReviewedCount } from "~/features/reviewedFiles/ReviewedCount";
 import { useReviewedFiles } from "~/features/reviewedFiles/useReviewedFiles";
 import { getFileContents } from "~/rpc/client";
@@ -72,7 +71,9 @@ export function GuideReady({
     running && attempt?.draft != null
       ? { attempt, version: attempt.draft.version, growing: attempt.draft.growing }
       : null;
-  const composingRevision = useNoteComposerHold(detail.key, "guide");
+  // A comment being written holds the revision it is on, so a new one doesn't swap its diff out.
+  const composer = useReviewCommentsStore(composerOn(detail));
+  const composingRevision = composer?.site.on === "guide" ? composer.site.revision : null;
   const closeComposer = useReviewCommentsStore((state) => state.closeComposer);
   // Nor a description being edited from the guide: the revision it drafts from holds until it closes.
   const [describing, setDescribing] = useState<number | null>(null);
@@ -83,11 +84,12 @@ export function GuideReady({
     latest;
   const pick = useCallback(
     (next: GuideChoice) => {
-      if (composingRevision !== null && next !== composingRevision) closeComposer();
+      if (composer !== null && composingRevision !== null && next !== composingRevision)
+        closeComposer(composer);
       if (describing !== null && next !== describing) setDescribing(null);
       setPicked(next === latest.revision ? null : next);
     },
-    [composingRevision, closeComposer, describing, latest.revision],
+    [composer, composingRevision, closeComposer, describing, latest.revision],
   );
   const reveal = useLineFocus((state) => state.reveal);
   const clear = useLineFocus((state) => state.clear);

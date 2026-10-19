@@ -7,7 +7,7 @@ import type {
 } from "@prkit/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { PencilIcon, Trash2Icon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 import { Button } from "~/components/ui/button";
 import { SendToAgentButton } from "~/features/fixes/SendToAgentButton";
@@ -18,7 +18,7 @@ import { CommentForm } from "./CommentForm";
 import { DiffSnippet } from "./DiffSnippet";
 import { storePending } from "./reviewCommentsCache";
 import { OUTDATED_WHY, rangeLabel, suggestionLabel } from "./reviewCommentPresentation";
-import { useReviewCommentsStore } from "./reviewCommentsStore";
+import { editForm, useReviewCommentsStore } from "./reviewCommentsStore";
 import { useOpenForm } from "./useOpenForm";
 
 /**
@@ -37,7 +37,10 @@ export function PendingCommentCard({
 }) {
   const client = useQueryClient();
   const store = storePending(client, pr.key, pr.accountId);
-  const [editing, setEditing] = useState(false);
+  const form = editForm(comment.id);
+  const editing = useReviewCommentsStore((state) => state.words.has(form));
+  const beginWriting = useReviewCommentsStore((state) => state.beginWriting);
+  const stopWriting = useReviewCommentsStore((state) => state.stopWriting);
   useOpenForm(pr.key, editing);
   const moving = useReviewCommentsStore((state) => state.moving?.id === comment.id);
   const startMove = useReviewCommentsStore((state) => state.startMove);
@@ -47,7 +50,7 @@ export function PendingCommentCard({
     mutationFn: (body: string) => editPendingComment(comment.id, body),
     onSuccess: (comments) => {
       store(comments);
-      setEditing(false);
+      stopWriting(form);
     },
   });
   const remove = useMutation({
@@ -100,7 +103,7 @@ export function PendingCommentCard({
             variant="ghost-muted"
             aria-label="Edit pending comment"
             disabled={editing}
-            onClick={() => setEditing(true)}
+            onClick={() => beginWriting(form, comment.body)}
           >
             <PencilIcon />
           </Button>
@@ -160,14 +163,14 @@ export function PendingCommentCard({
       <div className="mt-2">
         {editing ? (
           <CommentForm
+            form={form}
             label="Edit pending comment"
             submitLabel="Save"
             pendingLabel="Saving..."
-            defaultValue={comment.body}
             error={edit.error?.message ?? null}
             pending={edit.isPending}
             onSubmit={(body) => edit.mutate(body)}
-            onCancel={() => setEditing(false)}
+            onCancel={() => stopWriting(form)}
           />
         ) : (
           <PullRequestMarkdown body={comment.body} />

@@ -10,6 +10,7 @@ import {
   notePoint,
   type Outdated,
   type PendingComment,
+  type Placed,
   place,
   type PullRequestKey,
   type ReviewCommentId,
@@ -27,7 +28,12 @@ import { CommentPin } from "./CommentPin";
 import { NoteCommentFooter } from "./NoteCommentFooter";
 import { OutdatedComments } from "./OutdatedComments";
 import { storePending } from "./reviewCommentsCache";
-import { type NoteDraft, useReviewCommentsStore } from "./reviewCommentsStore";
+import {
+  type Composer,
+  composerOn,
+  type ComposerSite,
+  useReviewCommentsStore,
+} from "./reviewCommentsStore";
 import { sameRef, type ShownNote } from "./shownNote";
 
 /**
@@ -46,14 +52,14 @@ export type CommentScope = {
   threads: boolean;
   /** Whether drafts and threads whose lines are gone are listed under each file. */
   outdated: boolean;
-  notes: NoteSite | null;
+  notes: NoteSite;
 };
 
 type Pin = {
   point: LinePoint;
   threads: Array<ReviewThread>;
   drafts: Array<{ comment: PendingComment; placed: Landed }>;
-  composer: { placement: CommentPlacement; note: NoteDraft | null } | null;
+  composer: { composer: Composer; placed: Landed } | null;
 };
 
 /**
@@ -70,9 +76,7 @@ export function useDiffComments(
   const client = useQueryClient();
   const pending = useQuery(pendingCommentsQuery(key, accountId));
   const threads = useQuery({ ...reviewThreadsQuery(key, accountId), enabled: scope.threads });
-  const composer = useReviewCommentsStore((state) =>
-    state.composer?.key === key ? state.composer : null,
-  );
+  const composer = useReviewCommentsStore(composerOn(pr));
   const moving = useReviewCommentsStore((state) =>
     state.moving?.key === key ? state.moving : null,
   );
@@ -95,18 +99,17 @@ export function useDiffComments(
   const moveComment = move.mutate;
   const { commitSha, outdated: showOutdated } = scope;
   // Read apart, so a caller's new scope object each render keeps the layers as they were.
-  const noteOn = scope.notes?.on ?? null;
-  const guideRevision = scope.notes?.on === "guide" ? scope.notes.revision : null;
-  const filesNotes = scope.notes?.on === "files" ? scope.notes.notes : null;
+  const noteOn = scope.notes.on;
+  const guideRevision = scope.notes.on === "guide" ? scope.notes.revision : null;
+  const filesNotes = scope.notes.on === "files" ? scope.notes.notes : null;
   const drafts = pending.data?.comments;
   const fromNotes = pending.data?.fromNotes;
-  // A note's composer sits on the line numbers of the diff it was opened on, so only that
-  // surface shows it, and on the Guide only that revision.
+  // A composer's lines are the diff it was opened on, so only that surface shows it, and on
+  // the Guide only that revision.
   const visibleComposer =
     composer !== null &&
-    (composer.note === null ||
-      (composer.note.on === noteOn &&
-        (noteOn === "files" || composer.note.ref.revision === guideRevision)))
+    composer.site.on === noteOn &&
+    (composer.site.on === "files" || composer.site.revision === guideRevision)
       ? composer
       : null;
   // GitHub numbers threads against the head it had when they were read, so they are
@@ -120,6 +123,8 @@ export function useDiffComments(
   }, [staleThreads, client, key, accountId]);
   return useMemo(() => {
     const owner = { key, accountId };
+    const site: ComposerSite =
+      guideRevision === null ? { on: "files" } : { on: "guide", revision: guideRevision };
     const byNote = new Map((fromNotes ?? []).map((comment) => [comment.note, comment]));
     const build = (file: DiffFile): DiffComments | undefined => {
       if (drafts === undefined || file.patch._tag !== "text") return undefined;
@@ -164,12 +169,15 @@ export function useDiffComments(
         const placed = filesNotes?.byShown.get(note);
         return placed === undefined ? null : { on: "files", ...placed, rows, head: commitSha };
       };
-      const open =
-        visibleComposer?.path === file.path
-          ? capture(rows, { path: file.path, ...visibleComposer.range }, commitSha)
+      // Placed like a draft, so a push moves it with its code or leaves it waiting under the file.
+      const writing: Placed | null =
+        visibleComposer?.placement.anchor.path === file.path
+          ? place(visibleComposer.placement, rows, commitSha)
           : null;
-      if (open)
-        pinAt(open.anchor.end).composer = { placement: open, note: visibleComposer?.note ?? null };
+      const open = writing?._tag === "outdated" ? null : writing;
+      const lost = writing?._tag === "outdated" ? writing : null;
+      if (visibleComposer && open)
+        pinAt(open.placement.anchor.end).composer = { composer: visibleComposer, placed: open };
       return {
         pins: [...pins.values()].map((pin) => pin.point),
         render: (point) => {
@@ -185,7 +193,7 @@ export function useDiffComments(
             )
           );
         },
-        selection: open && { start: open.anchor.start, end: open.anchor.end },
+        selection: open && { start: open.placement.anchor.start, end: open.placement.anchor.end },
         onSelect: (range) => {
           const placement = capture(rows, { path: file.path, ...range }, commitSha);
           if (placement === null)
@@ -195,21 +203,17 @@ export function useDiffComments(
               description: "GitHub takes review comments only on lines shown in a hunk.",
             });
           else if (moving?.path === file.path) moveComment({ id: moving.id, placement });
-          else
-            compose({
-              key,
-              path: file.path,
-              range: { start: placement.anchor.start, end: placement.anchor.end },
-              note: null,
-            });
+          else compose({ pr: owner, site, placement, note: null });
         },
         footer:
-          showOutdated && (outdatedDrafts.length > 0 || outdatedThreads.length > 0) ? (
+          showOutdated &&
+          (outdatedDrafts.length > 0 || outdatedThreads.length > 0 || lost !== null) ? (
             <OutdatedComments
               pr={owner}
               path={file.path}
               drafts={outdatedDrafts}
               threads={outdatedThreads}
+              composer={visibleComposer && lost && { composer: visibleComposer, placed: lost }}
             />
           ) : null,
         count: fileDrafts.length + fileThreads.length,
