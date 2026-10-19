@@ -1,5 +1,4 @@
 import {
-  type Account,
   type AccountId,
   type InboxEntry,
   type InboxFilters,
@@ -69,9 +68,9 @@ export const sameRepository = (left: RepositoryFilter | null, right: RepositoryF
  */
 export const withLiveAccounts = (
   saved: InboxFilters,
-  accounts: ReadonlyArray<Account>,
+  accounts: ReadonlyArray<AccountId>,
 ): InboxFilters => {
-  const live = new Set(accounts.map((account) => account.id));
+  const live = new Set(accounts);
   const [reader, ...others] = saved.repository?.accountIds.filter((id) => live.has(id)) ?? [];
   return {
     search: saved.search,

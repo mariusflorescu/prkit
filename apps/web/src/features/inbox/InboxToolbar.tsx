@@ -1,4 +1,4 @@
-import type { Account, AccountId, InboxEntry } from "@prkit/contracts";
+import type { AccountId, InboxEntry } from "@prkit/contracts";
 import { RefreshCwIcon, SearchIcon } from "lucide-react";
 
 import { ToolbarIconButton } from "~/components/ToolbarIconButton";
@@ -22,7 +22,7 @@ export function InboxToolbar({
   onRefresh,
 }: {
   /** The accounts to filter by; none when there is only one. */
-  accounts: ReadonlyArray<Account>;
+  accounts: ReadonlyArray<AccountId>;
   /** The account filter in effect, null for all. */
   account: AccountId | null;
   entries: ReadonlyArray<InboxEntry>;
@@ -50,7 +50,7 @@ export function InboxToolbar({
           className="h-8 w-full rounded-lg border border-input bg-background pr-3 pl-8 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24"
         />
       </div>
-      {accounts.length > 1 && <InboxAccountFilter accounts={accounts} />}
+      {accounts.length > 1 && <InboxAccountFilter accounts={accounts} account={account} />}
       <InboxRepositoryFilter entries={entries} account={account} />
       <InboxSortSelect />
       <span data-collapse-compact="" inert={!collapsed} aria-hidden={!collapsed}>

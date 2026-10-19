@@ -229,7 +229,7 @@ GitHub's limits are per user (5,000 GraphQL points and 5,000 REST requests an ho
 - `stack(key)` - the layers of the stack the detail says the PR is in, one GraphQL read (`pullRequest { stack { entries } }`, about one point) cached per stack, so every layer shares it (see Stacks).
 - `context(key, accountId, headSha)` - what an attempt hands its agent besides the diff (see What the agent sees): the detail's failing and pending checks, the threads nobody resolved, and the issues the PR closes (`closingIssuesReferences`, the first 10, one GraphQL read cached per PR and read only here). It never fails: each part answers on its own, with what was read or why it couldn't be.
 
-**One read layer.** Every read goes through `makeReadCache` (`pullRequests/readCache.ts`): bounded by entries and bytes, keyed by account, gh config dir and key, one read per key at a time so concurrent callers share it. Inbox, detail, timeline, threads and files also write their last good answer to the `github_read_cache` table with `fetched_at`; the inbox answers from those rows before accounts are discovered, so a relaunch renders at once.
+**One read layer.** Every read goes through `makeReadCache` (`pullRequests/readCache.ts`): bounded by entries and bytes, keyed by account, gh config dir and key, one read per key at a time so concurrent callers share it. Inbox, detail, timeline, threads and files also write their last good answer to the `github_read_cache` table with `fetched_at`; before accounts are discovered, the inbox answers with each account a gh config directory lists and the row kept for it from that directory, so a relaunch renders at once and shows nothing of an account that has logged out since.
 
 **Freshness.**
 

@@ -9,8 +9,8 @@ import { create } from "zustand";
 
 /**
  * The Inbox's filters in this window. The server keeps the last ones for the next load:
- * `restore` applies them once, unless the user changed a filter before they arrived. The sort
- * needs no account, so `restoreSort` applies it as soon as it arrives, and the rows wait for it.
+ * `restore` applies them once, unless the user changed a filter before they arrived, and the
+ * rows wait for it. `restoreSort` applies the saved sort even then, unless the user chose one.
  */
 export const useInboxStore = create<
   InboxFilters & {

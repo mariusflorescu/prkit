@@ -33,12 +33,18 @@ export function InboxPage() {
   const repository = useInboxStore((state) => state.repository);
   const sort = useInboxStore((state) => state.sort);
   const clear = useInboxStore((state) => state.clear);
-  const sortRestored = useSavedInboxFilters(inbox.data?.entries);
+  const restored = useSavedInboxFilters(inbox.data);
   // Riskiest first orders by the review feed, so its rows wait for the feed's first index.
   const reviewsRead = useQuery({ ...reviewFeedQuery, select: () => true }).data === true;
-  // With one account, its filter and each row's account say nothing, so neither shows.
-  const manyAccounts = (accounts.data?.accounts.length ?? 0) > 1;
-  const account = manyAccounts ? chosenAccount : null;
+  // The accounts this inbox was read through, so a relaunch filters its first rows from prkit's
+  // cache before GitHub verifies the accounts. With one, its filter and each row's account say
+  // nothing, so neither shows.
+  const inboxAccounts = (inbox.data?.accounts ?? []).map((row) => row.accountId).toSorted();
+  const manyAccounts = inboxAccounts.length > 1;
+  const account =
+    manyAccounts && chosenAccount !== null && inboxAccounts.includes(chosenAccount)
+      ? chosenAccount
+      : null;
   const scroll = useRef<HTMLDivElement>(null);
   const { collapsed, sentinel } = useCollapsingHeader(scroll);
   const refresh = useMutation({
@@ -77,6 +83,10 @@ export function InboxPage() {
   };
   const inView =
     inbox.data?.accounts.filter((row) => account === null || row.accountId === account) ?? [];
+  // A relaunch answers before GitHub verifies the accounts, and an account with nothing kept
+  // from earlier has no rows until it is read, so nothing showing may only mean not read yet.
+  const unread =
+    visible.length === 0 && inView.some((row) => row.fetchedAt === null && row.problem === null);
   const oldest =
     inView
       .flatMap((row) => (row.fetchedAt === null ? [] : [row.fetchedAt]))
@@ -95,7 +105,7 @@ export function InboxPage() {
         />
         <CollapsingPinned collapsed={collapsed}>
           <InboxToolbar
-            accounts={manyAccounts ? (accounts.data?.accounts ?? []) : []}
+            accounts={manyAccounts ? inboxAccounts : []}
             account={account}
             entries={entries}
             collapsed={collapsed}
@@ -107,7 +117,7 @@ export function InboxPage() {
           {error && (
             <ListError title="Couldn't refresh your inbox" message={error.message} retry={retry} />
           )}
-          {inbox.isPending || !sortRestored || (sort === "risk" && !reviewsRead) ? (
+          {inbox.isPending || !restored || unread || (sort === "risk" && !reviewsRead) ? (
             <ListSkeleton label="Loading pull requests" />
           ) : (
             inbox.data && (
@@ -132,7 +142,7 @@ export function InboxPage() {
                   ) : (
                     <InboxEmpty
                       filtered={filtered}
-                      noAccounts={(accounts.data?.accounts.length ?? 0) === 0}
+                      noAccounts={inboxAccounts.length === 0}
                       clear={clear}
                     />
                   )
