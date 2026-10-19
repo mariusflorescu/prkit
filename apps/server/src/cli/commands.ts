@@ -23,6 +23,7 @@ export const commandMap = {
   ask_about_pull_request: { path: ["questions", "ask"], target: "pr" },
   stop_question: { path: ["questions", "stop"], target: "pr" },
   pin_answer: { path: ["questions", "pin"], target: "pr" },
+  wait_for_question: { path: ["questions", "wait"], target: "pr" },
   list_review_comments: { path: ["comments", "list"], target: "pr" },
   add_review_comment: { path: ["comments", "add"], target: "pr" },
   read_fix: { path: ["fix", "read"], target: "pr" },

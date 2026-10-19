@@ -15,6 +15,7 @@ import {
   OutsideQuestion,
   PullRequestResult,
   QuestionsResult,
+  QuestionWaitResult,
   WaitResult,
 } from "../apps/server/src/outside/schemas.ts";
 import { repoRoot } from "../scripts/verify-run.ts";
@@ -32,6 +33,7 @@ test(
     const claude = setUpFakeClaude(name);
     const git = outsideGit(name);
     let bridge: Bridge | null = null;
+    let other: Bridge | null = null;
     const lines: string[] = [];
     try {
       const run = git.start(() => startFakeInstance(name, fake, ["--claude", claude.file]));
@@ -392,11 +394,21 @@ test(
         { ...pr, question: "Asked while the first is answered", clientRequestId: "parity-ask-2" },
         "Wait for this answer",
       );
-      const unfinished = Schema.decodeUnknownSync(WaitResult)(
-        await ok("wait_for", { ...pr, what: "question", timeoutSeconds: 1 }),
+      const unfinished = Schema.decodeUnknownSync(QuestionWaitResult)(
+        await ok("wait_for_question", { ...pr, questionId: asked.questionId, timeoutSeconds: 1 }),
       );
       expect(unfinished.finished).toBe(false);
-      expect(unfinished.question?.id).toBe(asked.questionId);
+      expect(unfinished.question.id).toBe(asked.questionId);
+      await refusal(
+        "wait_for_question",
+        { ...pr, questionId: "missing", timeoutSeconds: 1 },
+        "isn't on this pull request",
+      );
+      const oldShape = await client.call("wait_for", { ...pr, what: "question" });
+      lines.push(`## refused wait_for what: question\n${JSON.stringify(oldShape, null, 2)}`);
+      expect("rpcError" in oldShape ? oldShape.rpcError : "").toContain(
+        "Invalid parameters for tool 'wait_for'",
+      );
       await expect
         .poll(
           async () =>
@@ -423,8 +435,8 @@ test(
         ).state,
       ).toBe("stopped");
       expect(
-        Schema.decodeUnknownSync(WaitResult)(
-          await ok("wait_for", { ...pr, what: "question", timeoutSeconds: 5 }),
+        Schema.decodeUnknownSync(QuestionWaitResult)(
+          await ok("wait_for_question", { ...pr, questionId: asked.questionId, timeoutSeconds: 5 }),
         ),
       ).toMatchObject({ finished: true, question: { id: asked.questionId, state: "stopped" } });
       await refusal(
@@ -442,13 +454,14 @@ test(
         }),
       );
       expect(again.questionId).not.toBe(asked.questionId);
-      const finished = Schema.decodeUnknownSync(WaitResult)(
-        await ok("wait_for", { ...pr, what: "question", timeoutSeconds: 50 }),
+      const finished = Schema.decodeUnknownSync(QuestionWaitResult)(
+        await ok("wait_for_question", { ...pr, questionId: again.questionId, timeoutSeconds: 50 }),
       );
       expect(finished).toMatchObject({
         finished: true,
         question: { id: again.questionId, state: "answered", pinned: false },
       });
+
       const firstPage = Schema.decodeUnknownSync(QuestionsResult)(
         await ok("read_pull_request_questions", { ...pr, limit: 1 }),
       );
@@ -483,6 +496,47 @@ test(
           await ok("pin_answer", { ...pr, questionId: again.questionId, pinned: false }),
         ).pinned,
       ).toBe(false);
+      // A second agent asks about the same pull request while the first waits on its own
+      // question: each wait wakes on its caller's question, never on the other's.
+      other = startBridge(run.home, "other client");
+      await other.initialize();
+      const otherAgent = other;
+      claude.holdAnswers();
+      const theirs = Schema.decodeUnknownSync(AskedQuestion)(
+        await otherAgent
+          .call("ask_about_pull_request", {
+            ...pr,
+            question: "Asked by another agent",
+            clientRequestId: "parity-other",
+          })
+          .then((answer) => ("json" in answer ? answer.json : answer)),
+      );
+      const theirWait = otherAgent
+        .call("wait_for_question", { ...pr, questionId: theirs.questionId, timeoutSeconds: 50 })
+        .then((answer) =>
+          Schema.decodeUnknownSync(QuestionWaitResult)("json" in answer ? answer.json : answer),
+        );
+      const mine = Schema.decodeUnknownSync(QuestionWaitResult)(
+        await ok("wait_for_question", { ...pr, questionId: again.questionId, timeoutSeconds: 50 }),
+      );
+      expect(mine).toMatchObject({
+        finished: true,
+        question: { id: again.questionId, state: "answered" },
+      });
+      const stillWaiting = await Promise.race([
+        theirWait.then(() => "woke"),
+        new Promise((resolve) => setTimeout(() => resolve("waiting"), 2_000)),
+      ]);
+      expect(stillWaiting, "the other agent's wait sleeps through the first agent's").toBe(
+        "waiting",
+      );
+      claude.releaseAnswers();
+      const woke = await theirWait;
+      lines.push(`## two agents waiting\n${JSON.stringify({ mine, theirs: woke }, null, 2)}`);
+      expect(woke).toMatchObject({
+        finished: true,
+        question: { id: theirs.questionId, state: "answered", askedBy: "other client" },
+      });
       const elsewhere = { ...pr, accountId: second.accountId };
       await refusal("read_pull_request_questions", elsewhere, `go through ${accountId}`);
       await refusal(
@@ -588,6 +642,7 @@ test(
       NodeFS.mkdirSync(dir, { recursive: true });
       NodeFS.writeFileSync(NodePath.join(dir, "parity.md"), `${lines.join("\n\n")}\n`);
       await bridge?.stop();
+      await other?.stop();
       const writes = await fake.writes();
       const pushes = git.pushes();
       stopFakeInstance(name, { keepHome: false });

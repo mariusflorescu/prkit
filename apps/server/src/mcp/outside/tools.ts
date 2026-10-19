@@ -37,6 +37,8 @@ import {
   ReadLocalGuideInput,
   ReadLocalQuestionsInput,
   QuestionInput,
+  QuestionWaitInput,
+  QuestionWaitResult,
   QuestionsResult,
   ReadPullRequestInput,
   ReadQuestionsInput,
@@ -47,7 +49,6 @@ import {
   TargetInput,
   TurnInput,
   LocalQuestionWaitInput,
-  LocalQuestionWaitResult,
   WaitInput,
   WaitResult,
 } from "../../outside/schemas.ts";
@@ -152,12 +153,12 @@ const ReadFix = read(
 
 const WaitFor = read(
   Tool.make("wait_for", {
-    description: `Waits until a pull request's guide or fix stops running, or none of its questions is being answered, or the timeout passes (50 seconds unless you ask for more, at most 600), and returns its state (for a question, the newest one); finished says which. A timeout never stops the work: call again to keep waiting.${TARGET_HINT}`,
+    description: `Waits until a pull request's guide or fix stops running, or the timeout passes (50 seconds unless you ask for more, at most 600), and returns its state; finished says which. A timeout never stops the work: call again to keep waiting. For a question, use wait_for_question.${TARGET_HINT}`,
     parameters: WaitInput,
     success: limited(WaitResult),
     failure: OutsideToolFailure,
   }),
-  "Wait for a guide, fix or question",
+  "Wait for a guide or fix",
 );
 
 const ListAccounts = read(
@@ -364,6 +365,16 @@ const ReadPullRequestQuestions = read(
   "Read questions about a guide",
 );
 
+const WaitForQuestion = read(
+  Tool.make("wait_for_question", {
+    description: `Waits until one question about a pull request's guide is answered, stopped or failed, or the timeout passes (50 seconds unless you ask for more, at most 600), and returns that question; finished says which. Another agent's questions never end the wait. A timeout never stops the question: call again to keep waiting.${TARGET_HINT}`,
+    parameters: QuestionWaitInput,
+    success: limited(QuestionWaitResult),
+    failure: OutsideToolFailure,
+  }),
+  "Wait for a question",
+);
+
 const ReadGuideDuration = read(
   Tool.make("read_guide_duration", {
     description:
@@ -530,7 +541,7 @@ const WaitForLocalQuestion = read(
   Tool.make("wait_for_local_question", {
     description: `Waits until one question about a guide of local changes is answered, stopped or failed, or the timeout passes (50 seconds unless you ask for more, at most 600), and returns that question; finished says which. A timeout never stops the question: call again to keep waiting.${LOCAL_HINT}`,
     parameters: LocalQuestionWaitInput,
-    success: limited(LocalQuestionWaitResult),
+    success: limited(QuestionWaitResult),
     failure: OutsideToolFailure,
   }),
   "Wait for a local question",
@@ -592,7 +603,7 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
 
   const AskAboutPullRequest = work(
     Tool.make("ask_about_pull_request", {
-      description: `Asks the agent that wrote a pull request's guide a question about the whole pull request, one chapter or some diff lines, on the latest accepted guide revision unless revision says. It returns at once with the question's id: call wait_for with what: question, then read_pull_request_questions. The answer is read-only and never touches the pull request or GitHub. Only one question is answered at a time; asking again after a stop or failure is how to retry.${TARGET_HINT}`,
+      description: `Asks the agent that wrote a pull request's guide a question about the whole pull request, one chapter or some diff lines, on the latest accepted guide revision unless revision says. It returns at once with the question's id: call wait_for_question with it for the answer. The answer is read-only and never touches the pull request or GitHub. Only one question is answered at a time; asking again after a stop or failure is how to retry.${TARGET_HINT}`,
       parameters: AskAboutInput,
       success: limited(AskedQuestion),
       failure: OutsideToolFailure,
@@ -806,7 +817,7 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
 
   const AskAboutLocalChanges = work(
     Tool.make("ask_about_local_changes", {
-      description: `Asks the agent that wrote a guide of local changes (not a pull request) a question about all the changes, one chapter or some diff lines, on the latest accepted guide revision unless revision says. It returns at once with the question's id: call wait_for_local_question, then read_local_questions. The answer is read-only and never touches the repository. Only one question per local review is answered at a time; asking again after a stop or failure is how to retry.${LOCAL_HINT}`,
+      description: `Asks the agent that wrote a guide of local changes (not a pull request) a question about all the changes, one chapter or some diff lines, on the latest accepted guide revision unless revision says. It returns at once with the question's id: call wait_for_local_question with it for the answer. The answer is read-only and never touches the repository. Only one question per local review is answered at a time; asking again after a stop or failure is how to retry.${LOCAL_HINT}`,
       parameters: AskAboutLocalInput,
       success: limited(AskedLocalQuestion),
       failure: OutsideToolFailure,
@@ -876,6 +887,7 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
     ReadGuideProgress,
     ReadReviewDiff,
     ReadPullRequestQuestions,
+    WaitForQuestion,
     ReadGuideDuration,
     ReadGuideSettings,
     ReadGuideScope,

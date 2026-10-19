@@ -131,13 +131,12 @@ When you or the user need something the guide doesn't say, ask the agent that wr
 
 ```sh
 prkit questions ask <pr> --question "Why does the retry stop after three tries?" --request-id ask-42
-prkit wait <pr> --for question --timeout 600
-prkit questions list <pr> --json
+prkit questions wait <pr> --question-id <question-id> --timeout 600
 ```
 
 A PR needs a guide first, and the question goes to its latest accepted revision unless you pass `--revision`. Without `--scope` it is about the whole PR. For one chapter, pass `--scope '{"_tag":"chapter","chapterId":"<id>"}'` with an id from `prkit guide read <pr> --json`. For diff lines, pass `--scope '{"_tag":"lines","anchor":{"path":"src/a.ts","start":{"side":"new","line":12},"end":{"side":"new","line":18}}}'`, side `new` or `old`. The lines must sit inside one part of the revision's diff, or the question is refused.
 
-One question is answered at a time per PR: asking while another is being answered fails with a conflict, so wait first or stop it with `prkit questions stop <pr> --question-id <question-id>`, which keeps the text written so far. `wait --for question` returns when none is being answered; check each question's `state` in `questions list`, since `failed` carries its reason in `message`. Asking again retries a stopped or failed question. Read the `answer` and tell the user what it says, and where it cites files and lines. To keep one in the guide for the user, `prkit questions pin <pr> --question-id <question-id> --pinned` pins an answered question to its chapter in prkit; `--no-pinned` unpins it.
+One question is answered at a time per PR: asking while another is being answered fails with a conflict, so wait first or stop it with `prkit questions stop <pr> --question-id <question-id>`, which keeps the text written so far. `questions wait` follows the question you name until it is answered, stopped or failed, even when someone else asks about the same PR; check its `state`, since `failed` carries its reason in `message`. `questions list` reads every question. Asking again retries a stopped or failed question. Read the `answer` and tell the user what it says, and where it cites files and lines. To keep one in the guide for the user, `prkit questions pin <pr> --question-id <question-id> --pinned` pins an answered question to its chapter in prkit; `--no-pinned` unpins it.
 
 ### Hand review comments to the fix agent
 

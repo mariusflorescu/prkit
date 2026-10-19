@@ -106,7 +106,7 @@ Scope reads accept `{"_tag":"repository","repositoryId":"<id>"}` or `{"_tag":"pu
 | `prkit questions ask <pr> --question 'Why this default?' --request-id ask-42` | Asks the guide's agent and returns the question's id at once. Optional `--revision` (the latest accepted one by default) and `--scope`.      |
 | `prkit questions stop <pr> --question-id <question-id>`                       | Stops a question being answered; the text so far stays as its answer.                                                                        |
 | `prkit questions pin <pr> --question-id <question-id> --pinned`               | Pins an answered question to its chapter in the guide, in prkit only. `--no-pinned` unpins it.                                               |
-| `prkit wait <pr> --for question --timeout 600 --json`                         | Waits until none of the PR's questions is starting, waiting or answering, and returns the newest one.                                        |
+| `prkit questions wait <pr> --question-id <question-id> --timeout 600 --json`  | Waits until that question is answered, stopped or failed, and returns it with its answer. Another question on the PR never ends the wait.    |
 
 `--scope` takes one of three tagged JSON shapes. Without it the question is about the whole pull request:
 

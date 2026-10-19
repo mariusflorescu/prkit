@@ -38,6 +38,7 @@ const LONG_CALLS = new Set([
   "wait_for",
   "wait_for_local_guide",
   "wait_for_local_question",
+  "wait_for_question",
   "generate_local_guide",
 ]);
 
