@@ -271,3 +271,15 @@ export const updateManifestEntry = (
   }
   return lines.join("\n");
 };
+
+/**
+ * The manifest with `releaseNotes`, as one JSON line, which YAML reads. Undefined when it has
+ * notes already.
+ */
+export const withReleaseNotes = (
+  manifest: string,
+  notes: ReadonlyArray<{ readonly version: string; readonly note: string }>,
+) =>
+  /^releaseNotes:/m.test(manifest)
+    ? undefined
+    : `${manifest.trimEnd()}\nreleaseNotes: ${JSON.stringify(notes)}\n`;

@@ -18,7 +18,7 @@ import * as NodeUtil from "node:util";
 
 import * as Schema from "effect/Schema";
 
-import { resolveMockUpdatePort } from "./desktop-artifact/config.ts";
+import { resolveMockUpdatePort, withReleaseNotes } from "./desktop-artifact/config.ts";
 
 const say = (message: string) => process.stdout.write(`[mock-update-server] ${message}\n`);
 
@@ -65,12 +65,9 @@ const fakeNote = (version: string) => `### Features
 
 - Keep the update button in view while it downloads ${version} ([#43](https://github.com/acme/widgets/pull/43))`;
 
-/** YAML reads JSON, so the notes go in as one JSON line. */
 const withNotes = (manifest: string) => {
-  if (/^releaseNotes:/m.test(manifest)) return manifest;
   const version = /^version:\s*(\S+)/m.exec(manifest)?.[1] ?? "";
-  const entries = notes ?? [{ version, note: fakeNote(version) }];
-  return `${manifest.trimEnd()}\nreleaseNotes: ${JSON.stringify(entries)}\n`;
+  return withReleaseNotes(manifest, notes ?? [{ version, note: fakeNote(version) }]) ?? manifest;
 };
 
 const inside = (file: string) => {

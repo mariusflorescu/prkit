@@ -7,7 +7,9 @@ import {
   type UpdateChannel,
 } from "@prkit/contracts";
 
-/** What electron-updater reports: one body, a body per version (fullChangelog), or nothing. */
+import { compareVersions } from "./versions.ts";
+
+/** What electron-updater reports: one body, a body per version, or nothing. */
 export type RawReleaseNotes =
   | string
   | ReadonlyArray<{ readonly version: string; readonly note?: string | null }>
@@ -47,12 +49,13 @@ const decodeEntities = (text: string) =>
   text.replace(/&([a-zA-Z]+|#\d+|#x[0-9a-fA-F]+);/g, (_, entity: string) => decodeEntity(entity));
 
 /**
- * GitHub's feed carries the body as HTML; a generic feed carries the markdown. Both become the
- * same markdown lines: headings, `- ` items, and links as `[text](href)`. Every other tag goes,
- * so no markup ever reaches the page.
+ * GitHub's feed carries the body as HTML, which always opens with a tag; the update manifest
+ * carries git-cliff's markdown, where a `<tag>` is text, such as a code span's. Both become the
+ * same markdown lines, and the page shows every line as text.
  */
-const toMarkdownLines = (body: string) =>
-  body
+const toMarkdownLines = (body: string) => {
+  if (!/^\s*</.test(body)) return body.split("\n");
+  return body
     .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, "")
     .replace(/<a\b[^>]*?\bhref\s*=\s*"([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_, href, text) => {
       const label = String(text).replace(/<[^>]*>/g, "");
@@ -65,6 +68,7 @@ const toMarkdownLines = (body: string) =>
     .replace(/<\/(?:p|div|li|h[1-6]|ul|ol|blockquote)>/gi, "\n")
     .replace(/<[^>]*>/g, "")
     .split("\n");
+};
 
 const PULL_REQUEST_URL = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/;
 const MARKDOWN_LINK = /\[([^\]]*)\]\(([^)\s]*)\)/g;
@@ -143,23 +147,30 @@ export const parseReleaseBody = (version: string, body: string): ReleaseNotesVer
   return { version, groups: filled, summary: filled.length > 0 ? null : summary, omittedItems };
 };
 
+interface UpdateSpan {
+  readonly running: string;
+  readonly offered: string;
+  readonly channel: UpdateChannel;
+}
+
 /**
- * electron-updater's release notes in the shape the page shows, newest first. Only versions on
- * the track being followed are kept, the same test the offered version itself passes.
+ * The notes in the shape the page shows, newest first, for the versions the update brings. The
+ * manifest lists earlier releases of the track too, the running one among them.
  */
-export const normalizeReleaseNotes = (
-  raw: RawReleaseNotes,
-  offeredVersion: string,
-  channel: UpdateChannel,
-): ReleaseNotes => {
+export const normalizeReleaseNotes = (raw: RawReleaseNotes, update: UpdateSpan): ReleaseNotes => {
   const entries =
     typeof raw === "string"
-      ? [{ version: offeredVersion, note: raw }]
+      ? [{ version: update.offered, note: raw }]
       : raw === null || raw === undefined
         ? []
         : raw;
   const versions = entries
-    .filter((entry) => channelOfVersion(entry.version) === channel)
+    .filter(
+      (entry) =>
+        channelOfVersion(entry.version) === update.channel &&
+        compareVersions(entry.version, update.running) > 0 &&
+        compareVersions(entry.version, update.offered) <= 0,
+    )
     .map((entry) => parseReleaseBody(entry.version, entry.note ?? ""))
     .filter((version) => version.groups.length > 0 || version.summary !== null);
   return {

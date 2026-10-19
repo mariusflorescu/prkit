@@ -15,6 +15,7 @@ import { ElectronUpdater, type UpdaterChannelOptions } from "./ElectronUpdater.t
 import { normalizeReleaseNotes } from "./releaseNotes.ts";
 import { initialUpdateState, reduceUpdateState, type UpdateEvent } from "./updateMachine.ts";
 import { parseUpdateFeed, UpdateHost } from "./UpdateHost.ts";
+import { compareVersions } from "./versions.ts";
 
 export const STARTUP_DELAY = "15 seconds";
 export const POLL_INTERVAL = "10 minutes";
@@ -41,41 +42,6 @@ const updaterChannel = (channel: UpdateChannel): UpdaterChannelOptions => ({
 /** A check would replace what's being downloaded or waits to install. */
 const canCheck = (state: DesktopUpdateState) =>
   state.status !== "disabled" && state.status !== "downloading" && state.status !== "downloaded";
-
-const PRERELEASE_PART = /^\d+$/;
-
-/** Semver order of two plain versions (`1.2.3` or `1.2.3-nightly.20261016.1`); 0 when either isn't one. */
-export const compareVersions = (left: string, right: string) => {
-  const parse = (version: string) => {
-    const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(version);
-    return match === null
-      ? undefined
-      : {
-          core: [Number(match[1]), Number(match[2]), Number(match[3])],
-          pre: match[4] === undefined ? [] : match[4].split("."),
-        };
-  };
-  const a = parse(left);
-  const b = parse(right);
-  if (a === undefined || b === undefined) return 0;
-  for (let index = 0; index < 3; index++) {
-    const difference = (a.core[index] ?? 0) - (b.core[index] ?? 0);
-    if (difference !== 0) return Math.sign(difference);
-  }
-  // A release ranks above its prereleases.
-  if (a.pre.length === 0 || b.pre.length === 0) return Math.sign(b.pre.length - a.pre.length);
-  for (let index = 0; index < Math.min(a.pre.length, b.pre.length); index++) {
-    const x = a.pre[index] ?? "";
-    const y = b.pre[index] ?? "";
-    if (x === y) continue;
-    const xNumeric = PRERELEASE_PART.test(x);
-    const yNumeric = PRERELEASE_PART.test(y);
-    if (xNumeric && yNumeric) return Math.sign(Number(x) - Number(y));
-    if (xNumeric !== yNumeric) return xNumeric ? -1 : 1;
-    return x < y ? -1 : 1;
-  }
-  return Math.sign(a.pre.length - b.pre.length);
-};
 
 /**
  * Finds, downloads and installs app updates through electron-updater, one action at a time,
@@ -185,7 +151,11 @@ export const make = Effect.gen(function* () {
         yield* dispatch({
           _tag: "UpdateAvailable",
           version: found.version,
-          releaseNotes: normalizeReleaseNotes(found.releaseNotes, found.version, channel),
+          releaseNotes: normalizeReleaseNotes(found.releaseNotes, {
+            offered: found.version,
+            running: host.appVersion,
+            channel,
+          }),
           at,
         });
         return null;

@@ -11,6 +11,10 @@
  *   node scripts/release-version.ts notes --version 0.2.0 [--from <ref>] [--to <ref>]
  *     Markdown for the release body, from the commits in from..to. `--to` defaults to HEAD,
  *     and without `--from` the notes start at the first commit.
+ *   node scripts/release-version.ts manifest-notes --version 0.2.0 [--from <ref>] [--to <ref>]
+ *     The update manifest's `releaseNotes` as JSON: `[{"version","note"}]`, newest first. The
+ *     first entry is what `notes` prints; then come the releases before it on its track (stable
+ *     or nightly), from the tags merged into `--to`, at most 10 in all.
  *
  * Every subcommand exits 0 when it worked, also when it printed nothing, and 1 with the reason
  * on stderr otherwise. PR links point at `--repository owner/name`, else GITHUB_REPOSITORY,
@@ -28,6 +32,10 @@ const config = NodePath.join(repoRoot, "cliff.toml");
 const gitCliff = NodePath.join(repoRoot, "node_modules", ".bin", "git-cliff");
 
 const stableVersion = /^\d+\.\d+\.\d+$/;
+const stableTag = /^v\d+\.\d+\.\d+$/;
+const nightlyTag = /^v\d+\.\d+\.\d+-nightly\.\d{8}\.\d+$/;
+/** The app shows six versions and says when it left older ones out, so ten is plenty. */
+const MANIFEST_RELEASES = 10;
 const repositoryName = /^[\w.-]+\/[\w.-]+$/;
 
 const { positionals, values } = NodeUtil.parseArgs({
@@ -124,6 +132,33 @@ const notes = (version: string, from: string | undefined, to: string) => {
   return body.length > 0 ? body : "No user-facing changes in this release.";
 };
 
+const earlierReleases = (version: string, to: string) => {
+  const track = nightlyTag.test(`v${version}`) ? nightlyTag : stableTag;
+  const tags = run("git", ["tag", "--list", "--merged", commitOf(to), "--sort=v:refname", "v*"]);
+  if (!tags.ok) fail(`git couldn't list the tags merged into ${to}:\n${tags.stderr.trim()}`);
+  return tags.stdout.split("\n").filter((tag) => track.test(tag) && tag !== `v${version}`);
+};
+
+/**
+ * `version`'s notes, then each earlier release of its track with the notes it was published
+ * with, from the release before it. The oldest nightly tag left is skipped: its notes start at a
+ * nightly the release workflow may have deleted. The first stable's start at the first commit.
+ */
+const manifestNotes = (version: string, from: string | undefined, to: string) => {
+  const tags = earlierReleases(version, to);
+  const nightly = nightlyTag.test(`v${version}`);
+  const earlier = tags
+    .map((tag, index) => ({ tag, previous: tags[index - 1] }))
+    .filter((release) => !nightly || release.previous !== undefined)
+    .toReversed()
+    .slice(0, MANIFEST_RELEASES - 1)
+    .map(({ tag, previous }) => ({
+      version: tag.slice(1),
+      note: notes(tag.slice(1), previous, tag),
+    }));
+  return [{ version, note: notes(version, from, to) }, ...earlier];
+};
+
 const subcommand = positionals[0];
 if (subcommand === "next") {
   const version = nextVersion();
@@ -135,11 +170,18 @@ if (subcommand === "next") {
   if (!/^[1-9]\d*$/.test(runNumber)) fail("--run must be a positive whole number.");
   const version = nextVersion();
   if (version !== undefined) console.log(`${version}-nightly.${date}.${runNumber}`);
-} else if (subcommand === "notes") {
+} else if (subcommand === "notes" || subcommand === "manifest-notes") {
   const version = values.version ?? "";
   if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/.test(version))
     fail("--version must be a version like 1.2.3 or 1.2.3-nightly.20261014.7.");
-  console.log(notes(version, values.from, values.to ?? "HEAD"));
+  const to = values.to ?? "HEAD";
+  console.log(
+    subcommand === "notes"
+      ? notes(version, values.from, to)
+      : JSON.stringify(manifestNotes(version, values.from, to)),
+  );
 } else {
-  fail("Usage: release-version next | nightly --date YYYYMMDD --run N | notes --version V");
+  fail(
+    "Usage: release-version next | nightly --date YYYYMMDD --run N | notes --version V | manifest-notes --version V",
+  );
 }

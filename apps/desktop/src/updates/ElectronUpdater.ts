@@ -66,7 +66,8 @@ export const make = ElectronUpdater.of({
   configure: Effect.sync(() => {
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = false;
-    // Every version between this one and the offered one brings its notes.
+    // Only a manifest without notes falls back to the releases feed. Without fullChangelog, a
+    // stable release missing from the feed would get the body of the feed's first entry.
     autoUpdater.fullChangelog = true;
   }),
   applyChannel: (options) =>
