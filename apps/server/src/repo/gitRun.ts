@@ -1,7 +1,14 @@
+import { childEnv } from "@prkit/contracts";
+import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import type * as FileSystem from "effect/FileSystem";
 import type * as Path from "effect/Path";
+import type { PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import { ChildProcess, type ChildProcessSpawner } from "effect/process";
+
+import { makeKeyedGate } from "../github/keyedGate.ts";
 
 /**
  * Config a planted file could otherwise make prkit's own git run as a program, pinned off
@@ -209,3 +216,113 @@ export const checkIntegrity = (fs: FileSystem.FileSystem, path: Path.Path, check
       .pipe(Effect.orElseSucceed(() => false));
     if (hasWorktreeConfig) return yield* refuse("a per-worktree config was added");
   });
+
+/** RepoCache's git machinery: one command builder and one gate per repository. */
+export const makeGitRunner = ({
+  spawner,
+  gitconfig,
+}: {
+  readonly spawner: Context.Service.Shape<typeof ChildProcessSpawner.ChildProcessSpawner>;
+  readonly gitconfig: string;
+}) => {
+  /**
+   * Every git command, prkit's and the agent's, runs with this. GIT_NO_LAZY_FETCH
+   * makes a missing object an error instead of a fetch with no or the wrong identity.
+   */
+  const isolatedGitEnv = {
+    GIT_CONFIG_GLOBAL: gitconfig,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_NO_LAZY_FETCH: "1",
+  };
+  const withRepository = makeKeyedGate<string>(1);
+  const serialized =
+    (repo: string) =>
+    <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      withRepository(repo, effect);
+
+  /**
+   * Every git command runs with the safety flags prepended and GIT_DIR / GIT_COMMON_DIR /
+   * GIT_WORK_TREE from the target, so a worktree's own `.git`, `commondir` or config can't
+   * steer it (docs/internals/architecture.md "Repository access"). Integrity is a separate,
+   * explicit check (`verifyCheckout`), so the command builder stays free of its error.
+   */
+  const runWith = <S>(
+    args: ReadonlyArray<string>,
+    options: {
+      readonly target: GitTarget;
+      readonly env?: Readonly<Record<string, string>>;
+      readonly input?: string;
+    },
+    readStdout: (
+      stdout: Stream.Stream<Uint8Array, PlatformError>,
+    ) => Effect.Effect<S, PlatformError>,
+  ) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const cwd = cwdOf(options.target);
+        const child = yield* spawner.spawn(
+          ChildProcess.make("git", gitArgs(args, options.target), {
+            ...(cwd === undefined ? {} : { cwd }),
+            env: childEnv(process.env, {
+              ...isolatedGitEnv,
+              ...gitDirEnv(options.target),
+              ...options.env,
+            }),
+            extendEnv: false,
+            stdin:
+              options.input === undefined
+                ? "ignore"
+                : Stream.make(new TextEncoder().encode(options.input)),
+          }),
+        );
+        const [stdout, stderr, code] = yield* Effect.all(
+          [
+            readStdout(child.stdout),
+            child.stderr.pipe(Stream.decodeText(), Stream.mkString),
+            child.exitCode,
+          ],
+          { concurrency: "unbounded" },
+        );
+        return { stdout, stderr, code };
+      }),
+    ).pipe(
+      Effect.catchTag("PlatformError", () =>
+        Effect.fail(
+          new RepoError({
+            reason: "repository",
+            message: "Couldn't run git. Install git and make sure it is on your PATH.",
+          }),
+        ),
+      ),
+    );
+  const run = (args: ReadonlyArray<string>, options: Parameters<typeof runWith>[1]) =>
+    runWith(args, options, (stdout) => stdout.pipe(Stream.decodeText(), Stream.mkString));
+  /** For output that holds file bytes, which a string would mangle. */
+  const runBytes = (args: ReadonlyArray<string>, options: Parameters<typeof runWith>[1]) =>
+    runWith(args, options, Stream.mkUint8Array);
+  const git = (
+    args: ReadonlyArray<string>,
+    options: Parameters<typeof run>[1] & { readonly failure?: string },
+  ) =>
+    run(args, options).pipe(
+      Effect.flatMap((result) => {
+        if (result.code === 0) return Effect.succeed(result.stdout);
+        return Effect.logWarning("git failed").pipe(
+          Effect.annotateLogs({ args: args.slice(0, 2).join(" "), stderr: result.stderr.trim() }),
+          Effect.andThen(
+            Effect.fail(
+              new RepoError({
+                reason: "repository",
+                message: options.failure ?? "A git command failed while preparing the code.",
+              }),
+            ),
+          ),
+        );
+      }),
+    );
+
+  return { isolatedGitEnv, serialized, run, runBytes, git };
+};
+
+export type GitRunner = ReturnType<typeof makeGitRunner>;
