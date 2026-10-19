@@ -54,7 +54,7 @@ export const make = Effect.gen(function* () {
       return settings;
     }).pipe(
       Effect.catchTags({
-        SqlError: failure("prkit couldn't read your guide settings. Try again."),
+        SqlError: failure("prkit couldn't read your guide settings."),
         SchemaError: failure("prkit read damaged guide settings. Choose them again."),
       }),
     );
@@ -88,8 +88,8 @@ export const make = Effect.gen(function* () {
       return yield* get();
     }).pipe(
       Effect.catchTags({
-        SqlError: failure("prkit couldn't save your guide settings. Try again."),
-        SchemaError: failure("prkit couldn't save those guide settings. Try again."),
+        SqlError: failure("prkit couldn't save your guide settings."),
+        SchemaError: failure("prkit couldn't save those guide settings."),
       }),
     );
 

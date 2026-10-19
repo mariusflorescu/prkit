@@ -282,8 +282,8 @@ export const make = Effect.gen(function* () {
   const refuse = (reason: AskError["reason"], message: string) =>
     Effect.fail(new AskError({ reason, message }));
   const storeFailures = {
-    SqlError: () => refuse("failed", "prkit couldn't read or save the question. Try again."),
-    SchemaError: () => refuse("failed", "prkit read a damaged question record. Try again."),
+    SqlError: () => refuse("failed", "prkit couldn't read or save the question."),
+    SchemaError: () => refuse("failed", "prkit read a damaged question record."),
   };
   const toQuestion = (row: QuestionRow): Question => ({
     id: row.id,

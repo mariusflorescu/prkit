@@ -29,7 +29,7 @@ export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const failure = (message: string) => () => Effect.fail(new FixerError({ message }));
   const storage = {
-    SqlError: failure("prkit couldn't read or save the repository settings. Try again."),
+    SqlError: failure("prkit couldn't read or save the repository settings."),
     SchemaError: failure("prkit read damaged repository settings. Set them again."),
   };
 

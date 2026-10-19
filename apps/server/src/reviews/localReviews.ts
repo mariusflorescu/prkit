@@ -148,9 +148,9 @@ const decodeRevisionCommits = Schema.decodeUnknownEffect(
 
 const dbFailures = {
   SqlError: () =>
-    Effect.fail(new ReviewError({ message: "prkit couldn't read or save the review. Try again." })),
+    Effect.fail(new ReviewError({ message: "prkit couldn't read or save the review." })),
   SchemaError: () =>
-    Effect.fail(new ReviewError({ message: "prkit read a damaged review record. Try again." })),
+    Effect.fail(new ReviewError({ message: "prkit read a damaged review record." })),
 };
 
 /** The watch keeps one local review on screen, so its failures speak of that review. */

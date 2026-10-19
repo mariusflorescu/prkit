@@ -146,7 +146,7 @@ export const make = Effect.gen(function* () {
     sql`SELECT path FROM github_config_dirs ORDER BY path`.pipe(
       Effect.flatMap(Schema.decodeUnknownEffect(AddedDirs)),
       Effect.mapError(
-        () => new AccountsError({ message: "Couldn't read saved GitHub directories. Try again." }),
+        () => new AccountsError({ message: "Couldn't read saved GitHub directories." }),
       ),
     );
 
@@ -365,7 +365,7 @@ export const make = Effect.gen(function* () {
         return byDir;
       }),
       Effect.mapError(
-        () => new AccountsError({ message: "Couldn't read saved GitHub directories. Try again." }),
+        () => new AccountsError({ message: "Couldn't read saved GitHub directories." }),
       ),
     );
   /** A directory that can't be read keeps what it listed; one no longer found is forgotten. */
@@ -388,7 +388,7 @@ export const make = Effect.gen(function* () {
       )
       .pipe(
         Effect.mapError(
-          () => new AccountsError({ message: "Couldn't save your GitHub directories. Try again." }),
+          () => new AccountsError({ message: "Couldn't save your GitHub directories." }),
         ),
       );
 
@@ -570,9 +570,7 @@ export const make = Effect.gen(function* () {
             message: "This directory is already included in account discovery.",
           });
         yield* sql`INSERT INTO github_config_dirs (path) VALUES (${configDir}) ON CONFLICT DO NOTHING`.pipe(
-          Effect.mapError(
-            () => new AccountsError({ message: "Couldn't save this directory. Try again." }),
-          ),
+          Effect.mapError(() => new AccountsError({ message: "Couldn't save this directory." })),
         );
         return yield* discover();
       }),
@@ -588,9 +586,7 @@ export const make = Effect.gen(function* () {
             message: "Only directories you added in Settings can be removed.",
           });
         yield* sql`DELETE FROM github_config_dirs WHERE path = ${configDir}`.pipe(
-          Effect.mapError(
-            () => new AccountsError({ message: "Couldn't remove this directory. Try again." }),
-          ),
+          Effect.mapError(() => new AccountsError({ message: "Couldn't remove this directory." })),
         );
         return yield* discover();
       }),

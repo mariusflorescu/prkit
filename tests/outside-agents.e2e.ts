@@ -887,8 +887,7 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
     async ({ app, screen, browser }) => {
       const name = "outside-agents-failed-save";
       const fake = await startFakeGitHub(name);
-      const failure =
-        "prkit couldn't write its file for outside agents, so nothing changed. Try again.";
+      const failure = "prkit couldn't write its file for outside agents, so nothing changed.";
       const toggle = screen.getByRole("switch", "Let my coding agents use prkit");
       const tops = () =>
         browser.evaluate(() =>

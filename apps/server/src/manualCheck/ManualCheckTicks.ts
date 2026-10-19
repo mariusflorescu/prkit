@@ -106,7 +106,7 @@ export const make = Effect.gen(function* () {
     });
 
   const ticks = (subject: ReviewSubject) =>
-    readTicks(subject).pipe(storage(subject, "prkit couldn't read your ticks. Try again."));
+    readTicks(subject).pipe(storage(subject, "prkit couldn't read your ticks."));
 
   /** Tells every window to read this subject's ticks again; call it after the write is saved. */
   const announceChanged = (subject: ReviewSubject) =>

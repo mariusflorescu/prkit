@@ -127,7 +127,7 @@ export const make = ElectronUpdater.of({
         Effect.fail(
           new UpdaterFailed({
             operation: "install",
-            message: "prkit didn't restart to install the update. Try again.",
+            message: "prkit didn't restart to install the update.",
           }),
         ),
     }),

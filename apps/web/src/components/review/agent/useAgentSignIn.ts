@@ -70,7 +70,7 @@ export function useAgentSignIn(instance: AgentInstanceId) {
     latest?.status === "pending"
       ? (step ?? { _tag: "opening" })
       : latest?.status === "error"
-        ? { _tag: "failed", message: latest.error?.message ?? "Signing in stopped. Try again." }
+        ? { _tag: "failed", message: latest.error?.message ?? "Signing in stopped." }
         : { _tag: "idle" };
   return {
     state,

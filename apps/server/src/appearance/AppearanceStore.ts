@@ -50,7 +50,7 @@ export const make = Effect.gen(function* () {
       return settings;
     }).pipe(
       Effect.catchTags({
-        SqlError: failure("prkit couldn't read your appearance. Try again."),
+        SqlError: failure("prkit couldn't read your appearance."),
         SchemaError: failure("prkit read a damaged appearance setting. Choose it again."),
       }),
     );
@@ -84,8 +84,8 @@ export const make = Effect.gen(function* () {
       return yield* get();
     }).pipe(
       Effect.catchTags({
-        SqlError: failure("prkit couldn't save your appearance. Try again."),
-        SchemaError: failure("prkit couldn't save that appearance. Try again."),
+        SqlError: failure("prkit couldn't save your appearance."),
+        SchemaError: failure("prkit couldn't save that appearance."),
       }),
     );
 

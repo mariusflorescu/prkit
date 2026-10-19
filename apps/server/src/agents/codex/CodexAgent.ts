@@ -391,8 +391,8 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
               reason: "auth",
               message:
                 status === "signed-in"
-                  ? `prkit couldn't sign out ${setup.label}'s ChatGPT login, so it kept the agent. Try again.`
-                  : `prkit couldn't confirm ${setup.label}'s ChatGPT login is signed out, so it kept the agent. Try again.`,
+                  ? `prkit couldn't sign out ${setup.label}'s ChatGPT login, so it kept the agent.`
+                  : `prkit couldn't confirm ${setup.label}'s ChatGPT login is signed out, so it kept the agent.`,
             });
         }
         yield* fs.remove(home, { recursive: true, force: true });
@@ -452,8 +452,8 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
                 new AgentError({
                   reason: "auth",
                   message: Option.isSome(done)
-                    ? `Signing in to Codex didn't finish (${done.value.error ?? "no reason given"}). Try again.`
-                    : "Codex stopped before the sign-in finished. Try again.",
+                    ? `Signing in to Codex didn't finish (${done.value.error ?? "no reason given"}).`
+                    : "Codex stopped before the sign-in finished.",
                 }),
               ),
         ),

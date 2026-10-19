@@ -74,7 +74,7 @@ export const make = Effect.gen(function* () {
         Effect.mapError(() => new ReviewedFilesError({ ...target, reason: "storage", message })),
       );
   const readFailure = (target: ReviewedTarget) =>
-    storage(target, "prkit couldn't read your reviewed files. Try again.");
+    storage(target, "prkit couldn't read your reviewed files.");
   const saveFailure = (target: ReviewedTarget) =>
     storage(target, "prkit couldn't save your reviewed files. Try again.");
 

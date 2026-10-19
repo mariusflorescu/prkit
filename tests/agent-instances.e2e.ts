@@ -406,7 +406,7 @@ test(
       // This instance's HOME is a stand-in with no keychain, so Codex can't say the login is
       // signed out: the removal is refused and the home kept, as it must be.
       await expect(confirm.getByRole("alert")).toHaveText(
-        "prkit couldn't confirm Personal's ChatGPT login is signed out, so it kept the agent. Try again.",
+        "prkit couldn't confirm Personal's ChatGPT login is signed out, so it kept the agent.",
         { timeout: 30_000 },
       );
       await shoot(app, browser, "u67-remove-agent-unconfirmed");

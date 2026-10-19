@@ -325,10 +325,7 @@ test(
       });
       await app.open(filesUrl(run.url, ACCOUNT));
       await expect(count).toHaveText(/^Reviewed files unavailable/, { timeout: 30_000 });
-      await expect(count).toHaveAttribute(
-        "title",
-        "prkit couldn't read your reviewed files. Try again.",
-      );
+      await expect(count).toHaveAttribute("title", "prkit couldn't read your reviewed files.");
       await expect(browser.locator("[data-file-diff-card]")).toHaveCount(6);
       await expect(screen.getByRole("checkbox", /^Reviewed /)).toHaveCount(0);
       await app.screenshot("files-read-failed");

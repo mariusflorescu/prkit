@@ -544,12 +544,7 @@ export const makeActions = (reads: {
             Effect.annotateLogs({ key, accountId, timeoutMs: 40_000 }),
             Effect.andThen(
               Effect.fail(
-                fail(
-                  key,
-                  accountId,
-                  "network",
-                  "GitHub took too long to load action choices. Try again.",
-                ),
+                fail(key, accountId, "network", "GitHub took too long to load action choices."),
               ),
             ),
           ),
