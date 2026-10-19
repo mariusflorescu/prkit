@@ -22,7 +22,7 @@ import { repoRoot } from "../scripts/verify-run.ts";
 import { setUpFakeClaude } from "./fakeClaude.ts";
 import { startFakeGitHub, startFakeInstance, stopFakeInstance } from "./fakeGitHub.ts";
 import { readRows } from "./fixturePr.ts";
-import { cliIn, switchOn } from "./localGuideSession.ts";
+import { cliIn, dismissToasts, switchOn } from "./localGuideSession.ts";
 import { outsideGit } from "./outsideGit.ts";
 import { startBridge, type Bridge } from "./outsideBridge.ts";
 
@@ -665,6 +665,7 @@ test(
     try {
       const run = startFakeInstance(name, fake);
       await switchOn({ app, screen, browser }, run.openUrl);
+      await dismissToasts(browser);
       const cli = cliIn(NodePath.join(run.home, "bin/prkit"), fake.home, []);
       const saveFromCli = (search: string, sort: string) => {
         const result = cli(repoRoot, [
@@ -689,6 +690,8 @@ test(
             "SELECT json_extract(inbox_filters, '$.search') AS s FROM workspace",
           )[0]?.s,
         );
+      // Every save bumps it by one, so the agent's save alone moves it by one.
+      const version = () => Number(readRows(run.home, "SELECT version FROM workspace")[0]?.version);
       const rows = () =>
         browser.evaluate(() =>
           [...document.querySelectorAll("main a[data-pr-number]")]
@@ -703,7 +706,9 @@ test(
       await expect.poll(rows, { timeout: 20_000 }).toBe("1,2,3,4,5,6");
       const origin = await loaded();
 
-      // The CLI saves filters while the Inbox is open: they show within moments, no reload.
+      // The CLI saves filters while the Inbox is open: they show within moments, no reload,
+      // and the window saves nothing back.
+      const before = version();
       saveFromCli("fixture 2", "size");
       await expect(search).toHaveValue("fixture 2", { timeout: 5_000 });
       await expect.poll(rows).toBe("2");
@@ -712,19 +717,41 @@ test(
       await app.screenshot("outside-filters-live");
       await new Promise((resolve) => setTimeout(resolve, 1_500));
       expect(savedFilters()).toBe("fixture 2");
+      expect(version()).toBe(before + 1);
 
       // The user types while an agent saves: what the user typed stays, and becomes the saved
-      // search once the typing pauses.
+      // search once the typing pauses. Each keystroke restarts the 400 ms before typing is sent,
+      // so the user's change is still unsent when the agent's save lands, however long it takes.
       bridge = startBridge(run.home, "filters client");
       await bridge.initialize();
-      await search.fill("fixture 3");
-      const answer = await bridge.call("save_inbox_filters", {
-        search: "fixture 5",
-        account: null,
-        repository: null,
-        sort: "updated",
-      });
-      expect(answer).toMatchObject({ isError: false });
+      await search.fill("fixture");
+      let stored = false;
+      const agentSave = bridge
+        .call("save_inbox_filters", {
+          search: "fixture 5",
+          account: null,
+          repository: null,
+          sort: "updated",
+        })
+        .then((answer) => {
+          stored = true;
+          return answer;
+        });
+      const typedUntil = Date.now() + 20_000;
+      let settled = 0;
+      while (settled < 5) {
+        if (Date.now() > typedUntil) throw new Error("The agent's save never landed.");
+        await browser.keyboard.type(" ");
+        await browser.keyboard.press("Backspace");
+        expect(await search.inputValue()).toBe("fixture");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        if (stored) {
+          expect(savedFilters()).toBe("fixture 5");
+          settled += 1;
+        }
+      }
+      expect(await agentSave).toMatchObject({ isError: false });
+      await browser.keyboard.type(" 3");
       await expect.poll(savedFilters, { timeout: 5_000 }).toBe("fixture 3");
       await expect(search).toHaveValue("fixture 3");
       await expect.poll(rows).toBe("3");
@@ -739,12 +766,14 @@ test(
       });
       await screen.getByRole("link", "Inbox").tap();
       await expect(search).toHaveValue("fixture 3");
+      const later = version();
       saveFromCli("fixture 4", "updated");
       await expect(search).toHaveValue("fixture 4", { timeout: 5_000 });
       await expect.poll(rows).toBe("4");
       await expect(sort).toContainText("Recently updated");
       await new Promise((resolve) => setTimeout(resolve, 1_500));
       expect(savedFilters()).toBe("fixture 4");
+      expect(version()).toBe(later + 1);
       expect(await loaded()).toBe(origin);
       await app.screenshot("outside-filters-after-tab");
     } finally {

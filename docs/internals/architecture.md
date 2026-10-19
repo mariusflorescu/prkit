@@ -70,7 +70,7 @@ SQLite goes through `effect/sql` with a small driver over `node:sqlite`, WAL mod
 
 Live PR data (titles, checks, comments, the current diff) is read from GitHub on demand and cached by the server; the last good answer of each read is also kept in `prkit.sqlite`, so a relaunch shows it before any network call (see GitHub reads). What prkit creates is persisted, including the exact diff each guide was written against, because a guide must keep rendering correctly after the PR moves on.
 
-The open-PR list and the Inbox's search, filters and sort are stored by the server too, not in `localStorage`: the window's origin includes the server port, and the port can change between launches. A load lets go of an account removed since the save, and a saved repository filter is dropped once every account's repository list was read whole after the save and neither it nor the inbox has the repository.
+The open-PR list and the Inbox's search, filters and sort are stored by the server too, not in `localStorage`: the window's origin includes the server port, and the port can change between launches. Every save of the filters, a window's, an outside agent's or the CLI's, is announced on the workspace's change stream, and the workspace's version orders them. A window with no change of its own waiting shows the newest; a change it hasn't sent yet wins and is saved after, and for one already on its way, the save stored last decides. A load lets go of an account removed since the save, and a saved repository filter is dropped once every account's repository list was read whole after the save and neither it nor the inbox has the repository.
 
 ## Domain model
 

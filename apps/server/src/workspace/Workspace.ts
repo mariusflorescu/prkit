@@ -44,7 +44,10 @@ export class Workspace extends Context.Service<Workspace, Effect.Success<typeof 
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const gate = yield* Semaphore.make(1);
-  /** Changes made other than through a window's own RPC, which windows apply as they come. */
+  /**
+   * Changes made other than through a window's own RPC, which windows apply as they come, and
+   * every save of the Inbox's filters.
+   */
   const announced = yield* PubSub.unbounded<WorkspaceChange>();
   // One transaction, so a review's removal can't land between reading its tab and the version.
   const read = () =>
@@ -168,12 +171,18 @@ export const make = Effect.gen(function* () {
           ),
         ),
     );
+  /**
+   * Every save is announced, a window's own included, so each open window shows the newest
+   * filters, whichever window, outside agent or CLI saved them.
+   */
   const saveInboxFilters = (filters: InboxFilters) =>
     Effect.gen(function* () {
       const saved = { ...filters, savedAt: DateTime.formatIso(yield* DateTime.now) };
       const stored = yield* Schema.encodeEffect(StoredFilters)(saved);
       yield* sql`UPDATE workspace SET inbox_filters = ${stored} WHERE id = 1`;
-      return { filters: saved, workspace: yield* read() };
+      const workspace = yield* read();
+      yield* PubSub.publish(announced, { _tag: "changed", workspace, focus: null });
+      return { filters: saved, workspace };
     }).pipe(
       gate.withPermits(1),
       Effect.mapError(
