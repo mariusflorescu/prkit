@@ -198,8 +198,7 @@ export const makeFixerState = Effect.gen(function* () {
       } satisfies FixerSnapshot;
     });
 
-  const appendActivity = (
-    key: PullRequestKey,
+  const recordActivity = (
     turnId: FixerTurnId,
     kind: "phase" | "tool" | "note" | "error",
     text: string,
@@ -209,16 +208,20 @@ export const makeFixerState = Effect.gen(function* () {
       const at = yield* now;
       yield* sql`INSERT INTO fixer_activity (turn_id, at, kind, text, detail)
         VALUES (${turnId}, ${at}, ${kind}, ${text}, ${detail})`;
-      yield* publish(key);
     });
+  const appendActivity = (
+    key: PullRequestKey,
+    turnId: FixerTurnId,
+    kind: "phase" | "tool" | "note" | "error",
+    text: string,
+    detail: string | null = null,
+  ) => recordActivity(turnId, kind, text, detail).pipe(Effect.andThen(publish(key)));
 
   /** Compare-and-set on the turn's state: a late write from a turn that moved on changes nothing. */
   const transition = (
     turnId: FixerTurnId,
     from: ReadonlyArray<FixerTurnState>,
     status: FixerTurnStatus,
-    /** Only a turn no change request ever ran on (`rounds = 0`). */
-    freshOnly = false,
   ) =>
     Effect.gen(function* () {
       const at = yield* now;
@@ -226,8 +229,7 @@ export const makeFixerState = Effect.gen(function* () {
       const rows = yield* sql`
         UPDATE fixer_turns SET status = ${encodeStatus(status)},
           finished_at = CASE WHEN ${ends ? 1 : 0} = 1 THEN ${at} ELSE finished_at END
-        WHERE id = ${turnId} AND json_extract(status, '$._tag') IN ${sql.in(from)}
-          AND (${freshOnly ? 1 : 0} = 0 OR rounds = 0) RETURNING id`;
+        WHERE id = ${turnId} AND json_extract(status, '$._tag') IN ${sql.in(from)} RETURNING id`;
       return rows.length > 0;
     });
 
@@ -304,6 +306,7 @@ export const makeFixerState = Effect.gen(function* () {
     turnsOf,
     autoResolvesLeft,
     snapshotOf,
+    recordActivity,
     appendActivity,
     transition,
     returnDrafts,
