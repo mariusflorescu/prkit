@@ -120,7 +120,8 @@ test(
       const fileNote = browser.locator(`[data-path="${LIMITS}"] [data-file-diff-note]`);
       const labelled = (label: string) =>
         browser.locator(`[data-guide-note][aria-label="${label}"]`);
-      const hiddenOne = tabs.getByText("1 guide note hidden");
+      const hiddenOne = tabs.getByRole("button", "1 guide note hidden");
+      const notesStatus = browser.locator("nav [data-guide-notes-status]");
       const hide = tabs.getByRole("button", "Hide guide notes");
       const show = tabs.getByRole("button", "Show guide notes");
       await expect(slug).toBeVisible({ timeout: 30_000 });
@@ -130,8 +131,8 @@ test(
       await expect(fileNote).toContainText("Guide");
       await expect(fileNote).toContainText(FILE_NOTE);
       await expect(hide).toHaveAttribute("aria-pressed", "true");
-      await expect(hiddenOne).toHaveAttribute(
-        "title",
+      await expect(hiddenOne).toBeVisible();
+      await expect(notesStatus).toContainText(
         "1 guide note is hidden: GitHub's diff doesn't show its line now.",
       );
       await expect(file).toContainText("3 questions");
@@ -195,8 +196,8 @@ test(
       await expect(url.getByRole("button", "Add as comment, risk on old line 2")).toBeVisible();
       await expect(check).toHaveCount(0);
       await expect(fileNote).toHaveCount(0);
-      await expect(tabs.getByText("Guide notes from an older commit")).toHaveAttribute(
-        "title",
+      await expect(tabs.getByRole("button", "Guide notes from an older commit")).toBeVisible();
+      await expect(notesStatus).toContainText(
         "Guide notes come from r1, written for an older commit. They show only where the code still reads the same. 3 no longer match and are hidden. prkit is updating the guide.",
         { timeout: 30_000 },
       );
@@ -234,7 +235,7 @@ test(
       await expect.poll(() => revisionCount(run.home), { timeout: 120_000 }).toBe(2);
       const newer = tabs.getByRole("button", "Show newer notes");
       await expect(newer).toBeVisible({ timeout: 30_000 });
-      await expect(newer).toHaveAttribute("title", /A newer guide is ready\.$/);
+      await expect(notesStatus).toContainText("A newer guide is ready.");
       await expect(check).toHaveCount(0);
       await browser.evaluate(() => {
         document.querySelector("[data-pr-scroll]")?.scrollTo({ top: 0, behavior: "instant" });

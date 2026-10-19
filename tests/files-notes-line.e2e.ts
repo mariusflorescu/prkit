@@ -18,6 +18,8 @@ const LIMITS = "src/limits.ts";
 const PR = "/pr/github.com/budget/fixtures/9?account=github.com%2Fbudget-test";
 const SLUG = "Why does a slug get its own limit here instead of in the shared config?";
 const OLDER = "Guide notes from an older commit";
+const STORY =
+  "Guide notes come from r1, written for an older commit. They show only where the code still reads the same.";
 
 const CHECKS = `export const limits = {
   url: 2048,
@@ -68,7 +70,10 @@ const recordFrames = (browser: Browser) =>
         const read = () => {
           const card = document.querySelector("[data-pr-files] [data-file-diff-card]");
           const toggle = document.querySelector("nav [aria-label$='guide notes']");
-          const words = toggle === null ? "no toggle" : `"${toggle.parentElement?.textContent}"`;
+          const said = document.querySelector(
+            "[data-guide-notes-status] [data-slot='tooltip-trigger']",
+          );
+          const words = toggle === null ? "no toggle" : `"${said?.textContent ?? ""}"`;
           const now =
             card === null
               ? "no card"
@@ -104,11 +109,27 @@ const restart = (browser: Browser) =>
 const tops = async (browser: Browser) => [
   ...new Set((await frames(browser)).map((frame) => frame.split(" | ")[0])),
 ];
+/** What the tab row says about the notes, which the keyboard can reach. */
+const SAID = "[data-guide-notes-status] [data-slot='tooltip-trigger']";
+const tabTo = async (browser: Browser, selector: string) => {
+  for (let presses = 0; presses < 20; presses++) {
+    const there = await browser.evaluate(
+      (match: string) => document.activeElement?.matches(match) ?? false,
+      selector,
+    );
+    if (there) return;
+    await browser.keyboard.press("Tab");
+  }
+  throw new Error(`Tab never reached ${selector}.`);
+};
+
 /** What the tab row says beside the notes toggle now, or null without the toggle. */
 const notesWords = (browser: Browser) =>
-  browser.evaluate(
-    () =>
-      document.querySelector("nav [aria-label$='guide notes']")?.parentElement?.textContent ?? null,
+  browser.evaluate(() =>
+    document.querySelector("nav [aria-label$='guide notes']") === null
+      ? null
+      : (document.querySelector("[data-guide-notes-status] [data-slot='tooltip-trigger']")
+          ?.textContent ?? ""),
   );
 
 const reads = async (fake: FakeGitHub, kind: string) => (await fake.stats()).byKind[kind] ?? 0;
@@ -209,25 +230,35 @@ test(
       await push(ELSEWHERE);
       await settle();
       expect(await tops(browser)).toEqual([start]);
-      const older = tabs.getByText(OLDER);
-      await expect(older).toHaveAttribute(
-        "title",
-        "Guide notes come from r1, written for an older commit. They show only where the code still reads the same. prkit is updating the guide.",
-        { timeout: 30_000 },
-      );
+      const older = tabs.getByRole("button", OLDER);
+      const notesStatus = browser.locator("nav [data-guide-notes-status]");
+      const story = `${STORY} prkit is updating the guide.`;
+      await expect(notesStatus).toContainText(story, { timeout: 30_000 });
       await expect(note).toBeVisible();
       expect(await tops(browser)).toEqual([start]);
       await shots(app, browser, "files-notes-line-older");
+
+      // The whole of it shows when the keyboard reaches the words.
+      await tabs.getByRole("link", "Files").focus();
+      await tabTo(browser, SAID);
+      await expect(older).toBeFocused();
+      const tooltip = browser.locator('[data-slot="tooltip-popup"]');
+      await expect(tooltip).toHaveText(story);
+      await settle();
+      await screenshotLightAndDark(app, browser, "files-notes-line-older-story");
+      await browser.keyboard.press("Shift+Tab");
+      await expect(tooltip).toHaveCount(0);
 
       // The next guide is ready while a comment is being written: it waits for the comment.
       await note.getByRole("button", "Add as comment, question on line 3").tap();
       const field = screen.getByRole("textbox", "Comment on line 3");
       await expect(field).toHaveValue(SLUG);
       claude.release();
-      await expect(tabs.getByText("Newer notes after your comment")).toHaveAttribute(
-        "title",
-        "Guide notes come from r1, written for an older commit. They show only where the code still reads the same. A newer guide is ready. You can show its notes once your comment is done.",
-        { timeout: 120_000 },
+      await expect(tabs.getByRole("button", "Newer notes after your comment")).toBeVisible({
+        timeout: 120_000,
+      });
+      await expect(notesStatus).toContainText(
+        `${STORY} A newer guide is ready. You can show its notes once your comment is done.`,
       );
       expect(await tops(browser)).toEqual([start]);
       await screenshotLightAndDark(app, browser, "files-notes-line-newer-writing");
@@ -237,10 +268,7 @@ test(
       // Then the tab row offers it, and the notes stay until asked.
       const newer = tabs.getByRole("button", "Show newer notes");
       await expect(newer).toBeVisible({ timeout: 30_000 });
-      await expect(newer).toHaveAttribute(
-        "title",
-        "Guide notes come from r1, written for an older commit. They show only where the code still reads the same. A newer guide is ready.",
-      );
+      await expect(notesStatus).toContainText(`${STORY} A newer guide is ready.`);
       await expect(older).toHaveCount(0);
       expect(await tops(browser)).toEqual([start]);
       await shots(app, browser, "files-notes-line-newer");
@@ -282,6 +310,7 @@ test(
 
       claude.release();
       await expect(hide).toHaveAttribute("aria-pressed", "true", { timeout: 120_000 });
+      await expect.poll(() => notesWords(browser), { timeout: 30_000 }).toBe("");
       await settle();
       expect(await tops(browser)).toEqual([start]);
       expect(await notesWords(browser)).toBe("");

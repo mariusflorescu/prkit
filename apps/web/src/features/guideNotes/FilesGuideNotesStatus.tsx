@@ -1,22 +1,27 @@
+import { useId } from "react";
+
 import { Button } from "~/components/ui/button";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { noNotesHere } from "./placeGuideNotes";
 import type { FilesGuideNotesState } from "./useFilesGuideNotes";
 
-/** What the tab row says about the notes: a few words with the whole story on hover, or an action. */
-type NotesStatus =
-  | {
-      readonly _tag: "words";
-      readonly words: string;
-      readonly story?: string;
-      readonly busy?: boolean;
-    }
-  | { readonly _tag: "failed"; readonly message: string; readonly retry: () => void }
-  | {
-      readonly _tag: "newer";
-      readonly story: string;
-      readonly loading: boolean;
-      readonly show: () => void;
-    };
+/** What the tab row says about the notes. */
+type NotesStatus = {
+  /** On the row, cut short when the window is narrow. */
+  readonly words: string;
+  /** All of it, on hover and focus, and read out with the words. */
+  readonly story: string;
+  readonly busy: boolean;
+  /** Retry a failed read, or take the newer guide, whose button the words become. */
+  readonly action: { readonly _tag: "retry" | "show"; readonly run: () => void } | null;
+};
+
+const said = (words: string, story = words): NotesStatus => ({
+  words,
+  story,
+  busy: false,
+  action: null,
+});
 
 const hiddenWords = (hidden: number, older: boolean) => {
   if (hidden === 0) return false;
@@ -31,16 +36,19 @@ const statusOf = (state: FilesGuideNotesState): NotesStatus | null => {
     case "none":
       return null;
     case "loading":
-      return { _tag: "words", words: "Loading guide notes...", busy: true };
+      return { ...said("Loading guide notes..."), busy: true };
     case "failed":
-      return { _tag: "failed", message: state.message, retry: state.retry };
+      return {
+        ...said("Guide notes unavailable", `Couldn't load the guide's notes. ${state.message}`),
+        action: { _tag: "retry", run: state.retry },
+      };
     case "hidden":
-      return state.waiting ? { _tag: "words", words: "Guide notes show after your comment" } : null;
+      return state.waiting ? said("Guide notes show after your comment") : null;
     case "ready":
       break;
   }
   const { notes, newer, hiding, updating } = state;
-  if (hiding) return { _tag: "words", words: "Guide notes hide after your comment" };
+  if (hiding) return said("Guide notes hide after your comment");
   // A guide with nothing for these files has nothing to qualify.
   const older = notes.older && !noNotesHere(notes);
   const story = [
@@ -59,58 +67,80 @@ const statusOf = (state: FilesGuideNotesState): NotesStatus | null => {
     .join(" ");
   if (story === "") return null;
   if (newer?.show != null)
-    return { _tag: "newer", story, loading: newer.loading, show: newer.show };
-  return {
-    _tag: "words",
+    return {
+      words: newer.loading ? "Loading..." : "Show newer notes",
+      story,
+      busy: newer.loading,
+      action: { _tag: "show", run: newer.show },
+    };
+  return said(
+    newer !== null
+      ? newer.taken
+        ? "Newer notes show after your comment"
+        : "Newer notes after your comment"
+      : older
+        ? "Guide notes from an older commit"
+        : `${notes.hidden} guide ${notes.hidden === 1 ? "note" : "notes"} hidden`,
     story,
-    words:
-      newer !== null
-        ? newer.taken
-          ? "Newer notes show after your comment"
-          : "Newer notes after your comment"
-        : older
-          ? "Guide notes from an older commit"
-          : `${notes.hidden} guide ${notes.hidden === 1 ? "note" : "notes"} hidden`,
-  };
+  );
 };
 
-// A column that may shrink to nothing: a narrow window cuts the words before the tab row scrolls.
-const WORDS = "grid grid-cols-[minmax(0,max-content)] text-xs text-muted-foreground";
-
-/** Beside the guide notes toggle, so nothing said about the notes ever moves the diffs. */
+/**
+ * Beside the guide notes toggle, so nothing said about the notes ever moves the diffs. One live
+ * region for as long as the toggle is there, so a screen reader hears each change.
+ */
 export function FilesGuideNotesStatus({ state }: { state: FilesGuideNotesState }) {
+  const storyId = useId();
   const status = statusOf(state);
-  if (status === null) return null;
-  if (status._tag === "newer")
-    return (
-      <Button
-        size="xs"
-        variant="outline"
-        title={status.story}
-        disabled={status.loading}
-        onClick={status.show}
-      >
-        {status.loading ? "Loading..." : "Show newer notes"}
-      </Button>
-    );
-  if (status._tag === "failed")
-    return (
-      <span role="alert" className="flex items-center gap-1.5">
-        <span className={WORDS}>
-          <span className="truncate" title={`Couldn't load the guide's notes. ${status.message}`}>
-            Guide notes unavailable
-          </span>
-        </span>
-        <Button variant="ghost-muted" size="micro" onClick={status.retry}>
-          Retry
-        </Button>
-      </span>
-    );
+  const told = status !== null && status.story !== status.words;
+  const show = status?.action?._tag === "show" ? status.action : null;
   return (
-    <span role="status" aria-busy={status.busy} className={WORDS}>
-      <span className="truncate" title={status.story}>
-        {status.words}
-      </span>
+    <span
+      role="status"
+      aria-busy={status?.busy === true || undefined}
+      data-guide-notes-status=""
+      className="flex items-center gap-1.5 text-xs text-muted-foreground"
+    >
+      {status !== null && (
+        <>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                show !== null ? (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    aria-describedby={told ? storyId : undefined}
+                    disabled={status.busy}
+                    onClick={show.run}
+                  />
+                ) : (
+                  // A column that may shrink to nothing: a narrow window cuts the words short
+                  // before the tab row scrolls.
+                  <button
+                    type="button"
+                    aria-describedby={told ? storyId : undefined}
+                    className="-mx-1 grid grid-cols-[minmax(0,max-content)] rounded-sm px-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                )
+              }
+            >
+              {show !== null ? status.words : <span className="truncate">{status.words}</span>}
+            </TooltipTrigger>
+            <TooltipPopup>{status.story}</TooltipPopup>
+          </Tooltip>
+          {told && (
+            <span id={storyId} className="sr-only">
+              {status.story}
+            </span>
+          )}
+          {status.action?._tag === "retry" && (
+            <Button variant="ghost-muted" size="micro" onClick={status.action.run}>
+              Retry
+            </Button>
+          )}
+        </>
+      )}
     </span>
   );
 }
