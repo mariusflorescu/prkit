@@ -9,7 +9,6 @@ import type { FilesGuideNotesState } from "./useFilesGuideNotes";
 /** A read quicker than this says nothing, so a guide landing never flashes "Loading". */
 const LOADING_WORDS_AFTER_MS = 500;
 
-/** Whether the notes have been loading long enough for the reader to wait on them. */
 function useLongLoad(loading: boolean) {
   const [long, setLong] = useState(false);
   if (!loading && long) setLong(false);
@@ -29,7 +28,10 @@ type NotesStatus = {
   readonly story: string;
   readonly busy: boolean;
   /** Beside the words, so what the keyboard is on never turns into something else. */
-  readonly action: { readonly _tag: "retry" | "show"; readonly run: () => void } | null;
+  readonly action:
+    | { readonly _tag: "retry" | "show"; readonly run: () => void }
+    | { readonly _tag: "retrying" }
+    | null;
 };
 
 const said = (words: string, story = words): NotesStatus => ({
@@ -57,6 +59,15 @@ const statusOf = (state: FilesGuideNotesState): NotesStatus | null => {
       return {
         ...said("Guide notes unavailable", `Couldn't load the guide's notes. ${state.message}`),
         action: { _tag: "retry", run: state.retry },
+      };
+    case "retrying":
+      return {
+        ...said(
+          "Guide notes unavailable",
+          "Couldn't load the guide's notes. prkit is reading them again.",
+        ),
+        busy: true,
+        action: { _tag: "retrying" },
       };
     case "hidden":
       return state.waiting ? said("Guide notes show after your comment") : null;
@@ -146,11 +157,22 @@ export function FilesGuideNotesStatus({ state }: { state: FilesGuideNotesState }
               variant={status.action._tag === "show" ? "outline" : "ghost-muted"}
               size="micro"
               disabled={status.busy}
-              onClick={status.action.run}
+              onClick={status.action._tag === "retrying" ? undefined : status.action.run}
             >
               <ButtonLabel
-                shown={status.action._tag === "retry" ? "retry" : status.busy ? "loading" : "show"}
-                labels={{ retry: "Retry", loading: "Loading...", show: "Show its notes" }}
+                shown={
+                  status.action._tag === "show"
+                    ? status.busy
+                      ? "loading"
+                      : "show"
+                    : status.action._tag
+                }
+                labels={{
+                  retry: "Retry",
+                  retrying: "Retrying...",
+                  loading: "Loading...",
+                  show: "Show its notes",
+                }}
               />
             </Button>
           )}

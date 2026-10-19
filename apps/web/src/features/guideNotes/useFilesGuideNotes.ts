@@ -13,6 +13,7 @@ export type FilesGuideNotesState =
   | { readonly _tag: "hidden"; readonly waiting: boolean }
   | { readonly _tag: "loading" }
   | { readonly _tag: "failed"; readonly message: string; readonly retry: () => void }
+  | { readonly _tag: "retrying" }
   | {
       readonly _tag: "ready";
       readonly notes: FilesGuideNotes;
@@ -30,6 +31,16 @@ export type FilesGuideNotesState =
       /** prkit is writing a new revision. */
       readonly updating: boolean;
     };
+
+/**
+ * A query that failed with no data and reads again. TanStack shows it as pending meanwhile, which
+ * would take the failure and its Retry off the row.
+ */
+const retrying = (query: {
+  readonly isFetching: boolean;
+  readonly errorUpdatedAt: number;
+  readonly dataUpdatedAt: number;
+}) => query.isFetching && query.errorUpdatedAt > query.dataUpdatedAt;
 
 /**
  * The latest guide's notes on GitHub's diff. The tab takes the newest revision when its notes
@@ -103,6 +114,7 @@ export function useFilesGuideNotes(
           message: review.error.message,
           retry: () => void review.refetch(),
         };
+      if (shown && retrying(review)) return { _tag: "retrying" };
       return shown && review.isPending ? { _tag: "loading" } : { _tag: "none" };
     }
     return { _tag: "hidden", waiting: wanted !== null };
@@ -110,7 +122,7 @@ export function useFilesGuideNotes(
   if (notes === null) {
     if (guide.isError)
       return { _tag: "failed", message: guide.error.message, retry: () => void guide.refetch() };
-    return { _tag: "loading" };
+    return retrying(guide) ? { _tag: "retrying" } : { _tag: "loading" };
   }
   const status = review.data?.review?.status._tag;
   return {
