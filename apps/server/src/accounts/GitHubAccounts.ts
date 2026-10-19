@@ -99,7 +99,16 @@ export const make = Effect.gen(function* () {
         }),
     ),
   );
-  const configuredDir = yield* Config.option(Config.String("GH_CONFIG_DIR"));
+  /**
+   * gh treats an empty variable as unset. A relative one names a folder under whatever folder
+   * gh runs in, which prkit can't know, so prkit leaves it out.
+   */
+  const variable = (name: string) =>
+    Config.option(Config.String(name)).pipe(
+      Effect.map(Option.filter((value) => path.isAbsolute(value))),
+    );
+  const configuredDir = yield* variable("GH_CONFIG_DIR");
+  const xdgConfigHome = yield* variable("XDG_CONFIG_HOME");
   const apiOverride = yield* Config.option(Config.String("PRKIT_GITHUB_API_URL"));
   if (Option.isSome(apiOverride) && !URL.canParse(apiOverride.value))
     return yield* new AccountsError({ message: "PRKIT_GITHUB_API_URL must be a URL." });
@@ -164,38 +173,52 @@ export const make = Effect.gen(function* () {
     }
   };
 
-  /** When ~/.config can't be listed, its remembered `gh-*` directories are still tried. */
+  /**
+   * Where gh looks, in its own order: `GH_CONFIG_DIR`, then `gh` in `XDG_CONFIG_HOME`, then in
+   * ~/.config. When a config home can't be listed, its remembered `gh-*` directories are still
+   * tried.
+   */
   const candidates = (added: ReadonlyArray<string>, remembered: ReadonlyArray<string>) =>
     Effect.gen(function* () {
-      const configHome = path.join(home, ".config");
-      const listed = yield* fs.readDirectory(configHome).pipe(
-        Effect.map((names) => ({ names, problem: null })),
-        Effect.catchTag("PlatformError", (error) =>
-          Effect.succeed(
-            error.reason._tag === "NotFound"
-              ? { names: [], problem: null }
-              : {
-                  names: remembered
-                    .filter((dir) => path.dirname(dir) === configHome)
-                    .map((dir) => path.basename(dir)),
-                  problem: {
-                    configDir: configHome,
-                    message: `prkit can't list ${homeRelative(configHome)}, so it may miss gh directories there. Check the directory's permissions, then retry.`,
+      const configHomes = [
+        ...new Set([...Option.toArray(xdgConfigHome), path.join(home, ".config")].map(normalize)),
+      ];
+      const listed = yield* Effect.forEach(configHomes, (configHome) =>
+        fs.readDirectory(configHome).pipe(
+          Effect.map((names) => ({ configHome, names, problem: null })),
+          Effect.catchTag("PlatformError", (error) =>
+            Effect.succeed(
+              error.reason._tag === "NotFound"
+                ? { configHome, names: [], problem: null }
+                : {
+                    configHome,
+                    names: remembered
+                      .filter((dir) => path.dirname(dir) === configHome)
+                      .map((dir) => path.basename(dir)),
+                    problem: {
+                      configDir: configHome,
+                      message: `prkit can't list ${homeRelative(configHome)}, so it may miss gh directories there. Check the directory's permissions, then retry.`,
+                    },
                   },
-                },
+            ),
           ),
         ),
       );
       const dirs = [
         ...Option.toArray(configuredDir),
-        path.join(configHome, "gh"),
-        ...listed.names
-          .filter((name) => name.startsWith("gh-"))
-          .sort()
-          .map((name) => path.join(configHome, name)),
+        ...listed.flatMap(({ configHome, names }) => [
+          path.join(configHome, "gh"),
+          ...names
+            .filter((name) => name.startsWith("gh-"))
+            .sort()
+            .map((name) => path.join(configHome, name)),
+        ]),
         ...added,
       ];
-      return { dirs: [...new Set(dirs.map(normalize))], problem: listed.problem };
+      return {
+        dirs: [...new Set(dirs.map(normalize))],
+        problems: listed.flatMap(({ problem }) => (problem === null ? [] : [problem])),
+      };
     });
 
   const unavailable = (account: Account, message: string) =>
@@ -346,7 +369,11 @@ export const make = Effect.gen(function* () {
               ...Object.keys(settings.users ?? {}),
               ...(settings.user ? [settings.user] : []),
             ]),
-          ].map((login) => ({ host, login, active: settings.user === login })),
+          ].map((login) => ({
+            host,
+            login,
+            active: settings.user?.toLowerCase() === login.toLowerCase(),
+          })),
         ),
       };
       return listing;
@@ -401,19 +428,28 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const addedConfigDirs = (yield* readAdded()).map((row) => row.path);
       const remembered = yield* readRemembered();
-      const { dirs, problem } = yield* candidates(addedConfigDirs, [...remembered.keys()]);
+      const { dirs, problems } = yield* candidates(addedConfigDirs, [...remembered.keys()]);
       const listings = (yield* Effect.forEach(dirs, (configDir) =>
         look(configDir, remembered.get(configDir) ?? []),
       )).filter((listing) => listing !== null);
       yield* remember(listings);
-      const found = new Map<AccountId, Account>();
+      /** By login in lower case: GitHub logins ignore case, so `Octocat` and `octocat` are one account. */
+      const found = new Map<string, Account>();
       const foundActiveAccounts = new Set<AccountId>();
       const unreadAccounts = new Set<AccountId>();
-      const configDirProblems: Array<ConfigDirProblem> = problem === null ? [] : [problem];
+      const configDirProblems: Array<ConfigDirProblem> = [...problems];
       const claim = (configDir: string, { host, login }: Login, status: Account["status"]) => {
         const id = AccountId.make(`${host}/${login}`);
-        if (found.has(id)) return null;
-        found.set(id, { id, host, login, configDir, name: null, avatarUrl: null, status });
+        if (found.has(id.toLowerCase())) return null;
+        found.set(id.toLowerCase(), {
+          id,
+          host,
+          login,
+          configDir,
+          name: null,
+          avatarUrl: null,
+          status,
+        });
         return id;
       };
       for (const listing of listings) {
@@ -477,7 +513,7 @@ export const make = Effect.gen(function* () {
       for (const [id, token] of freshTokens) tokens.set(id, token);
       activeAccounts = foundActiveAccounts;
       unreadableDirAccounts = unreadAccounts;
-      current = { accounts, addedConfigDirs, configDirProblems };
+      current = { home, accounts, addedConfigDirs, configDirProblems };
       return current;
     });
 

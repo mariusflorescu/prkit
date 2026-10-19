@@ -176,7 +176,6 @@ const quotas = {
 };
 type Resource = keyof typeof quotas;
 const latency: Record<Resource, number> = { core: 0, graphql: 0 };
-/** Answers a `hold` keeps back until `release`, per resource, all or one directory's; null when nothing is held. */
 const held: Record<
   Resource,
   { readonly queue: Array<() => void>; readonly dir: string | null } | null

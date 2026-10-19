@@ -40,7 +40,8 @@ type GitHubJson =
  * Why a read failed. Only `unauthorized` means the account itself is broken (its
  * token was refused after one re-read); the others are about this request.
  * `rate-limited` and `reserved` were never sent: the account is paused, or a
- * background read would dip into the share kept for clicks.
+ * background read would dip into the share kept for clicks. `moved`: the account is read
+ * through another gh config directory now (see `GitHubBinding`).
  */
 export const GitHubFailure = Schema.Literals([
   "unauthorized",
@@ -49,6 +50,7 @@ export const GitHubFailure = Schema.Literals([
   "reserved",
   "network",
   "rejected",
+  "moved",
 ]);
 export type GitHubFailure = typeof GitHubFailure.Type;
 
@@ -71,6 +73,24 @@ export const GitHubPriority = Context.Reference<Priority>(
 );
 export const inBackground = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.provideService(effect, GitHubPriority, "background");
+
+/**
+ * The gh config directory a cached read is kept under for its account. Its requests go out
+ * only with that directory's token, and an answer that arrives once a rediscovery reads the
+ * account through another directory, or no longer finds it, fails as `moved`, so nothing
+ * keeps or shows it.
+ */
+export const GitHubBinding = Context.Reference<{
+  readonly accountId: AccountId;
+  readonly configDir: string;
+} | null>("@prkit/server/github/GitHubApi/GitHubBinding", { defaultValue: () => null });
+export const throughBinding =
+  (binding: { readonly accountId: AccountId; readonly configDir: string }) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.provideService(effect, GitHubBinding, {
+      accountId: binding.accountId,
+      configDir: binding.configDir,
+    });
 
 /** One entry of a GraphQL `errors` array; `path[0]` is the alias it belongs to. */
 export const GraphQLError = Schema.Struct({
@@ -267,8 +287,26 @@ export const make = Effect.gen(function* () {
       id,
       Effect.gen(function* () {
         const priority = yield* GitHubPriority;
+        const pinned = yield* GitHubBinding;
+        const configDir = pinned?.accountId === id ? pinned.configDir : null;
+        const moved = (login: string) =>
+          Effect.logWarning(
+            "GitHub read set aside: its account moved to another gh directory",
+          ).pipe(
+            Effect.annotateLogs({ accountId: id, operation, configDir }),
+            Effect.andThen(
+              Effect.fail(
+                fail(
+                  "moved",
+                  `${login}'s gh directory changed while prkit was reading GitHub. Try again.`,
+                ),
+              ),
+            ),
+          );
         let binding = yield* accounts.token(id);
         const login = binding.account.login;
+        if (configDir !== null && binding.account.configDir !== configDir)
+          return yield* moved(login);
         let reread = false;
         let rateRetries = 0;
         while (true) {
@@ -310,6 +348,15 @@ export const make = Effect.gen(function* () {
                 priority,
               }),
             );
+          if (
+            configDir !== null &&
+            (yield* accounts.known)?.accounts.find((account) => account.id === id)?.configDir !==
+              configDir
+          ) {
+            yield* response.text.pipe(Effect.ignore);
+            yield* logRequest(spent);
+            return yield* moved(login);
+          }
           if (response.status === 304 || (response.status >= 200 && response.status < 300)) {
             const value = yield* read(response).pipe(Effect.tapError(() => logRequest(spent)));
             yield* logRequest(
@@ -322,6 +369,8 @@ export const make = Effect.gen(function* () {
           if (response.status === 401 && !reread) {
             binding = yield* accounts.token(id, true);
             reread = true;
+            if (configDir !== null && binding.account.configDir !== configDir)
+              return yield* moved(login);
             continue;
           }
           if (response.status === 403 || response.status === 429) {

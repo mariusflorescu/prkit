@@ -119,6 +119,7 @@ const github = (state: GitHubState) =>
               status: { _tag: "ready" },
             },
           ],
+          home: "/home/octocat",
           addedConfigDirs: [],
           configDirProblems: [],
         }),

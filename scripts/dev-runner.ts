@@ -129,6 +129,7 @@ const runDev = async (base: { home: string; serverPort: number; webPort: number 
       env: {
         ...baseEnv,
         GH_CONFIG_DIR: process.env.GH_CONFIG_DIR,
+        XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
         PRKIT_GH_PATH: process.env.PRKIT_GH_PATH,
         PRKIT_HOME: base.home,
         PRKIT_AUTH_TOKEN: token,
@@ -176,6 +177,7 @@ const runDevDesktop = async (base: { home: string; serverPort: number; webPort: 
     env: {
       ...baseEnv,
       GH_CONFIG_DIR: process.env.GH_CONFIG_DIR,
+      XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
       PRKIT_GH_PATH: process.env.PRKIT_GH_PATH,
       PRKIT_HOME: base.home,
       PRKIT_DEV_WEB_URL: webOrigin,

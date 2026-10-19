@@ -348,9 +348,9 @@ test(
       await expect(screen.getByRole("alert")).toContainText(
         `prkit can't read ~/.config/gh/hosts.yml, so it can't check ${SECOND}.`,
       );
-      expect((await inbox.fake.stats()).log.filter((entry) => entry.dir === "gh-second")).toEqual(
-        [],
-      );
+      expect(
+        (await inbox.fake.stats()).log.filter((entry) => entry.dir === ".config/gh-second"),
+      ).toEqual([]);
       NodeFS.writeFileSync(first, firstHosts);
     } finally {
       inbox.stop();

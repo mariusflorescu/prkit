@@ -21,7 +21,13 @@ import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import { GitHubAccounts } from "../accounts/GitHubAccounts.ts";
 import * as ServerConfig from "../config.ts";
-import { GitHubApi, type GraphQLError, graphQLFailure, inBackground } from "../github/GitHubApi.ts";
+import {
+  GitHubApi,
+  GitHubBinding,
+  type GraphQLError,
+  graphQLFailure,
+  inBackground,
+} from "../github/GitHubApi.ts";
 import {
   FingerprintResponse,
   fingerprintQuery,
@@ -127,12 +133,25 @@ export const make = Effect.gen(function* () {
   const etags = new Map<string, string>();
 
   /** Each alias is handled on its own; one failed read doesn't touch the others. */
-  const readBatch = (accountId: AccountId, batch: ReadonlyArray<Target>) =>
+  const readBatch = (
+    accountId: AccountId,
+    configDir: string | undefined,
+    batch: ReadonlyArray<Target>,
+  ) =>
     Effect.gen(function* () {
       const { query, variables } = fingerprintQuery(batch.map((entry) => entry.ref));
       const read = yield* inBackground(
-        api.graphqlResult(accountId, query, variables, FingerprintResponse),
+        api
+          .graphqlResult(accountId, query, variables, FingerprintResponse)
+          .pipe(
+            Effect.provideService(
+              GitHubBinding,
+              configDir === undefined ? null : { accountId, configDir },
+            ),
+          ),
       ).pipe(Effect.result);
+      // The account is read through another directory now; the next tick reads these through it.
+      if (Result.isFailure(read) && read.failure.reason === "moved") return [];
       const answered = yield* Effect.forEach(batch, (entry, index) =>
         Effect.gen(function* () {
           const alias = `p${index}`;
@@ -280,7 +299,7 @@ export const make = Effect.gen(function* () {
         );
         if (due.length > 0) {
           // Tokens are only handed out for discovered accounts.
-          yield* accounts.list();
+          const discovered = yield* accounts.list();
           const byAccount = new Map<AccountId, Array<Target>>();
           for (const target of due) {
             checkedAt.set(`${target.accountId}:${target.key}`, now);
@@ -293,7 +312,12 @@ export const make = Effect.gen(function* () {
                 Array.from({ length: Math.ceil(entries.length / BATCH_SIZE) }, (_, index) =>
                   entries.slice(index * BATCH_SIZE, (index + 1) * BATCH_SIZE),
                 ),
-                (batch) => readBatch(accountId, batch),
+                (batch) =>
+                  readBatch(
+                    accountId,
+                    discovered.accounts.find((account) => account.id === accountId)?.configDir,
+                    batch,
+                  ),
               ),
             { concurrency: 4 },
           );

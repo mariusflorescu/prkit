@@ -14,6 +14,7 @@ import { accountsQuery, inboxQuery } from "~/rpc/queries";
 
 import { AccountRow } from "./AccountRow";
 import { AddConfigDirForm } from "./AddConfigDirForm";
+import { atHome } from "./atHome";
 import { ConfigDirProblemRow } from "./ConfigDirProblemRow";
 
 export function AccountsSettings() {
@@ -84,6 +85,7 @@ export function AccountsSettings() {
                 <AccountRow
                   key={account.id}
                   account={account}
+                  location={atHome(account.configDir, accounts.data.home)}
                   removable={accounts.data.addedConfigDirs.includes(account.configDir)}
                   removing={remove.isPending}
                   remove={(path) => remove.mutate(path)}
@@ -116,7 +118,7 @@ export function AccountsSettings() {
                 className="mt-3 flex items-center gap-3 border-b border-border/60 py-3"
               >
                 <div className="min-w-0 flex-1">
-                  <p className="break-all font-mono text-xs">{path}</p>
+                  <p className="break-all font-mono text-xs">{atHome(path, accounts.data.home)}</p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     No accounts found in this added directory.
                   </p>

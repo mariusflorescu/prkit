@@ -7,6 +7,7 @@ import { AccountBudget } from "./AccountBudget";
 
 export function AccountRow({
   account,
+  location,
   removable,
   removing,
   remove,
@@ -14,6 +15,8 @@ export function AccountRow({
   retrying,
 }: {
   account: Account;
+  /** Where gh keeps this account, from `~` when it is under the home folder. */
+  location: string;
   removable: boolean;
   removing: boolean;
   remove: (path: string) => void;
@@ -38,7 +41,7 @@ export function AccountRow({
           </span>
         </div>
         {account.name && <p className="text-xs text-muted-foreground">{account.name}</p>}
-        <p className="break-all font-mono text-2xs text-muted-foreground">{account.configDir}</p>
+        <p className="break-all font-mono text-2xs text-muted-foreground">{location}</p>
         <AccountBudget accountId={account.id} />
         {account.status._tag === "error" && (
           <div role="alert" className="space-y-2 pt-1 text-xs text-error-foreground">
