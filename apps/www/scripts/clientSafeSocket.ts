@@ -156,7 +156,8 @@ export function createClientSafeSocket(
   const filter = (value: Json, key = ""): Json => {
     if (Array.isArray(value)) {
       // "Showing 100 of N" counts pull requests the shots never show.
-      if (key === "truncated" || key === "addedConfigDirs") return [];
+      if (key === "truncated" || key === "addedConfigDirs" || key === "configDirProblems")
+        return [];
       return value.filter(keepRow).map((inner) => filter(inner));
     }
     if (!isObject(value)) return value;

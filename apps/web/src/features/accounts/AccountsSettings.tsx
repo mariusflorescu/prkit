@@ -12,6 +12,7 @@ import { accountsQuery, inboxQuery } from "~/rpc/queries";
 
 import { AccountRow } from "./AccountRow";
 import { AddConfigDirForm } from "./AddConfigDirForm";
+import { ConfigDirProblemRow } from "./ConfigDirProblemRow";
 
 export function AccountsSettings() {
   const queryClient = useQueryClient();
@@ -72,7 +73,7 @@ export function AccountsSettings() {
         />
       ) : (
         <>
-          {accounts.data.accounts.length === 0 ? (
+          {accounts.data.accounts.length === 0 && accounts.data.configDirProblems.length === 0 ? (
             <div role="status" className="my-6 py-8 text-center">
               <h3 className="font-medium text-sm">No GitHub accounts found</h3>
               <p className="mt-2 text-xs text-muted-foreground">
@@ -93,10 +94,25 @@ export function AccountsSettings() {
                   retrying={refresh.isPending}
                 />
               ))}
+              {accounts.data.configDirProblems.map((problem) => (
+                <ConfigDirProblemRow
+                  key={problem.configDir}
+                  problem={problem}
+                  removable={accounts.data.addedConfigDirs.includes(problem.configDir)}
+                  removing={remove.isPending}
+                  remove={(path) => remove.mutate(path)}
+                  retry={() => refresh.mutate()}
+                  retrying={refresh.isPending}
+                />
+              ))}
             </ul>
           )}
           {accounts.data.addedConfigDirs
-            .filter((path) => !accounts.data.accounts.some((account) => account.configDir === path))
+            .filter(
+              (path) =>
+                !accounts.data.accounts.some((account) => account.configDir === path) &&
+                !accounts.data.configDirProblems.some((problem) => problem.configDir === path),
+            )
             .map((path) => (
               <div
                 key={path}

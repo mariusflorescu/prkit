@@ -9,6 +9,7 @@ Settings lists each discovered GitHub host/login with its config directory, avat
 - `accounts-add-dir` adds a gh config dir the scan did not find.
 - `accounts-remove-dir` removes a saved directory from discovery without changing its gh files.
 - `accounts-states` has a loading skeleton, an empty state for a machine with no gh login, and an error state with a retry.
+- `accounts-unreadable-dir` keeps every other directory's accounts when prkit can't read one directory. The logins it listed last read `Needs attention` with its reason and get no token from any directory; a directory with no such account gets a row of its own with `Retry`, and the Inbox says the same above the rows.
 
 ## How to get to it (user POV)
 
@@ -16,7 +17,7 @@ Settings lists each discovered GitHub host/login with its config directory, avat
 
 ## Driving it with e2e
 
-The journey in `tests/accounts-inbox.e2e.ts` checks both Ready accounts, directory validation, API errors, success toasts, and add/remove through the UI.
+The journey in `tests/accounts-inbox.e2e.ts` checks both Ready accounts, directory validation, API errors, success toasts, and add/remove through the UI. `tests/accounts-config-dirs.e2e.ts` makes directories unreadable on the fake GitHub, mid-run and at launch, and repairs them.
 
 Preconditions:
 
@@ -28,6 +29,7 @@ Preconditions:
 - **Validation.** Tap `screen.getByRole("button", "Add directory")` with an empty field. The form asks for a directory. Fill `screen.getByRole("textbox", "Add gh config directory")` with a nonexistent absolute path; the field explains that it cannot be read. Submit an existing directory without `hosts.yml`; the field explains which file is missing.
 - **Add and remove.** Submit a new directory containing `hosts.yml`, kept under `.e2e/`. Check the success toast, restart with `--keep-home`, and check the saved directory before tapping its Remove button. Default directories have no Remove button.
 - **Broken directory.** On the fake GitHub, a directory whose login the fake refuses reads `Needs attention` with the reason and `Retry`, and the Inbox shows it beside the other account's rows. See Account error in [Inbox](./inbox.md).
+- **Unreadable directory.** On the fake with `secondAccount`, `chmod 000` `<fake home>/.config/gh-second` and tap Refresh: `budget-test` stays Ready, `budget-second` reads `prkit can't open ~/.config/gh-second, so it can't check budget-second.`, and the Inbox keeps rows 1 to 6 with that sentence and `Retry`. Opening #5 sends no request, and the fake's log (`login` and `dir` of each request's token) never shows a login read through another directory. The same for an unreadable `hosts.yml`, one cut off mid-write, and an empty one; a keyring-style `hosts.yml` (the user with no value) reads Ready. A new `gh-third` that can't be opened at launch shows its own row and Inbox notice with `Retry`. With both directories naming `budget-test`, locking `gh` leaves `budget-test` needing attention, and nothing reads through `gh-second`, before and after a relaunch.
 - **Proof.** A screenshot of the rows, plus the same list after `stop --keep-home` and `start` under the same name.
 
 ## Gotchas

@@ -5,6 +5,7 @@ import { ReviewFeedNotice } from "~/components/review/ReviewFeedNotice";
 import { FreshnessNotice } from "~/features/github/FreshnessNotice";
 import { reviewFeedQuery } from "~/rpc/queries";
 
+import { ConfigDirNotice } from "./ConfigDirNotice";
 import { INBOX_GROUPS } from "./inboxPresentation";
 import { useInboxStore } from "./inboxStore";
 
@@ -13,11 +14,15 @@ export function InboxNotices({
   account,
   retry,
   retrying,
+  retryConfigDirs,
+  retryingConfigDirs,
 }: {
   result: InboxResult;
   account: AccountId | null;
   retry: (accountId: AccountId, problem: GitHubProblem) => void;
   retrying: AccountId | null;
+  retryConfigDirs: () => void;
+  retryingConfigDirs: boolean;
 }) {
   const failed = useQuery({
     ...reviewFeedQuery,
@@ -33,6 +38,14 @@ export function InboxNotices({
             : "Guide marks and risk levels may be out of date until it can."}
         </ReviewFeedNotice>
       )}
+      {result.configDirProblems.map((problem) => (
+        <ConfigDirNotice
+          key={problem.configDir}
+          problem={problem}
+          retry={retryConfigDirs}
+          retrying={retryingConfigDirs}
+        />
+      ))}
       {result.accounts
         .filter((row) => account === null || account === row.accountId)
         .flatMap((row) =>

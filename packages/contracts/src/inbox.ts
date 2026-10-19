@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 
+import { ConfigDirProblem } from "./accounts.ts";
 import { GitHubProblem, PullRequestState } from "./github.ts";
 import { AccountId, PullRequestKey } from "./ids.ts";
 import { ReviewWait } from "./inboxTriage.ts";
@@ -81,6 +82,8 @@ export const InboxResult = Schema.Struct({
       total: Schema.Int,
     }),
   ),
+  /** gh config directories prkit couldn't read, from the same discovery as `accounts`. */
+  configDirProblems: Schema.Array(ConfigDirProblem),
 });
 export type InboxResult = typeof InboxResult.Type;
 /**

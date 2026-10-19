@@ -11,7 +11,7 @@ The installed CLI is the source of truth for flags: run `prkit --help` or `prkit
 
 ## Start with `prkit status`
 
-Run `prkit status --json` before anything else. It tells you whether prkit is open, the Outside agents access level, the accounts and their GitHub budget, and current guide and fix work. Use `prkit accounts --json` for account details and `prkit agents --json` for model options.
+Run `prkit status --json` before anything else. It tells you whether prkit is open, the Outside agents access level, the accounts and their GitHub budget, any gh config directory prkit couldn't read (`configDirProblems`, whose accounts are missing until it can), and current guide and fix work. Use `prkit accounts --json` for account details and `prkit agents --json` for model options.
 
 Exit codes tell you what to do next:
 
