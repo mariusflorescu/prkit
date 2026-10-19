@@ -1,3 +1,5 @@
+import { useRef } from "react";
+
 import { ReviewAlert } from "~/components/review/ReviewAlert";
 import { cn } from "~/lib/utils";
 
@@ -8,6 +10,7 @@ import { useDock } from "./askStore";
 import type { AskTarget } from "./askTarget";
 import { useAskActions } from "./useAskActions";
 import { useAsks } from "./useAsks";
+import { useKeepAskedLines } from "./useKeepAskedLines";
 
 /**
  * Ask, held at the bottom of the Guide tab while the guide scrolls under it. Closed it is
@@ -16,12 +19,15 @@ import { useAsks } from "./useAsks";
  */
 export function AskDock({ target }: { target: AskTarget }) {
   const open = useDock(target.key, "open");
+  const section = useRef<HTMLElement>(null);
+  useKeepAskedLines(section, target);
   const { state, retry } = useAsks(target.reviewId);
   const actions = useAskActions(target.reviewId);
   const questions = state._tag === "ready" ? state.questions : [];
   const newest = questions.at(-1);
   return (
     <section
+      ref={section}
       aria-label={PLACEHOLDERS[askWords(target.key).whole._tag]}
       data-ask-dock={open ? "open" : "closed"}
       className={cn(

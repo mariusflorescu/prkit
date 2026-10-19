@@ -42,6 +42,29 @@ export const cellAt = (root: ParentNode, point: LinePoint) =>
   [...root.querySelectorAll<HTMLElement>(NUMBER)].find((cell) => sameLine(pointOf(cell), point));
 
 /**
+ * Where each drawn diff of `path` under `root` shows `range`, from the higher of its two ends'
+ * line numbers to the lower (in split view an old start can sit below a new end), with the card
+ * that holds that diff.
+ */
+export const drawnRanges = (root: ParentNode, path: string, range: LineRange) =>
+  [
+    ...root.querySelectorAll<HTMLElement>(`[data-file-diff-card][data-path="${CSS.escape(path)}"]`),
+  ].flatMap((card) => {
+    const shadow = card.querySelector("diffs-container")?.shadowRoot;
+    const start = shadow && cellAt(shadow, range.start)?.getBoundingClientRect();
+    const end = shadow && cellAt(shadow, range.end)?.getBoundingClientRect();
+    return start && end
+      ? [
+          {
+            card,
+            top: Math.min(start.top, end.top),
+            bottom: Math.max(start.bottom, end.bottom),
+          },
+        ]
+      : [];
+  });
+
+/**
  * Line numbers as a keyboard path to picking lines, which Pierre only offers to a pointer.
  * Each gutter is one tab stop. Arrows, Home and End move along it, Shift extends a
  * range, Enter or Space picks the line or range, and Escape or leaving the line

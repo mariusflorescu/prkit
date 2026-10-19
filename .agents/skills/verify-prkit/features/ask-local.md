@@ -5,7 +5,7 @@ A local review's page (`/local/$key`) has the same Ask dock as a PR's Guide tab 
 ## Sub-features
 
 - `dock`, `cards`, `links`, `pins` and `states` read as in [ask.md](./ask.md), with the local words above. The chip's remove button is `button "Ask about all the changes instead"`. A draft being written (the switcher's draft entry) shows no dock, pins or chapter button.
-- `lines` are picked by a drag across line numbers, the hover button `button "Ask about this line"` (`[data-ask-line-button]`, in the diff card's light DOM), or Enter/Space on a focused line number, whose gutter label reads `Ask about line N` / `Ask about old line N`. The dock opens on `<path> <start>-<end>` with focus in the field, and those lines stay highlighted (`[data-selected-line]` in the diff's shadow root) while they are the dock's scope. A range outside one hunk toasts `Pick lines inside one part of the diff` and leaves the dock alone.
+- `lines` are picked by a drag across line numbers, the hover button `button "Ask about this line"` (`[data-ask-line-button]`, in the diff card's light DOM), or Enter/Space on a focused line number, whose gutter label reads `Ask about line N` / `Ask about old line N`. The dock opens on `<path> <start>-<end>` with focus in the field, and those lines stay highlighted (`[data-selected-line]` in the diff's shadow root) while they are the dock's scope. Opening the dock shrinks the guide's scroll area, and the lines stay in view as in ask.md's `lines in view`. While lines are picked, Pierre keeps the hover Ask button on their last line, so hovering another line doesn't move it; a tap on that line's number picks it instead. A range outside one hunk toasts `Pick lines inside one part of the diff` and leaves the dock alone.
 - `outside` is five tools on the local target (`key`, or `path` + `branch`): `read_local_questions`, `wait_for_local_question` (waits for the named question), `ask_about_local_changes` (with `clientRequestId`), `stop_local_question`, `pin_local_answer`; and `prkit local questions list|wait|ask|stop|pin` from the repository folder. A question asked there shows `Asked by prkit CLI` in the dock.
 - `removal` of the local review deletes its questions, and an answer being written stops: its agent's process exits and its `asks/` folders go.
 
@@ -26,6 +26,7 @@ Preconditions:
 - `claude.writingAnswers(true)` has the stand-in write `made-by-agent.txt` where it runs and `git add` it, as an agent past every guard would.
 
 - **Ask, stream, link, chapter, lines, stop, fail, pin.** As in ask.md, on the local page. `claude.runs()` records each turn's `cwd`, which starts with `<home>/asks/checkouts/`.
+- **Lines in view.** `tests/ask-dock-lines.e2e.ts` picks `docs/handbook.md` 15-16 as ask.md's **Lines in view** does, on the local page, and checks that a tap on line 18's number, with 15-16 picked, makes line 18 the scope and moves the Ask button there. It runs the placements again in split view on a pick from old line 16 to new line 15 (chip `docs/handbook.md old 16-15`), whose start sits below its end.
 - **Containment.** With `writingAnswers(true)`, ask: the card reads `It wrote made-by-agent.txt and staged it.`, yet `fixture.fingerprint()` (every file of `.git`) and `fixture.workTree()` (every file outside it) are unchanged, `made-by-agent.txt` isn't in the repository, and the repository's filter never ran.
 - **CLI.** `prkit local questions list --json` lists every question with its scope (`local-changes`, `chapter`, `lines`); `ask --question ... --request-id cli-1 --json` twice returns the same `questionId`; `wait --question-id <id> --timeout 120 --json` returns `finished: true` with the answer; `pin --pinned true|false` shows and hides the pin in the open page.
 - **Relaunch.** Stop the instance with `keepHome: true` (the dock says `Couldn't keep your questions up to date`), start it again, open `/local/<key>`: pins and every card are back.
@@ -38,5 +39,4 @@ Preconditions:
 ## Gotchas
 
 - The page header shows the repository's folder (a `/private/var/folders/...` temp path in journeys): crop the top ~122 px of a 1280 px frame before filing it.
-- Opening the dock from a line pick shrinks the guide's scroll area, so the picked lines can end up under the open dock. Hide the questions to see them.
 - Run without `--output`, as for ask.md.

@@ -66,7 +66,6 @@
   --collapse-pinned-height: var(--pr-pinned-height);
   position: relative;
   scroll-padding-top: var(--pr-pinned-height);
-  scroll-padding-bottom: var(--pr-covered-bottom, 0px);
   scrollbar-gutter: stable;
 }
 /* A length, so readingLine reads the open dock's max() in pixels rather than as text. */
@@ -81,6 +80,14 @@
 }
 [data-pr-scroll]:has([data-ask-dock="open"]) {
   --pr-covered-bottom: max(45dvh, 15rem);
+}
+/*
+ * What scrolls into view in the guide's chapters stops above the dock. The dock sits in the same
+ * scroller, so as the scroller's padding this would count the dock's own field as hidden and
+ * scroll the guide on every focus there. The chapter rail scrolls its own list, so it is left out.
+ */
+[data-pr-content] [data-guide-view] [data-diff-list] * {
+  scroll-margin-bottom: var(--pr-covered-bottom);
 }
 [data-pr-content] :where([data-file-diff-header]) {
   top: var(--pr-pinned-height);
