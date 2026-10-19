@@ -9,6 +9,7 @@ Three cards, System, Light and Dark, each a miniature of prkit in that theme (Sy
 - `theme-stored` is `settings.appearance.theme` in `<home>/prkit.sqlite`, a JSON string (`"dark"`).
 - `theme-first-paint` paints the stored theme before React: the server's `/appearance.js` sets `data-theme`, index.html sets `html.dark`.
 - `theme-system-live` follows the OS while the page is open.
+- `theme-failed-save` keeps the cards on what prkit holds when a pick fails to save, with the error and Retry below them; while a pick saves, the cards are dimmed and take no other. See Failed saves in [Settings](./settings.md).
 - `theme-desktop` sets `nativeTheme.themeSource` before the first window, on every change, and swaps the Dock icon.
 
 ## How to get to it (user POV)

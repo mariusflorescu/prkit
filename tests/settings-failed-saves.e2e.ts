@@ -65,7 +65,7 @@ const holdWrites = (home: string) => {
   };
 };
 
-/** The last control that saves: the last match of `selector`, with `text` in it when given. */
+/** The last control that saves: the last match of `selector` outside an alert, with `text` in it when given. */
 type Mark = { selector: string; text?: string };
 
 /**
@@ -74,9 +74,11 @@ type Mark = { selector: string; text?: string };
  */
 const controlsDownTo = (browser: Browser, last: Mark) =>
   browser.evaluate(({ selector, text }: Mark) => {
-    const end = [...document.querySelectorAll(selector)]
-      .filter((node) => text === undefined || node.textContent?.includes(text))
-      .at(-1);
+    const end = [...document.querySelectorAll(selector)].findLast(
+      (node) =>
+        node.closest('[role="alert"]') === null &&
+        (text === undefined || node.textContent?.includes(text) === true),
+    );
     if (end === undefined) return null;
     return [
       ...document.querySelectorAll(
@@ -96,9 +98,11 @@ const controlsDownTo = (browser: Browser, last: Mark) =>
 const alertBelow = (browser: Browser, last: Mark, said: string) =>
   browser.evaluate(
     ({ selector, text, message }: Mark & { message: string }) => {
-      const end = [...document.querySelectorAll(selector)]
-        .filter((node) => text === undefined || node.textContent?.includes(text))
-        .at(-1);
+      const end = [...document.querySelectorAll(selector)].findLast(
+        (node) =>
+          node.closest('[role="alert"]') === null &&
+          (text === undefined || node.textContent?.includes(text) === true),
+      );
       const alert = [...document.querySelectorAll('main [role="alert"]')].find((node) =>
         node.textContent?.includes(message),
       );
@@ -139,18 +143,26 @@ const openSection = async ({ screen, browser }: Fixtures, section: string) => {
 };
 
 /**
- * Taps, waits for the save to fail with `message`, and checks that the error sits below the
- * controls with nothing above it moved, and that its Retry stands alone, with no "Try again".
+ * Taps, waits for the save to fail with `message`, keeps light and dark frames of it, and checks
+ * that the error sits below the controls with nothing above it moved, and that its Retry stands
+ * alone, with no "Try again".
  */
 const failAndHold = async (
-  { screen, browser }: Fixtures,
-  { last, tap, message }: { last: Mark; tap: () => Promise<void>; message: string },
+  { app, screen, browser }: Fixtures,
+  {
+    last,
+    tap,
+    message,
+    frame,
+  }: { last: Mark; tap: () => Promise<void>; message: string; frame: string },
 ) => {
   const before = await controlsDownTo(browser, last);
   expect(before, `${last.selector} is on the page`).not.toBeNull();
   await tap();
   const alert = screen.getByRole("alert").filter({ hasText: message });
   await expect(alert).toBeVisible({ timeout: 20_000 });
+  // Kept before anything is checked, so a run against an older build keeps its frames too.
+  await screenshotLightAndDark(app, browser, frame);
   await expect
     .poll(() => controlsDownTo(browser, last), { message: "nothing moves when the error shows" })
     .toEqual(before);
@@ -197,16 +209,12 @@ describe("settings failed saves", { tags: ["settings-failed-saves"] }, () => {
                 last: cards,
                 tap: () => theme.getByText("Dark").tap(),
                 message,
+                frame: `settings-failed-appearance-${width.label}`,
               });
               await expect(theme.getByRole("radio", "System")).toBeChecked();
               await expect(theme.getByRole("radio", "Dark")).toBeEnabled();
               expect(await readPageTheme(browser)).toMatchObject({ dark: false, choice: "system" });
               expect(setting(run.home, "appearance.theme")).toEqual([]);
-              await screenshotLightAndDark(
-                app,
-                browser,
-                `settings-failed-appearance-${width.label}`,
-              );
             },
           );
         } finally {
@@ -216,28 +224,52 @@ describe("settings failed saves", { tags: ["settings-failed-saves"] }, () => {
         await expect.poll(() => setting(run.home, "appearance.theme")).toEqual(['"light"']);
         await expect(screen.getByRole("alert").filter({ hasText: message })).toHaveCount(0);
 
-        // While a save waits, the cards show the theme being saved and take no second pick.
+        // While a save waits, the cards show the theme being saved, dimmed, and take no second pick.
         const release = holdWrites(run.home);
         try {
           await theme.getByText("Dark").tap();
           await expect(theme.getByRole("radio", "Dark")).toBeChecked();
-          await expect(theme.getByRole("radio", "Light")).toBeDisabled();
+          await expect(theme.getByRole("radio", "Light")).toHaveAttribute("aria-disabled", "true");
           await app.screenshot("settings-failed-appearance-saving");
+          // A click on Light right away, without waiting for the cards like a tap would.
+          await browser.evaluate(() => {
+            document.querySelector('input[name="theme"][value="light"]')?.closest("label")?.click();
+            return null;
+          });
+          await expect(theme.getByRole("radio", "Dark")).toBeChecked();
         } finally {
           release();
         }
-        await expect(theme.getByRole("radio", "Light")).toBeEnabled({ timeout: 20_000 });
+        await expect(theme.getByRole("radio", "Light")).toHaveAttribute("aria-disabled", "false", {
+          timeout: 20_000,
+        });
+        await expect(theme.getByRole("radio", "Dark")).toBeChecked();
         await expect.poll(() => setting(run.home, "appearance.theme")).toEqual(['"dark"']);
+
+        // The arrow keys walk the cards, and focus stays on each pick once it saves.
+        const focused = () =>
+          browser.evaluate(() =>
+            document.activeElement instanceof HTMLInputElement
+              ? document.activeElement.value
+              : null,
+          );
+        await theme.getByText("Dark").tap();
+        for (const next of ["light", "system"]) {
+          await browser.keyboard.press("ArrowLeft");
+          await expect.poll(() => setting(run.home, "appearance.theme")).toEqual([`"${next}"`]);
+          await expect.poll(focused).toBe(next);
+        }
 
         // Retry sends the failed pick again.
         const refuse = refuseWrites(run.home, "settings");
         try {
           await failAndHold(fixtures, {
             last: cards,
-            tap: () => theme.getByText("System").tap(),
+            tap: () => theme.getByText("Dark").tap(),
             message,
+            frame: "settings-failed-appearance-retry",
           });
-          await expect(theme.getByRole("radio", "Dark")).toBeChecked();
+          await expect(theme.getByRole("radio", "System")).toBeChecked();
         } finally {
           refuse();
         }
@@ -246,9 +278,9 @@ describe("settings failed saves", { tags: ["settings-failed-saves"] }, () => {
           .filter({ hasText: message })
           .getByRole("button", "Retry")
           .tap();
-        await expect(theme.getByRole("radio", "System")).toBeChecked();
+        await expect(theme.getByRole("radio", "Dark")).toBeChecked();
         await expect(screen.getByRole("alert").filter({ hasText: message })).toHaveCount(0);
-        await expect.poll(() => setting(run.home, "appearance.theme")).toEqual(['"system"']);
+        await expect.poll(() => setting(run.home, "appearance.theme")).toEqual(['"dark"']);
       } finally {
         stop(name, fake);
       }
@@ -279,15 +311,11 @@ describe("settings failed saves", { tags: ["settings-failed-saves"] }, () => {
                 last: { selector: '[aria-label="Automatic guides by account"] [role="switch"]' },
                 tap: () => auto.tap(),
                 message,
+                frame: `settings-failed-auto-guides-${width.label}`,
               });
               await expect(auto).toHaveAttribute("aria-checked", "false");
               await expect(auto).toBeEnabled();
               expect(setting(run.home, "guides.autoAccounts")).toEqual([]);
-              await screenshotLightAndDark(
-                app,
-                browser,
-                `settings-failed-auto-guides-${width.label}`,
-              );
             },
           );
         } finally {
@@ -307,11 +335,11 @@ describe("settings failed saves", { tags: ["settings-failed-saves"] }, () => {
                 last: { selector: 'form[aria-label="Global guidance"] :is(button, textarea)' },
                 tap: () => save.tap(),
                 message,
+                frame: `settings-failed-guidance-${width.label}`,
               });
               await expect(guidance).toHaveValue("Lead with the API changes.");
               await expect(save).toBeEnabled();
               expect(readRows(run.home, "SELECT value FROM guide_config")).toEqual([]);
-              await screenshotLightAndDark(app, browser, `settings-failed-guidance-${width.label}`);
             },
           );
         } finally {
@@ -367,14 +395,17 @@ describe("settings failed saves", { tags: ["settings-failed-saves"] }, () => {
                   await screen.getByRole("option", /Haiku/).first().tap();
                 },
                 message,
+                frame: `settings-failed-default-agent-${width.label}`,
               });
               await expect(picker).toHaveAttribute("aria-label", label ?? "");
               await expect(picker).toBeEnabled();
               expect(setting(run.home, "guides.defaultAgent")).toEqual(stored);
+              // The default agent ends the page, so its error can start at the window's bottom edge.
+              await screen.getByRole("alert").filter({ hasText: message }).scrollIntoView();
               await screenshotLightAndDark(
                 app,
                 browser,
-                `settings-failed-default-agent-${width.label}`,
+                `settings-failed-default-agent-${width.label}-scrolled`,
               );
             },
           );
@@ -445,12 +476,12 @@ describe("settings failed saves", { tags: ["settings-failed-saves"] }, () => {
                 last: { selector: "main button", text: "Remove" },
                 tap: () => remove.tap(),
                 message,
+                frame: `settings-failed-accounts-${width.label}`,
               });
               await expect(remove).toBeEnabled();
               expect(readRows(run.home, "SELECT path FROM github_config_dirs")).toEqual([
                 { path: extra },
               ]);
-              await screenshotLightAndDark(app, browser, `settings-failed-accounts-${width.label}`);
             },
           );
         } finally {

@@ -240,9 +240,6 @@ export function PathRulesEditor({
             );
           })}
       </div>
-      {save.error !== null && (
-        <SaveProblem error={save.error} onRetry={() => void submit()} onReload={reload} />
-      )}
       {isDirty && (
         <div className="flex items-center gap-2">
           <Button type="submit" size="sm" disabled={save.isPending}>
@@ -260,6 +257,9 @@ export function PathRulesEditor({
             Discard
           </Button>
         </div>
+      )}
+      {save.error !== null && (
+        <SaveProblem error={save.error} onRetry={() => void submit()} onReload={reload} />
       )}
     </form>
   );

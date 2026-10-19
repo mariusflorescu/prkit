@@ -11,7 +11,7 @@ Ignore rules, "Always look closely at" paths, focus areas and guidance shape eve
 - `guide-config-guard` blocks Generate when every changed file is skipped and names every deciding rule; an attempt that finds the same fails with reason `settings`.
 - `guide-config-frozen` freezes settings per attempt; the status bar shows "Written with ..." and "Settings changed since this revision · Regenerate"; a changed hash starts a fresh session.
 - `guide-config-focus-answers` shows the agent's answers under "Your focus areas" in the overview, and its optional note on conflicting guidance above the guide.
-- `guide-config-stale-save` refuses a save from a form loaded before another save of the same section.
+- `guide-config-stale-save` refuses a save from a form loaded before another save of the same section. A refused or failed save shows its error below Save and Discard, so neither moves, and keeps the unsaved words (`tests/settings-failed-saves.e2e.ts`).
 
 ## How to get to it (user POV)
 

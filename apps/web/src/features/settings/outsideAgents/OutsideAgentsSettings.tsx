@@ -2,6 +2,7 @@ import { ListError } from "~/components/ListError";
 import { ListSkeleton } from "~/components/ListSkeleton";
 import { Button } from "~/components/ui/button";
 
+import { FailedSave } from "../FailedSave";
 import { SettingsAlert } from "../SettingsAlert";
 import { SettingsSection } from "../SettingsSection";
 import { CommandLineSettings } from "./CommandLineSettings";
@@ -55,17 +56,7 @@ export function OutsideAgentsSettings() {
             saving={update.isPending}
             onSave={(settings) => update.mutateAsync(settings)}
           />
-          {/* Below the switch and the level, so neither moves when a save fails. */}
-          {update.error !== null && (
-            <SettingsAlert
-              message={update.error.message}
-              retry={() => {
-                const last = update.variables;
-                update.reset();
-                if (last !== undefined) update.mutate(last);
-              }}
-            />
-          )}
+          <FailedSave save={update} />
           <CommandLineSettings enabled={state.data.enabled} access={state.data.access} />
           {state.data.launcherProblem !== null && (
             <SettingsAlert

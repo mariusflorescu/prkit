@@ -5,6 +5,7 @@ import { ListError } from "~/components/ListError";
 import { ListSkeleton } from "~/components/ListSkeleton";
 import { Button } from "~/components/ui/button";
 import { FixCommand } from "~/features/settings/agents/FixCommand";
+import { FailedSave } from "~/features/settings/FailedSave";
 import { SettingsAlert } from "~/features/settings/SettingsAlert";
 
 import { cliInstallQuery } from "~/rpc/cliInstall";
@@ -133,14 +134,7 @@ export function CommandLineSettings({
           </div>
         </>
       )}
-      {change.isError && (
-        <SettingsAlert
-          message={change.error.message}
-          retry={() => {
-            if (change.variables !== undefined) change.mutate(change.variables);
-          }}
-        />
-      )}
+      <FailedSave save={change} />
     </section>
   );
 }

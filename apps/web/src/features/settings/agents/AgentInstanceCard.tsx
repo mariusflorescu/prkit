@@ -105,7 +105,7 @@ export function AgentInstanceCard({
         </Button>
         <Switch
           aria-label={`${entry.label} on`}
-          checked={entry.enabled}
+          checked={busy ? (actions.toggle.variables?.enabled ?? entry.enabled) : entry.enabled}
           disabled={busy}
           onCheckedChange={(enabled) => actions.toggle.mutate({ ...configOf(entry), enabled })}
         />
