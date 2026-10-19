@@ -45,6 +45,14 @@ export const useAskStore = create<{
 export const useDock = <Field extends keyof Dock>(key: ReviewKey, field: Field) =>
   useAskStore((state) => (state.docks.get(key) ?? closed)[field]);
 
+/** The lines the review's dock asks about on `revision`, or null when it asks about something else. */
+export const useAskedLines = (key: ReviewKey, revision: number) => {
+  const choice = useDock(key, "choice");
+  return choice?.revision === revision && choice.scope._tag === "lines"
+    ? choice.scope.anchor
+    : null;
+};
+
 /** Opens the dock on `choice` and puts the cursor in its field. */
 export const askAbout = (key: ReviewKey, choice: AskChoice | null) =>
   useAskStore.getState().update(key, { open: true, choice, focus: true });

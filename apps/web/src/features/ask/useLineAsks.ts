@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import type { DiffAsk } from "~/components/diff";
 import { toastManager } from "~/components/ui/toast";
 
-import { askAbout, useDock } from "./askStore";
+import { askAbout, useAskedLines } from "./askStore";
 import type { AskTarget } from "./askTarget";
 
 /**
@@ -15,9 +15,7 @@ import type { AskTarget } from "./askTarget";
  */
 export function useLineAsks(target: AskTarget, headSha: string) {
   const { key, revision } = target;
-  const picked = useDock(key, "choice");
-  const lines =
-    picked?.revision === revision && picked.scope._tag === "lines" ? picked.scope.anchor : null;
+  const lines = useAskedLines(key, revision);
   return useMemo(
     () =>
       (file: DiffFile): DiffAsk | undefined => {
