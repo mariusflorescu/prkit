@@ -1,8 +1,9 @@
 import { Button } from "~/components/ui/button";
 import type { FilesGuideNotesState } from "./useFilesGuideNotes";
 
+// Its words take the height of the button they sometimes have, so the line never grows by itself.
 const LINE =
-  "flex items-center justify-between gap-3 border-b border-border/60 px-4 py-2 text-xs text-muted-foreground";
+  "flex items-center justify-between gap-3 border-b border-border/60 px-4 py-2 text-xs leading-6 text-muted-foreground";
 
 const hiddenWords = (hidden: number, older: boolean) => {
   if (hidden === 0) return false;

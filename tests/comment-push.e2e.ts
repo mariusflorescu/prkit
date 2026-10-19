@@ -163,7 +163,7 @@ test(
       await composer.fill(COMPOSING);
       await expect(composer).toBeFocused();
 
-      // A push that leaves the file alone still hides the thread until it is read again.
+      // A push that leaves the file alone.
       await push({ "src/change-0.ts": 'export const change0 = "Second fixture 9";\n' });
       await expect(composer).toHaveValue(COMPOSING);
       await expect(composer).toBeFocused();

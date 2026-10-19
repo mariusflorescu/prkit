@@ -241,9 +241,10 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
             >
               {files.map((file, index) => (
                 <FileDiffCard
-                  // A new version of a file is a new card, so a file reviewed before a push
-                  // opens as changed; one whose hunks only moved keeps how the user left it.
-                  key={`${snapshot.baseSha}:${file.path}:${versionOf(file)?.hunks ?? versionOf(file)?.end ?? ""}`}
+                  key={file.path}
+                  // A file reviewed before a push opens as changed; one whose hunks only moved
+                  // keeps how the user left it.
+                  version={`${snapshot.baseSha}:${versionOf(file)?.hunks ?? versionOf(file)?.end ?? ""}`}
                   file={file}
                   id={`pr-file-${index}`}
                   loadContents={loadContents}

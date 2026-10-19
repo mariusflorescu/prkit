@@ -17,7 +17,7 @@ import {
   type ReviewThread,
 } from "@prkit/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { DiffComments } from "~/components/diff";
 import { toastManager } from "~/components/ui/toast";
@@ -112,10 +112,24 @@ export function useDiffComments(
   // A composer's lines are read against the diff it is on, so only that surface shows it, and
   // on the Guide only that revision.
   const visibleComposers = useMemo(() => composers.filter(onSite(site)), [composers, site]);
-  // GitHub numbers threads against the head it had when they were read, so they are
-  // placed only on a diff of that head, and read again once the diff moves on.
+  // GitHub numbers threads against the head it had when they were read, so they are placed by
+  // their lines only on a diff of that head, and read again once the diff moves on. Until that
+  // answers they stay where their code is now, found from the diff they were numbered on.
   const threadsHead = threads.data?.headSha;
-  const threadList = scope.threads && threadsHead === commitSha ? threads.data?.threads : undefined;
+  const [numbered, setNumbered] = useState<{
+    head: string;
+    files: ReadonlyArray<DiffFile>;
+  } | null>(null);
+  if (scope.threads && threadsHead === commitSha && numbered?.files !== files)
+    setNumbered({ head: commitSha, files });
+  const carried =
+    scope.threads && numbered !== null && numbered.head === threadsHead && threadsHead !== commitSha
+      ? numbered.files
+      : null;
+  const threadList =
+    scope.threads && (threadsHead === commitSha || carried !== null)
+      ? threads.data?.threads
+      : undefined;
   const staleThreads = scope.threads && threadsHead !== undefined && threadsHead !== commitSha;
   useEffect(() => {
     if (staleThreads)
@@ -141,8 +155,21 @@ export function useDiffComments(
         (comment) => comment.state === "draft" && comment.anchor.path === file.path,
       );
       const fileThreads = (threadList ?? []).filter((thread) => thread.path === file.path);
+      const before = carried?.find((entry) => entry.path === file.path)?.patch;
+      const beforeRows = before?._tag === "text" ? diffRows(before.patch) : null;
+      // Its lines on this diff, or the one place its own lines still read the same.
+      const follow = (anchor: ReviewThread["anchor"]) => {
+        const placement =
+          anchor && beforeRows && threadsHead ? capture(beforeRows, anchor, threadsHead) : null;
+        const placed = placement && place(placement, rows, commitSha);
+        if (placed === null) return null;
+        return placed._tag === "outdated"
+          ? (placed.suggestion?.anchor ?? null)
+          : placed.placement.anchor;
+      };
       const outdatedThreads: Array<ReviewThread> = [];
-      for (const thread of fileThreads) {
+      for (const read of fileThreads) {
+        const thread = carried === null ? read : { ...read, anchor: follow(read.anchor) };
         if (thread.anchor && inOneHunk(rows, thread.anchor.start, thread.anchor.end))
           pinAt(thread.anchor.end).threads.push(thread);
         else outdatedThreads.push(thread);
@@ -252,6 +279,8 @@ export function useDiffComments(
     drafts,
     fromNotes,
     threadList,
+    threadsHead,
+    carried,
     visibleComposers,
     moving,
     commitSha,

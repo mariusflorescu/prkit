@@ -31,6 +31,11 @@ export type FileDiffCardProps = {
   reviewed?: ReviewedControl | undefined;
   /** Changes when the card should open again as it first would, such as a chapter unticked. */
   reopened?: number | undefined;
+  /**
+   * The file's version, such as one a push changed. A new one sets the card open or closed as a
+   * new card would, in place, so its diff and what is written on it never blink.
+   */
+  version?: string | undefined;
   /** Labels the file note and line notes as the guide's, on a diff that isn't the guide's. */
   fromGuide?: boolean | undefined;
 };
@@ -47,12 +52,17 @@ export function FileDiffCard({
   trailingLines,
   reviewed,
   reopened = 0,
+  version,
   fromGuide = false,
 }: FileDiffCardProps) {
   const reveal = useFileReveal(file.path);
-  const [open, setOpen] = useState(
-    (!defaultCollapsed && reviewed?.state !== "reviewed") || reveal !== null,
-  );
+  const first = (!defaultCollapsed && reviewed?.state !== "reviewed") || reveal !== null;
+  const [open, setOpen] = useState(first);
+  const [seenVersion, setSeenVersion] = useState(version);
+  if (version !== seenVersion) {
+    setSeenVersion(version);
+    setOpen(first);
+  }
   const [revealed, setRevealed] = useState(reveal);
   if (reveal !== revealed) {
     setRevealed(reveal);
@@ -138,7 +148,7 @@ export function FileDiffCard({
             </div>
           )}
           <RenderBoundary
-            key={file.patch._tag === "text" ? file.patch.patch : file.patch._tag}
+            resetKey={file.patch._tag === "text" ? file.patch.patch : file.patch._tag}
             title={`The diff for ${file.path}`}
           >
             <LazyDiffBody
