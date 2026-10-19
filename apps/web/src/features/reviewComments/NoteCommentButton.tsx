@@ -11,6 +11,7 @@ import { useMutation } from "@tanstack/react-query";
 import { MessageSquarePlusIcon } from "lucide-react";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { toastManager } from "~/components/ui/toast";
 import { getPullRequestFiles } from "~/rpc/client";
 import { rangeLabel } from "./reviewCommentPresentation";
@@ -86,8 +87,11 @@ export function NoteCommentButton({
         disabled={composing || start.isPending}
         onClick={() => start.mutate()}
       >
-        <MessageSquarePlusIcon aria-hidden="true" />
-        {start.isPending ? "Checking..." : "Add as comment"}
+        <ButtonLabel
+          icon={<MessageSquarePlusIcon aria-hidden="true" />}
+          shown={start.isPending ? "checking" : "add"}
+          labels={{ add: "Add as comment", checking: "Checking..." }}
+        />
       </Button>
     </div>
   );

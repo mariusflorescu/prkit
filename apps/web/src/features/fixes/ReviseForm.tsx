@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { reviseFix } from "~/rpc/client";
 
 import { storeFixer } from "./fixerCache";
@@ -68,7 +69,10 @@ export function ReviseForm({
           Cancel
         </Button>
         <Button type="submit" size="sm" disabled={revise.isPending}>
-          {revise.isPending ? "Sending…" : "Send to the agent"}
+          <ButtonLabel
+            shown={revise.isPending ? "sending" : "send"}
+            labels={{ send: "Send to the agent", sending: "Sending…" }}
+          />
         </Button>
       </div>
     </form>

@@ -222,7 +222,7 @@ export const make = Effect.fn("CursorAgent.make")(function* (
         Effect.fail(
           new AgentError({
             reason: "agent",
-            message: `prkit couldn't start Cursor for ${setup.label}. Retry.`,
+            message: `prkit couldn't start Cursor for ${setup.label}.`,
           }),
         ),
       ),
@@ -255,7 +255,7 @@ export const make = Effect.fn("CursorAgent.make")(function* (
         duration: timeout,
         orElse: () =>
           Effect.fail(
-            new AgentError({ reason: "agent", message: "Cursor took too long to answer. Retry." }),
+            new AgentError({ reason: "agent", message: "Cursor took too long to answer." }),
           ),
       }),
     );
@@ -522,7 +522,7 @@ export const make = Effect.fn("CursorAgent.make")(function* (
                       ).pipe(Effect.annotateLogs({ instance: setup.id, stderr: yield* stderr }));
                       return yield* new AgentError({
                         reason: "agent",
-                        message: "Cursor stopped before the turn finished. Retry.",
+                        message: "Cursor stopped before the turn finished.",
                       });
                     }),
                   ),

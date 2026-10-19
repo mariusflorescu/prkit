@@ -3,6 +3,7 @@ import type { PullRequestDetail } from "@prkit/contracts";
 import { useForm, useWatch } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { usePullRequestActions } from "./actionContext";
 import { PullRequestMarkdown } from "./PullRequestMarkdown";
 
@@ -82,7 +83,10 @@ export function PullRequestEditForm({ detail }: { detail: PullRequestDetail }) {
           Cancel
         </Button>
         <Button type="submit" size="sm" disabled={actions.pending}>
-          {actions.pending ? "Saving..." : actions.error ? "Retry" : "Save changes"}
+          <ButtonLabel
+            shown={actions.pending ? "saving" : actions.error ? "retry" : "save"}
+            labels={{ save: "Save changes", saving: "Saving...", retry: "Retry" }}
+          />
         </Button>
       </div>
     </form>

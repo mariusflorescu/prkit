@@ -4,6 +4,7 @@ import { RefreshCwIcon } from "lucide-react";
 import { ListError } from "~/components/ListError";
 import { ListSkeleton } from "~/components/ListSkeleton";
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { toastManager } from "~/components/ui/toast";
 import { FailedSave } from "~/features/settings/FailedSave";
 import { SettingsAlert } from "~/features/settings/SettingsAlert";
@@ -48,8 +49,11 @@ export function AccountsSettings() {
           disabled={refresh.isPending}
           onClick={() => refresh.mutate()}
         >
-          <RefreshCwIcon className="size-3.5" />
-          {refresh.isPending ? "Refreshing..." : "Refresh"}
+          <ButtonLabel
+            icon={<RefreshCwIcon className="size-3.5" />}
+            shown={refresh.isPending ? "refreshing" : "refresh"}
+            labels={{ refresh: "Refresh", refreshing: "Refreshing..." }}
+          />
         </Button>
       }
     >

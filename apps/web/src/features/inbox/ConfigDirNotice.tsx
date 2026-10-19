@@ -2,6 +2,7 @@ import type { ConfigDirProblem } from "@prkit/contracts";
 import { Link } from "@tanstack/react-router";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 
 /**
  * Says which gh config directory prkit couldn't read and what that hides, above the rows of
@@ -30,7 +31,10 @@ export function ConfigDirNotice({
         Accounts
       </Link>
       <Button size="sm" variant="outline" disabled={retrying} onClick={retry}>
-        {retrying ? "Retrying..." : "Retry"}
+        <ButtonLabel
+          shown={retrying ? "retrying" : "retry"}
+          labels={{ retry: "Retry", retrying: "Retrying..." }}
+        />
       </Button>
     </div>
   );

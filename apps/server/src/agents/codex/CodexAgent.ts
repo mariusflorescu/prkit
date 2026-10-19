@@ -653,7 +653,7 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
               Effect.fail(
                 new AgentError({
                   reason: "agent",
-                  message: "Codex couldn't connect to prkit's tools in time. Retry the guide.",
+                  message: "Codex couldn't connect to prkit's tools in time.",
                 }),
               ),
           }),
@@ -790,7 +790,7 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
               if (result.status === "inProgress")
                 return new AgentError({
                   reason: "agent",
-                  message: "Codex ended a turn without a final outcome. Retry the guide.",
+                  message: "Codex ended a turn without a final outcome.",
                 });
               return [
                 {

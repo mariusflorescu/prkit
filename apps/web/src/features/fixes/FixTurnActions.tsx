@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { toastManager } from "~/components/ui/toast";
 import { getFixerPatch } from "~/rpc/client";
 import { pushAccessQuery } from "~/rpc/queries";
@@ -61,7 +62,10 @@ export function FixTurnActions({ detail, turn }: { detail: PullRequestDetail; tu
           disabled={command.isPending || access.isPending || denied !== null || revising}
           onClick={() => command.mutate("push")}
         >
-          {pushing ? "Pushing…" : rebase ? "Force-push with lease" : "Push"}
+          <ButtonLabel
+            shown={pushing ? "pushing" : "push"}
+            labels={{ push: rebase ? "Force-push with lease" : "Push", pushing: "Pushing…" }}
+          />
         </Button>
         {turn.work._tag !== "revert" && (
           <Button
@@ -79,7 +83,10 @@ export function FixTurnActions({ detail, turn }: { detail: PullRequestDetail; tu
           disabled={copy.isPending}
           onClick={() => copy.mutate()}
         >
-          {copy.isPending ? "Copying…" : "Copy patch"}
+          <ButtonLabel
+            shown={copy.isPending ? "copying" : "copy"}
+            labels={{ copy: "Copy patch", copying: "Copying…" }}
+          />
         </Button>
         <Button
           size="sm"

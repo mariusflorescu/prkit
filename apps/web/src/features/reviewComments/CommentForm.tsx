@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { type FormKey, useReviewCommentsStore } from "./reviewCommentsStore";
 
 /**
@@ -131,7 +132,10 @@ export function CommentForm({
           Cancel
         </Button>
         <Button type="submit" size="xs" disabled={pending}>
-          {pending ? pendingLabel : submitLabel}
+          <ButtonLabel
+            shown={pending ? "pending" : "submit"}
+            labels={{ submit: submitLabel, pending: pendingLabel }}
+          />
         </Button>
       </div>
     </form>

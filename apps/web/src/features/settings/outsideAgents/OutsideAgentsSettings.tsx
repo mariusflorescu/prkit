@@ -1,6 +1,7 @@
 import { ListError } from "~/components/ListError";
 import { ListSkeleton } from "~/components/ListSkeleton";
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 
 import { FailedSave } from "../FailedSave";
 import { SettingsAlert } from "../SettingsAlert";
@@ -27,7 +28,10 @@ export function OutsideAgentsSettings() {
             aria-busy={reset.isPending}
             onClick={() => reset.mutate()}
           >
-            {reset.isPending ? "Resetting…" : "Reset access"}
+            <ButtonLabel
+              shown={reset.isPending ? "resetting" : "reset"}
+              labels={{ reset: "Reset access", resetting: "Resetting…" }}
+            />
           </Button>
         )
       }

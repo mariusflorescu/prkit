@@ -9,6 +9,7 @@ import { useEffect } from "react";
 import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 
 import { DanglingOverrides } from "./DanglingOverrides";
 import { FOCUS_SUGGESTIONS } from "./guidePresets";
@@ -261,7 +262,10 @@ export function FocusAreasEditor({
       {isDirty && (
         <div className="flex items-center gap-2">
           <Button type="submit" size="sm" disabled={save.isPending}>
-            {save.isPending ? "Saving…" : "Save focus areas"}
+            <ButtonLabel
+              shown={save.isPending ? "saving" : "save"}
+              labels={{ save: "Save focus areas", saving: "Saving…" }}
+            />
           </Button>
           <Button
             size="sm"

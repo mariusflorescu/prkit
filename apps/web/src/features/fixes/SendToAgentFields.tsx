@@ -4,6 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useForm, useWatch } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { toastManager } from "~/components/ui/toast";
 import { sendToAgent } from "~/rpc/client";
 import { pendingCommentsQuery } from "~/rpc/queries";
@@ -178,7 +179,13 @@ export function SendToAgentFields({
           size="sm"
           disabled={send.isPending || agent.selection === null || agent.problem !== null}
         >
-          {send.isPending ? "Sending..." : `Send ${plural(picked.length, "comment")} to agent`}
+          <ButtonLabel
+            shown={send.isPending ? "sending" : "send"}
+            labels={{
+              send: `Send ${plural(picked.length, "comment")} to agent`,
+              sending: "Sending...",
+            }}
+          />
         </Button>
       </div>
     </form>

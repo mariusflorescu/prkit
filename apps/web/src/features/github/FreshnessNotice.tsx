@@ -2,6 +2,7 @@ import type { AccountId, GitHubProblem } from "@prkit/contracts";
 import { Link } from "@tanstack/react-router";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 
 import { clockTime, freshnessText, retryAt } from "./freshness";
 import { useNow } from "./useNow";
@@ -53,7 +54,10 @@ export function FreshnessNotice({
         }
         onClick={retry}
       >
-        {retrying ? "Retrying..." : "Retry"}
+        <ButtonLabel
+          shown={retrying ? "retrying" : "retry"}
+          labels={{ retry: "Retry", retrying: "Retrying..." }}
+        />
       </Button>
     </div>
   );

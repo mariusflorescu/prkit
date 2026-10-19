@@ -5,6 +5,7 @@ import { useState } from "react";
 import { ListError } from "~/components/ListError";
 import { ListSkeleton } from "~/components/ListSkeleton";
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { toastManager } from "~/components/ui/toast";
 import { useGuideSettings } from "~/features/guides/useGuideSettings";
 import { agentCatalogQuery } from "~/rpc/queries";
@@ -43,8 +44,11 @@ export function AgentsSettings() {
             disabled={checkAgain.isPending}
             onClick={() => checkAgain.mutate()}
           >
-            <RefreshCwIcon className="size-3.5" />
-            {checkAgain.isPending ? "Checking…" : "Check again"}
+            <ButtonLabel
+              icon={<RefreshCwIcon className="size-3.5" />}
+              shown={checkAgain.isPending ? "checking" : "check"}
+              labels={{ check: "Check again", checking: "Checking…" }}
+            />
           </Button>
           <Button
             size="sm"

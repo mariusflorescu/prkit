@@ -2,6 +2,7 @@ import { AlertDialog } from "@base-ui/react/alert-dialog";
 import type { LocalReview } from "@prkit/contracts";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { toastManager } from "~/components/ui/toast";
 import { useWorkspace } from "~/features/workspace/workspaceContext";
 
@@ -41,11 +42,6 @@ export function RemoveLocalReviewDialog({
             Its guides and prkit's copy of its snapshots are deleted. Your repository isn't touched,
             and running prkit local guide there starts a new one.
           </AlertDialog.Description>
-          {remove.error !== null && !remove.isPending && (
-            <p role="alert" className="mt-3 text-xs text-error-foreground">
-              {remove.error.message}
-            </p>
-          )}
           <div className="mt-5 flex justify-end gap-2">
             <AlertDialog.Close
               disabled={remove.isPending}
@@ -59,7 +55,7 @@ export function RemoveLocalReviewDialog({
               disabled={remove.isPending}
               aria-busy={remove.isPending}
               // The removal empties the page under the dialog, so this runs off the promise,
-              // which settles whether or not the dialog is still mounted. A failure shows above.
+              // which settles whether or not the dialog is still mounted. A failure shows below.
               onClick={() =>
                 void remove.mutateAsync().then(
                   () => {
@@ -71,9 +67,17 @@ export function RemoveLocalReviewDialog({
                 )
               }
             >
-              {remove.isPending ? "Removing…" : remove.error !== null ? "Try again" : "Remove"}
+              <ButtonLabel
+                shown={remove.isPending ? "removing" : remove.error !== null ? "retry" : "remove"}
+                labels={{ remove: "Remove", removing: "Removing…", retry: "Try again" }}
+              />
             </Button>
           </div>
+          {remove.error !== null && !remove.isPending && (
+            <p role="alert" className="mt-3 text-xs text-error-foreground">
+              {remove.error.message}
+            </p>
+          )}
         </AlertDialog.Popup>
       </AlertDialog.Portal>
     </AlertDialog.Root>

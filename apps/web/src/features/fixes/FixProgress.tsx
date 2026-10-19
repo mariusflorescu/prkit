@@ -2,6 +2,7 @@ import type { FixerActivity, FixerTurn, PullRequestKey } from "@prkit/contracts"
 
 import { ElapsedTime } from "~/components/review/ElapsedTime";
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 
 import { FixActivityLog } from "./FixActivityLog";
 import { useTurnCommand } from "./useTurnCommand";
@@ -40,7 +41,10 @@ export function FixProgress({
             disabled={command.isPending}
             onClick={() => command.mutate("discard")}
           >
-            {command.isPending ? "Stopping…" : "Stop and discard"}
+            <ButtonLabel
+              shown={command.isPending ? "stopping" : "stop"}
+              labels={{ stop: "Stop and discard", stopping: "Stopping…" }}
+            />
           </Button>
         )}
       </div>

@@ -4,6 +4,7 @@ import { SettingsIcon } from "lucide-react";
 
 import { agentLabel } from "~/components/review/agent/agentSelection";
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import { stopFixer } from "~/rpc/client";
 import { agentCatalogQuery } from "~/rpc/queries";
@@ -77,7 +78,10 @@ export function FixesHeader({
             disabled={stop.isPending}
             onClick={() => stop.mutate()}
           >
-            {stop.isPending ? "Stopping…" : "Stop agent"}
+            <ButtonLabel
+              shown={stop.isPending ? "stopping" : "stop"}
+              labels={{ stop: "Stop agent", stopping: "Stopping…" }}
+            />
           </Button>
         )}
       </span>

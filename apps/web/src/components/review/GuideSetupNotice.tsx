@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 
 /**
  * Why Generate can't run, beside the button: every file skipped, the start failed (Retry),
@@ -57,7 +58,10 @@ export function GuideSetupNotice({
             disabled={checking || pending}
             onClick={failure !== null ? onRetry : onCheckAgain}
           >
-            {failure !== null ? "Retry" : checking ? "Checking…" : "Check again"}
+            <ButtonLabel
+              shown={failure !== null ? "retry" : checking ? "checking" : "check"}
+              labels={{ retry: "Retry", checking: "Checking…", check: "Check again" }}
+            />
           </Button>
         </div>
       )}
