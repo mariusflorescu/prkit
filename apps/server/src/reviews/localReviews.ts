@@ -153,6 +153,18 @@ const dbFailures = {
     Effect.fail(new ReviewError({ message: "prkit read a damaged review record. Try again." })),
 };
 
+/** The watch keeps one local review on screen, so its failures speak of that review. */
+const watchFailures = {
+  SqlError: () =>
+    Effect.fail(new ReviewError({ message: "prkit can't read this local review right now." })),
+  SchemaError: () =>
+    Effect.fail(
+      new ReviewError({
+        message: "prkit can't read this local review right now, because its record is damaged.",
+      }),
+    ),
+};
+
 const running = (status: ReviewStatus) => status._tag === "preparing" || status._tag === "writing";
 
 /** Nothing watches local changes: a current guide is ready, and only the user ends one. */
@@ -613,14 +625,14 @@ export const makeLocalReviews = (port: LocalPort, capture: LocalCaptureService) 
                   run: attempt === null ? null : toRun(yield* port.captureOf(attempt.id)),
                 };
                 return [update];
-              }).pipe(Effect.catchTags(dbFailures)),
+              }).pipe(Effect.catchTags(watchFailures)),
             ),
             Stream.flatMap((events) => Stream.fromIterable(events)),
             Stream.takeUntil((event) => event._tag === "removed"),
           );
           const opening: LocalReviewWatchEvent = { _tag: "snapshot", snapshot: first };
           return Stream.concat(Stream.succeed(opening), updates);
-        }).pipe(Effect.catchTags(dbFailures)),
+        }).pipe(Effect.catchTags(watchFailures)),
       );
 
     /**

@@ -33,14 +33,15 @@ export function LocalReviewWorkspaceTab({
   active: boolean;
 }) {
   const workspace = useWorkspace();
-  useLocalReviewWatch(row.key);
+  const { problem, retry } = useLocalReviewWatch(row.key);
   const snapshot = useQuery(localReviewQuery(row.key));
   const review = snapshot.data?.review ?? null;
   const title = review === null ? "Local review" : localTitle(review.source);
-  const running = review !== null && isRunning(review.status);
+  // While prkit can't read the review, its last state can't be vouched for: no ring, a warning.
+  const running = problem === null && review !== null && isRunning(review.status);
   const attempt = snapshot.data?.attempt ?? null;
   const progress = running && attempt !== null ? guideProgress(attempt) : null;
-  const failed = review?.status._tag === "failed";
+  const warning = review?.status._tag === "failed" || problem !== null || snapshot.isError;
   return (
     <div
       data-active-tab={active}
@@ -70,7 +71,7 @@ export function LocalReviewWorkspaceTab({
           ) : (
             <FolderGit2Icon className="size-3 text-muted-foreground" />
           )}
-          {failed && (
+          {warning && (
             <span
               data-guide-warning=""
               className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-warning-foreground"
@@ -84,13 +85,23 @@ export function LocalReviewWorkspaceTab({
           <>
             {review !== null && (
               <>
-                <p className="font-mono text-muted-foreground">{review.source.path}</p>
-                <p data-tab-guide-progress={running ? "" : undefined}>
-                  {LOCAL_STATUS_WORDS[review.status._tag]}
-                  {progress !== null && ` · ${progress.short}`}
-                  {review.status._tag === "failed" && ` · ${review.status.message}`}
-                </p>
+                <p className="break-all font-mono text-muted-foreground">{review.source.path}</p>
+                {problem === null && (
+                  <p data-tab-guide-progress={running ? "" : undefined}>
+                    {LOCAL_STATUS_WORDS[review.status._tag]}
+                    {progress !== null && ` · ${progress.short}`}
+                    {review.status._tag === "failed" && ` · ${review.status.message}`}
+                  </p>
+                )}
               </>
+            )}
+            {problem !== null && (
+              <div role="alert">
+                <p>{problem}</p>
+                <Button size="sm" variant="outline" onClick={retry}>
+                  Retry
+                </Button>
+              </div>
             )}
             {snapshot.isError && (
               <div role="alert">

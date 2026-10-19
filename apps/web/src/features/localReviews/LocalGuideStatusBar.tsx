@@ -6,11 +6,14 @@ import { guideProgress } from "~/components/review/progressModel";
 import { ProgressBar } from "~/components/review/ProgressBar";
 import { ReviewStatusLine } from "~/components/review/ReviewStatusLine";
 import { type GuideChoice, RevisionSwitcher } from "~/components/review/RevisionSwitcher";
-import { agentCatalogQuery } from "~/rpc/queries";
+import { agentCatalogQuery, localReviewProblemQuery } from "~/rpc/queries";
 
 import { isRunning, LOCAL_WORDS } from "./localPresentation";
 
-/** Above a local guide: what the review is doing, who writes it, and which revision is shown. */
+/**
+ * Above a local guide: what the review is doing, who writes it, and which revision is shown.
+ * While prkit can't read the review, it says nothing of what the review is doing.
+ */
 export function LocalGuideStatusBar({
   review,
   attempt,
@@ -25,7 +28,8 @@ export function LocalGuideStatusBar({
   onSelect: (choice: GuideChoice) => void;
 }) {
   const catalog = useQuery(agentCatalogQuery);
-  const running = isRunning(review.status);
+  const unreadable = useQuery(localReviewProblemQuery(review.key)).data != null;
+  const running = !unreadable && isRunning(review.status);
   const progress = running && attempt !== null ? guideProgress(attempt) : null;
   const agent = agentLabel(catalog.data, {
     instance: review.instance,
@@ -41,12 +45,14 @@ export function LocalGuideStatusBar({
         className="flex min-h-10 items-center justify-between gap-3 px-(--workspace-gutter-start) text-xs text-muted-foreground"
       >
         <span className="flex min-w-0 flex-1 items-center gap-2">
-          <ReviewStatusLine
-            status={review.status}
-            watchProblem={null}
-            attempt={attempt}
-            words={LOCAL_WORDS}
-          />
+          {!unreadable && (
+            <ReviewStatusLine
+              status={review.status}
+              watchProblem={null}
+              attempt={attempt}
+              words={LOCAL_WORDS}
+            />
+          )}
         </span>
         <span className="flex min-w-0 shrink-0 items-center gap-2">
           <span data-agent-label="" className="hidden max-w-56 truncate lg:inline" title={agent}>

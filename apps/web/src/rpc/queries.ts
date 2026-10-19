@@ -185,6 +185,16 @@ export const localReviewQuery = (key: LocalReviewKey) =>
     staleTime: Infinity,
     retry: false,
   });
+/**
+ * Why `localReviews.watch` can't keep a local review current, until its next answer; null or
+ * undefined while it does. What it read before stays in `localReviewQuery`.
+ */
+export const localReviewProblemQuery = (key: LocalReviewKey) =>
+  queryOptions<string | null>({
+    queryKey: ["localReviewProblem", key],
+    queryFn: skipToken,
+    staleTime: Infinity,
+  });
 /** Every local review, latest changed first; `localReviews.feed` keeps it current. */
 export const localReviewsQuery = queryOptions({
   queryKey: ["localReviews"],
