@@ -40,7 +40,8 @@
  * `{"type":"ready","url":"http://127.0.0.1:<port>"}`; `<home>/fake.json` records the
  * same url and this pid. Control, all under `/__fake/`:
  *
- *   GET  stats                          counts by kind, GraphQL points, requests while limited
+ *   GET  stats                          counts by kind, GraphQL points, requests while limited, and
+ *                                       the latest requests with the login their token is for
  *   POST reset-stats
  *   POST comment?pr=<n>                 a new issue comment (bumps updatedAt)
  *   POST push?pr=<n>                    a new head commit (bumps updatedAt)
@@ -80,7 +81,10 @@
  *   GET  writes                         every mutation and REST write, with its input
  *   POST limit?resource=graphql|core&seconds=<s>   the limit is used up until then
  *   POST latency?ms=<n>[&resource=graphql|core]   every API answer, or that resource's, waits this long
+ *   POST hold?resource=graphql|core     that resource's answers wait from now on, until release
+ *   POST release?resource=graphql|core  sends the answers held since hold, and holds no more
  *   POST archive?repo=<name>            archives a repository, so lists leave it out
+ *   POST inbox-only?login=<l>&prs=<n,n> that login's inbox searches find only these pull requests
  *   POST context?pr=<n>                 seeds what the PR says besides its diff (the body is JSON, see
  *                                       fake-github/context.ts): check runs with their output, review
  *                                       threads and the issues it closes. It replaces the PR's earlier
@@ -100,6 +104,7 @@ import {
   encodeJson,
   fileChanges,
   head,
+  inboxOnly,
   iso,
   LOGIN,
   merge,
@@ -154,19 +159,25 @@ const quotas = {
 };
 type Resource = keyof typeof quotas;
 const latency: Record<Resource, number> = { core: 0, graphql: 0 };
+/** Answers a `hold` keeps back until `release`, per resource; null when nothing is held. */
+const held: Record<Resource, Array<() => void> | null> = { core: null, graphql: null };
 
 const failures = new Map<string, { status: number; times: number; message: string | null }>();
 
 const remaining = (resource: Resource) =>
   Date.now() < quotas[resource].limitedUntil ? 0 : Math.max(0, LIMIT - quotas[resource].used);
 
-const count = (kind: string, status: number, cost: number) => {
+/** The login a request's fake token was printed for, empty without one. */
+const tokenLogin = (request: NodeHttp.IncomingMessage) =>
+  (request.headers.authorization ?? "").replace(/^(Bearer|token) fake-token-for-/, "");
+
+const count = (kind: string, status: number, cost: number, login = "") => {
   stats.requests++;
   if (kind.startsWith("graphql")) stats.points += cost;
   else stats.rest += cost;
   if (status === 403 || kind.endsWith(":limited")) stats.refused++;
   stats.byKind[kind] = (stats.byKind[kind] ?? 0) + 1;
-  stats.log.push({ at: iso(Date.now()), kind, status, cost });
+  stats.log.push({ at: iso(Date.now()), kind, status, cost, login });
   if (stats.log.length > 2000) stats.log.shift();
 };
 
@@ -180,18 +191,22 @@ const send = (
   const quota = quotas[resource];
   const reset =
     Date.now() < quota.limitedUntil ? Math.ceil(quota.limitedUntil / 1000) : quota.reset;
-  setTimeout(() => {
-    response.writeHead(status, {
-      "content-type": "application/json",
-      "x-ratelimit-limit": String(LIMIT),
-      "x-ratelimit-remaining": String(remaining(resource)),
-      "x-ratelimit-used": String(quota.used),
-      "x-ratelimit-reset": String(reset),
-      "x-ratelimit-resource": resource,
-      ...headers,
-    });
-    response.end(body);
-  }, latency[resource]);
+  const write = () =>
+    setTimeout(() => {
+      response.writeHead(status, {
+        "content-type": "application/json",
+        "x-ratelimit-limit": String(LIMIT),
+        "x-ratelimit-remaining": String(remaining(resource)),
+        "x-ratelimit-used": String(quota.used),
+        "x-ratelimit-reset": String(reset),
+        "x-ratelimit-resource": resource,
+        ...headers,
+      });
+      response.end(body);
+    }, latency[resource]);
+  const queue = held[resource];
+  if (queue === null) write();
+  else queue.push(write);
 };
 
 const failedByControl = (response: NodeHttp.ServerResponse, resource: Resource, kind: string) => {
@@ -428,9 +443,21 @@ const control = (url: URL, method: string, text: string, response: NodeHttp.Serv
       Date.now() + Number(url.searchParams.get("seconds") ?? "120") * 1000;
     return answer({ ok: true, resource, until: iso(quotas[resource].limitedUntil) });
   }
+  if (name === "inbox-only") {
+    const prs = (url.searchParams.get("prs") ?? "").split(",").filter((item) => item !== "");
+    inboxOnly.set(url.searchParams.get("login") ?? "", new Set(prs.map(Number)));
+    return answer({ ok: true });
+  }
   if (name === "archive") {
     archived.add(url.searchParams.get("repo") ?? "");
     return answer({ ok: true, archived: [...archived] });
+  }
+  if (name === "hold" || name === "release") {
+    const resource = url.searchParams.get("resource") === "core" ? "core" : "graphql";
+    const queue = held[resource] ?? [];
+    held[resource] = name === "hold" ? queue : null;
+    if (name === "release") for (const write of queue) write();
+    return answer({ ok: true, resource, held: queue.length });
   }
   if (name === "latency") {
     const only = url.searchParams.get("resource");
@@ -482,10 +509,10 @@ const server = NodeHttp.createServer((request, response) => {
         );
         return;
       }
-      const answer = graphql(body);
+      const answer = graphql(body, tokenLogin(request));
       if (failedByControl(response, "graphql", answer.kind)) return;
       quotas.graphql.used += answer.cost;
-      count(answer.kind, 200, answer.cost);
+      count(answer.kind, 200, answer.cost, tokenLogin(request));
       const withCost =
         body.includes("prkitRateLimit") && typeof answer.data === "object" && answer.data !== null
           ? { ...answer.data, prkitRateLimit: { cost: answer.cost } }
@@ -526,7 +553,7 @@ const server = NodeHttp.createServer((request, response) => {
     if ("commit" in answer) answer.commit();
     const cost = answer.status === 304 ? 0 : 1;
     quotas.core.used += cost;
-    count(answer.kind, answer.status, cost);
+    count(answer.kind, answer.status, cost, tokenLogin(request));
     send(
       response,
       "core",
