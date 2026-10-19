@@ -48,6 +48,9 @@ export type FilesGuideNotes = {
   readonly byShown: ReadonlyMap<LineNote, PlacedNote>;
 };
 
+/** The revision has no notes for these files, placed or not. */
+export const noNotesHere = (notes: FilesGuideNotes) => notes.files.size === 0 && notes.hidden === 0;
+
 // A file note has no lines around it to match, so it stays only on the very change it explains.
 const sameChange = (
   written: DiffFile | undefined,

@@ -101,7 +101,7 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
   const notesShown = useGuideNotesOnFiles();
   const writing = useReviewCommentsStore(writingOn(detail));
   // Notes that come with the first paint never push a diff down; ones turned on later say so
-  // above the list instead. Until that paint no form is on screen for them to move.
+  // in the tab row instead. Until that paint no form is on screen for them to move.
   const [painted, setPainted] = useState(false);
   const guideNotes = useFilesGuideNotes(detail, query.data, notesShown.shown, writing && painted);
   const notes = guideNotes._tag === "ready" ? guideNotes.notes : null;
@@ -184,18 +184,22 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
   return (
     <div data-pr-files="" className="flex min-h-0 flex-col" ref={root}>
       <TabActions>
+        {/* First in a row that ends on the right, so their arrival moves nothing else. */}
+        {guideNotes._tag !== "none" && (
+          <span className="mr-1.5 flex items-center gap-1.5">
+            <FilesGuideNotesStatus state={guideNotes} />
+            <ToolbarIconButton
+              label={notesShown.shown ? "Hide guide notes" : "Show guide notes"}
+              pressed={notesShown.shown}
+              disabled={notesShown.saving}
+              onClick={() => notesShown.set(!notesShown.shown)}
+            >
+              <BookOpenTextIcon />
+            </ToolbarIconButton>
+          </span>
+        )}
         <ReviewedCount reviewed={reviewed} files={files} />
         <DiffControls />
-        {guideNotes._tag !== "none" && (
-          <ToolbarIconButton
-            label={notesShown.shown ? "Hide guide notes" : "Show guide notes"}
-            pressed={notesShown.shown}
-            disabled={notesShown.saving}
-            onClick={() => notesShown.set(!notesShown.shown)}
-          >
-            <BookOpenTextIcon />
-          </ToolbarIconButton>
-        )}
         <ToolbarIconButton
           label={showTree ? "Hide file tree" : "Show file tree"}
           pressed={showTree}
@@ -205,7 +209,6 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
         </ToolbarIconButton>
       </TabActions>
       <ReviewCommentsAlerts pr={detail} />
-      <FilesGuideNotesStatus state={guideNotes} />
       <CommentsWithoutDiff pr={detail} files={files} site={{ on: "files" }} />
       {snapshot.changedFiles > files.length && (
         <p

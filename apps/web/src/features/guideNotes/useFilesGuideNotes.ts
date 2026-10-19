@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 
 import { toastManager } from "~/components/ui/toast";
 import { guideQuery, reviewQuery } from "~/rpc/queries";
-import { type FilesGuideNotes, placeGuideNotes } from "./placeGuideNotes";
+import { type FilesGuideNotes, noNotesHere, placeGuideNotes } from "./placeGuideNotes";
 
 export type FilesGuideNotesState =
   /** No accepted guide: no toggle, no notes, nothing to say. */
@@ -81,6 +81,16 @@ export function useFilesGuideNotes(
     () => (guide.data && files ? placeGuideNotes(guide.data, files) : null),
     [guide.data, files],
   );
+  // With nothing of its own on screen to hold still, a newer guide comes in as a first one does.
+  if (
+    shown &&
+    taken !== null &&
+    latest !== null &&
+    latest > taken &&
+    placed !== null &&
+    noNotesHere(placed)
+  )
+    setTaken(latest);
   // Notes that finish loading under an open form wait too. Notes already on screen still follow
   // a push, which only moves them in files whose cards remount anyway.
   const [notes, setNotes] = useState(placed);
