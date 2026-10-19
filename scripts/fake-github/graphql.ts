@@ -9,6 +9,7 @@ import {
   head,
   headRef,
   HISTORY,
+  inboxOnly,
   iso,
   LOGIN,
   mergeState,
@@ -446,6 +447,7 @@ const mutation = (
 /** The GraphQL point cost GitHub would charge, roughly: the inbox's three searches cost 6. */
 export const graphql = (
   body: string,
+  login: string,
 ): { kind: string; cost: number; data: Schema.Json; errors?: Schema.Json } => {
   const decoded = decodeRequest(body);
   if (Option.isNone(decoded))
@@ -553,18 +555,22 @@ export const graphql = (
     return { kind: "graphql:stack", cost: 1, data: STACKS ? stackLayers() : { repository: null } };
   if (query.includes("PrkitReviewWaits"))
     return reviewWaits(Option.getOrElse(decodeIds(variables["ids"]), () => []));
-  if (query.includes("PrkitInbox"))
+  if (query.includes("PrkitInbox")) {
+    const sees = (number: number) => inboxOnly.get(login)?.has(number) ?? true;
     return {
       kind: "graphql:inbox",
       cost: 6,
       data: {
         reviewRequested: search(
-          [1, 2, 3, 4, 5, 6, 9].filter((number) => (pulls.get(number)?.requested.length ?? 0) > 0),
+          [1, 2, 3, 4, 5, 6, 9].filter(
+            (number) => sees(number) && (pulls.get(number)?.requested.length ?? 0) > 0,
+          ),
         ),
-        authored: search([4, 5, 6]),
+        authored: search([4, 5, 6].filter(sees)),
         involved: search([]),
       },
     };
+  }
   if (query.includes("PrkitTexts")) {
     // A PR's head has the texts `texts` seeded for it, and every other path is the one-line
     // file REST contents answers.

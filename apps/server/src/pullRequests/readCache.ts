@@ -327,6 +327,7 @@ export const makeReadCache = <V>(options: {
             onSome: (value) => [
               {
                 accountId: row.account_id,
+                configDir: row.config_dir,
                 key: row.key,
                 cached: { value, fetchedAt: row.fetched_at, problem: null },
               },

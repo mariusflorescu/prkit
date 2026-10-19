@@ -190,14 +190,24 @@ export const make = Effect.gen(function* () {
       return result(rows);
     });
   /**
-   * The inbox across accounts. Before accounts are discovered (a relaunch), it answers
-   * from the persisted inbox at once, then discovers and tells windows to read again.
+   * The inbox across accounts. Before accounts are discovered (a relaunch), it answers at
+   * once with each account the gh config directories list and what was kept of its inbox
+   * from that directory, then discovers and tells windows to read again.
    */
   const inbox = (read: InboxRead): Effect.Effect<InboxResult, InboxError> =>
     Effect.gen(function* () {
       if (read._tag === "cached" && (yield* accounts.known) === null) {
         const persisted = yield* inboxCache.persisted;
-        if (persisted.length > 0) {
+        const rows = (yield* accounts.configured).map((account) =>
+          row(
+            account.id,
+            persisted.find(
+              (item) => item.accountId === account.id && item.configDir === account.configDir,
+            )?.cached,
+            null,
+          ),
+        );
+        if (rows.some((item) => item.fetchedAt !== null)) {
           yield* Effect.forkIn(
             inBackground(readAll(read)).pipe(
               Effect.andThen(publish({ _tag: "inbox" })),
@@ -205,7 +215,7 @@ export const make = Effect.gen(function* () {
             ),
             scope,
           );
-          return result(persisted.map((item) => row(item.accountId, item.cached, null)));
+          return result(rows);
         }
       }
       return yield* readAll(read);

@@ -312,6 +312,8 @@ export const wrote = (kind: string, input: Schema.Json) => {
 
 /** Repositories archived through the control; `attic` always is. */
 export const archived = new Set(["attic"]);
+/** A login's inbox searches find only these pull requests; a login not here finds them all. */
+export const inboxOnly = new Map<string, ReadonlySet<number>>();
 type Stats = {
   since: string;
   requests: number;
@@ -324,7 +326,7 @@ type Stats = {
   /** Merged PRs an inbox search still found, as GitHub's index does just after a merge. */
   mergedInSearch: number;
   byKind: Record<string, number>;
-  log: Array<{ at: string; kind: string; status: number; cost: number }>;
+  log: Array<{ at: string; kind: string; status: number; cost: number; login: string }>;
 };
 const emptyStats = (): Stats => ({
   since: iso(Date.now()),

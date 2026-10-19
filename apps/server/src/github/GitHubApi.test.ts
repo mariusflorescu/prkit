@@ -30,6 +30,7 @@ const accounts = Layer.succeed(
   GitHubAccounts.of({
     list: () => unused,
     known: unused,
+    configured: unused,
     refresh: () => unused,
     addConfigDir: () => unused,
     removeConfigDir: () => unused,

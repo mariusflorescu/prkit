@@ -12,6 +12,7 @@ import {
 } from "@prkit/contracts";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -100,6 +101,10 @@ export const make = Effect.gen(function* () {
   const tokens = new Map<AccountId, Redacted.Redacted<string>>();
   let activeAccounts = new Set<AccountId>();
   let current: AccountsResult | null = null;
+  const firstFound = yield* Deferred.make<
+    ReadonlyArray<Pick<Account, "id" | "configDir">>,
+    AccountsError
+  >();
 
   const normalize = (value: string) =>
     path.resolve(
@@ -259,7 +264,8 @@ export const make = Effect.gen(function* () {
       }),
     );
 
-  const discover = () =>
+  /** The accounts the gh config directories list now, before GitHub verifies any of them. */
+  const find = () =>
     Effect.gen(function* () {
       const addedConfigDirs = (yield* readAdded()).map((row) => row.path);
       const dirs = yield* candidates(addedConfigDirs);
@@ -321,9 +327,25 @@ export const make = Effect.gen(function* () {
           }
         }
       }
+      return {
+        addedConfigDirs,
+        found: [...found.values()].sort((a, b) => a.id.localeCompare(b.id)),
+        foundActiveAccounts,
+      };
+    });
+
+  const discover = () =>
+    Effect.gen(function* () {
+      const { addedConfigDirs, found, foundActiveAccounts } = yield* find().pipe(
+        Effect.tapError((error) => Deferred.fail(firstFound, error)),
+      );
+      yield* Deferred.succeed(
+        firstFound,
+        found.map(({ id, configDir }) => ({ id, configDir })),
+      );
       const freshTokens = new Map<AccountId, Redacted.Redacted<string>>();
       const accounts = yield* Effect.forEach(
-        [...found.values()].sort((a, b) => a.id.localeCompare(b.id)),
+        found,
         (account) =>
           Effect.gen(function* () {
             const token = yield* fromGh(account, foundActiveAccounts.has(account.id));
@@ -458,7 +480,13 @@ export const make = Effect.gen(function* () {
   );
   /** The accounts as last discovered, without waiting for a discovery to finish. */
   const known = Effect.sync(() => current);
-  return { list, known, refresh, addConfigDir, removeConfigDir, token, apiBase };
+  /**
+   * Who the first discovery found in the gh config directories, and where, while GitHub
+   * verifies them. The same snapshot discovery verifies, so a directory that changes in
+   * between can't put one directory's rows under an account read through another.
+   */
+  const configured = Deferred.await(firstFound);
+  return { list, known, configured, refresh, addConfigDir, removeConfigDir, token, apiBase };
 });
 
 export const layer = Layer.effect(GitHubAccounts, make);

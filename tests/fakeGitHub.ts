@@ -28,6 +28,8 @@ const Stats = Schema.fromJsonString(
         kind: Schema.String,
         status: Schema.Number,
         cost: Schema.Number,
+        /** The login the request's token was for, empty without one. */
+        login: Schema.String,
       }),
     ),
   }),
@@ -103,7 +105,13 @@ export const startFakeGitHub = async (
     /** Every answer, or only `resource`'s, waits `ms`. */
     latency: (ms: number, resource?: "graphql" | "core") =>
       post(`latency?ms=${ms}${resource === undefined ? "" : `&resource=${resource}`}`),
+    /** `resource`'s answers wait from now on, until `release` sends them. */
+    hold: (resource: "graphql" | "core") => post(`hold?resource=${resource}`),
+    release: (resource: "graphql" | "core") => post(`release?resource=${resource}`),
     archive: (repo: string) => post(`archive?repo=${repo}`),
+    /** `login`'s inbox finds only these pull requests from now on. */
+    inboxOnly: (login: string, prs: ReadonlyArray<number>) =>
+      post(`inbox-only?login=${login}&prs=${prs.join(",")}`),
     /** Only `count` requests (or points, for graphql) are left in the window, like GitHub's header says. */
     remaining: (resource: "graphql" | "core", count: number) =>
       post(`remaining?resource=${resource}&count=${count}`),
