@@ -94,7 +94,8 @@ export const makeCodexApprovals = (paths: CheckoutPaths, access: AgentAccess) =>
           reason = null,
         } = request.value;
         const script = typeof command === "string" ? unwrapShell(command) : null;
-        const about = { command: (script ?? "").slice(0, 200), cwd: cwd ?? "" };
+        // The command can quote the user's code, so the log names only where it would run.
+        const about = { cwd: cwd ?? "" };
         if (
           script === null ||
           typeof cwd !== "string" ||

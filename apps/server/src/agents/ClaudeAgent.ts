@@ -270,18 +270,17 @@ export const make = Effect.fn("ClaudeAgent.make")(function* (setup: InstanceSetu
 
         const canUseTool: CanUseTool = async (toolName, toolInput) => {
           const result = await Effect.runPromiseWith(services)(decide(toolName, toolInput));
-          const bash = toolName === "Bash" ? decodeBashInput(toolInput) : Option.none();
           const target = decodePathInput(toolInput).pipe(
             Option.flatMap((value) => Option.fromNullishOr(value.file_path ?? value.path)),
           );
+          // The command and the reason for a refusal can quote the user's code, so the log
+          // keeps only what was decided and the file it was about.
           log(
             Effect.logInfo("canUseTool").pipe(
               Effect.annotateLogs({
                 tool: toolName,
                 decision: result.behavior,
-                ...(Option.isSome(bash) ? { command: oneLine(bash.value.command, 200) } : {}),
                 ...(Option.isSome(target) ? { path: target.value } : {}),
-                ...(result.behavior === "deny" ? { reason: result.message } : {}),
               }),
             ),
           );

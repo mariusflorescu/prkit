@@ -169,7 +169,7 @@ export const makeAgentRuns = (state: FixerState, leftovers: TurnLeftovers) =>
                   case "finished":
                     result.finished = { outcome: event.outcome, message: event.message };
                     return Effect.logInfo("Fix turn finished").pipe(
-                      Effect.annotateLogs({ outcome: event.outcome, message: event.message ?? "" }),
+                      Effect.annotateLogs({ outcome: event.outcome }),
                     );
                   case "tool-done":
                   case "composing-guide":

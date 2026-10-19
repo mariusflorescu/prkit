@@ -242,8 +242,9 @@ export const make = Effect.fn("CursorAgent.make")(function* (
         });
         const all = yield* Stream.runCollect(events);
         if (all.length === 0)
+          // The runner holds the Cursor key, so what it printed stays out of the log.
           yield* Effect.logWarning("Cursor's runner stopped without a word").pipe(
-            Effect.annotateLogs({ instance: setup.id, stderr: yield* stderr }),
+            Effect.annotateLogs({ instance: setup.id, stderrBytes: (yield* stderr).length }),
           );
         const failed = all.find((event) => event.type === "error");
         if (failed !== undefined && failed.type === "error")
@@ -320,7 +321,7 @@ export const make = Effect.fn("CursorAgent.make")(function* (
           }),
           Effect.tapError((error) =>
             Effect.logWarning("Cursor didn't list its models").pipe(
-              Effect.annotateLogs({ message: error.message }),
+              Effect.annotateLogs({ reason: error.reason }),
             ),
           ),
           Effect.orElseSucceed((): ReadonlyArray<AgentModel> => []),
@@ -402,7 +403,7 @@ export const make = Effect.fn("CursorAgent.make")(function* (
       yield* logOut.pipe(
         Effect.tapError((error) =>
           Effect.logInfo("Cursor didn't sign out before its folder went").pipe(
-            Effect.annotateLogs({ instance: setup.id, message: error.message }),
+            Effect.annotateLogs({ instance: setup.id, reason: error.reason }),
           ),
         ),
         Effect.ignore,
@@ -519,7 +520,12 @@ export const make = Effect.fn("CursorAgent.make")(function* (
                     Effect.gen(function* () {
                       yield* Effect.logWarning(
                         "Cursor's runner stopped before the turn finished",
-                      ).pipe(Effect.annotateLogs({ instance: setup.id, stderr: yield* stderr }));
+                      ).pipe(
+                        Effect.annotateLogs({
+                          instance: setup.id,
+                          stderrBytes: (yield* stderr).length,
+                        }),
+                      );
                       return yield* new AgentError({
                         reason: "agent",
                         message: "Cursor stopped before the turn finished.",

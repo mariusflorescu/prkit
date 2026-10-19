@@ -219,7 +219,7 @@ export const makeGuideTools = ({
       );
       if (result.normalized === null)
         return yield* Effect.logInfo("Left a streamed guide piece out of the draft").pipe(
-          Effect.annotateLogs({ problems: result.errors.join(" | ") }),
+          Effect.annotateLogs({ problems: result.errors.length }),
         );
       yield* keepDraft(attemptId, merged, result.normalized);
       yield* publish(row.pr_key);
@@ -296,7 +296,7 @@ export const makeGuideTools = ({
       );
       if (result.normalized === null) {
         yield* Effect.logInfo("submit_guide rejected").pipe(
-          Effect.annotateLogs({ attemptId, problems: result.errors }),
+          Effect.annotateLogs({ attemptId, problems: result.errors.length }),
         );
         yield* appendActivity(
           row.pr_key,
