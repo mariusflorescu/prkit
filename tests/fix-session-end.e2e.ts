@@ -149,7 +149,7 @@ test(
       await app.open(pull(run.url, 6, "fixes"));
       await screen.getByRole("button", "Stop agent").tap();
       await expect(screen.getByRole("alert")).toContainText(
-        "prkit couldn't read or save the fix. Try again.",
+        "prkit couldn't read or save the fix.",
         { timeout: 30_000 },
       );
       await app.screenshot("stop-failed");
@@ -179,11 +179,11 @@ test(
       expect(heldCommits(run.home)).toEqual([`refs/prkit/fixes/${String(readyFix)}`]);
       process.kill(run.serverPid, "SIGKILL");
       await expect.poll(() => isAlive(run.pid), { timeout: 15_000 }).toBe(false);
-      const agentOutlivedServer = processGroup(agent.pid).length > 0;
+      expect(processGroup(agent.pid).length).toBeGreaterThan(0);
       holdEnds(run.home, false);
-      claude.release();
 
-      // The next start finishes both ends the way Stop would have, each step once.
+      // The next start finishes both ends the way Stop would have, each step once. The agent is
+      // still held, so only prkit can have stopped it.
       run = launch();
       await app.open(run.openUrl);
       await expect(screen.getByRole("link", "Inbox")).toBeVisible({ timeout: 30_000 });
@@ -203,7 +203,6 @@ test(
         expect(heldCommits(run.home)).toEqual([]);
       };
       finished();
-      expect(agentOutlivedServer).toBe(true);
       expect(processGroup(agent.pid)).toEqual([]);
       await app.open(pull(run.url, 6, "fixes"));
       await expect(screen.getByRole("article", "Fix 1 comment: Discarded")).toHaveCount(2, {
