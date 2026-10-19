@@ -90,7 +90,7 @@ const ChapterRisk = Schema.Struct({
  * How a chapter's logic worked before this change and how it works now. Both keys are
  * optional so that a half pair gets a plain-word error from `normalize`.
  */
-const PseudocodePair = Schema.Struct({
+export const PseudocodePair = Schema.Struct({
   before: Schema.optionalKey(Schema.String),
   after: Schema.optionalKey(Schema.String),
 });

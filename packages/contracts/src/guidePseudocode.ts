@@ -1,5 +1,13 @@
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+
 import type { DiffSnapshot } from "./diffSnapshot.ts";
-import type { Guide, NormalizedGuide, NormalizedPseudocodePair } from "./guide.ts";
+import {
+  type Guide,
+  type NormalizedGuide,
+  type NormalizedPseudocodePair,
+  PseudocodePair,
+} from "./guide.ts";
 import { type Report, chapterKey } from "./guideCheck.ts";
 
 type Chapter = NormalizedGuide["chapters"][number];
@@ -15,6 +23,8 @@ export interface PseudocodeRow {
   readonly after: Line<"added"> | null;
 }
 
+// Some agents' tool calls send the pair JSON-encoded, which the schema reads as one block.
+const decodeEncodedPair = Schema.decodeUnknownOption(Schema.fromJsonString(PseudocodePair));
 const PSEUDOCODE_LINES_MAX = 10;
 const PSEUDOCODE_LINE_WIDTH_MAX = 72;
 const PAIRLESS_KINDS = new Set<Chapter["kind"]>(["tests", "docs", "generated"]);
@@ -152,7 +162,17 @@ export const normalizePseudocode = (input: {
 }): ReadonlyArray<Chapter> => {
   const raws = new Map(input.raw.map((chapter) => [chapterKey(chapter), chapter.pseudocode]));
   return input.chapters.map((chapter) => {
-    const raw = raws.get(chapter.id);
+    const sent = raws.get(chapter.id);
+    const raw =
+      typeof sent === "string"
+        ? Option.getOrElse(
+            Option.filter(
+              decodeEncodedPair(sent),
+              (pair) => pair.before !== undefined || pair.after !== undefined,
+            ),
+            () => sent,
+          )
+        : sent;
     if (raw === undefined || typeof raw === "string")
       return { ...chapter, pseudocode: raw || null };
     const pair = { before: tidy(raw.before ?? ""), after: tidy(raw.after ?? "") };
