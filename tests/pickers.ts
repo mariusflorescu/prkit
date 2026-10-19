@@ -1,6 +1,8 @@
 import type { Browser } from "@e2e-dev/web";
 import { expect, type Locator, type Screen } from "e2e";
 
+import { pressShortcut } from "./shortcut.ts";
+
 /** Opens a select (or a filter) and picks one of its options by name. */
 export const choose = async (screen: Screen, trigger: Locator, option: string | RegExp) => {
   await trigger.tap();
@@ -12,15 +14,12 @@ export const choose = async (screen: Screen, trigger: Locator, option: string | 
  * tab (Cmd+W) returns to the page it came from.
  */
 export const accountCount = async (screen: Screen, browser: Browser) => {
-  const modifier = await browser.evaluate(() =>
-    /Mac|iPhone|iPad/.test(navigator.platform) ? "Meta" : "Control",
-  );
-  await browser.keyboard.press(`${modifier}+Comma`);
+  await pressShortcut(screen, browser, "Comma");
   await screen.getByRole("navigation", "Settings sections").getByRole("link", "Accounts").tap();
   const statuses = screen.getByRole("main").getByText(/^(Ready|Needs attention)$/);
   await expect(statuses.first()).toBeVisible({ timeout: 30_000 });
   const count = await statuses.count();
-  await browser.keyboard.press(`${modifier}+w`);
+  await pressShortcut(screen, browser, "w");
   return count;
 };
 

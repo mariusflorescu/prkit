@@ -93,6 +93,7 @@ pnpm e2e run tests/shell.e2e.ts --trace=on --video=on --output .e2e/proof/<name>
 - No model is configured, so `agent.*` steps fail with `MODEL_UNAVAILABLE`. Use `screen` locators and `expect`. Never add a model or an API key.
 - Real Claude journeys use `PRKIT_E2E_AGENT=1 --tag agent`; Codex uses `PRKIT_E2E_CODEX=1 --tag codex`; the timing runs use `--tag timing` with the flag of the agent they time. [features/README.md](features/README.md) names the journeys behind each tag. Put the environment flag before `pnpm e2e run`. Run each separately and reserve fixtures before any journey that writes to GitHub. The default suite sets no flag.
 - The DEV Guide viewer requires `PRKIT_GUIDE_URL`; the built app excludes that route.
+- `app.open` and `browser.reload` can return while the boot splash still shows. A locator step waits for its target, but a key press sent then goes nowhere and a `toHaveCount(0)` passes at once. Send app shortcuts with `pressShortcut(screen, browser, key)` from `tests/shortcut.ts`, which waits for the Inbox tab first.
 - Names match exactly: `getByRole("button", "Refresh inbox")` misses `Refresh pull request`.
 - `--trace` and `--video` read the next argument as their value. Write `--trace=on`, or put the files first.
 - The first run downloads Chrome Headless Shell (about 95 MB) into `~/Library/Caches/ms-playwright`.
