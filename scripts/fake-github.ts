@@ -264,6 +264,8 @@ const failedByControl = (
       resource,
       failure.status,
       failure.message === null ? "{}" : encodeJson({ message: failure.message }),
+      {},
+      token,
     );
   }, failure.ms);
   return true;

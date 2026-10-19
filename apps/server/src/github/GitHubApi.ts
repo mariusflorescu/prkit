@@ -82,7 +82,8 @@ export const inBackground = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
  */
 export const GitHubBinding = Context.Reference<{
   readonly accountId: AccountId;
-  readonly configDir: string;
+  /** Null: the account had no directory when the read started, so any it has now is another. */
+  readonly configDir: string | null;
 } | null>("@prkit/server/github/GitHubApi/GitHubBinding", { defaultValue: () => null });
 export const throughBinding =
   (binding: { readonly accountId: AccountId; readonly configDir: string }) =>
@@ -288,12 +289,12 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const priority = yield* GitHubPriority;
         const pinned = yield* GitHubBinding;
-        const configDir = pinned?.accountId === id ? pinned.configDir : null;
+        const pin = pinned?.accountId === id ? pinned : null;
         const moved = (login: string, when: "before-send" | "on-answer") =>
           Effect.logWarning(
             "GitHub read set aside: its account moved to another gh directory",
           ).pipe(
-            Effect.annotateLogs({ accountId: id, operation, configDir, when }),
+            Effect.annotateLogs({ accountId: id, operation, configDir: pin?.configDir, when }),
             Effect.andThen(
               Effect.fail(
                 fail(
@@ -305,17 +306,18 @@ export const make = Effect.gen(function* () {
           );
         /** Checked once the whole answer is in: an answer still arriving when the account moved counts as late. */
         const movedAway =
-          configDir === null
+          pin === null
             ? Effect.succeed(false)
             : accounts.known.pipe(
                 Effect.map(
                   (known) =>
-                    known?.accounts.find((account) => account.id === id)?.configDir !== configDir,
+                    (known?.accounts.find((account) => account.id === id)?.configDir ?? null) !==
+                    pin.configDir,
                 ),
               );
-        let binding = yield* accounts.token(id);
-        const login = binding.account.login;
-        if (configDir !== null && binding.account.configDir !== configDir)
+        let bound = yield* accounts.token(id);
+        const login = bound.account.login;
+        if (pin !== null && bound.account.configDir !== pin.configDir)
           return yield* moved(login, "before-send");
         let reread = false;
         let rateRetries = 0;
@@ -336,8 +338,8 @@ export const make = Effect.gen(function* () {
               null,
               admission.until,
             );
-          const built = request(accounts.apiBase(binding.account.host)).pipe(
-            HttpClientRequest.bearerToken(binding.token),
+          const built = request(accounts.apiBase(bound.account.host)).pipe(
+            HttpClientRequest.bearerToken(bound.token),
             HttpClientRequest.setHeaders({
               "user-agent": "prkit",
               "x-github-api-version": "2022-11-28",
@@ -370,9 +372,9 @@ export const make = Effect.gen(function* () {
           yield* logRequest(spent);
           if (yield* movedAway) return yield* moved(login, "on-answer");
           if (response.status === 401 && !reread) {
-            binding = yield* accounts.token(id, true);
+            bound = yield* accounts.token(id, true);
             reread = true;
-            if (configDir !== null && binding.account.configDir !== configDir)
+            if (pin !== null && bound.account.configDir !== pin.configDir)
               return yield* moved(login, "before-send");
             continue;
           }

@@ -265,6 +265,8 @@ export const makeReadCache = <V>(
           if (!unchanged) yield* options.changed(key);
           return;
         }
+        // The account is read through another directory now, whose answer this one isn't.
+        if (isGitHubError(result.failure) && result.failure.reason === "moved") return;
         const problem = problemOf(result.failure) ?? {
           _tag: "unavailable" as const,
           message: isGitHubError(result.failure)

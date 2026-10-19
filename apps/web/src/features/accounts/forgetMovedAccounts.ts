@@ -1,7 +1,12 @@
 import type { AccountId } from "@prkit/contracts";
 import type { QueryClient } from "@tanstack/react-query";
 
-import { accountsQuery, inboxQuery, repositoriesQuery } from "~/rpc/queries";
+import {
+  accountsQuery,
+  inboxQuery,
+  pullRequestStatusQuery,
+  repositoriesQuery,
+} from "~/rpc/queries";
 
 /**
  * Each account is read through one gh config directory. When the accounts come back with an
@@ -24,6 +29,11 @@ export const forgetMovedAccounts = (client: QueryClient) => {
     void client.resetQueries({
       predicate: (query) => moved.some((id) => query.queryHash.includes(JSON.stringify(id))),
     });
+    client.setQueryData(pullRequestStatusQuery.queryKey, (statuses) =>
+      statuses === undefined
+        ? statuses
+        : new Map([...statuses].filter(([, status]) => !moved.includes(status.accountId))),
+    );
     void client.invalidateQueries({ queryKey: inboxQuery.queryKey });
     void client.invalidateQueries({ queryKey: repositoriesQuery.queryKey });
   });

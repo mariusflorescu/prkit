@@ -143,12 +143,7 @@ export const make = Effect.gen(function* () {
       const read = yield* inBackground(
         api
           .graphqlResult(accountId, query, variables, FingerprintResponse)
-          .pipe(
-            Effect.provideService(
-              GitHubBinding,
-              configDir === undefined ? null : { accountId, configDir },
-            ),
-          ),
+          .pipe(Effect.provideService(GitHubBinding, { accountId, configDir: configDir ?? null })),
       ).pipe(Effect.result);
       // The account is read through another directory now; the next tick reads these through it.
       if (Result.isFailure(read) && read.failure.reason === "moved") return [];
