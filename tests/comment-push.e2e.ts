@@ -60,9 +60,13 @@ const COMPOSED = `${COMPOSING} is it left over?`;
 const EDITING = "Does short need a test of its own, maybe";
 const REPLYING = "Agreed, and the title limit should";
 const HEADING = "Should heading trim before it";
+const LEAVING = "These comments say where slugs went, but";
+/** The base's limits, so a push that writes them takes the file out of the PR. */
+const BASE_LIMITS =
+  'export const limits = {\n  url: 1024,\n  title: 120,\n};\n\nexport const schemes = ["http", "https"];\n';
 
-const served = (patch: string) => ({
-  filename: LIMITS,
+const served = (patch: string, filename = LIMITS) => ({
+  filename,
   status: "modified",
   additions: patch.split("\n").filter((line) => line.startsWith("+")).length,
   deletions: patch.split("\n").filter((line) => line.startsWith("-")).length,
@@ -249,6 +253,34 @@ test(
         { body: COMPOSED, line: 7 },
         { body: `${HEADING} counts?`, line: 25 },
       ]);
+
+      // A push that takes the file out of the PR leaves the composer above the list of files.
+      await lineNumber(browser, 1).tap();
+      await screen.getByRole("textbox", "Comment on line 1").fill(LEAVING);
+      const before = await filesRead(fake);
+      const reverted = git.commit(9, {
+        [LIMITS]: BASE_LIMITS,
+        "src/slugs.ts": "export const slugLimit = 64;\n",
+      });
+      await fake.files(9, [served(git.patch(9, "src/slugs.ts"), "src/slugs.ts")]);
+      await fake.gitHead(9, reverted);
+      await expect.poll(() => filesRead(fake), { timeout: 60_000 }).toBeGreaterThan(before);
+      await expect(file).toHaveCount(0, { timeout: 30_000 });
+      const stray = screen.getByRole("region", `Comment on ${LIMITS}`);
+      const strayField = stray.getByRole("textbox", "Comment written on line 1");
+      await expect(strayField).toHaveValue(LEAVING);
+      await expect(strayField).toBeFocused();
+      await expect(stray).toContainText(
+        `GitHub shows no diff for ${LIMITS} now. Add the comment to keep it with your drafts.`,
+      );
+      await expect(stray).toContainText("+// Slugs are checked in slugs.ts now.");
+      await screenshotLightAndDark(app, browser, "file-left-composer");
+      await browser.setViewport({ width: 760, height: 900 });
+      await screenshotLightAndDark(app, browser, "file-left-composer-narrow");
+      await browser.setViewport({ width: 1280, height: 900 });
+      await strayField.press("Meta+Enter");
+      await expect(stray).toHaveCount(0);
+      expect(draftRows(run.home).at(-1)).toEqual({ body: LEAVING, line: 1 });
       expect(await fake.writes()).toEqual([]);
     } finally {
       stopFakeInstance(name, { keepHome: false });

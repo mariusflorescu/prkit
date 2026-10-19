@@ -9,6 +9,7 @@ import { replyToThread, resolveThread } from "~/rpc/client";
 import { CommentCard } from "./CommentCard";
 import { CommentForm } from "./CommentForm";
 import { DiffSnippet } from "./DiffSnippet";
+import { PlacementTag } from "./PlacementTag";
 import { ThreadComment } from "./ThreadComment";
 import { storeThreads } from "./reviewCommentsCache";
 import { hunkTail, rangeLabel } from "./reviewCommentPresentation";
@@ -75,9 +76,7 @@ export function ReviewThreadCard({
           {thread.resolved ? "Resolved" : "Open"} · {count} {count === 1 ? "comment" : "comments"}
           {!open && ` · ${author}`}
         </button>
-        {thread.anchor === null && (
-          <span className="rounded border border-border/60 px-1 text-3xs">Outdated</span>
-        )}
+        {thread.anchor === null && <PlacementTag moved={false} />}
         {!thread.resolved && (
           <span className="ml-auto">
             <SendToAgentButton

@@ -16,6 +16,7 @@ import { deletePendingComment, editPendingComment, movePendingComment } from "~/
 import { CommentCard } from "./CommentCard";
 import { CommentForm } from "./CommentForm";
 import { DiffSnippet } from "./DiffSnippet";
+import { PlacementTag } from "./PlacementTag";
 import { storePending } from "./reviewCommentsCache";
 import { OUTDATED_WHY, rangeLabel, suggestionLabel } from "./reviewCommentPresentation";
 import { editForm, useReviewCommentsStore } from "./reviewCommentsStore";
@@ -82,11 +83,7 @@ export function PendingCommentCard({
         <span className="rounded bg-warning-surface px-1.5 py-0.5 text-3xs font-medium text-warning-foreground">
           {withAgent ? "With the agent" : "Pending"}
         </span>
-        {placed._tag !== "kept" && (
-          <span className="rounded border border-border/60 px-1 text-3xs">
-            {placed._tag === "moved" ? "Moved" : "Outdated"}
-          </span>
-        )}
+        {placed._tag !== "kept" && <PlacementTag moved={placed._tag === "moved"} />}
         <span className="min-w-0 truncate">
           {where}
           {written !== null && `, written on ${written}`}

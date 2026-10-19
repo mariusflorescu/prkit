@@ -8,18 +8,16 @@ import { pendingCommentsQuery } from "~/rpc/queries";
 import { CommentCard } from "./CommentCard";
 import { CommentForm } from "./CommentForm";
 import { DiffSnippet } from "./DiffSnippet";
+import { PlacementTag } from "./PlacementTag";
 import { storePending } from "./reviewCommentsCache";
 import { rangeLabel } from "./reviewCommentPresentation";
 import { type Composer, composerForm, useReviewCommentsStore } from "./reviewCommentsStore";
 
-const CHANGED =
-  "A new commit changed these lines while you were writing. Add the comment to keep it with your drafts, then move it to a current line.";
 /** Why a comment being written has no line on this diff, as its card says it. */
-const LOST = {
-  lines: CHANGED,
-  unchecked: CHANGED,
-  file: "GitHub shows no diff for this file now. Add the comment to keep it with your drafts.",
-} as const satisfies Record<Outdated["why"], string>;
+const lostWhy = (placed: Outdated, path: string) =>
+  placed.why === "file"
+    ? `GitHub shows no diff for ${path} now. Add the comment to keep it with your drafts.`
+    : "A new commit changed these lines while you were writing. Add the comment to keep it with your drafts, then move it to a current line.";
 
 /**
  * The inline composer under the selected lines, or under a guide note with the note's
@@ -72,11 +70,14 @@ export function NewCommentComposer({
   return (
     <CommentCard draft label={`New comment ${where}, in ${placement.anchor.path}`}>
       <div className="mb-2 space-y-1 text-xs text-muted-foreground">
-        <p>{label}</p>
+        <p className="flex items-center gap-2">
+          {placed._tag !== "kept" && <PlacementTag moved={placed._tag === "moved"} />}
+          <span className="min-w-0">{label}</span>
+        </p>
         {placed._tag === "moved" && <p>A new commit moved this code, and your comment with it.</p>}
         {placed._tag === "outdated" && (
           <>
-            <p>{LOST[placed.why]}</p>
+            <p>{lostWhy(placed, placement.anchor.path)}</p>
             <DiffSnippet
               text={placement.snippet}
               context={placement.context}
