@@ -101,6 +101,18 @@ process.exit(result.status ?? 1);
       git("update-ref", `refs/pull/${number}/head`, "HEAD");
       return git("rev-parse", "HEAD").trim();
     },
+    /** Commits files on main and merges main into the PR's branch, as a base merge does. Returns the new head. */
+    mergeBase: (number: number, files: Record<string, string>) => {
+      git("checkout", "-q", "main");
+      for (const [path, content] of Object.entries(files))
+        NodeFS.writeFileSync(NodePath.join(source, path), content);
+      git("add", ".");
+      git("commit", "-qm", `Change main for ${number}`);
+      git("checkout", "-q", `feature-${number}`);
+      git("merge", "-q", "--no-ff", "-m", `Merge main into fixture ${number}`, "main");
+      git("update-ref", `refs/pull/${number}/head`, "HEAD");
+      return git("rev-parse", "HEAD").trim();
+    },
     /** A file's patch in the PR's diff as GitHub's files API has it: the hunks alone. */
     patch: (number: number, path: string) => {
       const diff = git("diff", `main...refs/pull/${number}/head`, "--", path);
