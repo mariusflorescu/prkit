@@ -958,7 +958,7 @@ export const make = Effect.gen(function* () {
   const removeLocalReview = (key: LocalReviewKey) =>
     Effect.gen(function* () {
       const review = (yield* reviews.local.get(key)).review;
-      if (review === null) return yield* reviews.local.remove(key);
+      if (review === null) return yield* reviews.local.remove(key, null);
       // Read inside the review's turn, so a question that started just before is stopped too.
       const stopAll = Effect.suspend(() =>
         Effect.forEach(
@@ -970,7 +970,10 @@ export const make = Effect.gen(function* () {
           { discard: true },
         ),
       );
-      return yield* lifecycle(review.id, stopAll.pipe(Effect.andThen(reviews.local.remove(key))));
+      return yield* lifecycle(
+        review.id,
+        stopAll.pipe(Effect.andThen(reviews.local.remove(key, review.id))),
+      );
     }).pipe(Effect.uninterruptible);
 
   yield* reconcile;

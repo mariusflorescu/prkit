@@ -7,7 +7,7 @@ import { expect, type Screen, type TestFixtures } from "e2e";
 import * as Schema from "effect/Schema";
 
 import { GenerateLocalGuideResult, LocalWaitResult } from "../apps/server/src/outside/schemas.ts";
-import type { RunFile } from "../scripts/verify-run.ts";
+import { type RunFile, repoRoot } from "../scripts/verify-run.ts";
 import {
   alive,
   cardStates,
@@ -22,13 +22,12 @@ import {
   sleep,
   twoAddedLines,
 } from "./askJourney.ts";
-import { startFakeGitHub, startFakeInstance, stopFakeInstance } from "./fakeGitHub.ts";
+import { startInstance, stopFakeInstance } from "./fakeGitHub.ts";
 import { AGENT_WAIT, CODEX_RUNS, CODEX_SKIP } from "./fixActions.ts";
 import { AGENT_RUNS, AGENT_SKIP, readRows } from "./fixturePr.ts";
-import { cliIn, dismissToasts, scratchRoot, switchOn } from "./localGuideSession.ts";
+import { cliIn, dismissToasts, outsideAccess, scratchRoot } from "./localGuideSession.ts";
 import { localRepoFixture } from "./localRepoFixture.ts";
 import { emulateOsColorScheme } from "./osColorScheme.ts";
-import { setUpRealClaude } from "./realClaude.ts";
 
 const decodeGenerate = Schema.decodeSync(Schema.fromJsonString(GenerateLocalGuideResult));
 const decodeWait = Schema.decodeSync(Schema.fromJsonString(LocalWaitResult));
@@ -98,23 +97,22 @@ const reviewRow = (home: string, key: string) => {
 };
 
 /**
- * An instance on the fake GitHub, whose agent is the owner's own: Claude through a wrapper
- * that gives it the real HOME back, Codex through the owner's Codex home (prkit links its
- * login and writes only in its own Codex home).
+ * An instance with the owner's own HOME, as the app runs: the agent finds its login and keeps
+ * its sessions where prkit looks for them to fork. On the fake GitHub, HOME is the fake's, so
+ * prkit would look for the guide's Claude session in the wrong folder. A local review reads
+ * nothing from GitHub either way.
  */
-const launch = (
-  name: string,
-  fake: Awaited<ReturnType<typeof startFakeGitHub>>,
-  claude: string,
-) => {
-  const previous = process.env.CODEX_HOME;
-  process.env.CODEX_HOME = previous ?? NodePath.join(NodeOs.homedir(), ".codex");
-  try {
-    return startFakeInstance(name, fake, ["--watch-interval", "600000", "--claude", claude]);
-  } finally {
-    if (previous === undefined) delete process.env.CODEX_HOME;
-    else process.env.CODEX_HOME = previous;
-  }
+const launch = (name: string) => startInstance(name, ["--watch-interval", "600000"]);
+
+/** Opens the app and turns Outside agents on at Read and start work, so the CLI can start guides. */
+const switchOn = async ({ app, screen, browser }: Page, openUrl: string) => {
+  await app.open(openUrl);
+  await expect(screen.getByRole("link", "Inbox")).toBeVisible({ timeout: 30_000 });
+  await browser.keyboard.press("Meta+Comma");
+  await screen.getByRole("link", "Outside agents").tap();
+  await screen.getByRole("switch", "Let my coding agents use prkit").tap();
+  await expect(screen.getByText("Outside agents can read", { exact: true })).toBeVisible();
+  await outsideAccess({ screen }, "Read and start work");
 };
 
 const openLocal = async ({ app, screen }: Page, run: RunFile, key: string) => {
@@ -129,14 +127,13 @@ const journey = (agent: Agent) => async (page: Page) => {
   const evidence: Array<string> = [];
   const note = (label: string, value: object | string | null) =>
     evidence.push(`${label}: ${JSON.stringify(value)}`);
-  const fake = await startFakeGitHub(name);
+  NodeFS.rmSync(NodePath.join(repoRoot, ".e2e", "homes", name), { recursive: true, force: true });
   const root = scratchRoot();
   const log: Array<string> = [];
   try {
     const repo = shop(root);
-    const claude = setUpRealClaude(name);
-    let run = launch(name, fake, claude.file);
-    const cli = cliIn(NodePath.join(run.home, "bin/prkit"), fake.home, log);
+    let run = launch(name);
+    const cli = cliIn(NodePath.join(run.home, "bin/prkit"), NodeOs.homedir(), log);
     await emulateOsColorScheme(browser, "light");
     await browser.setViewport({ width: 1280, height: 860 });
     await switchOn(page, run.openUrl);
@@ -328,7 +325,7 @@ const journey = (agent: Agent) => async (page: Page) => {
       questionRows(run.home, key).map((entry) => [entry.text, entry.state]),
     );
     stopFakeInstance(name, { keepHome: true });
-    run = launch(name, fake, claude.file);
+    run = launch(name);
     await openLocal(page, run, key);
     await expect(pin).toContainText(`Pinned from Ask · ${agent.label} · r1`, { timeout: 30_000 });
     await dock.getByRole("button", "Show questions").tap();
@@ -344,7 +341,6 @@ const journey = (agent: Agent) => async (page: Page) => {
     });
     note("relaunched", statesBefore);
     await keep(app, `${agent.name}-relaunched`);
-    expect(await fake.writes()).toEqual([]);
   } finally {
     NodeFS.mkdirSync(EVIDENCE, { recursive: true });
     NodeFS.writeFileSync(
@@ -352,7 +348,6 @@ const journey = (agent: Agent) => async (page: Page) => {
       `${evidence.join("\n")}\n\n${log.join("\n\n")}\n`,
     );
     stopFakeInstance(name, { keepHome: false });
-    fake.stop();
     NodeFS.rmSync(root, { recursive: true, force: true });
   }
 };
