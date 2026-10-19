@@ -203,7 +203,13 @@ test(
 
       const fallback =
         "Skill installer opened in Terminal | prkit couldn't use your default terminal.";
-      for (const answer of ["com.apple.TextEdit", "dev.warp.Warp-Stable", "", "unreadable"]) {
+      for (const answer of [
+        "com.apple.TextEdit",
+        "dev.warp.Warp-Stable",
+        "net.kovidgoyal.kitty",
+        "",
+        "unreadable",
+      ]) {
         tools.prepare(answer);
         await open({ screen, browser }, fallback);
         expect(launches(), answer).toEqual(["com.apple.Terminal"]);

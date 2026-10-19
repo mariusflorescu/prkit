@@ -1,16 +1,16 @@
 const appleTerminal = { bundleId: "com.apple.Terminal", name: "Terminal" };
 
 /**
- * Terminals that run an executable they're asked to open, in the user's own shell, as a double
- * click in Finder does. Ghostty, iTerm2 and kitty ask before they run it. Alacritty can't open
- * files, and Warp is closed source, so what it does with one is unknown.
+ * Terminals that run an executable they're asked to open in the user's own shell, as a double
+ * click in Finder does, so `npx` from the shell's setup is found. Ghostty and iTerm2 ask before
+ * they run it. kitty runs the file outside the shell, Alacritty can't open files, and Warp is
+ * closed source, so what it does with one is unknown.
  */
 const terminals = [
   appleTerminal,
   { bundleId: "com.mitchellh.ghostty", name: "Ghostty" },
   { bundleId: "com.googlecode.iterm2", name: "iTerm2" },
   { bundleId: "com.github.wez.wezterm", name: "WezTerm" },
-  { bundleId: "net.kovidgoyal.kitty", name: "kitty" },
 ];
 
 /**
