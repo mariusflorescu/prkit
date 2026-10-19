@@ -16,11 +16,13 @@ Every 4 hours, at 17 minutes past 00:00, 04:00, 08:00, 12:00, 16:00, and 20:00 U
 
 A run that skips ends after its first job, **Resolve version**, about 30 seconds on Linux. The macOS build and the publish job never start.
 
-Otherwise the nightly gets the next stable version plus the date and run number, for example `0.2.0-nightly.20261014.37`. Every run takes a higher run number, so two nightlies on one day still sort in order: `.37` before `.41`. The workflow builds, signs, notarizes, and verifies the app, then publishes the release **prkit Nightly 0.2.0-nightly.20261014.37**. It is a prerelease and never the latest release. Its notes cover the commits since the previous nightly, or since the last stable release when there is no previous nightly.
+Otherwise the nightly gets the next stable version plus the date and run number, for example `0.2.0-nightly.20261014.37`. Each new run takes a higher run number, so two nightlies on one day still sort in order: `.37` before `.41`. The workflow builds, signs, notarizes, and verifies the app, then publishes the release **prkit Nightly 0.2.0-nightly.20261014.37**. It is a prerelease and never the latest release. Its notes cover the commits since the previous nightly, or since the last stable release when there is no previous nightly.
 
 The workflow then deletes every nightly release and tag older than the 14 newest, which is at least two days of nightlies at six a day. The app never needs an older one. An update needs only the newest release, and the app reads its changelog from GitHub's releases feed, which lists only the 10 newest releases. Keep at least 10, or the changelog loses versions.
 
 To run a nightly now, open **Actions > Release > Run workflow**, keep `main` and the `nightly` channel, and click **Run workflow**. A manual nightly skips for the same reasons as the scheduled one.
+
+A failed nightly needs no retry, because the next scheduled run, at most 4 hours later, publishes everything it would have. To retry sooner, run a new one, which builds, signs, and notarizes the app again. **Publish** refuses every re-run of a nightly. A re-run keeps its run number and commit, so after a later nightly it would publish older code.
 
 ## Publish a stable release
 

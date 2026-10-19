@@ -228,6 +228,14 @@ jobs:
       PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
       MAKE_LATEST: ${{ needs.resolve.outputs.make_latest }}
     steps:
+      # A re-run keeps its commit and run number, so after a later nightly it would publish older
+      # code and hide the newer one from the update feed. The next scheduled run retries instead.
+      - name: Refuse a nightly re-run
+        if: needs.resolve.outputs.channel == 'nightly' && github.run_attempt != '1'
+        run: |
+          echo "::error::A nightly is never re-run, since a re-run publishes its old commit. Start a new run instead."
+          exit 1
+
       - name: Download the build
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
