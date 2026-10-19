@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { ReviewFeedNotice } from "~/components/review/ReviewFeedNotice";
 import { FreshnessNotice } from "~/features/github/FreshnessNotice";
+import { retryReviewFeed } from "~/rpc/client";
 import { reviewFeedQuery } from "~/rpc/queries";
 
 import { ConfigDirNotice } from "./ConfigDirNotice";
@@ -32,7 +33,11 @@ export function InboxNotices({
   return (
     <div className="space-y-2 px-3">
       {failed && (
-        <ReviewFeedNotice message={failed.message}>
+        <ReviewFeedNotice
+          label="Couldn't read your guides"
+          message={failed.message}
+          retry={retryReviewFeed}
+        >
           {failed.reviews === null
             ? `Guide marks and risk levels are hidden until it can${riskiest ? ", and Riskiest first orders by wait" : ""}.`
             : "Guide marks and risk levels may be out of date until it can."}

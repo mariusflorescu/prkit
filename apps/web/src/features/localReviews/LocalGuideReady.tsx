@@ -16,7 +16,7 @@ import { useGuideAskTarget } from "~/features/ask/useGuideAskTarget";
 import { useLineAsks } from "~/features/ask/useLineAsks";
 import { useManualCheckTicks } from "~/features/manualCheck/useManualCheckTicks";
 import { getLocalFileContents } from "~/rpc/client";
-import { guideQuery } from "~/rpc/queries";
+import { guideQuery, localReviewProblemQuery } from "~/rpc/queries";
 
 import { isRunning, LOCAL_FAILURE_TITLES } from "./localPresentation";
 import { LocalGuideStatusBar } from "./LocalGuideStatusBar";
@@ -41,8 +41,10 @@ export function LocalGuideReady({
   // null follows the newest revision; "draft" reads the update being written until it lands.
   const [picked, setPicked] = useState<GuideChoice | null>(null);
   const status = review.status;
+  // While prkit can't read the review, the run it last saw may be over: only revisions show.
+  const unreadable = useQuery(localReviewProblemQuery(review.key)).data != null;
   const draft =
-    isRunning(status) && attempt?.draft != null
+    !unreadable && isRunning(status) && attempt?.draft != null
       ? { attempt, version: attempt.draft.version, growing: attempt.draft.growing }
       : null;
   const showingDraft = picked === "draft" && draft !== null;
@@ -86,7 +88,7 @@ export function LocalGuideReady({
         selected={showingDraft ? "draft" : revision.revision}
         onSelect={pick}
       />
-      {status._tag === "failed" && (
+      {status._tag === "failed" && !unreadable && (
         <ReviewAlert
           title={LOCAL_FAILURE_TITLES[status.reason]}
           message={retry.error?.message ?? status.message}

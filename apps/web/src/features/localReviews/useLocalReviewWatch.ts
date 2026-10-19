@@ -1,22 +1,36 @@
 import type { LocalReviewKey } from "@prkit/contracts";
-import { useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect } from "react";
 
 import { watchLocalReview } from "~/rpc/client";
+import { localReviewProblemQuery } from "~/rpc/queries";
 
 import { applyLocalReviewEvent } from "./localReviewCache";
 
 /** One stream per local review however many components follow it (its tab and its page). */
-const subscriptions = new Map<LocalReviewKey, { count: number; stop: () => void }>();
+const subscriptions = new Map<
+  LocalReviewKey,
+  { count: number; stop: () => void; retry: () => void }
+>();
 
-/** Keeps `localReviewQuery(key)` current while the calling component is mounted. */
+/**
+ * Keeps `localReviewQuery(key)` current while the calling component is mounted. `problem` says
+ * why prkit can't, until it can again; `retry` tries again now.
+ */
 export function useLocalReviewWatch(key: LocalReviewKey) {
   const client = useQueryClient();
   useEffect(() => {
-    const existing = subscriptions.get(key);
-    const entry = existing ?? {
+    const { queryKey } = localReviewProblemQuery(key);
+    const entry = subscriptions.get(key) ?? {
       count: 0,
-      stop: watchLocalReview(key, (event) => applyLocalReviewEvent(client, key, event)),
+      ...watchLocalReview(
+        key,
+        (event) => {
+          if (client.getQueryData(queryKey) != null) client.setQueryData(queryKey, null);
+          applyLocalReviewEvent(client, key, event);
+        },
+        (message) => client.setQueryData(queryKey, message),
+      ),
     };
     entry.count++;
     subscriptions.set(key, entry);
@@ -27,4 +41,7 @@ export function useLocalReviewWatch(key: LocalReviewKey) {
       subscriptions.delete(key);
     };
   }, [client, key]);
+  const problem = useQuery(localReviewProblemQuery(key)).data ?? null;
+  const retry = useCallback(() => subscriptions.get(key)?.retry(), [key]);
+  return { problem, retry };
 }

@@ -6,6 +6,7 @@ import { Button } from "~/components/ui/button";
 import { LAYER_GUIDE_LABELS, layerGuide, layerKey } from "~/features/stack/stackPresentation";
 import { pullRequestState } from "~/lib/pullRequestState";
 import { cn } from "~/lib/utils";
+import { retryReviewFeed } from "~/rpc/client";
 import { reviewFeedQuery } from "~/rpc/queries";
 
 import { chosenLayers, type ComposerValues, type GuideScopeChoice } from "./composerValues";
@@ -72,7 +73,11 @@ export function StackScopeControl({
         )}
       </div>
       {scope !== "this" && feed?._tag === "failed" && (
-        <ReviewFeedNotice message={feed.message}>
+        <ReviewFeedNotice
+          label="Couldn't read your guides"
+          message={feed.message}
+          retry={retryReviewFeed}
+        >
           Which layers already have a guide is unknown until it can.
         </ReviewFeedNotice>
       )}

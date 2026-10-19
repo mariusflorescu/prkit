@@ -1,8 +1,10 @@
 import type { LocalReview, LocalRun } from "@prkit/contracts";
+import { useQuery } from "@tanstack/react-query";
 import { FolderGit2Icon } from "lucide-react";
 
 import { Button } from "~/components/ui/button";
 import { relativeTime } from "~/features/pullRequest/pullRequestPresentation";
+import { localReviewProblemQuery } from "~/rpc/queries";
 
 import { HEAD_WORDS, isRunning, localTitle } from "./localPresentation";
 import { LocalReviewMenu } from "./LocalReviewMenu";
@@ -11,10 +13,12 @@ import { useLocalReviewActions } from "./useLocalReviewActions";
 
 /**
  * What a local review is about (the folder, its branch, the base and head of the last run)
- * and what can be done with it: Run again, or Stop while a guide is written, and Remove.
+ * and what can be done with it: Run again, or Stop while a guide is written, and Remove. Run
+ * again and Stop follow the review's state, so neither shows while prkit can't read it.
  */
 export function LocalReviewHeader({ review, run }: { review: LocalReview; run: LocalRun | null }) {
   const { generate, stop } = useLocalReviewActions(review.key);
+  const unreadable = useQuery(localReviewProblemQuery(review.key)).data != null;
   const running = isRunning(review.status);
   const error = stop.error ?? generate.error;
   const title = localTitle(review.source);
@@ -29,7 +33,7 @@ export function LocalReviewHeader({ review, run }: { review: LocalReview; run: L
           Local changes
         </span>
         <div className="ml-auto flex shrink-0 items-center gap-1">
-          {running ? (
+          {unreadable ? null : running ? (
             <Button
               variant="outline"
               size="xs"
@@ -74,16 +78,18 @@ export function LocalReviewHeader({ review, run }: { review: LocalReview; run: L
       {error && (
         <p role="alert" className="mt-1.5 flex items-center gap-2 text-xs text-error-foreground">
           {error.message}
-          <Button
-            variant="link"
-            size="xs"
-            disabled={stop.isPending || generate.isPending}
-            onClick={() =>
-              error === stop.error ? stop.mutate() : generate.mutate(generate.variables ?? {})
-            }
-          >
-            Retry
-          </Button>
+          {!unreadable && (
+            <Button
+              variant="link"
+              size="xs"
+              disabled={stop.isPending || generate.isPending}
+              onClick={() =>
+                error === stop.error ? stop.mutate() : generate.mutate(generate.variables ?? {})
+              }
+            >
+              Retry
+            </Button>
+          )}
         </p>
       )}
     </header>

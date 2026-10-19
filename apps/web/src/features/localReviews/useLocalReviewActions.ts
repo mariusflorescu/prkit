@@ -8,18 +8,25 @@ import {
   retryLocalReview,
   stopLocalReview,
 } from "~/rpc/client";
+import { localReviewProblemQuery } from "~/rpc/queries";
 
 import { forgetLocalReview, storeLocalSnapshot } from "./localReviewCache";
 
 /**
  * Run again, Stop, Retry and Remove for one local review. Run again says so quietly when it
- * found nothing new or a guide already being written, since neither changes the page.
+ * found nothing new or a guide already being written, since neither changes the page. A run
+ * spends the user's agent subscription, so Run again and Retry start none while prkit can't
+ * read the review, whatever asked for it (a toast or a Retry from before included).
  */
 export function useLocalReviewActions(key: LocalReviewKey) {
   const client = useQueryClient();
+  const readable = <A>(run: () => Promise<A>) =>
+    client.getQueryData(localReviewProblemQuery(key).queryKey) == null
+      ? run()
+      : Promise.reject(new Error("prkit couldn't read this local review, so it started no run."));
   const generate = useMutation({
     mutationFn: (input: { agent?: AgentSelection; regenerate?: boolean }) =>
-      generateLocalReview(key, input),
+      readable(() => generateLocalReview(key, input)),
     onSuccess: (result) => {
       storeLocalSnapshot(client, result.snapshot);
       const latest = result.snapshot.revisions.at(-1)?.revision;
@@ -42,7 +49,7 @@ export function useLocalReviewActions(key: LocalReviewKey) {
     onSuccess: (snapshot) => storeLocalSnapshot(client, snapshot),
   });
   const retry = useMutation({
-    mutationFn: () => retryLocalReview(key),
+    mutationFn: () => readable(() => retryLocalReview(key)),
     onSuccess: (snapshot) => storeLocalSnapshot(client, snapshot),
   });
   const remove = useMutation({

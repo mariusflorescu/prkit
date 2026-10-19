@@ -62,6 +62,13 @@ test(
       write('{"broken');
       return () => write(capture);
     };
+    const attempts = (key: string) =>
+      Number(
+        readRows(
+          run.home,
+          `SELECT count(*) AS n FROM review_attempts WHERE review_id = (SELECT id FROM reviews WHERE pr_key = '${key}')`,
+        )[0]?.n,
+      );
     const failed = (key: string) =>
       String(readRows(run.home, `SELECT status FROM reviews WHERE pr_key = '${key}'`)[0]?.status);
     try {
@@ -97,20 +104,47 @@ test(
       claude.release();
       await expect.poll(() => failed(key), { timeout: 30_000 }).toContain('"failed"');
       await expect(notice).toContainText(DAMAGED, { timeout: 15_000 });
+      const failedAt = Date.now();
       await expect(screen.getByRole("status", "What the agent is doing")).toHaveCount(0);
       await expect(screen.getByRole("button", "Stop")).toHaveCount(0);
       await expect(screen.getByRole("button", "Run again")).toHaveCount(0);
       await expect.poll(() => tabMark(browser)).toBe("warning");
+      await screen.getByRole("heading", TITLE).hover();
+      // The tap left focus on the tab, which shows its close button there instead of the dot.
+      await browser.evaluate(() => {
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+        return null;
+      });
       await screenshotLightAndDark(app, browser, "local-feed-failed");
       await browser.setViewport({ width: 600, height: 860 });
       await expect(notice.getByRole("button", "Retry")).toBeVisible();
       await app.screenshot("local-feed-failed-narrow");
       await browser.setViewport({ width: 1280, height: 860 });
+      // The tab says the same where it shows more, with its own Retry.
+      await tab.hover();
+      const tooltip = browser.locator('[role="tooltip"]');
+      await expect(tooltip).toContainText(DAMAGED, { timeout: 5_000 });
+      await expect(tooltip.getByRole("button", "Retry")).toBeVisible();
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      await app.screenshot("local-feed-failed-tab");
+      await notice.hover();
+      await expect(tooltip).toHaveCount(0);
+      // The page comes back from the Inbox with the notice at once: the tab kept following.
+      await screen.getByRole("link", "Inbox").tap();
+      await tab.tap();
+      await expect(notice).toContainText(DAMAGED, { timeout: 1_000 });
 
-      // Repaired, Retry reads it again: the run failed, and its own Retry writes the guide.
+      // Repaired, Retry reads it again well before prkit's own next try (about 16 seconds of
+      // failures put that 16 seconds after the last one): the run failed, and its own Retry
+      // writes the guide.
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.max(0, failedAt + 16_000 - Date.now())),
+      );
       repair();
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      await expect(notice).toBeVisible();
       await notice.getByRole("button", "Retry").tap();
-      await expect(notice).toHaveCount(0, { timeout: 15_000 });
+      await expect(notice).toHaveCount(0, { timeout: 3_000 });
       const runFailure = screen.getByRole("alert").filter({ hasText: "Retry" });
       await expect(runFailure).toBeVisible();
       await runFailure.getByRole("button", "Retry").tap();
@@ -121,21 +155,35 @@ test(
       await dismissToasts(browser);
 
       // A second run's record is damaged under the first guide: the guide stays readable, the
-      // page says it may be out of date, and offers no Retry of the run it can't read.
+      // page says it may be out of date, and offers no Retry of the run it can't read. Nor does
+      // a toast's "Write it again" from before the failure start one.
+      await screen.getByRole("button", "Run again").tap();
+      const writeAgain = screen.getByRole("button", "Write it again");
+      await expect(writeAgain).toBeVisible();
+      await writeAgain.hover();
       claude.hold();
       fixture.write("docs/handbook.md", handbook({ 15: team, 22: "Teams can raise their own." }));
-      await screen.getByRole("button", "Run again").tap();
+      expect(decodeGenerate(local(["guide", "--json"]).stdout).outcome).toBe("started");
       await expect(screen.getByRole("button", "Stop")).toBeVisible({ timeout: 30_000 });
       repair = damageRun(key);
       claude.release();
       await expect.poll(() => failed(key), { timeout: 30_000 }).toContain('"failed"');
       await expect(notice).toContainText(DAMAGED, { timeout: 15_000 });
+      const before = attempts(key);
+      await writeAgain.tap();
+      await expect(
+        screen.getByRole("alert").filter({ hasText: "so it started no run" }),
+      ).toContainText("prkit couldn't read this local review, so it started no run.");
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      expect(attempts(key)).toBe(before);
       await expect(notice).toContainText("The guide below may be out of date until it can.");
       await expect(screen.getByText("A guide written by the stand-in agent.")).toBeVisible();
       await expect(screen.getByRole("button", "Stop")).toHaveCount(0);
       await expect(screen.getByRole("button", "Run again")).toHaveCount(0);
       await expect(screen.getByRole("alert").filter({ hasText: "Retry" })).toHaveCount(1);
+      await expect(status).not.toContainText(/Writing|Preparing/);
       await expect.poll(() => tabMark(browser)).toBe("warning");
+      await screen.getByRole("heading", TITLE).hover();
       await screenshotLightAndDark(app, browser, "local-feed-stale");
 
       // Repaired, prkit's own next try clears the notice without a click.

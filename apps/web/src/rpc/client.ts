@@ -48,6 +48,7 @@ import {
   type GuideScope,
   type PullRequestGuideConfig,
   type ScopeConfig,
+  type ReviewError,
   type ReviewFeedEvent,
   type ReviewKey,
   type LocalGenerateResult,
@@ -625,32 +626,26 @@ export const watchGitHub = (onEvent: (event: GitHubEvent) => void): (() => void)
   };
 };
 
-/** Asks the review feed being followed to try again now; set while `watchReviewFeed` runs. */
-let retryFeed: (() => void) | null = null;
-
 /**
- * Follows every review app-wide (inbox marks, tab indicators, notifications) until the
- * returned function is called. Each subscription opens with the full index. When prkit can't
- * read the reviews, `onFailed` gets its message and the feed tries again after 2 seconds, then
- * less often, up to a minute apart, or at once on `retryReviewFeed`. A dropped connection only
- * tries again.
+ * Follows one of prkit's review streams until `stop`. When prkit can't read what it follows
+ * (`ReviewError`), `onFailed` gets its message and it tries again after 2 seconds, then less
+ * often, up to a minute apart, or at once on `retry`: right after a try under way, or now while
+ * it waits. A dropped connection only tries again.
  */
-export const watchReviewFeed = (
-  onEvent: (event: ReviewFeedEvent) => void,
+const followReviews = <A>(
+  subscribe: (
+    client: WsClient["Service"],
+  ) => Stream.Stream<A, ReviewError | RpcClientError.RpcClientError>,
+  onEvent: (event: A) => void,
   onFailed: (message: string) => void,
-): (() => void) => {
+) => {
   const current = getRuntime();
-  if (current === null) return () => {};
+  if (current === null) return { stop: () => {}, retry: () => {} };
   let failures = 0;
-  // A retry asked for while a try is under way skips the wait after it.
   let wake: (() => void) | null = null;
   let skipWait = false;
-  retryFeed = () => {
-    if (wake === null) skipWait = true;
-    else wake();
-  };
   const follow = WsClient.use((client) =>
-    client[WS_METHODS.reviewsFeed]({}).pipe(
+    subscribe(client).pipe(
       Stream.runForEach((event) =>
         Effect.sync(() => {
           failures = 0;
@@ -681,9 +676,34 @@ export const watchReviewFeed = (
     wake = null;
   });
   const fiber = current.runFork(follow.pipe(Effect.andThen(wait), Effect.forever));
+  return {
+    stop: () => {
+      current.runFork(Fiber.interrupt(fiber));
+    },
+    retry: () => {
+      if (wake === null) skipWait = true;
+      else wake();
+    },
+  };
+};
+
+/** Asks the review feed being followed to try again now; set while `watchReviewFeed` runs. */
+let retryFeed: (() => void) | null = null;
+
+/**
+ * Follows every review app-wide (inbox marks, tab indicators, notifications) until the
+ * returned function is called, as `followReviews` does. Each subscription opens with the full
+ * index. `retryReviewFeed` tries again now.
+ */
+export const watchReviewFeed = (
+  onEvent: (event: ReviewFeedEvent) => void,
+  onFailed: (message: string) => void,
+): (() => void) => {
+  const feed = followReviews((client) => client[WS_METHODS.reviewsFeed]({}), onEvent, onFailed);
+  retryFeed = feed.retry;
   return () => {
     retryFeed = null;
-    current.runFork(Fiber.interrupt(fiber));
+    feed.stop();
   };
 };
 /** Tries the review feed again now: at once while it waits, or right after a try under way. */
@@ -713,24 +733,15 @@ export const getLocalFileContents = (
   side: FileSide,
 ): Promise<FileContents> =>
   call((client) => client[WS_METHODS.localReviewsFileContents]({ key, revision, path, side }));
-/** Like `watchReview`: a snapshot first on every subscription, then updates, then `removed`. */
+/**
+ * Like `watchReview`: a snapshot first on every subscription, then updates, then `removed`,
+ * followed as `followReviews` does.
+ */
 export const watchLocalReview = (
   key: LocalReviewKey,
   onEvent: (event: LocalReviewWatchEvent) => void,
-): (() => void) => {
-  const current = getRuntime();
-  if (current === null) return () => {};
-  const fiber = current.runFork(
-    WsClient.use((client) =>
-      client[WS_METHODS.localReviewsWatch]({ key }).pipe(
-        Stream.runForEach((event) => Effect.sync(() => onEvent(event))),
-      ),
-    ).pipe(Effect.ignore, Effect.andThen(Effect.sleep("2 seconds")), Effect.forever),
-  );
-  return () => {
-    current.runFork(Fiber.interrupt(fiber));
-  };
-};
+  onFailed: (message: string) => void,
+) => followReviews((client) => client[WS_METHODS.localReviewsWatch]({ key }), onEvent, onFailed);
 /** Every local review for the whole app, opening with the full index on each subscription. */
 export const watchLocalReviewFeed = (
   onEvent: (event: LocalReviewFeedEvent) => void,

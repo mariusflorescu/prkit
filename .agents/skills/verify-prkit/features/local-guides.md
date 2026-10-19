@@ -12,6 +12,7 @@ A guide of a repository's changes before a pull request exists, asked for from a
 - `local.isolation`: no GitHub request or write, no change to the repository's `.git`, its clean filter never run, and the Inbox and `list_reviews` never show a local review.
 - `local.tab`: `generate_local_guide` opens the review's tab without focus, after the PR tabs. The server keeps it (`open_local_reviews`), so a relaunch restores it; Remove drops the row with the review. Cmd+W and the tab's close button close it, Cmd+2..9 count PR tabs only.
 - `local.page`: the header (folder and branch, "Local changes", base, head mode, folder, captured time, left-out files), progress, the guide with every revision's files openable in full, Run again (the agent picker in its popover), Stop, failed with Retry, Remove behind a confirmation, and the removed state at a stale link.
+- `local.unreadable`: when prkit can't read a local review while its page is open, the page says so above what it read last (`alert "Couldn't read this local review"`, with prkit's words and Retry), keeps only a written guide, and offers no Run again, Stop or Retry of a run until it reads the review again. The tab shows the warning dot instead of the progress ring, and its tooltip says the same with a Retry. prkit tries again after 2 seconds, then less often, up to a minute apart.
 - `local.palette`: the palette's "Local reviews" group, newest first, opening the tab.
 - `local.scope`: the guide, its draft and its progress name the function, class, loop or branch above each hunk and show moved code, as a pull request's do. The new side comes from the review's own copy (`diffs.texts` with a `local` source), never the working tree.
 - `local.notify`: "Guide ready" or "Guide updated" with `<name> · <branch> · N chapters` as a toast, and as a macOS notification whose click opens the page (`pnpm smoke:desktop`).
@@ -53,6 +54,15 @@ Fake GitHub and the stand-in Claude only, so no fixture lock: `pnpm e2e run test
 - **Toast:** from Settings > Appearance, a CLI run with a change raises "Guide updated" with `widgets · feature/limits · 1 chapter`, whose Open shows the page.
 - **Remove:** ⋯ > "Remove local review…", then Remove in the `alertdialog`: the tab goes, the row goes, the palette shows no Local reviews group, and opening `/local/<key>` shows "This local review was removed" with Go to Inbox.
 - **Evidence:** every frame is saved with `app.screenshot` and copied to `.e2e/evidence/local-guides-ui/` as `local-<state>-<theme>.png`, with the CLI transcript. It copies only this run's frames, from `.e2e/results` or from the `--output .e2e/proof/<name>` folder the run wrote them to. Frames avoid Settings > Outside agents and the Inbox footer, which print this machine's paths.
+
+### A local review prkit can't read (`tests/local-review-feed.e2e.ts`)
+
+Fake GitHub and the stand-in Claude only, so no fixture lock: `pnpm e2e run tests/local-review-feed.e2e.ts`. While the stand-in is held, the journey sets the run's `review_attempts.capture` to text that isn't JSON, then releases it: the run fails on the server, and the page's next read fails.
+
+- **No guide yet:** `alert "Couldn't read this local review"` reads `prkit can't read this local review right now, because its record is damaged. Its run shows here again once it can.`, with no progress, no Stop and no Run again. The tab has `[data-guide-warning]` and no `[data-guide-progress]`, and its tooltip (`[role="tooltip"]`, on hover) says the same with Retry. Light, dark and 600 px.
+- **Recovery:** with the record put back, the notice's Retry shows the failed run, whose own Retry writes the guide.
+- **Under a guide:** held again, Run again after a change, the record damaged and the stand-in released. The guide stays, the notice adds "The guide below may be out of date until it can.", and there is no Stop, Run again, Retry of the run or "Writing" status. Put back, prkit's own next try clears the notice and shows the failed update.
+- **Evidence:** `local-feed-failed-light`, `-dark`, `-narrow` and `-tab`, and `local-feed-stale-light` and `-dark`.
 
 ### Scope and moved code (`tests/local-diff-scope.e2e.ts`)
 
