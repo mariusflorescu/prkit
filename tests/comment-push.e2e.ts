@@ -1,5 +1,5 @@
 import { type Browser, test } from "@e2e-dev/web";
-import { expect } from "e2e";
+import { expect, type Screen, type TestFixtures } from "e2e";
 
 import { type FakeNote, setUpFakeClaude } from "./fakeClaude.ts";
 import {
@@ -539,6 +539,110 @@ test(
       await expect(revision).not.toContainText("r1 · ", { timeout: 30_000 });
       expect(await fake.writes()).toEqual([]);
       expect(git.pushes()).toEqual([]);
+    } finally {
+      stopFakeInstance(name, { keepHome: false });
+      fake.stop();
+    }
+  },
+);
+
+const LINES = "Do the schemes need ftp too, or";
+const ON_REPLY = "The url limit came from the old proxy, so";
+
+/** PR 9 with CHECKS, a thread on check's return, and a guide with notes on the slug limit and short's `}`. */
+const withGuide = async (name: string) => {
+  const fake = await startFakeGitHub(name);
+  const claude = setUpFakeClaude(name);
+  const git = outsideGit(name);
+  const sha = git.commit(9, { [LIMITS]: CHECKS });
+  await fake.files(9, [served(git.patch(9, LIMITS))]);
+  await fake.gitHead(9, sha);
+  await fake.context(9, {
+    checks: [],
+    issues: [],
+    threads: [
+      {
+        id: "thread-check",
+        path: LIMITS,
+        line: 10,
+        originalLine: 10,
+        resolved: false,
+        comments: [{ id: 2, login: "octocat", body: "Is 2048 enough for signed links?" }],
+      },
+    ],
+  });
+  claude.notes({ [LIMITS]: [question(3, SLUG), question(15, BRACE)] });
+  const run = git.start(() =>
+    startFakeInstance(name, fake, ["--claude", claude.file, "--e2e", "--watch-interval", "5000"]),
+  );
+  return { fake, git, run };
+};
+
+const openGuide = async (
+  { app, screen }: { app: TestFixtures["app"]; screen: Screen },
+  run: { url: string; openUrl: string },
+) => {
+  await app.open(run.openUrl);
+  await expect(screen.getByRole("link", "Inbox")).toBeVisible({ timeout: 30_000 });
+  await app.open(`${run.url}${FILES.replace("tab=files", "tab=guide")}`);
+  await screen.getByRole("button", "Generate guide").tap({ timeout: 60_000 });
+  await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r1 · ", {
+    timeout: 120_000,
+  });
+};
+
+test(
+  "comment words: a guide note's comment opens beside words being written and never replaces them",
+  { timeout: 300_000 },
+  async ({ app, screen, browser }) => {
+    const name = "comment-words-kept";
+    const { fake, run } = await withGuide(name);
+    try {
+      await browser.setViewport({ width: 1280, height: 900 });
+      await emulateOsColorScheme(browser, "light");
+      await openGuide({ app, screen }, run);
+      const tabs = screen.getByRole("navigation", "Pull request tabs");
+      await tabs.getByRole("link", "Files").tap();
+      await expect(lineNumber(browser, 7)).toBeVisible({ timeout: 30_000 });
+      await lineNumber(browser, 7).tap();
+      const lines = screen.getByRole("textbox", "Comment on line 7");
+      await lines.fill(LINES);
+      await noteIn(browser, SLUG).getByRole("button", "Add as comment, question on line 3").tap();
+      await expect(screen.getByRole("textbox", "Comment on line 3")).toHaveValue(SLUG);
+      await expect(lines).toHaveValue(LINES);
+    } finally {
+      stopFakeInstance(name, { keepHome: false });
+      fake.stop();
+    }
+  },
+);
+
+test(
+  "comment words: a failed send keeps its error through a rebuild until the words change or go again",
+  { timeout: 300_000 },
+  async ({ app, screen, browser }) => {
+    const name = "comment-words-failed";
+    const { fake, run } = await withGuide(name);
+    try {
+      await browser.setViewport({ width: 1280, height: 900 });
+      await emulateOsColorScheme(browser, "light");
+      await openGuide({ app, screen }, run);
+      const tabs = screen.getByRole("navigation", "Pull request tabs");
+      await tabs.getByRole("link", "Files").tap();
+      const file = screen.getByRole("region", LIMITS);
+      const thread = file.getByRole("article", `Thread by octocat on ${LIMITS} line 10`);
+      await thread.getByRole("button", "Reply").tap({ timeout: 30_000 });
+      const reply = thread.getByRole("textbox", "Reply to octocat");
+      await reply.fill(ON_REPLY);
+      await reply.press("Meta+Enter");
+      const refused = thread.getByRole("alert");
+      await expect(refused).toBeVisible({ timeout: 30_000 });
+      const said = (await refused.textContent()) ?? "";
+      console.log(`reply refused: ${said}`);
+      await tabs.getByRole("link", "Conversation").tap();
+      await tabs.getByRole("link", "Files").tap();
+      await expect(reply).toHaveValue(ON_REPLY, { timeout: 30_000 });
+      await expect(thread.getByRole("alert")).toHaveText(said);
     } finally {
       stopFakeInstance(name, { keepHome: false });
       fake.stop();
