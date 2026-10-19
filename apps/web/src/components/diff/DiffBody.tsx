@@ -280,7 +280,7 @@ export function DiffBody({
     const root = host.current?.shadowRoot;
     if (root) paintScopes(root, scopes);
   }, [scopes]);
-  const shown = keyRange ?? selection ?? reveal?.range ?? null;
+  const shown = keyRange ?? selection ?? comments?.asked ?? reveal?.range ?? null;
   const selectionKey = shown ? `${pointKey(shown.start)},${pointKey(shown.end)}` : "";
   const selectedLines = useMemo<SelectedLineRange | null>(() => {
     if (selectionKey === "") return null;

@@ -1,4 +1,4 @@
-import type { AskScope, ReviewKey } from "@prkit/contracts";
+import type { AskScope, CommentAnchor, ReviewKey } from "@prkit/contracts";
 import { create } from "zustand";
 
 /** A scope the reader picked, on the revision it belongs to. */
@@ -52,6 +52,10 @@ export const useAskedLines = (key: ReviewKey, revision: number) => {
     ? choice.scope.anchor
     : null;
 };
+
+/** The asked lines as the picked range of a diff of `path`, or null for any other file. */
+export const askedRange = (lines: CommentAnchor | null, path: string) =>
+  lines?.path === path ? { start: lines.start, end: lines.end } : null;
 
 /** Opens the dock on `choice` and puts the cursor in its field. */
 export const askAbout = (key: ReviewKey, choice: AskChoice | null) =>

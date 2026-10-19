@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import type { DiffAsk } from "~/components/diff";
 import { toastManager } from "~/components/ui/toast";
 
-import { askAbout, useAskedLines } from "./askStore";
+import { askAbout, askedRange, useAskedLines } from "./askStore";
 import type { AskTarget } from "./askTarget";
 
 /**
@@ -23,7 +23,7 @@ export function useLineAsks(target: AskTarget, headSha: string) {
         const { patch } = file.patch;
         return {
           kind: "ask",
-          selection: lines?.path === file.path ? { start: lines.start, end: lines.end } : null,
+          selection: askedRange(lines, file.path),
           onSelect: (range) => {
             const placement = capture(diffRows(patch), { path: file.path, ...range }, headSha);
             if (placement === null)
