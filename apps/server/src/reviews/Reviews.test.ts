@@ -325,7 +325,7 @@ const Config = Layer.effect(
 
 const GitHub = Layer.mergeAll(
   Layer.mock(GitHubAccounts, {
-    list: () => Effect.succeed({ accounts: [], addedConfigDirs: [] }),
+    list: () => Effect.succeed({ accounts: [], addedConfigDirs: [], configDirProblems: [] }),
     apiBase: () => "https://api.github.com",
   }),
   Layer.mock(GitHubApi, {

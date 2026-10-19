@@ -21,6 +21,7 @@ import {
   sha,
   STACK,
   start,
+  tokenOwner,
 } from "./model.ts";
 import { STACKS } from "./options.ts";
 
@@ -112,7 +113,7 @@ export const rest = (
 ) => {
   const path = url.pathname;
   if (path === "/user") {
-    const login = token.replace(/^(Bearer|token) fake-token-for-/, "");
+    const { login } = tokenOwner(token);
     return login.startsWith("budget-")
       ? {
           kind: "rest:user",

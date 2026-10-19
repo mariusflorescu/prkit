@@ -120,6 +120,7 @@ const github = (state: GitHubState) =>
             },
           ],
           addedConfigDirs: [],
+          configDirProblems: [],
         }),
       apiBase: () => "https://api.github.com",
     }),

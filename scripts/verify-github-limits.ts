@@ -289,10 +289,11 @@ const account: Account = {
   status: { _tag: "ready" },
 };
 const accounts = GitHubAccounts.of({
-  list: () => Effect.succeed({ accounts: [account], addedConfigDirs: [] }),
-  refresh: () => Effect.succeed({ accounts: [account], addedConfigDirs: [] }),
-  known: Effect.succeed({ accounts: [account], addedConfigDirs: [] }),
-  configured: Effect.succeed([account]),
+  list: () => Effect.succeed({ accounts: [account], addedConfigDirs: [], configDirProblems: [] }),
+  refresh: () =>
+    Effect.succeed({ accounts: [account], addedConfigDirs: [], configDirProblems: [] }),
+  known: Effect.succeed({ accounts: [account], addedConfigDirs: [], configDirProblems: [] }),
+  configured: Effect.succeed({ accounts: [account], configDirProblems: [] }),
   token: () => Effect.succeed({ account, token: Redacted.make("local-test-token") }),
   apiBase: () => "https://api.github.com",
   addConfigDir: () => Effect.die("Not used in the limits journey"),

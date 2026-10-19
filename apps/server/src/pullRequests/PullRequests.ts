@@ -1,6 +1,7 @@
 import {
   type Account,
   type AccountId,
+  type ConfigDirProblem,
   type GitHubEvent,
   type GitHubProblem,
   InboxError,
@@ -165,7 +166,10 @@ export const make = Effect.gen(function* () {
       ),
     );
   };
-  const result = (rows: ReadonlyArray<ReturnType<typeof row>>): InboxResult => ({
+  const result = (
+    rows: ReadonlyArray<ReturnType<typeof row>>,
+    configDirProblems: ReadonlyArray<ConfigDirProblem>,
+  ): InboxResult => ({
     entries: mergeAccounts(rows.flatMap((item) => item.inbox.entries)),
     accounts: rows.map((item) => ({
       accountId: item.accountId,
@@ -174,6 +178,7 @@ export const make = Effect.gen(function* () {
       problem: item.problem,
     })),
     truncated: rows.flatMap((item) => item.inbox.truncated),
+    configDirProblems,
   });
   const readAll = (read: InboxRead) =>
     Effect.gen(function* () {
@@ -187,7 +192,7 @@ export const make = Effect.gen(function* () {
           ),
         { concurrency: 4 },
       );
-      return result(rows);
+      return result(rows, discovered.configDirProblems);
     });
   /**
    * The inbox across accounts. Before accounts are discovered (a relaunch), it answers at
@@ -198,13 +203,16 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if (read._tag === "cached" && (yield* accounts.known) === null) {
         const persisted = yield* inboxCache.persisted;
-        const rows = (yield* accounts.configured).map((account) =>
+        const configured = yield* accounts.configured;
+        const rows = configured.accounts.map((account) =>
           row(
             account.id,
             persisted.find(
               (item) => item.accountId === account.id && item.configDir === account.configDir,
             )?.cached,
-            null,
+            account.status._tag === "error"
+              ? { _tag: "account", message: account.status.message }
+              : null,
           ),
         );
         if (rows.some((item) => item.fetchedAt !== null)) {
@@ -215,7 +223,7 @@ export const make = Effect.gen(function* () {
             ),
             scope,
           );
-          return result(rows);
+          return result(rows, configured.configDirProblems);
         }
       }
       return yield* readAll(read);

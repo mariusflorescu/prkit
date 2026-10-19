@@ -60,6 +60,14 @@ export function InboxPage() {
     },
     onSuccess: (result) => queryClient.setQueryData(inboxQuery.queryKey, result),
   });
+  // Answers from what prkit kept, so only the accounts it finds anew are read from GitHub.
+  const rediscover = useMutation({
+    mutationFn: async () => {
+      queryClient.setQueryData(accountsQuery.queryKey, await refreshAccounts());
+      return listInbox({ _tag: "cached" });
+    },
+    onSuccess: (result) => queryClient.setQueryData(inboxQuery.queryKey, result),
+  });
   const recover = useMutation({
     mutationFn: refreshAccounts,
     onSuccess: (result) => {
@@ -75,10 +83,16 @@ export function InboxPage() {
     return filtered && inGroup.length === 0 ? [] : [{ reason, title, entries: inGroup }];
   });
   const error =
-    recover.error ?? refresh.error ?? retryAccount.error ?? inbox.error ?? accounts.error;
+    recover.error ??
+    refresh.error ??
+    retryAccount.error ??
+    rediscover.error ??
+    inbox.error ??
+    accounts.error;
   const retry = () => {
     refresh.reset();
     retryAccount.reset();
+    rediscover.reset();
     recover.mutate();
   };
   const inView =
@@ -87,6 +101,10 @@ export function InboxPage() {
   // from earlier has no rows until it is read, so nothing showing may only mean not read yet.
   const unread =
     visible.length === 0 && inView.some((row) => row.fetchedAt === null && row.problem === null);
+  // A notice above says why rows may be missing, so no empty state claims nothing needs you.
+  const noticeInsteadOfEmpty =
+    inView.some((row) => row.problem !== null && row.count === 0) ||
+    (!filtered && (inbox.data?.configDirProblems.length ?? 0) > 0);
   const oldest =
     inView
       .flatMap((row) => (row.fetchedAt === null ? [] : [row.fetchedAt]))
@@ -129,11 +147,11 @@ export function InboxPage() {
                   retrying={
                     retryAccount.isPending ? (retryAccount.variables?.accountId ?? null) : null
                   }
+                  retryConfigDirs={() => rediscover.mutate()}
+                  retryingConfigDirs={rediscover.isPending}
                 />
                 {visible.length === 0 ? (
-                  inView.some(
-                    (row) => row.problem !== null && row.count === 0,
-                  ) ? null : repository !== null && search.trim() === "" ? (
+                  noticeInsteadOfEmpty ? null : repository !== null && search.trim() === "" ? (
                     <InboxRepositoryEmpty
                       key={repositoryKey(repository)}
                       repository={repository}

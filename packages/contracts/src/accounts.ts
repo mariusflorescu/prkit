@@ -18,9 +18,20 @@ export const Account = Schema.Struct({
 });
 export type Account = typeof Account.Type;
 
+/**
+ * A gh config directory prkit couldn't read, when no account stands for it. A directory whose
+ * accounts prkit knows from an earlier read shows its reason on those accounts instead.
+ */
+export const ConfigDirProblem = Schema.Struct({
+  configDir: Schema.String,
+  message: Schema.String,
+});
+export type ConfigDirProblem = typeof ConfigDirProblem.Type;
+
 export const AccountsResult = Schema.Struct({
   accounts: Schema.Array(Account),
   addedConfigDirs: Schema.Array(Schema.String),
+  configDirProblems: Schema.Array(ConfigDirProblem),
 });
 export type AccountsResult = typeof AccountsResult.Type;
 

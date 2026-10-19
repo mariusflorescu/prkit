@@ -292,17 +292,24 @@ test(
         before: write(original.replaceAll(SECOND, "budget-test")),
       });
 
-      // A hosts file cut off mid-write before any login, then one prkit can't read: that
-      // directory is skipped, and the other's rows show alone, with no error.
+      // A hosts file cut off mid-write before any login, then one prkit can't read. The login it
+      // listed last is the first directory's, so the other's rows show alone, and the directory
+      // says what's wrong with it.
       await inbox.relaunch("rows 1,2,3,4", { before: write("github.com:\n  users:\n    budg") });
-      await expect(screen.getByRole("alert")).toHaveCount(0);
+      await expect(screen.getByRole("alert")).toHaveCount(1);
+      await expect(screen.getByRole("alert")).toContainText(
+        "~/.config/gh-second/hosts.yml is incomplete or isn't valid YAML",
+      );
       await inbox.relaunch("rows 1,2,3,4", {
         before: () => {
           write(original)();
           NodeFS.chmodSync(hosts, 0o000);
         },
       });
-      await expect(screen.getByRole("alert")).toHaveCount(0);
+      await expect(screen.getByRole("alert")).toHaveCount(1);
+      await expect(screen.getByRole("alert")).toContainText(
+        "prkit can't read ~/.config/gh-second/hosts.yml",
+      );
       NodeFS.chmodSync(hosts, 0o644);
 
       // Each directory names the other's login: nothing was kept for either from its directory,
@@ -317,41 +324,27 @@ test(
         },
       });
 
-      // Both directories name the second account, whose rows were last kept from the first.
-      // The first's hosts file can't be read while prkit starts, so discovery verifies the
-      // account through the second directory, and the rows kept from the first never show,
-      // even once that file is readable again before the Inbox asks.
-      await inbox.relaunch(null, {
-        settled: "rows 5,6",
+      // Both directories name the second account, whose rows were last kept from the first, the
+      // directory that listed it last. The first's hosts file can't be read while prkit starts, so
+      // the account keeps its place there: the rows kept from the first show with its reason, and
+      // nothing reads through the second, even once that file is readable again before the Inbox
+      // asks.
+      await inbox.fake.resetStats();
+      await inbox.relaunch("rows 5,6", {
         before: () => {
           NodeFS.writeFileSync(hosts, original);
           NodeFS.chmodSync(first, 0o000);
         },
         started: () => NodeFS.chmodSync(first, 0o644),
       });
+      await expect(screen.getByRole("alert")).toContainText(
+        `prkit can't read ~/.config/gh/hosts.yml, so it can't check ${SECOND}.`,
+      );
+      expect((await inbox.fake.stats()).log.filter((entry) => entry.dir === "gh-second")).toEqual(
+        [],
+      );
       NodeFS.writeFileSync(first, firstHosts);
-
-      // A directory prkit can't even look into: no account can be trusted, so the Inbox says why
-      // and draws nothing, until the directory is readable again and Retry finds both accounts.
-      await inbox.fake.hold("core");
-      stopFakeInstance("inbox-relaunch-directories", { keepHome: true });
-      NodeFS.chmodSync(directory, 0o000);
-      try {
-        const run = startFakeInstance("inbox-relaunch-directories", inbox.fake);
-        await app.open(run.openUrl);
-        await expect(screen.getByRole("alert")).toContainText("Couldn't refresh your inbox", {
-          timeout: 10_000,
-        });
-        await expect(screen.getByRole("alert")).toContainText("Check its permissions");
-        expect(await frames(browser)).toEqual([]);
-      } finally {
-        NodeFS.chmodSync(directory, 0o755);
-      }
-      await inbox.fake.release("core");
-      await screen.getByRole("alert").getByRole("button", "Retry").tap();
-      await expect.poll(() => frames(browser), { timeout: 20_000 }).toEqual(["rows 1,2,3,4,5,6"]);
     } finally {
-      NodeFS.chmodSync(directory, 0o755);
       inbox.stop();
     }
   },

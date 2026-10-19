@@ -6,6 +6,7 @@ import {
   AccountUnavailableError,
   childEnv,
   ConfigDirAlreadyAddedError,
+  type ConfigDirProblem,
   ConfigDirNoHostsError,
   ConfigDirNotAddedError,
   ConfigDirNotFoundError,
@@ -29,14 +30,41 @@ import { parse } from "yaml";
 
 import { resolveGh } from "./resolveGh.ts";
 
+/**
+ * gh writes a user whose token is in the keyring with no value, and `{}` when no one is logged
+ * in. It empties the file before writing it, so an empty file may be one it is still writing.
+ */
 const Hosts = Schema.Record(
   Schema.String,
   Schema.Struct({
     user: Schema.optionalKey(Schema.String),
-    users: Schema.optionalKey(Schema.Record(Schema.String, Schema.Struct({}))),
+    users: Schema.optionalKey(
+      Schema.Record(
+        Schema.String,
+        Schema.Union([Schema.Null, Schema.Literal(""), Schema.Struct({})]),
+      ),
+    ),
   }),
 );
 const AddedDirs = Schema.Array(Schema.Struct({ path: Schema.String }));
+const RememberedRows = Schema.Array(
+  Schema.Struct({ config_dir: Schema.String, host: Schema.String, login: Schema.String }),
+);
+
+type Login = { readonly host: string; readonly login: string };
+type Failure = "unopenable" | "unreadable" | "damaged";
+type Listing =
+  | {
+      readonly _tag: "listed";
+      readonly configDir: string;
+      readonly logins: ReadonlyArray<Login & { readonly active: boolean }>;
+    }
+  | {
+      readonly _tag: "failed";
+      readonly configDir: string;
+      readonly failure: Failure;
+      readonly remembered: ReadonlyArray<Login>;
+    };
 const Profile = Schema.Struct({
   login: Schema.String,
   name: Schema.NullOr(Schema.String),
@@ -100,9 +128,13 @@ export const make = Effect.gen(function* () {
   const gate = yield* Semaphore.make(1);
   const tokens = new Map<AccountId, Redacted.Redacted<string>>();
   let activeAccounts = new Set<AccountId>();
+  let unreadableDirAccounts = new Set<AccountId>();
   let current: AccountsResult | null = null;
   const firstFound = yield* Deferred.make<
-    ReadonlyArray<Pick<Account, "id" | "configDir">>,
+    {
+      readonly accounts: ReadonlyArray<Pick<Account, "id" | "configDir" | "status">>;
+      readonly configDirProblems: ReadonlyArray<ConfigDirProblem>;
+    },
     AccountsError
   >();
 
@@ -118,30 +150,52 @@ export const make = Effect.gen(function* () {
       ),
     );
 
-  const candidates = (added: ReadonlyArray<string>) =>
+  const homeRelative = (dir: string) =>
+    dir === home ? "~" : dir.startsWith(`${home}${path.sep}`) ? `~${dir.slice(home.length)}` : dir;
+  const failureText = (failure: Failure, configDir: string, login: string | null) => {
+    const hidden = login === null ? "find the accounts there" : `check ${login}`;
+    switch (failure) {
+      case "unopenable":
+        return `prkit can't open ${homeRelative(configDir)}, so it can't ${hidden}. Check the directory's permissions, then retry.`;
+      case "unreadable":
+        return `prkit can't read ${homeRelative(path.join(configDir, "hosts.yml"))}, so it can't ${hidden}. Check the file's permissions, then retry.`;
+      case "damaged":
+        return `${homeRelative(path.join(configDir, "hosts.yml"))} is incomplete or isn't valid YAML, so prkit can't ${hidden}. If gh was saving it, retry. Otherwise run gh auth status with GH_CONFIG_DIR set to this directory.`;
+    }
+  };
+
+  /** When ~/.config can't be listed, its remembered `gh-*` directories are still tried. */
+  const candidates = (added: ReadonlyArray<string>, remembered: ReadonlyArray<string>) =>
     Effect.gen(function* () {
       const configHome = path.join(home, ".config");
-      const names = yield* fs.readDirectory(configHome).pipe(
+      const listed = yield* fs.readDirectory(configHome).pipe(
+        Effect.map((names) => ({ names, problem: null })),
         Effect.catchTag("PlatformError", (error) =>
-          error.reason._tag === "NotFound"
-            ? Effect.succeed([])
-            : Effect.fail(
-                new AccountsError({
-                  message: "Couldn't read ~/.config. Check its permissions and retry.",
-                }),
-              ),
+          Effect.succeed(
+            error.reason._tag === "NotFound"
+              ? { names: [], problem: null }
+              : {
+                  names: remembered
+                    .filter((dir) => path.dirname(dir) === configHome)
+                    .map((dir) => path.basename(dir)),
+                  problem: {
+                    configDir: configHome,
+                    message: `prkit can't list ${homeRelative(configHome)}, so it may miss gh directories there. Check the directory's permissions, then retry.`,
+                  },
+                },
+          ),
         ),
       );
       const dirs = [
         ...Option.toArray(configuredDir),
         path.join(configHome, "gh"),
-        ...names
+        ...listed.names
           .filter((name) => name.startsWith("gh-"))
           .sort()
           .map((name) => path.join(configHome, name)),
         ...added,
       ];
-      return [...new Set(dirs.map(normalize))];
+      return { dirs: [...new Set(dirs.map(normalize))], problem: listed.problem };
     });
 
   const unavailable = (account: Account, message: string) =>
@@ -264,108 +318,166 @@ export const make = Effect.gen(function* () {
       }),
     );
 
-  /** The accounts the gh config directories list now, before GitHub verifies any of them. */
+  /** What one gh config directory lists now, or why it can't be read. Null without a hosts.yml. */
+  const look = (configDir: string, remembered: ReadonlyArray<Login>) =>
+    Effect.gen(function* () {
+      const failed = (failure: Failure) =>
+        Effect.logWarning("Couldn't read GitHub config directory").pipe(
+          Effect.annotateLogs({ configDir, failure }),
+          Effect.as<Listing>({ _tag: "failed", configDir, failure, remembered }),
+        );
+      const hostsFile = path.join(configDir, "hosts.yml");
+      const exists = yield* fs.exists(hostsFile).pipe(Effect.option);
+      if (Option.isNone(exists)) return yield* failed("unopenable");
+      if (!exists.value) return null;
+      const text = yield* fs.readFileString(hostsFile).pipe(Effect.option);
+      if (Option.isNone(text)) return yield* failed("unreadable");
+      const hosts = yield* Effect.try({
+        try: () => parse(text.value, { logLevel: "silent", prettyErrors: false }),
+        catch: () => new AccountsError({ message: "hosts.yml isn't valid YAML." }),
+      }).pipe(Effect.flatMap(Schema.decodeUnknownEffect(Hosts)), Effect.option);
+      if (Option.isNone(hosts)) return yield* failed("damaged");
+      const listing: Listing = {
+        _tag: "listed",
+        configDir,
+        logins: Object.entries(hosts.value).flatMap(([host, settings]) =>
+          [
+            ...new Set([
+              ...Object.keys(settings.users ?? {}),
+              ...(settings.user ? [settings.user] : []),
+            ]),
+          ].map((login) => ({ host, login, active: settings.user === login })),
+        ),
+      };
+      return listing;
+    });
+
+  const readRemembered = () =>
+    sql`SELECT config_dir, host, login FROM github_config_dir_accounts`.pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(RememberedRows)),
+      Effect.map((rows) => {
+        const byDir = new Map<string, Array<Login>>();
+        for (const row of rows)
+          byDir.set(row.config_dir, [
+            ...(byDir.get(row.config_dir) ?? []),
+            { host: row.host, login: row.login },
+          ]);
+        return byDir;
+      }),
+      Effect.mapError(
+        () => new AccountsError({ message: "Couldn't read saved GitHub directories. Try again." }),
+      ),
+    );
+  /** A directory that can't be read keeps what it listed; one no longer found is forgotten. */
+  const remember = (listings: ReadonlyArray<Listing>) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const failed = listings.flatMap((listing) =>
+            listing._tag === "failed" ? [listing.configDir] : [],
+          );
+          yield* failed.length === 0
+            ? sql`DELETE FROM github_config_dir_accounts`
+            : sql`DELETE FROM github_config_dir_accounts WHERE config_dir NOT IN ${sql.in(failed)}`;
+          for (const listing of listings)
+            if (listing._tag === "listed")
+              for (const { host, login } of listing.logins)
+                yield* sql`INSERT INTO github_config_dir_accounts (config_dir, host, login)
+                  VALUES (${listing.configDir}, ${host}, ${login})`;
+        }),
+      )
+      .pipe(
+        Effect.mapError(
+          () => new AccountsError({ message: "Couldn't save your GitHub directories. Try again." }),
+        ),
+      );
+
+  /**
+   * The accounts the gh config directories list now, before GitHub verifies any of them. A
+   * directory that can't be read holds the logins it listed before in its place, so no later
+   * directory's token reads them.
+   */
   const find = () =>
     Effect.gen(function* () {
       const addedConfigDirs = (yield* readAdded()).map((row) => row.path);
-      const dirs = yield* candidates(addedConfigDirs);
+      const remembered = yield* readRemembered();
+      const { dirs, problem } = yield* candidates(addedConfigDirs, [...remembered.keys()]);
+      const listings = (yield* Effect.forEach(dirs, (configDir) =>
+        look(configDir, remembered.get(configDir) ?? []),
+      )).filter((listing) => listing !== null);
+      yield* remember(listings);
       const found = new Map<AccountId, Account>();
       const foundActiveAccounts = new Set<AccountId>();
-      for (const configDir of dirs) {
-        const hostsFile = path.join(configDir, "hosts.yml");
-        const exists = yield* fs.exists(hostsFile).pipe(
-          Effect.mapError(
-            () =>
-              new AccountsError({
-                message: `Couldn't inspect ${configDir}. Check its permissions.`,
-              }),
-          ),
-        );
-        if (!exists) continue;
-        const hosts = yield* fs.readFileString(hostsFile).pipe(
-          Effect.flatMap((text) =>
-            Effect.try({
-              try: () => parse(text, { logLevel: "silent", prettyErrors: false }),
-              catch: () =>
-                new AccountsError({
-                  message: `Couldn't parse hosts.yml in ${configDir}. Check its YAML syntax.`,
-                }),
-            }),
-          ),
-          Effect.flatMap(Schema.decodeUnknownEffect(Hosts)),
-          Effect.catchTags({
-            PlatformError: () => Effect.succeed(null),
-            SchemaError: () => Effect.succeed(null),
-            AccountsError: () => Effect.succeed(null),
-          }),
-        );
-        if (hosts === null) {
-          yield* Effect.logWarning("Couldn't read GitHub config directory").pipe(
-            Effect.annotateLogs({ configDir }),
-          );
+      const unreadAccounts = new Set<AccountId>();
+      const configDirProblems: Array<ConfigDirProblem> = problem === null ? [] : [problem];
+      const claim = (configDir: string, { host, login }: Login, status: Account["status"]) => {
+        const id = AccountId.make(`${host}/${login}`);
+        if (found.has(id)) return null;
+        found.set(id, { id, host, login, configDir, name: null, avatarUrl: null, status });
+        return id;
+      };
+      for (const listing of listings) {
+        if (listing._tag === "listed") {
+          for (const entry of listing.logins) {
+            const id = claim(listing.configDir, entry, { _tag: "ready" });
+            if (id !== null && entry.active) foundActiveAccounts.add(id);
+          }
           continue;
         }
-        for (const [host, settings] of Object.entries(hosts)) {
-          const logins = new Set([
-            ...Object.keys(settings.users ?? {}),
-            ...(settings.user ? [settings.user] : []),
-          ]);
-          for (const login of logins) {
-            const id = AccountId.make(`${host}/${login}`);
-            if (!found.has(id)) {
-              if (settings.user === login) foundActiveAccounts.add(id);
-              found.set(id, {
-                id,
-                host,
-                login,
-                configDir,
-                name: null,
-                avatarUrl: null,
-                status: { _tag: "ready" },
-              });
-            }
-          }
+        for (const entry of listing.remembered) {
+          const message = failureText(listing.failure, listing.configDir, entry.login);
+          const id = claim(listing.configDir, entry, { _tag: "error", message });
+          if (id !== null) unreadAccounts.add(id);
         }
+        if (![...found.values()].some((account) => account.configDir === listing.configDir))
+          configDirProblems.push({
+            configDir: listing.configDir,
+            message: failureText(listing.failure, listing.configDir, null),
+          });
       }
       return {
         addedConfigDirs,
         found: [...found.values()].sort((a, b) => a.id.localeCompare(b.id)),
         foundActiveAccounts,
+        unreadAccounts,
+        configDirProblems,
       };
     });
 
   const discover = () =>
     Effect.gen(function* () {
-      const { addedConfigDirs, found, foundActiveAccounts } = yield* find().pipe(
-        Effect.tapError((error) => Deferred.fail(firstFound, error)),
-      );
-      yield* Deferred.succeed(
-        firstFound,
-        found.map(({ id, configDir }) => ({ id, configDir })),
-      );
+      const { addedConfigDirs, found, foundActiveAccounts, unreadAccounts, configDirProblems } =
+        yield* find().pipe(Effect.tapError((error) => Deferred.fail(firstFound, error)));
+      yield* Deferred.succeed(firstFound, {
+        accounts: found.map(({ id, configDir, status }) => ({ id, configDir, status })),
+        configDirProblems,
+      });
       const freshTokens = new Map<AccountId, Redacted.Redacted<string>>();
       const accounts = yield* Effect.forEach(
         found,
         (account) =>
-          Effect.gen(function* () {
-            const token = yield* fromGh(account, foundActiveAccounts.has(account.id));
-            const profile = yield* verify(account, token);
-            freshTokens.set(account.id, token);
-            return { ...account, name: profile.name, avatarUrl: profile.avatar_url };
-          }).pipe(
-            Effect.catchTag("AccountUnavailableError", (error) =>
-              Effect.succeed({
-                ...account,
-                status: { _tag: "error" as const, message: error.message },
-              }),
-            ),
-          ),
+          unreadAccounts.has(account.id)
+            ? Effect.succeed(account)
+            : Effect.gen(function* () {
+                const token = yield* fromGh(account, foundActiveAccounts.has(account.id));
+                const profile = yield* verify(account, token);
+                freshTokens.set(account.id, token);
+                return { ...account, name: profile.name, avatarUrl: profile.avatar_url };
+              }).pipe(
+                Effect.catchTag("AccountUnavailableError", (error) =>
+                  Effect.succeed({
+                    ...account,
+                    status: { _tag: "error" as const, message: error.message },
+                  }),
+                ),
+              ),
         { concurrency: 4 },
       );
       tokens.clear();
       for (const [id, token] of freshTokens) tokens.set(id, token);
       activeAccounts = foundActiveAccounts;
-      current = { accounts, addedConfigDirs };
+      unreadableDirAccounts = unreadAccounts;
+      current = { accounts, addedConfigDirs, configDirProblems };
       return current;
     });
 
@@ -382,6 +494,11 @@ export const make = Effect.gen(function* () {
           return yield* new AccountUnavailableError({
             accountId: id,
             message: "This GitHub account is no longer available. Refresh Accounts in Settings.",
+          });
+        if (unreadableDirAccounts.has(id) && account.status._tag === "error")
+          return yield* new AccountUnavailableError({
+            accountId: id,
+            message: account.status.message,
           });
         const cached = tokens.get(id);
         if (!reread && cached) return { account, token: cached };
@@ -442,7 +559,12 @@ export const make = Effect.gen(function* () {
               "This directory has no hosts.yml. Choose a gh config directory where you've logged in.",
           });
         const added = yield* readAdded();
-        if ((yield* candidates(added.map((row) => row.path))).includes(configDir))
+        if (
+          (yield* candidates(
+            added.map((row) => row.path),
+            [],
+          )).dirs.includes(configDir)
+        )
           return yield* new ConfigDirAlreadyAddedError({
             path: configDir,
             message: "This directory is already included in account discovery.",
@@ -481,9 +603,10 @@ export const make = Effect.gen(function* () {
   /** The accounts as last discovered, without waiting for a discovery to finish. */
   const known = Effect.sync(() => current);
   /**
-   * Who the first discovery found in the gh config directories, and where, while GitHub
-   * verifies them. The same snapshot discovery verifies, so a directory that changes in
-   * between can't put one directory's rows under an account read through another.
+   * Who the first discovery found in the gh config directories, and where, with the directories
+   * it couldn't read, while GitHub verifies them. The same snapshot discovery verifies, so a
+   * directory that changes in between can't put one directory's rows under an account read
+   * through another.
    */
   const configured = Deferred.await(firstFound);
   return { list, known, configured, refresh, addConfigDir, removeConfigDir, token, apiBase };

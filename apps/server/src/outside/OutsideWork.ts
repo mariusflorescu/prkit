@@ -215,6 +215,7 @@ export const make = Effect.gen(function* () {
           problem: account.status._tag === "error" ? account.status.message : null,
           budget: budget.accounts.find((entry) => entry.accountId === account.id)?.limits ?? [],
         })),
+        configDirProblems: list.configDirProblems.map((problem) => problem.message),
         agents: catalog.providers.map((entry) => ({
           instance: entry.instance,
           label: entry.label,
@@ -270,6 +271,7 @@ export const make = Effect.gen(function* () {
             (input.accountId === undefined || entry.accountId === input.accountId) &&
             (input.reason === undefined || entry.reason === input.reason),
         ),
+        configDirProblems: result.configDirProblems.map((problem) => problem.message),
         nextCursor: paged.nextCursor,
         total: paged.total,
         truncated: paged.truncated,

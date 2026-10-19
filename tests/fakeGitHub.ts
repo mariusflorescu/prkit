@@ -30,6 +30,8 @@ const Stats = Schema.fromJsonString(
         cost: Schema.Number,
         /** The login the request's token was for, empty without one. */
         login: Schema.String,
+        /** The name of the gh config directory that printed the token, empty without one. */
+        dir: Schema.String,
       }),
     ),
   }),

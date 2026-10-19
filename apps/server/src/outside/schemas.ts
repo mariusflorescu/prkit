@@ -99,6 +99,13 @@ export const Target = Schema.Struct({
   url: Schema.String,
 });
 
+const ConfigDirProblems = Schema.Array(
+  describe(
+    Schema.String,
+    "A gh config directory prkit couldn't read, so the accounts there are missing, with what to do about it.",
+  ),
+);
+
 // prkit_status
 export const StatusResult = Schema.Struct({
   version: Schema.String,
@@ -113,6 +120,7 @@ export const StatusResult = Schema.Struct({
       budget: Schema.Array(GitHubLimit),
     }),
   ),
+  configDirProblems: ConfigDirProblems,
   agents: Schema.Array(
     Schema.Struct({
       instance: AgentInstanceId,
@@ -186,6 +194,7 @@ export const InboxPullRequest = Schema.Struct({
 export const InboxListResult = Schema.Struct({
   ...PageInfo,
   githubTruncated: InboxResult.fields.truncated,
+  configDirProblems: ConfigDirProblems,
   accounts: Schema.Array(
     Schema.Struct({
       accountId: AccountId,
