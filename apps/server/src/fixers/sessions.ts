@@ -70,7 +70,6 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
       runId,
       snapshotOf,
       transition,
-      turnsOf,
       unreadableTurns,
     } = state;
     const { advance, stopFiber } = queue;
@@ -184,7 +183,11 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
         const ended = yield* sql`UPDATE fixers SET ended = ${reason}, updated_at = ${at}
           WHERE id = ${fixer.id} AND ended IS NULL RETURNING id`;
         if (ended.length === 0) return;
-        for (const row of yield* turnsOf(fixer.id, DROPPABLE))
+        // A turn prkit can't read stays as it was; the others end with the session.
+        const droppable = yield* sql`SELECT ${sql.literal(TURN_COLUMNS)} FROM fixer_turns
+          WHERE fixer_id = ${fixer.id} AND json_extract(status, '$._tag') IN ${sql.in(DROPPABLE)}
+          ORDER BY created_at, rowid`.pipe(Effect.flatMap(readableTurns));
+        for (const row of droppable)
           yield* dropTurn(fixer, row, {
             _tag: "discarded",
             reason: "ended",

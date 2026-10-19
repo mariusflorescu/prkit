@@ -351,10 +351,8 @@ const decodeOutcomes = Schema.decodeUnknownEffect(
     }),
   ),
 );
-/** A capture that doesn't decode reads as none, so its run says it kept no snapshot. */
-const decodeCaptures = decodeReadable(
-  "review_attempts",
-  Schema.Struct({ capture: Schema.NullOr(Schema.fromJsonString(LocalCapture)) }),
+const decodeCaptures = Schema.decodeUnknownEffect(
+  Schema.Array(Schema.Struct({ capture: Schema.NullOr(Schema.fromJsonString(LocalCapture)) })),
 );
 const decodeLocalKeys = decodeEach("reviews", Schema.Struct({ pr_key: LocalReviewKey }));
 const decodeClaimed = Schema.decodeUnknownEffect(
@@ -866,7 +864,7 @@ export const make = Effect.gen(function* () {
 
   /** What a local attempt reviews; null for a pull request's. */
   const captureOf = (attemptId: AttemptId) =>
-    sql`SELECT id, capture FROM review_attempts WHERE id = ${attemptId}`.pipe(
+    sql`SELECT capture FROM review_attempts WHERE id = ${attemptId}`.pipe(
       Effect.flatMap(decodeCaptures),
       Effect.map((rows) => rows[0]?.capture ?? null),
     );
@@ -2943,7 +2941,17 @@ export const make = Effect.gen(function* () {
       const batch = attemptId === null ? null : yield* batchOf(attemptId);
       // Local changes are written again from the snapshot that attempt took, not the folder now.
       const capture =
-        review.kind === "local" && attemptId !== null ? yield* captureOf(attemptId) : null;
+        review.kind === "local" && attemptId !== null
+          ? yield* captureOf(attemptId).pipe(
+              // A snapshot prkit can't read leaves the review failed, and its Retry says so.
+              Effect.catchTag("SchemaError", (error) =>
+                Effect.logWarning("Left a local review failed: prkit can't read its snapshot").pipe(
+                  Effect.annotateLogs({ attemptId, problem: error.message }),
+                  Effect.as(null),
+                ),
+              ),
+            )
+          : null;
       if (review.kind === "local" && capture === null) continue;
       yield* unattended(startAttempt(review, "retry", { batch, capture }));
     }

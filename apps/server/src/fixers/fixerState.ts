@@ -32,7 +32,6 @@ import {
   encodeStatus,
   type FixerRow,
   readableFixers,
-  readableTurns,
   toActivity,
   toFixer,
   toTurn,
@@ -139,7 +138,7 @@ export const makeFixerState = Effect.gen(function* () {
   const turnsOf = (fixerId: FixerId, states: ReadonlyArray<FixerTurnState>) =>
     sql`SELECT ${sql.literal(TURN_COLUMNS)} FROM fixer_turns
       WHERE fixer_id = ${fixerId} AND json_extract(status, '$._tag') IN ${sql.in(states)}
-      ORDER BY created_at, rowid`.pipe(Effect.flatMap(readableTurns));
+      ORDER BY created_at, rowid`.pipe(Effect.flatMap(decodeTurns));
 
   const settingsOf = (key: PullRequestKey) => {
     const ref = refFromKey(key);
