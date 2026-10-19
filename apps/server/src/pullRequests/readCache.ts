@@ -1,6 +1,7 @@
-import { AccountId, type GitHubProblem } from "@prkit/contracts";
+import type { AccountId, GitHubProblem } from "@prkit/contracts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -77,38 +78,27 @@ const Row = Schema.Struct({
   invalidated: Schema.Number,
 });
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(Row));
-const decodeAllRows = Schema.decodeUnknownEffect(
-  Schema.Array(Schema.Struct({ ...Row.fields, account_id: AccountId, key: Schema.String })),
-);
 
-/**
- * GitHub answers by account and key, bounded by entries and bytes. An answer is
- * fresh for `freshMs`; after that a read answers from cache at once and reads GitHub
- * again in the background, calling `changed` when the answer or its problem changes.
- * An invalidated answer is read again on the next read; if that read can't reach
- * GitHub, the old answer comes back with the problem. One read per key runs at a time,
- * so concurrent callers share it. With `persist`, answers also live in SQLite under
- * `name`, so a relaunch starts from them.
- */
-export const makeReadCache = <V>(options: {
+interface EntryOptions<V> {
   readonly name: string;
   /** The answer as JSON text (`Schema.fromJsonString`), for its size and SQLite. */
   readonly json: Schema.Codec<V, string>;
   readonly maxEntries: number;
   readonly maxBytes: number;
-  readonly freshMs: number;
   readonly persist: boolean;
-  readonly changed: (key: CacheKey) => Effect.Effect<void>;
-}) => {
+}
+
+/**
+ * Answers by account and key, in memory and, with `persist`, in SQLite under `name`, bounded
+ * by entries and bytes, and how they are marked stale. Both caches below keep their answers here.
+ */
+const makeEntries = <V>(options: EntryOptions<V>) => {
   const encode = Schema.encodeSync(options.json);
   const decode = Schema.decodeOption(options.json);
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const scope = yield* Effect.scope;
     const entries = new Map<string, Entry<V>>();
-    const revalidating = new Set<string>();
     const invalidatedAt = new Map<string, number>();
-    const gate = makeKeyedGate<string>(1);
     let retainedBytes = 0;
     const id = (key: CacheKey) => `${key.accountId}:${key.key}`;
     const remove = (name: string) => {
@@ -208,6 +198,53 @@ export const makeReadCache = <V>(options: {
           );
         return { value, fetchedAt, problem: null };
       });
+    /** Marks a key's answer stale in memory and on disk, so its next read goes to GitHub. */
+    const invalidate = (accountId: AccountId, key: string) =>
+      Effect.gen(function* () {
+        const name = `${accountId}:${key}`;
+        invalidatedAt.set(name, yield* Clock.currentTimeMillis);
+        const entry = entries.get(name);
+        if (entry !== undefined) entries.set(name, { ...entry, invalidated: true });
+        if (options.persist)
+          yield* sql`
+            UPDATE github_read_cache SET invalidated = 1
+            WHERE kind = ${options.name} AND account_id = ${accountId} AND key = ${key}`.pipe(
+            Effect.catchCause(persistFailed),
+          );
+      });
+    return {
+      id,
+      entries,
+      encode,
+      lookup,
+      store,
+      invalidate,
+      /** When the key was last marked stale in this run, 0 if it wasn't. */
+      invalidatedAt: (key: CacheKey) => invalidatedAt.get(id(key)) ?? 0,
+    };
+  });
+};
+
+/**
+ * GitHub answers by account and key, bounded by entries and bytes. An answer is
+ * fresh for `freshMs`; after that a read answers from cache at once and reads GitHub
+ * again in the background, calling `changed` when the answer or its problem changes.
+ * An invalidated answer is read again on the next read; if that read can't reach
+ * GitHub, the old answer comes back with the problem. One read per key runs at a time,
+ * so concurrent callers share it. With `persist`, answers also live in SQLite under
+ * `name`, so a relaunch starts from them.
+ */
+export const makeReadCache = <V>(
+  options: EntryOptions<V> & {
+    readonly freshMs: number;
+    readonly changed: (key: CacheKey) => Effect.Effect<void>;
+  },
+) =>
+  Effect.gen(function* () {
+    const { id, entries, encode, lookup, store, invalidate } = yield* makeEntries(options);
+    const scope = yield* Effect.scope;
+    const revalidating = new Set<string>();
+    const gate = makeKeyedGate<string>(1);
     const noteProblem = (key: CacheKey, entry: Entry<V>, problem: GitHubProblem) =>
       Effect.sync(() => {
         const current = entries.get(id(key)) ?? entry;
@@ -300,44 +337,157 @@ export const makeReadCache = <V>(options: {
         );
       });
 
-    /** Marks a key's answer stale in memory and on disk, so its next read goes to GitHub. */
-    const invalidate = (accountId: AccountId, key: string) =>
+    return { read, invalidate, peek: lookup };
+  });
+
+/** What one read brought: GitHub's answer, or why it couldn't give one. */
+export type ReadOutcome<V> =
+  | { readonly _tag: "read"; readonly value: V }
+  | { readonly _tag: "failed"; readonly problem: GitHubProblem };
+
+/** What a key holds now: the last good answer and when it was read, and why the last read failed. */
+export interface Observation<V> {
+  readonly kept: { readonly value: V; readonly fetchedAt: number } | undefined;
+  readonly problem: GitHubProblem | null;
+}
+
+/**
+ * How long a caller waits for GitHub. `snapshot` never waits. `settled` waits when nothing
+ * is kept or the kept answer is invalidated. `refresh` waits for a read that starts now, or
+ * for the one running when it succeeds.
+ */
+export type ObservedRead = "snapshot" | "settled" | "refresh";
+
+/**
+ * Answers kept like `makeReadCache`'s, for callers that show what is kept while GitHub is
+ * slow or failing, such as each account's inbox. One read per key runs at a time, and every
+ * caller that needs GitHub shares it and its outcome, failure included. A read tells
+ * `changed` when it succeeds or fails for a new reason, whoever started it. Its failure is
+ * kept until a read succeeds, next to the last good answer or alone when there is none.
+ *
+ * A key is due a read when nothing is kept, its answer is invalidated, or the answer is older
+ * than `freshMs`. Any read starts a due read that isn't running, at the caller's priority, or
+ * in the background for one that is only old. A `snapshot` doesn't start one after a read
+ * failed, until the key is invalidated again: a window asks for snapshots on every change,
+ * so retrying there would read GitHub on every other account's change.
+ */
+export const makeObservedReadCache = <V>(
+  options: EntryOptions<V> & {
+    readonly freshMs: number;
+    readonly changed: (key: CacheKey) => Effect.Effect<void>;
+  },
+) =>
+  Effect.gen(function* () {
+    const { id, lookup, store, invalidate, invalidatedAt } = yield* makeEntries(options);
+    const scope = yield* Effect.scope;
+    const running = new Map<
+      string,
+      { readonly configDir: string; readonly done: Deferred.Deferred<ReadOutcome<V>> }
+    >();
+    const failures = new Map<
+      string,
+      { readonly configDir: string; readonly problem: GitHubProblem; readonly at: number }
+    >();
+    const runningFor = (key: CacheKey) => {
+      const claim = running.get(id(key));
+      return claim?.configDir === key.configDir ? claim : undefined;
+    };
+    const failureOf = (key: CacheKey) => {
+      const failure = failures.get(id(key));
+      return failure?.configDir === key.configDir ? failure : undefined;
+    };
+    const observe = (key: CacheKey) =>
+      lookup(key).pipe(
+        Effect.map((entry): Observation<V> => ({
+          kept:
+            entry === undefined ? undefined : { value: entry.value, fetchedAt: entry.fetchedAt },
+          problem: failureOf(key)?.problem ?? null,
+        })),
+      );
+    const outcome = (key: CacheKey, result: ReadOutcome<V>, startedAt: number) =>
       Effect.gen(function* () {
-        const name = `${accountId}:${key}`;
-        invalidatedAt.set(name, yield* Clock.currentTimeMillis);
-        const entry = entries.get(name);
-        if (entry !== undefined) entries.set(name, { ...entry, invalidated: true });
-        if (options.persist)
-          yield* sql`
-            UPDATE github_read_cache SET invalidated = 1
-            WHERE kind = ${options.name} AND account_id = ${accountId} AND key = ${key}`.pipe(
-            Effect.catchCause(persistFailed),
-          );
+        const name = id(key);
+        if (result._tag === "read") {
+          yield* store(key, result.value, startedAt);
+          failures.delete(name);
+          yield* options.changed(key);
+          return;
+        }
+        const before = failureOf(key);
+        const same = before !== undefined && before.problem._tag === result.problem._tag;
+        failures.set(name, {
+          configDir: key.configDir,
+          problem: same ? before.problem : result.problem,
+          at: yield* Clock.currentTimeMillis,
+        });
+        for (const oldest of failures.keys()) {
+          if (failures.size <= options.maxEntries) break;
+          failures.delete(oldest);
+        }
+        if (!same) yield* options.changed(key);
+      });
+    /** The key's running read, or a new one in the cache's scope, so no caller cancels it. */
+    const join = <R>(key: CacheKey, fetch: Effect.Effect<ReadOutcome<V>, never, R>) =>
+      Effect.gen(function* () {
+        const current = runningFor(key);
+        if (current !== undefined) return current.done;
+        const done = yield* Deferred.make<ReadOutcome<V>>();
+        const claim = { configDir: key.configDir, done };
+        running.set(id(key), claim);
+        // Off the running list before anyone waiting hears, so a caller that needs a newer read starts one.
+        const release = Effect.sync(() => {
+          if (running.get(id(key)) === claim) running.delete(id(key));
+        });
+        yield* Effect.forkIn(
+          Effect.gen(function* () {
+            const startedAt = yield* Clock.currentTimeMillis;
+            const result = yield* fetch;
+            yield* outcome(key, result, startedAt);
+            return result;
+          }).pipe(
+            Effect.onExit((exit) => release.pipe(Effect.andThen(Deferred.done(done, exit)))),
+            Effect.catchCauseIf(
+              (cause) => !Cause.hasInterruptsOnly(cause),
+              (cause) =>
+                Effect.logWarning("GitHub read failed", cause).pipe(
+                  Effect.annotateLogs({
+                    cache: options.name,
+                    key: key.key,
+                    accountId: key.accountId,
+                  }),
+                ),
+            ),
+          ),
+          scope,
+        );
+        return done;
       });
 
-    /** Every persisted answer, without waiting for accounts to be discovered. */
-    const persisted = sql`
-      SELECT account_id, config_dir, key, value, fetched_at, invalidated FROM github_read_cache
-      WHERE kind = ${options.name}`.pipe(
-      Effect.flatMap(decodeAllRows),
-      Effect.map((rows) =>
-        rows.flatMap((row) =>
-          Option.match(decode(row.value), {
-            onNone: () => [],
-            onSome: (value) => [
-              {
-                accountId: row.account_id,
-                configDir: row.config_dir,
-                key: row.key,
-                cached: { value, fetchedAt: row.fetched_at, problem: null },
-              },
-            ],
-          }),
-        ),
-      ),
-      Effect.catchCause((cause) => persistFailed(cause).pipe(Effect.as([]))),
-    );
+    const read = <R>(
+      key: CacheKey,
+      fetch: Effect.Effect<ReadOutcome<V>, never, R>,
+      mode: ObservedRead,
+    ): Effect.Effect<Observation<V>, never, R> =>
+      Effect.gen(function* () {
+        if (mode === "refresh") {
+          const current = runningFor(key);
+          if (current === undefined || (yield* Deferred.await(current.done))._tag === "failed")
+            yield* Deferred.await(yield* join(key, fetch));
+          return yield* observe(key);
+        }
+        const entry = yield* lookup(key);
+        const now = yield* Clock.currentTimeMillis;
+        const missing = entry === undefined || entry.invalidated;
+        if (!missing && now - entry.fetchedAt < options.freshMs) return yield* observe(key);
+        if (mode === "settled" && missing) {
+          yield* Deferred.await(yield* join(key, fetch));
+          return yield* observe(key);
+        }
+        const failed = failureOf(key);
+        if (mode === "settled" || failed === undefined || failed.at < invalidatedAt(key))
+          yield* join(key, missing ? fetch : inBackground(fetch));
+        return yield* observe(key);
+      });
 
-    return { read, invalidate, peek: lookup, persisted };
+    return { read, invalidate, peek: lookup };
   });
-};

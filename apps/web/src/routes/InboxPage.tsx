@@ -60,11 +60,11 @@ export function InboxPage() {
     },
     onSuccess: (result) => queryClient.setQueryData(inboxQuery.queryKey, result),
   });
-  // Answers from what prkit kept, so only the accounts it finds anew are read from GitHub.
+  // Answers at once from what prkit kept; the accounts it finds anew show once GitHub is read.
   const rediscover = useMutation({
     mutationFn: async () => {
       queryClient.setQueryData(accountsQuery.queryKey, await refreshAccounts());
-      return listInbox({ _tag: "cached" });
+      return listInbox({ _tag: "snapshot" });
     },
     onSuccess: (result) => queryClient.setQueryData(inboxQuery.queryKey, result),
   });

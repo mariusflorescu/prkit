@@ -214,3 +214,49 @@ test(
     }
   },
 );
+
+/** The page starts hidden, as a window opened behind others does, until `show`. */
+const START_HIDDEN = `(() => {
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+})()`;
+const show = (browser: Browser) =>
+  browser.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    return true;
+  });
+
+test(
+  "a window that opens hidden draws the rows read while nobody looked once it is shown",
+  { timeout: 120_000 },
+  async ({ app, browser }) => {
+    const name = "inbox-reload-hidden";
+    const fake = await twoAccounts(name);
+    try {
+      const run = startFakeInstance(name, fake);
+      await browser.addInitScript(FRAME_TRACE);
+      await browser.addInitScript(START_HIDDEN);
+      await app.open(run.openUrl);
+      // Its first answer had nothing kept to show, and both reads landed while it heard nothing.
+      await expect
+        .poll(
+          async () =>
+            (await inboxReads(fake, FIRST)).length + (await inboxReads(fake, SECOND)).length,
+          { timeout: 20_000 },
+        )
+        .toBe(2);
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      expect(await frames(browser)).toEqual([]);
+
+      await show(browser);
+      await expect.poll(() => frames(browser), { timeout: 3_000 }).toEqual(["rows 1,2,3,4,5,6"]);
+      expect((await fake.stats()).byKind["graphql:inbox"]).toBe(2);
+    } finally {
+      stopFakeInstance(name, { keepHome: false });
+      fake.stop();
+    }
+  },
+);

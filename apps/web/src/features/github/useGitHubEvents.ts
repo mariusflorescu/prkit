@@ -27,10 +27,11 @@ const applyTo = (client: QueryClient) => (event: GitHubEvent, reopened: boolean)
         pullRequestStatusQuery.queryKey,
         new Map(event.statuses.map((status) => [statusKey(status.accountId, status.key), status])),
       );
+      // The inbox's first answer may have started reads that landed before this opened.
+      void client.invalidateQueries({ queryKey: inboxQuery.queryKey });
       if (!reopened) return;
       // Changes made while this window was hidden or offline were never sent; the
       // server answers these from its cache unless GitHub really changed.
-      void client.invalidateQueries({ queryKey: inboxQuery.queryKey });
       for (const name of PULL_REQUEST_READS) void client.invalidateQueries({ queryKey: [name] });
       return;
     case "changed":

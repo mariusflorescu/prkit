@@ -87,10 +87,14 @@ export const InboxResult = Schema.Struct({
 });
 export type InboxResult = typeof InboxResult.Type;
 /**
- * `cached` answers from prkit's cache and reads GitHub only when it is older than
- * ten minutes. `refresh` reads every account now; `retry` reads one account now.
+ * `snapshot` answers at once with what prkit keeps of every account, and why an account's
+ * last read failed; the reads it starts tell windows `inbox` when they land. `cached` waits
+ * for an account prkit kept nothing of, or whose answer a write made stale, for callers that
+ * hear no `inbox` events. Both answer older than ten minutes from cache and read it again in
+ * the background. `refresh` reads every account now; `retry` reads one account now.
  */
 export const InboxRead = Schema.Union([
+  Schema.TaggedStruct("snapshot", {}),
   Schema.TaggedStruct("cached", {}),
   Schema.TaggedStruct("refresh", {}),
   Schema.TaggedStruct("retry", { accountId: AccountId }),
