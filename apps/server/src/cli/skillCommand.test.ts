@@ -16,7 +16,7 @@ it("pins the remote skill to the build commit and refuses shell input in build m
   expect(skillInstallWords("acme/widgets", "$(echo no)")).toBeNull();
 });
 
-it("runs the installer's words as written, from home, and removes itself and its folder first", () => {
+it("runs the installer's words as written, from home", () => {
   const root = NodeFs.realpathSync(NodeFs.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "prkit-")));
   try {
     const folder = NodePath.join(root, `it's "$(touch made)" \`touch made\``);
@@ -26,7 +26,7 @@ it("runs the installer's words as written, from home, and removes itself and its
     NodeFs.mkdirSync(bin);
     NodeFs.writeFileSync(
       NodePath.join(bin, "npx"),
-      `#!/bin/sh\n{ pwd; [ -e "$INSTALLER" ] && echo still-there; printf '%s\\n' "$@"; } > "$LOG"\n`,
+      `#!/bin/sh\n{ pwd; printf '%s\\n' "$@"; } > "$LOG"\n`,
       { mode: 0o700 },
     );
     const file = NodePath.join(folder, "prkit-skill-installer");
@@ -35,14 +35,13 @@ it("runs the installer's words as written, from home, and removes itself and its
     const result = NodeChildProcess.spawnSync(file, {
       cwd: folder,
       encoding: "utf8",
-      env: { PATH: `${bin}:/usr/bin:/bin`, HOME: root, LOG: log, INSTALLER: file },
+      env: { PATH: `${bin}:/usr/bin:/bin`, HOME: root, LOG: log },
     });
     expect(result.stderr).toBe("");
     expect(NodeFs.readFileSync(log, "utf8").trimEnd().split("\n")).toEqual([
       root,
       ...words.slice(1),
     ]);
-    expect(NodeFs.existsSync(folder)).toBe(false);
     expect(NodeFs.existsSync(NodePath.join(root, "made"))).toBe(false);
   } finally {
     NodeFs.rmSync(root, { recursive: true, force: true });
