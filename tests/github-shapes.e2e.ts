@@ -148,6 +148,7 @@ test("each account says what it left out, and no empty state claims nothing need
     );
     await expect(screen.getByRole("heading", "Nothing in budget/fixtures to show")).toBeVisible();
     await expect(screen.getByText(/one there may still need you/)).toBeVisible();
+    await expect(screen.getByText("Refresh list")).toHaveCount(0);
     await app.screenshot("accounts-repository-incomplete");
   } finally {
     stopFakeInstance("github-shapes-accounts", { keepHome: false });
