@@ -18,6 +18,7 @@ const LIMITS = "src/limits.ts";
 const PR = "/pr/github.com/budget/fixtures/9?account=github.com%2Fbudget-test";
 const SLUG = "Why does a slug get its own limit here instead of in the shared config?";
 const OLDER = "Guide notes from an older commit";
+const WORDS = "Should short reject an empty slug too?";
 const STORY =
   "Guide notes come from r1, written for an older commit. They show only where the code still reads the same.";
 
@@ -130,6 +131,11 @@ const notesWords = (browser: Browser) =>
       ? null
       : (document.querySelector("[data-guide-notes-status] [data-slot='tooltip-trigger']")
           ?.textContent ?? ""),
+  );
+
+const lineNumber = (browser: Browser, line: number) =>
+  browser.locator(
+    `[data-path="${LIMITS}"] [data-gutter] > [data-column-number="${line}"]:not([data-line-type="change-deletion"])`,
   );
 
 const reads = async (fake: FakeGitHub, kind: string) => (await fake.stats()).byKind[kind] ?? 0;
@@ -325,11 +331,26 @@ test(
       expect(await notesWords(browser)).toBe("");
       await app.screenshot("files-notes-line-none-older-dark");
 
-      // The next guide has a note here, and it comes in the way a first guide's would.
+      // The next guide has a note here. It waits for the comment being written, then comes in
+      // the way a first guide's would.
+      await lineNumber(browser, 9).tap();
+      const field = screen.getByRole("textbox", "Comment on line 9");
+      await field.fill(WORDS);
       claude.notes({ [LIMITS]: [question(3, SLUG)] });
       claude.release();
       await expect.poll(() => revisionCount(run.home), { timeout: 120_000 }).toBe(2);
+      await expect(tabs.getByRole("button", "Newer notes show after your comment")).toBeVisible({
+        timeout: 30_000,
+      });
+      await expect(note).toHaveCount(0);
+      await expect(field).toHaveValue(WORDS);
+      expect(await tops(browser)).toEqual([start]);
+      await app.screenshot("files-notes-line-none-newer-writing-dark");
+      await field.press("Meta+Enter");
       await expect(note).toBeVisible({ timeout: 30_000 });
+      await expect(file.getByRole("article", `Pending comment on ${LIMITS} line 9`)).toContainText(
+        WORDS,
+      );
       await expect(tabs.getByRole("button", "Show newer notes")).toHaveCount(0);
       await settle();
       expect(await tops(browser)).toEqual([start]);
