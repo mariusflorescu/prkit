@@ -313,16 +313,24 @@ test(
       NodeFS.chmodSync(hosts, 0o644);
 
       // Each directory names the other's login: nothing was kept for either from its directory,
-      // so the skeleton until both are read.
+      // so the skeleton until one is read, then each account's own rows as it is read.
       const first = NodePath.join(inbox.fake.home, ".config", "gh", "hosts.yml");
       const firstHosts = NodeFS.readFileSync(first, "utf8");
-      await inbox.relaunch(null, {
-        settled: "rows 1,2,3,4,5,6",
+      await inbox.relaunchHeld(null, {
         before: () => {
           NodeFS.writeFileSync(first, original);
           NodeFS.writeFileSync(hosts, firstHosts);
         },
       });
+      await inbox.fake.release("core");
+      await expect
+        .poll(async () => (await frames(browser)).at(-1), { timeout: 10_000 })
+        .toBe("rows 1,2,3,4,5,6");
+      expect(
+        (await frames(browser)).every((frame) =>
+          ["rows 1,2,3,4", "rows 5,6", "rows 1,2,3,4,5,6"].includes(frame),
+        ),
+      ).toBe(true);
 
       // Both directories name the second account, whose rows were last kept from the first, the
       // directory that listed it last. The first's hosts file can't be read while prkit starts, so

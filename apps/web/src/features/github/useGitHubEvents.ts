@@ -20,6 +20,15 @@ const PULL_REQUEST_READS = [
   "pullRequestStack",
 ];
 
+/**
+ * Reads the inbox again. A refetch while its first answer is still on its way would only join
+ * that answer, which may be from before the change, so that one is dropped first.
+ */
+const readInboxAgain = (client: QueryClient) =>
+  void client
+    .cancelQueries({ queryKey: inboxQuery.queryKey })
+    .then(() => client.invalidateQueries({ queryKey: inboxQuery.queryKey }));
+
 const applyTo = (client: QueryClient) => (event: GitHubEvent, reopened: boolean) => {
   switch (event._tag) {
     case "opened":
@@ -28,7 +37,7 @@ const applyTo = (client: QueryClient) => (event: GitHubEvent, reopened: boolean)
         new Map(event.statuses.map((status) => [statusKey(status.accountId, status.key), status])),
       );
       // The inbox's first answer may have started reads that landed before this opened.
-      void client.invalidateQueries({ queryKey: inboxQuery.queryKey });
+      readInboxAgain(client);
       if (!reopened) return;
       // Changes made while this window was hidden or offline were never sent; the
       // server answers these from its cache unless GitHub really changed.
@@ -45,7 +54,7 @@ const applyTo = (client: QueryClient) => (event: GitHubEvent, reopened: boolean)
         void client.invalidateQueries({ queryKey });
       return;
     case "inbox":
-      void client.invalidateQueries({ queryKey: inboxQuery.queryKey });
+      readInboxAgain(client);
       return;
     case "stack":
       void client.invalidateQueries({ queryKey: ["pullRequestStack", event.accountId] });

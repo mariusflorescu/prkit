@@ -229,8 +229,8 @@ const failedByControl = (
   if (failure === undefined) return false;
   failure.times--;
   if (failure.times <= 0) failures.delete(key);
+  count(`${kind}:failed`, failure.status, 0, token);
   setTimeout(() => {
-    count(`${kind}:failed`, failure.status, 0, token);
     send(
       response,
       resource,

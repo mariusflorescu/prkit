@@ -1,5 +1,7 @@
 import { AccountId } from "@prkit/contracts";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
@@ -13,7 +15,7 @@ import { GitHubRequestError } from "../github/GitHubApi.ts";
 import { runMigrations } from "../persistence/Migrations.ts";
 import * as NodeSqliteClient from "../persistence/NodeSqliteClient.ts";
 import { FRESH_MS } from "./detailReads.ts";
-import { type Cached, type CacheKey, makeReadCache } from "./readCache.ts";
+import { type Cached, type CacheKey, makeObservedReadCache, makeReadCache } from "./readCache.ts";
 
 // The 10-minute freshness of PR reads, on a clock the test moves. Waiting ten real
 // minutes against GitHub is not a test anyone runs.
@@ -148,6 +150,42 @@ describe("makeReadCache", () => {
           problem: null,
         });
         expect(yield* detail.reads).toBe(2);
+      }),
+    ));
+});
+
+describe("makeObservedReadCache", () => {
+  it("makes a caller that hears no changes wait past a read that started before a write marked the answer stale", () =>
+    run(
+      Effect.gen(function* () {
+        const inbox = yield* makeObservedReadCache({
+          name: "inbox",
+          json: Schema.fromJsonString(Schema.String),
+          maxEntries: 10,
+          maxBytes: 1_000_000,
+          freshMs: FRESH_MS,
+          persist: true,
+          changed: () => Effect.void,
+        });
+        const github = (value: string) => Effect.succeed({ _tag: "read" as const, value });
+        yield* inbox.read(KEY, github("before the write"), "cached");
+
+        // The answer is old, so a window's snapshot reads GitHub again, and GitHub takes its time.
+        yield* TestClock.adjust("10 minutes");
+        const answered = yield* Deferred.make<void>();
+        yield* inbox.read(
+          KEY,
+          Deferred.await(answered).pipe(Effect.andThen(github("before the write"))),
+          "snapshot",
+        );
+        yield* TestClock.adjust("1 millis");
+        yield* inbox.invalidate(KEY.accountId, KEY.key);
+        const outside = yield* Effect.forkChild(
+          inbox.read(KEY, github("after the write"), "cached"),
+          { startImmediately: true },
+        );
+        yield* Deferred.succeed(answered, undefined);
+        expect((yield* Fiber.join(outside)).kept?.value).toBe("after the write");
       }),
     ));
 });

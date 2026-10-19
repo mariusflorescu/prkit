@@ -88,10 +88,7 @@ interface EntryOptions<V> {
   readonly persist: boolean;
 }
 
-/**
- * Answers by account and key, in memory and, with `persist`, in SQLite under `name`, bounded
- * by entries and bytes, and how they are marked stale. Both caches below keep their answers here.
- */
+/** The answers both caches below keep, in memory and with `persist` in SQLite. */
 const makeEntries = <V>(options: EntryOptions<V>) => {
   const encode = Schema.encodeSync(options.json);
   const decode = Schema.decodeOption(options.json);
@@ -219,7 +216,6 @@ const makeEntries = <V>(options: EntryOptions<V>) => {
       lookup,
       store,
       invalidate,
-      /** When the key was last marked stale in this run, 0 if it wasn't. */
       invalidatedAt: (key: CacheKey) => invalidatedAt.get(id(key)) ?? 0,
     };
   });
@@ -352,11 +348,11 @@ export interface Observation<V> {
 }
 
 /**
- * How long a caller waits for GitHub. `snapshot` never waits. `settled` waits when nothing
+ * How long a caller waits for GitHub. `snapshot` never waits. `cached` waits when nothing
  * is kept or the kept answer is invalidated. `refresh` waits for a read that starts now, or
  * for the one running when it succeeds.
  */
-export type ObservedRead = "snapshot" | "settled" | "refresh";
+export type ObservedRead = "snapshot" | "cached" | "refresh";
 
 /**
  * Answers kept like `makeReadCache`'s, for callers that show what is kept while GitHub is
@@ -426,7 +422,10 @@ export const makeObservedReadCache = <V>(
         }
         if (!same) yield* options.changed(key);
       });
-    /** The key's running read, or a new one in the cache's scope, so no caller cancels it. */
+    /**
+     * Forked into the cache's scope, so no caller cancels a read others share, and claimed in the
+     * same uninterruptible step, since a claim with no fiber would keep every later caller waiting.
+     */
     const join = <R>(key: CacheKey, fetch: Effect.Effect<ReadOutcome<V>, never, R>) =>
       Effect.gen(function* () {
         const current = runningFor(key);
@@ -445,6 +444,7 @@ export const makeObservedReadCache = <V>(
             yield* outcome(key, result, startedAt);
             return result;
           }).pipe(
+            Effect.interruptible,
             Effect.onExit((exit) => release.pipe(Effect.andThen(Deferred.done(done, exit)))),
             Effect.catchCauseIf(
               (cause) => !Cause.hasInterruptsOnly(cause),
@@ -461,7 +461,7 @@ export const makeObservedReadCache = <V>(
           scope,
         );
         return done;
-      });
+      }).pipe(Effect.uninterruptible);
 
     const read = <R>(
       key: CacheKey,
@@ -479,15 +479,18 @@ export const makeObservedReadCache = <V>(
         const now = yield* Clock.currentTimeMillis;
         const missing = entry === undefined || entry.invalidated;
         if (!missing && now - entry.fetchedAt < options.freshMs) return yield* observe(key);
-        if (mode === "settled" && missing) {
-          yield* Deferred.await(yield* join(key, fetch));
+        if (mode === "cached" && missing) {
+          const result = yield* Deferred.await(yield* join(key, fetch));
+          // A read that started before the key was invalidated leaves it invalidated; the next one is newer.
+          if (result._tag === "read" && (yield* lookup(key))?.invalidated === true)
+            yield* Deferred.await(yield* join(key, fetch));
           return yield* observe(key);
         }
         const failed = failureOf(key);
-        if (mode === "settled" || failed === undefined || failed.at < invalidatedAt(key))
+        if (mode === "cached" || failed === undefined || failed.at < invalidatedAt(key))
           yield* join(key, missing ? fetch : inBackground(fetch));
         return yield* observe(key);
       });
 
-    return { read, invalidate, peek: lookup };
+    return { read, observe, invalidate, peek: lookup };
   });

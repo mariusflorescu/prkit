@@ -164,22 +164,25 @@ export const make = Effect.gen(function* () {
     fetchedAt: kept === undefined ? null : isoAt(kept.fetchedAt),
     problem,
   });
-  /** One account's inbox as kept, with why its last read failed, once it has waited as `mode` says. */
-  const readAccount = (account: Account, mode: ObservedRead) => {
-    const key = inboxKey(account);
-    if (account.status._tag === "error") {
-      const problem = { _tag: "account" as const, message: account.status.message };
-      return inboxCache.peek(key).pipe(Effect.map((kept) => row(account.id, kept, problem)));
-    }
-    return inboxCache
-      .read(key, fetchAccount(account), mode)
-      .pipe(Effect.map((seen) => row(account.id, seen.kept, seen.problem)));
-  };
+  const accountRow = (account: Pick<Account, "id" | "status">, seen: Observation<AccountInbox>) =>
+    row(
+      account.id,
+      seen.kept,
+      account.status._tag === "error"
+        ? { _tag: "account", message: account.status.message }
+        : seen.problem,
+    );
+  /** One account's inbox as kept; an account prkit can't read is never read, only shown. */
+  const readAccount = (account: Account, mode: ObservedRead) =>
+    (account.status._tag === "error"
+      ? inboxCache.observe(inboxKey(account))
+      : inboxCache.read(inboxKey(account), fetchAccount(account), mode)
+    ).pipe(Effect.map((seen) => accountRow(account, seen)));
   const modeOf = (read: InboxRead, account: Account): ObservedRead =>
     read._tag === "refresh" || (read._tag === "retry" && read.accountId === account.id)
       ? "refresh"
       : read._tag === "cached"
-        ? "settled"
+        ? "cached"
         : "snapshot";
   const result = (
     rows: ReadonlyArray<ReturnType<typeof row>>,
@@ -197,9 +200,7 @@ export const make = Effect.gen(function* () {
   });
   const readAll = (read: InboxRead) =>
     Effect.gen(function* () {
-      // A snapshot takes the accounts as last discovered, so it never waits for a rediscovery.
-      const discovered =
-        (read._tag === "snapshot" ? yield* accounts.known : null) ?? (yield* accounts.list());
+      const discovered = yield* accounts.list();
       const rows = yield* Effect.forEach(
         discovered.accounts,
         (account) => readAccount(account, modeOf(read, account)),
@@ -208,7 +209,7 @@ export const make = Effect.gen(function* () {
       if (read._tag === "snapshot") return result(rows, discovered.configDirProblems);
       // What the reads it waited for brought, and every other account as it is by then.
       const settled = yield* Effect.forEach(discovered.accounts, (account) =>
-        readAccount(account, "snapshot"),
+        inboxCache.observe(inboxKey(account)).pipe(Effect.map((seen) => accountRow(account, seen))),
       );
       return result(settled, discovered.configDirProblems);
     });
@@ -224,18 +225,8 @@ export const make = Effect.gen(function* () {
         const configured = yield* accounts.configured;
         const rows = yield* Effect.forEach(configured.accounts, (account) =>
           inboxCache
-            .peek(inboxKey(account))
-            .pipe(
-              Effect.map((kept) =>
-                row(
-                  account.id,
-                  kept,
-                  account.status._tag === "error"
-                    ? { _tag: "account", message: account.status.message }
-                    : null,
-                ),
-              ),
-            ),
+            .observe(inboxKey(account))
+            .pipe(Effect.map((seen) => accountRow(account, seen))),
         );
         yield* Effect.forkIn(
           readAll(read).pipe(
