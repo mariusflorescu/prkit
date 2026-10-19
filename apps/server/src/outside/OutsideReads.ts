@@ -367,10 +367,10 @@ export const makeOutsideReads = (
           createdAt: guide.createdAt,
           content: guide.normalized,
           config: guide.config,
-          manualCheckTicked: yield* manualCheckTicks.ticked(
+          ...(yield* manualCheckTicks.numbers(
             { _tag: "pull-request", key: target.key, accountId: target.accountId },
-            guide.normalized,
-          ),
+            guide,
+          )),
         };
       }).pipe(Effect.mapError(asFailure));
 

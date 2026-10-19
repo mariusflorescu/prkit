@@ -59,6 +59,7 @@ import {
   GuideStatus,
   FixResult,
   HOST_NAME,
+  ManualCheckChanged,
   ManualCheckTicked,
   OWNER_NAME,
   REPO_NAME,
@@ -215,6 +216,7 @@ export const RevisionResult = Schema.Struct({
   content: NormalizedGuide,
   config: AttemptConfig,
   manualCheckTicked: ManualCheckTicked,
+  manualCheckChanged: ManualCheckChanged,
 });
 export const TickManualCheckInput = Schema.Struct({
   ...TargetFields,

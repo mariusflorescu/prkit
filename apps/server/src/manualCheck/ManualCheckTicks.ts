@@ -1,15 +1,21 @@
 import {
   type AccountId,
   GuideNotFoundError,
+  type GuideRevision,
+  indexTicks,
+  ManualCheckCode,
   type ManualCheckDecision,
+  type ManualCheckIndex,
+  manualCheckCode,
+  manualCheckDecided,
+  manualCheckStepState,
+  manualCheckStepVersion,
   ManualCheckTicks as Ticks,
   ManualCheckTicksError,
   type ManualCheckTicksChange,
-  manualCheckStepVersion,
-  type NormalizedGuide,
   type PullRequestKey,
   type ReviewSubject,
-  tickedSteps,
+  stepFiles,
 } from "@prkit/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -25,19 +31,39 @@ import { makeKeyedGate } from "../github/keyedGate.ts";
 import { Reviews } from "../reviews/Reviews.ts";
 import { subjectKey } from "../reviews/reviewSubject.ts";
 
-const Row = Schema.Struct({ step: Schema.String, ticked: Schema.Int, seq: Schema.Int });
+const Row = Schema.Struct({
+  step: Schema.String,
+  code: Schema.String,
+  ticked: Schema.Int,
+  seq: Schema.Int,
+});
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(Row));
 const decodeNext = Schema.decodeUnknownEffect(Schema.Tuple([Schema.Struct({ next: Schema.Int })]));
 const decodeTicks = Schema.decodeUnknownEffect(Ticks);
+const CodeJson = Schema.fromJsonString(ManualCheckCode);
+const decodeCode = Schema.decodeUnknownEffect(CodeJson);
+const encodeCode = Schema.encodeEffect(CodeJson);
+const readCode = (stored: string): Effect.Effect<ManualCheckCode | null, Schema.SchemaError> =>
+  stored === "" ? Effect.succeed(null) : decodeCode(stored);
 
-/** The 1-based numbers of a guide's steps that are ticked; none when it has no steps. */
-const tickedNumbers = (guide: NormalizedGuide, ticks: Ticks) => {
-  const plan = guide.manualCheck;
-  if (plan?._tag !== "steps") return [];
-  const ticked = tickedSteps(ticks);
-  return plan.steps.flatMap((step, index) =>
-    ticked.has(manualCheckStepVersion(step)) ? [index + 1] : [],
+/**
+ * The 1-based numbers of a revision's steps that are ticked, and of those ticked against code
+ * that has changed since; none of either when it has no steps. The code is the revision's own.
+ */
+const stepNumbers = ({ normalized, snapshot }: GuideRevision, index: ManualCheckIndex) => {
+  const plan = normalized.manualCheck;
+  if (plan?._tag !== "steps") return { manualCheckTicked: [], manualCheckChanged: [] };
+  const files = new Map(snapshot.files.map((file) => [file.path, file]));
+  const states = plan.steps.map((step) =>
+    manualCheckStepState(
+      manualCheckStepVersion(step),
+      stepFiles(step, normalized.chapters, files),
+      index,
+    ),
   );
+  const numbers = (wanted: (typeof states)[number]) =>
+    states.flatMap((state, position) => (state === wanted ? [position + 1] : []));
+  return { manualCheckTicked: numbers("ticked"), manualCheckChanged: numbers("changed") };
 };
 
 export class ManualCheckTicks extends Context.Service<
@@ -62,13 +88,21 @@ export const make = Effect.gen(function* () {
   const readTicks = (subject: ReviewSubject) =>
     Effect.gen(function* () {
       const rows = yield* sql`
-        SELECT step, ticked, seq FROM manual_check_ticks
-        WHERE subject = ${subjectKey(subject)} ORDER BY seq DESC, step`.pipe(
+        SELECT step, code, ticked, seq FROM manual_check_ticks
+        WHERE subject = ${subjectKey(subject)} ORDER BY seq DESC, step, code`.pipe(
         Effect.flatMap(decodeRows),
       );
-      return yield* decodeTicks({
-        ticks: rows.map((row) => ({ step: row.step, ticked: row.ticked === 1, order: row.seq })),
-      });
+      const ticks = yield* Effect.forEach(rows, (row) =>
+        readCode(row.code).pipe(
+          Effect.map((code) => ({
+            step: row.step,
+            code,
+            ticked: row.ticked === 1,
+            order: row.seq,
+          })),
+        ),
+      );
+      return yield* decodeTicks({ ticks });
     });
 
   const ticks = (subject: ReviewSubject) =>
@@ -79,8 +113,9 @@ export const make = Effect.gen(function* () {
     PubSub.publish(announced, { _tag: "changed", subject });
 
   /**
-   * Records what the reader decided about these step versions. A decision a version already
-   * holds changes nothing, its order included, so repeating one is safe.
+   * Records what the reader decided about these step versions, against the code each was made
+   * for. A decision the newest answer about the same code already holds changes nothing, its
+   * order included, so repeating one is safe.
    */
   const decide = (subject: ReviewSubject, decision: ManualCheckDecision) =>
     withSubject(
@@ -89,21 +124,22 @@ export const make = Effect.gen(function* () {
         const key = subjectKey(subject);
         const changed = yield* sql.withTransaction(
           Effect.gen(function* () {
-            const held = new Map(
-              (yield* readTicks(subject)).ticks.map((tick) => [tick.step, tick.ticked]),
-            );
+            const index = indexTicks(yield* readTicks(subject));
             const at = DateTime.formatIso(yield* DateTime.now);
             const [{ next }] = yield* sql`
               SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM manual_check_ticks`.pipe(
               Effect.flatMap(decodeNext),
             );
             let changed = false;
-            for (const step of new Set(decision.steps)) {
-              if (held.get(step) === decision.ticked) continue;
+            for (const entry of decision.steps) {
+              const decided = manualCheckDecided(index.get(entry.step) ?? [], entry.files);
+              if (decided?.compared === "same" && decided.tick.ticked === decision.ticked) continue;
+              const code = manualCheckCode(entry.files);
+              const stored = code === null ? "" : yield* encodeCode(code);
               yield* sql`
-                INSERT INTO manual_check_ticks (subject, step, ticked, seq, decided_at)
-                VALUES (${key}, ${step}, ${decision.ticked ? 1 : 0}, ${next}, ${at})
-                ON CONFLICT (subject, step)
+                INSERT INTO manual_check_ticks (subject, step, code, ticked, seq, decided_at)
+                VALUES (${key}, ${entry.step}, ${stored}, ${decision.ticked ? 1 : 0}, ${next}, ${at})
+                ON CONFLICT (subject, step, code)
                 DO UPDATE SET ticked = excluded.ticked, seq = excluded.seq, decided_at = excluded.decided_at`;
               changed = true;
             }
@@ -126,9 +162,12 @@ export const make = Effect.gen(function* () {
       }),
     );
 
-  /** Which of a guide's steps the reader ticked, for outside readers of the guide. */
-  const ticked = (subject: ReviewSubject, guide: NormalizedGuide) =>
-    ticks(subject).pipe(Effect.map((all) => tickedNumbers(guide, all)));
+  /**
+   * Which of a revision's steps the reader ticked and which have changed since, for outside
+   * readers of the guide, from one read of the ticks.
+   */
+  const numbers = (subject: ReviewSubject, revision: GuideRevision) =>
+    ticks(subject).pipe(Effect.map((all) => stepNumbers(revision, indexTicks(all))));
 
   /**
    * An outside write: steps of one accepted revision, by number, ticked or unticked in one
@@ -138,7 +177,7 @@ export const make = Effect.gen(function* () {
   const tickSteps = (
     target: { readonly key: PullRequestKey; readonly accountId: AccountId },
     revision: number,
-    numbers: ReadonlyArray<number>,
+    picked: ReadonlyArray<number>,
     tick: boolean,
   ) =>
     Effect.gen(function* () {
@@ -152,11 +191,19 @@ export const make = Effect.gen(function* () {
       const guide = yield* reviews.guide(target.key, revision);
       const plan = guide.normalized.manualCheck;
       const steps = plan?._tag === "steps" ? plan.steps : [];
-      const wanted = [...new Set(numbers)];
+      const files = new Map(guide.snapshot.files.map((file) => [file.path, file]));
+      const wanted = [...new Set(picked)];
       const missing = wanted.filter((number) => steps[number - 1] === undefined);
       const [first, ...rest] = wanted.flatMap((number) => {
         const step = steps[number - 1];
-        return step === undefined ? [] : [manualCheckStepVersion(step)];
+        return step === undefined
+          ? []
+          : [
+              {
+                step: manualCheckStepVersion(step),
+                files: stepFiles(step, guide.normalized.chapters, files),
+              },
+            ];
       });
       if (missing.length > 0 || first === undefined)
         return yield* new ManualCheckTicksError({
@@ -168,10 +215,10 @@ export const make = Effect.gen(function* () {
               : `Revision ${revision} has steps 1-${steps.length}, not ${missing.join(", ")}. Read them with read_guide_revision.`,
         });
       const after = yield* decide(subject, { steps: [first, ...rest], ticked: tick });
-      return { revision, ticked: tickedNumbers(guide.normalized, after) };
+      return { revision, ticked: stepNumbers(guide, indexTicks(after)).manualCheckTicked };
     });
 
-  return { ticks, decide, announceChanged, changes, ticked, tickSteps };
+  return { ticks, decide, announceChanged, changes, numbers, tickSteps };
 });
 
 export const layer = Layer.effect(ManualCheckTicks, make);
