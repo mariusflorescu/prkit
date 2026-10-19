@@ -3,18 +3,22 @@
 prkit ships as a signed and notarized macOS app (Apple Silicon) through GitHub Releases in this repository. The app updates itself from those releases and shows each release body as its changelog. Two workflows do the work:
 
 - `.github/workflows/ci.yml` runs on every pull request and on every push to `main`.
-- `.github/workflows/release.yml` publishes a nightly every day and a stable release when you ask for one.
+- `.github/workflows/release.yml` publishes a nightly every 4 hours when `main` has something new, and a stable release when you ask for one.
 
 Nobody picks a version by hand. git-cliff reads the commit subjects on `main`, and `scripts/release-version.ts` turns them into a version and release notes.
 
 ## How a nightly is made
 
-Every day at 03:17 UTC, the release workflow takes `main` HEAD and decides whether a nightly is due. It skips, with the reason in the run summary, in two cases:
+Every 4 hours, at 17 minutes past 00:00, 04:00, 08:00, 12:00, 16:00, and 20:00 UTC, the release workflow takes `main` HEAD and decides whether a nightly is due. It skips, with the reason in the run summary, in two cases:
 
 - `main` has no commit since the latest nightly tag.
 - No commit since the last stable tag is a `feat`, `fix`, `perf`, or breaking change. `node scripts/release-version.ts next` prints nothing in that case.
 
-Otherwise the nightly gets the next stable version plus the date and run number, for example `0.2.0-nightly.20261014.37`. The workflow builds, signs, notarizes, and verifies the app, then publishes the release **prkit Nightly 0.2.0-nightly.20261014.37**. It is a prerelease and never the latest release. Its notes cover the commits since the previous nightly, or since the last stable release when there is no previous nightly. The workflow then deletes every nightly release and tag older than the 14 newest.
+A run that skips ends after its first job, **Resolve version**, about 30 seconds on Linux. The macOS build and the publish job never start.
+
+Otherwise the nightly gets the next stable version plus the date and run number, for example `0.2.0-nightly.20261014.37`. Every run takes a higher run number, so two nightlies on one day still sort in order: `.37` before `.41`. The workflow builds, signs, notarizes, and verifies the app, then publishes the release **prkit Nightly 0.2.0-nightly.20261014.37**. It is a prerelease and never the latest release. Its notes cover the commits since the previous nightly, or since the last stable release when there is no previous nightly.
+
+The workflow then deletes every nightly release and tag older than the 14 newest, which is at least two days of nightlies at six a day. The app never needs an older one. An update needs only the newest release, and the app reads its changelog from GitHub's releases feed, which lists only the 10 newest releases. Keep at least 10, or the changelog loses versions.
 
 To run a nightly now, open **Actions > Release > Run workflow**, keep `main` and the `nightly` channel, and click **Run workflow**. A manual nightly skips for the same reasons as the scheduled one.
 

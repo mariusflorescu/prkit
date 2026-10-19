@@ -3,8 +3,8 @@ name: Release
 # How releases work, and what to check by hand: docs/operations/release.md.
 on:
   schedule:
-    # The nightly. Off the hour, when GitHub's scheduler is least busy.
-    - cron: "17 3 * * *"
+    # The nightly, every 4 hours. Off the hour, when GitHub's scheduler is least busy.
+    - cron: "17 */4 * * *"
   workflow_dispatch:
     inputs:
       channel:
@@ -262,6 +262,8 @@ jobs:
             --latest="$MAKE_LATEST"
           echo "Published [$NAME]($GITHUB_SERVER_URL/$GH_REPO/releases/tag/$TAG)." >> "$GITHUB_STEP_SUMMARY"
 
+      # Never fewer than 10: the app reads its changelog from GitHub's releases feed, which lists
+      # the 10 newest releases.
       - name: Keep the 14 newest nightlies
         if: needs.resolve.outputs.channel == 'nightly'
         run: |

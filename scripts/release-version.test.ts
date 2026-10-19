@@ -6,6 +6,13 @@ import * as NodePath from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 const script = NodePath.join(import.meta.dirname, "release-version.ts");
+const resolveScript = NodePath.join(
+  import.meta.dirname,
+  "..",
+  ".github",
+  "scripts",
+  "resolve-release.sh",
+);
 const repos: Array<string> = [];
 
 afterEach(() => {
@@ -51,6 +58,39 @@ const repository = () => {
         env: { PATH: process.env.PATH ?? "", HOME: dir },
       });
       return { status: result.status, stdout: result.stdout.trim(), stderr: result.stderr };
+    },
+    /** The release workflow's decision for a scheduled nightly run on main HEAD. */
+    resolve: (date: string, runNumber: number) => {
+      const file = (name: string) => NodePath.join(dir, ".git", `resolve-${runNumber}-${name}`);
+      const result = NodeChildProcess.spawnSync("bash", [resolveScript], {
+        cwd: dir,
+        encoding: "utf8",
+        env: {
+          PATH: process.env.PATH ?? "",
+          HOME: dir,
+          CHANNEL: "nightly",
+          DRY_RUN: "false",
+          COMMIT: git("rev-parse", "HEAD").trim(),
+          REF: "refs/heads/main",
+          RUN_DATE: date,
+          RUN_NUMBER: String(runNumber),
+          REPOSITORY: "acme/widgets",
+          NOTES_FILE: file("notes"),
+          GITHUB_OUTPUT: file("output"),
+          GITHUB_STEP_SUMMARY: file("summary"),
+        },
+      });
+      expect(result.status, result.stderr).toBe(0);
+      const output = Object.fromEntries(
+        NodeFS.readFileSync(file("output"), "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => line.split("=", 2)),
+      );
+      const notes = NodeFS.existsSync(file("notes"))
+        ? NodeFS.readFileSync(file("notes"), "utf8")
+        : "";
+      return { output, notes };
     },
   };
   return repo.commit("Initial commit");
@@ -201,5 +241,29 @@ describe("release-version notes", () => {
 
   it("needs the repository for the links", () => {
     expect(history().run("notes", "--version", "0.2.0")).toMatchObject({ status: 1 });
+  });
+});
+
+describe("resolve-release nightly", () => {
+  it("publishes nothing on a run with no commit since the latest nightly", () => {
+    const repo = repository().commit("feat: an inbox (#1)").tag("v0.1.0-nightly.20261019.11");
+    expect(repo.resolve("20261019", 12).output).toEqual({ release: "false" });
+    expect(repo.commit("fix: crash on start (#2)").resolve("20261019", 13).output).toMatchObject({
+      release: "true",
+      tag: "v0.1.0-nightly.20261019.13",
+    });
+  });
+
+  it("starts the notes of a day's second nightly where the first ended", () => {
+    const repo = repository()
+      .commit("feat: an inbox (#1)")
+      .tag("v0.1.0-nightly.20261019.9")
+      .commit("fix: crash on start (#2)")
+      .tag("v0.1.0-nightly.20261019.10")
+      .commit("fix: hang on quit (#3)");
+    const run = repo.resolve("20261019", 11);
+    expect(run.output).toMatchObject({ release: "true", version: "0.1.0-nightly.20261019.11" });
+    expect(run.notes).toContain("Hang on quit");
+    expect(run.notes).not.toContain("Crash on start");
   });
 });
