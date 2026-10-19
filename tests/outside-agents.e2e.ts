@@ -920,7 +920,7 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
           await expect(screen.getByRole("radio", "Read only")).toBeChecked();
           await expect(screen.getByText(failure, { exact: true })).toBeVisible();
           expect(await tops(), "nothing moves in a narrow window either").toEqual(narrow);
-          await app.screenshot("outside-agents-failed-save-narrow");
+          await screenshotLightAndDark(app, browser, "outside-agents-failed-save-narrow");
           await browser.setViewport({ width: 1280, height: 720 });
           expect(discovery(run.home), "clients still read prkit as off").toBe("off");
         } finally {
