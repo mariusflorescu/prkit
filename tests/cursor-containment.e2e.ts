@@ -16,6 +16,7 @@ import { draftOn } from "./fixActions.ts";
 import { closeFixFixture, createFixFixture } from "./fixFixture.ts";
 import { FIXTURE_REPO, NEEDS_FIXTURE, prPath, readRows } from "./fixturePr.ts";
 import { LIMITS_PATH } from "./reviewFixture.ts";
+import { pressShortcut } from "./shortcut.ts";
 
 /**
  * Cursor's agent, live: the guarantees prkit's Cursor setup makes, checked against the real SDK
@@ -301,10 +302,7 @@ const textOf = (events: ReadonlyArray<RunnerEvent>) =>
     .join("");
 
 const openAgents = async (screen: Screen, browser: Browser) => {
-  const modifier = await browser.evaluate(() =>
-    /Mac|iPhone|iPad/.test(navigator.platform) ? "Meta" : "Control",
-  );
-  await browser.keyboard.press(`${modifier}+Comma`);
+  await pressShortcut(screen, browser, "Comma");
   await screen.getByRole("navigation", "Settings sections").getByRole("link", "Agents").tap();
   return screen.getByRole("region", "Agents").getByRole("list", "Agents");
 };
