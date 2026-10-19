@@ -26,12 +26,13 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as ServerConfig from "../config.ts";
 import {
   decodeActivity,
+  decodeEachTurn,
   decodeFixers,
-  decodeTurnStates,
   decodeTurns,
   encodeStatus,
   type FixerRow,
   readableFixers,
+  readableTurns,
   toActivity,
   toFixer,
   toTurn,
@@ -138,7 +139,7 @@ export const makeFixerState = Effect.gen(function* () {
   const turnsOf = (fixerId: FixerId, states: ReadonlyArray<FixerTurnState>) =>
     sql`SELECT ${sql.literal(TURN_COLUMNS)} FROM fixer_turns
       WHERE fixer_id = ${fixerId} AND json_extract(status, '$._tag') IN ${sql.in(states)}
-      ORDER BY created_at, rowid`.pipe(Effect.flatMap(decodeTurns));
+      ORDER BY created_at, rowid`.pipe(Effect.flatMap(readableTurns));
 
   const settingsOf = (key: PullRequestKey) => {
     const ref = refFromKey(key);
@@ -275,10 +276,11 @@ export const makeFixerState = Effect.gen(function* () {
       )).map(toActivity);
     });
 
-  /** Unfinished turns whose state prkit can't read: their agent may still be in the checkout. */
+  /** Unfinished turns prkit can't read: their agent may still be in the checkout. */
   const unreadableTurns = (fixerId: FixerId) =>
-    sql`SELECT id, status FROM fixer_turns WHERE fixer_id = ${fixerId} AND finished_at IS NULL`.pipe(
-      Effect.flatMap(decodeTurnStates),
+    sql`SELECT ${sql.literal(TURN_COLUMNS)} FROM fixer_turns
+      WHERE fixer_id = ${fixerId} AND finished_at IS NULL`.pipe(
+      Effect.flatMap(decodeEachTurn),
       Effect.map(([, unreadable]) => unreadable),
     );
 

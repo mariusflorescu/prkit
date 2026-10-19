@@ -104,6 +104,7 @@ export const decodeTurns = Schema.decodeUnknownEffect(Schema.Array(TurnRow));
 export const readableFixers = decodeReadable("fixers", FixerRow);
 export const readableTurns = decodeReadable("fixer_turns", TurnRow);
 export const decodeEachFixer = decodeEach("fixers", FixerRow);
+export const decodeEachTurn = decodeEach("fixer_turns", TurnRow);
 /** Each turn's state on its own, so startup can leave one it can't read as it was. */
 export const decodeTurnStates = decodeEach(
   "fixer_turns",

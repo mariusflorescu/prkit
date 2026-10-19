@@ -74,11 +74,13 @@ const sendFix = async (
   { app, screen, browser }: Page,
   url: string,
   number: number,
+  file: string,
   comment: string,
+  beforeSend: (() => Promise<Response>) | null = null,
 ) => {
   await app.open(pull(url, number, "files"));
   const line = screen
-    .getByRole("region", "src/change-0.ts")
+    .getByRole("region", file)
     .getByRole("button", /^Comment on line \d+$/)
     .first();
   await expect(line).toBeVisible({ timeout: 30_000 });
@@ -93,6 +95,7 @@ const sendFix = async (
     .tap();
   const send = screen.getByRole("dialog", "Send to agent");
   await expect(send.getByRole("button", /^Agent and model: /)).toBeVisible({ timeout: 30_000 });
+  if (beforeSend !== null) await beforeSend();
   await send.getByRole("button", "Send 1 comment to agent").tap();
   await expect(send).toHaveCount(0, { timeout: 30_000 });
 };
@@ -129,8 +132,8 @@ test(
       await switchOn(page, run.openUrl);
 
       // A local review written from a terminal, guides for #4 and #6, two answered questions
-      // on #6, fixes the agent is still writing on #6 (with another queued behind it) and on #2,
-      // and tabs for #3 and #9.
+      // on #6, a fix on #9 that ended at once (#9 merged first), fixes the agent is still
+      // writing on #6 (with another queued behind it) and on #2, and a tab for #3.
       const fixture = localRepoFixture(root);
       fixture.write("docs/handbook.md", handbook({ 15: "Limits are set per team." }));
       const local = cliIn(NodePath.join(run.home, "bin/prkit"), fake.home, log);
@@ -150,23 +153,31 @@ test(
       });
       await ask(page, FIRST);
       await ask(page, SECOND);
+      await sendFix(page, run.url, 9, "src/limits.ts", "Name the limit.", () => fake.merge(9));
+      await expect
+        .poll(
+          () =>
+            readRows(
+              run.home,
+              `SELECT t.finished_at IS NOT NULL AS ended FROM fixer_turns t
+               JOIN fixers f ON f.id = t.fixer_id WHERE f.pr_key = '${keyOf(9)}'`,
+            ),
+          { timeout: 30_000 },
+        )
+        .toEqual([{ ended: 1 }]);
       claude.hold();
-      await sendFix(page, run.url, 6, "Name the change.");
+      await sendFix(page, run.url, 6, "src/change-0.ts", "Name the change.");
       await expect
         .poll(() => turnsOf6(run.home).map((turn) => turn.state), { timeout: 60_000 })
         .toEqual(["running"]);
-      await sendFix(page, run.url, 6, "Say why it starts here.");
+      await sendFix(page, run.url, 6, "src/change-0.ts", "Say why it starts here.");
       await expect
         .poll(() => turnsOf6(run.home).map((turn) => turn.state), { timeout: 30_000 })
         .toEqual(["running", "queued"]);
-      await sendFix(page, run.url, 2, "Name the second change.");
+      await sendFix(page, run.url, 2, "src/change-0.ts", "Name the second change.");
       await expect
         .poll(() => turnsOf(run.home, 2).map((turn) => turn.state), { timeout: 60_000 })
         .toEqual(["running"]);
-      await app.open(pull(run.url, 9, "conversation"));
-      await expect(screen.getByRole("link", /#9 Keyboard fixture 9/).first()).toBeVisible({
-        timeout: 30_000,
-      });
       await app.open(pull(run.url, 3, "conversation"));
       await expect(screen.getByRole("link", /#3 Budget fixture 3/).first()).toBeVisible({
         timeout: 30_000,
@@ -181,6 +192,8 @@ test(
       const [running, queued] = turnsOf6(run.home);
       const turnId = String(running?.id);
       const queuedId = String(queued?.id);
+      const [ended] = turnsOf(run.home, 9);
+      const endedTurn = String(ended?.id);
       const [merged] = turnsOf(run.home, 2);
       const mergedTurn = String(merged?.id);
       const checkout = NodePath.join(run.home, "fixes", String(merged?.fixerId));
@@ -198,7 +211,8 @@ test(
       );
       damage(run.home, "UPDATE reviews SET status = 'garbage' WHERE pr_key = ?", localKey);
       damage(run.home, "UPDATE fixer_turns SET status = ? WHERE id = ?", NEWER_FAILURE, turnId);
-      damage(run.home, "UPDATE fixer_turns SET status = 'garbage' WHERE id = ?", mergedTurn);
+      damage(run.home, "UPDATE fixer_turns SET status = 'garbage' WHERE id = ?", endedTurn);
+      damage(run.home, "UPDATE fixer_turns SET work = 'not json' WHERE id = ?", mergedTurn);
       await fake.merge(2);
       damage(
         run.home,
@@ -295,8 +309,14 @@ test(
         { status: NEWER_FAILURE },
       ]);
       expect(
-        readRows(run.home, `SELECT status FROM fixer_turns WHERE id = '${mergedTurn}'`),
+        readRows(run.home, `SELECT status FROM fixer_turns WHERE id = '${endedTurn}'`),
       ).toEqual([{ status: '"garbage"' }]);
+      expect(
+        readRows(
+          run.home,
+          `SELECT json_extract(status, '$._tag') AS state, work FROM fixer_turns WHERE id = '${mergedTurn}'`,
+        ),
+      ).toEqual([{ state: "running", work: "not json" }]);
       expect(turnsOf6(run.home)[1]).toEqual({ id: queuedId, state: "queued" });
       expect(
         readRows(run.home, `SELECT scope FROM ask_questions WHERE id = '${String(first?.id)}'`),
