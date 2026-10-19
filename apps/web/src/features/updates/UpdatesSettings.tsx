@@ -16,7 +16,7 @@ export function UpdatesSettings() {
   return (
     <SettingsSection
       title="Updates"
-      description="prkit looks for a new version every 30 minutes and asks before it installs one."
+      description="prkit looks for a new version every 10 minutes and asks before it installs one."
     >
       {update.isPending ? (
         <UpdatesSettingsSkeleton />

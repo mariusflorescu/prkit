@@ -17,7 +17,7 @@ import { initialUpdateState, reduceUpdateState, type UpdateEvent } from "./updat
 import { parseUpdateFeed, UpdateHost } from "./UpdateHost.ts";
 
 export const STARTUP_DELAY = "15 seconds";
-export const POLL_INTERVAL = "30 minutes";
+export const POLL_INTERVAL = "10 minutes";
 
 type UpdateAction = "check" | "download" | "install" | "channel";
 
@@ -80,7 +80,7 @@ export const compareVersions = (left: string, right: string) => {
 /**
  * Finds, downloads and installs app updates through electron-updater, one action at a time,
  * and keeps the state every window shows. Checks start 15 seconds after launch and repeat every
- * 30 minutes. The track (Stable or Nightly) is the user's, stored in the desktop settings.
+ * 10 minutes. The track (Stable or Nightly) is the user's, stored in the desktop settings.
  */
 export class DesktopUpdates extends Context.Service<DesktopUpdates, Effect.Success<typeof make>>()(
   "@prkit/desktop/updates/DesktopUpdates",

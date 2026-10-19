@@ -156,7 +156,7 @@ const found = (
 ) => Effect.succeedSome<FoundUpdate>({ version, releaseNotes: note });
 
 describe("DesktopUpdates", () => {
-  it("checks 15 seconds after launch, then every 30 minutes", async () => {
+  it("checks 15 seconds after launch, then every 10 minutes", async () => {
     const harness = makeHarness();
     await run(
       harness,
@@ -173,11 +173,15 @@ describe("DesktopUpdates", () => {
         yield* settle;
         expect(harness.checkCount()).toBe(1);
         expect((yield* updates.getState).status).toBe("up-to-date");
-        yield* TestClock.adjust("29 minutes");
+        yield* TestClock.adjust("9 minutes");
+        yield* settle;
         expect(harness.checkCount()).toBe(1);
         yield* TestClock.adjust("1 minute");
         yield* settle;
         expect(harness.checkCount()).toBe(2);
+        yield* TestClock.adjust("10 minutes");
+        yield* settle;
+        expect(harness.checkCount()).toBe(3);
       }),
     );
   });
@@ -373,7 +377,7 @@ describe("DesktopUpdates", () => {
         yield* updates.setChannel("stable");
         const offered = harness.published.length;
         // The startup check at 15 s, then the first poll.
-        yield* TestClock.adjust("31 minutes");
+        yield* TestClock.adjust("11 minutes");
         yield* settle;
         expect(harness.checkCount()).toBe(3);
         expect(harness.published.slice(offered).map((published) => published.status)).toEqual(

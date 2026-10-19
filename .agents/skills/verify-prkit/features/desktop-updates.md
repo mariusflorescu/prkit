@@ -1,6 +1,6 @@
 # Desktop updates
 
-The installed app looks for a newer release on its track 15 seconds after launch and every 30 minutes, shows the release notes before anything downloads, downloads on one click and installs and restarts on a second, after a confirm. Settings > Updates holds the version, the Stable or Nightly track, the status, and the notes. After an update, the first launch on the new version says so once, with the notes. Installing needs a signed build: unsigned, Squirrel.Mac refuses the new app and prkit says why. How the feed is built, and the mock flow, are in [docs/operations/desktop-build.md](../../../../docs/operations/desktop-build.md).
+The installed app looks for a newer release on its track 15 seconds after launch and every 10 minutes, shows the release notes before anything downloads, downloads on one click and installs and restarts on a second, after a confirm. Settings > Updates holds the version, the Stable or Nightly track, the status, and the notes. After an update, the first launch on the new version says so once, with the notes. Installing needs a signed build: unsigned, Squirrel.Mac refuses the new app and prkit says why. How the feed is built, and the mock flow, are in [docs/operations/desktop-build.md](../../../../docs/operations/desktop-build.md).
 
 ## Sub-features
 
