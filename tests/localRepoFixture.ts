@@ -112,5 +112,27 @@ export const localRepoFixture = (
       walk(NodePath.join(repo, ".git"));
       return hash.digest("hex");
     },
+    /**
+     * Every file of the work tree outside `.git`, with its mode and content, hashed. Equal
+     * values mean nothing was written, added or removed there.
+     */
+    workTree: () => {
+      const hash = NodeCrypto.createHash("sha256");
+      const walk = (directory: string) => {
+        for (const entry of NodeFS.readdirSync(directory, { withFileTypes: true }).toSorted(
+          (left, right) => left.name.localeCompare(right.name),
+        )) {
+          const path = NodePath.join(directory, entry.name);
+          if (path === NodePath.join(repo, ".git")) continue;
+          const stat = NodeFS.lstatSync(path);
+          hash.update(`${NodePath.relative(repo, path)} ${stat.mode}\n`);
+          if (entry.isDirectory()) walk(path);
+          else if (entry.isSymbolicLink()) hash.update(NodeFS.readlinkSync(path));
+          else hash.update(NodeFS.readFileSync(path));
+        }
+      };
+      walk(repo);
+      return hash.digest("hex");
+    },
   };
 };

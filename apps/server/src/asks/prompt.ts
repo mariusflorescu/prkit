@@ -8,6 +8,8 @@ import {
   type NormalizedGuide,
 } from "@prkit/contracts";
 
+import { SUBJECTS, type Subject } from "./subject.ts";
+
 /** Every question's prompt starts with it, so the stand-in Claude (`scripts/fake-claude.ts`) knows one. */
 export const ASK_MARKER = "<prkit-ask>";
 /** How many earlier answers a new conversation is told about, and how much of each. */
@@ -16,7 +18,8 @@ const EARLIER_ANSWER_LENGTH = 2000;
 const MAX_ROWS = 200;
 
 export interface AskPromptInput {
-  /** "acme/widgets#12". */
+  readonly subject: Subject;
+  /** "acme/widgets#12", or "the local changes in widgets on `main`". */
   readonly label: string;
   readonly revision: number;
   readonly headSha: string;
@@ -49,14 +52,15 @@ const workspace = (input: AskPromptInput) => {
     case "follow-up":
       return `Earlier in this conversation you answered the reviewer's questions about this revision. Your working directory is ${input.cwd}, a read-only checkout of its head. The numbered diff the guide explains is ${input.diffFile}, and the guide is ${input.guideFile}.`;
     case "fresh":
-      return `Your working directory is ${input.cwd}, a read-only checkout of the pull request at that head. The guide the reviewer is reading is ${input.guideFile}: read it first. The numbered diff it explains is ${input.diffFile}: read the parts the question needs.`;
+      return `Your working directory is ${input.cwd}, ${SUBJECTS[input.subject].checkout}. The guide the reviewer is reading is ${input.guideFile}: read it first. The numbered diff it explains is ${input.diffFile}: read the parts the question needs.`;
   }
 };
 
 const about = (input: AskPromptInput): ReadonlyArray<string> => {
   switch (input.scope._tag) {
     case "pull-request":
-      return ["The question is about the whole pull request."];
+    case "local-changes":
+      return [SUBJECTS[input.subject].whole];
     case "chapter": {
       const chapter = askedChapter(input.scope, input.guide);
       return [
@@ -90,7 +94,7 @@ const cut = (text: string) =>
 export const askPrompt = (input: AskPromptInput) =>
   [
     ASK_MARKER,
-    `A reviewer reading prkit's guide to ${input.label}, revision ${input.revision} at ${input.headSha.slice(0, 7)}, asks you a question.`,
+    `A reviewer reading prkit's guide to ${input.label}, revision ${input.revision} at ${input.headSha.slice(0, 7)}, asks you a question.${SUBJECTS[input.subject].note}`,
     "",
     workspace(input),
     "",

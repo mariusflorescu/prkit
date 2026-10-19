@@ -5,6 +5,8 @@ import {
   AddCommentInput,
   AddedComment,
   AskAboutInput,
+  AskAboutLocalInput,
+  AskedLocalQuestion,
   AskedQuestion,
   CommentsResult,
   ConflictsInput,
@@ -21,6 +23,7 @@ import {
   LocalGuideStatus,
   LocalListInput,
   LocalListResult,
+  LocalQuestionInput,
   LocalTargetInput,
   LocalWaitInput,
   LocalWaitResult,
@@ -29,8 +32,10 @@ import {
   OutsideQuestion,
   OutsideToolFailure,
   PinInput,
+  PinLocalInput,
   PullRequestResult,
   ReadLocalGuideInput,
+  ReadLocalQuestionsInput,
   QuestionInput,
   QuestionsResult,
   ReadPullRequestInput,
@@ -41,6 +46,8 @@ import {
   StatusResult,
   TargetInput,
   TurnInput,
+  LocalQuestionWaitInput,
+  LocalQuestionWaitResult,
   WaitInput,
   WaitResult,
 } from "../../outside/schemas.ts";
@@ -509,6 +516,26 @@ const WaitForLocalGuide = read(
   "Wait for a local guide",
 );
 
+const ReadLocalQuestions = read(
+  Tool.make("read_local_questions", {
+    description: `The questions asked about a guide of local changes (not a pull request), oldest first, and their answers. Each has its id, the guide revision it was asked on, what it is about, its state (starting, waiting, answering, answered, stopped, failed), the conversation that answered it, the answer so far or in full, and whether it is pinned to the guide. Follow nextCursor until null; revision narrows to one guide revision.${LOCAL_HINT}`,
+    parameters: ReadLocalQuestionsInput,
+    success: limited(QuestionsResult),
+    failure: OutsideToolFailure,
+  }),
+  "Read questions about a local guide",
+);
+
+const WaitForLocalQuestion = read(
+  Tool.make("wait_for_local_question", {
+    description: `Waits until one question about a guide of local changes is answered, stopped or failed, or the timeout passes (50 seconds unless you ask for more, at most 600), and returns that question; finished says which. A timeout never stops the question: call again to keep waiting.${LOCAL_HINT}`,
+    parameters: LocalQuestionWaitInput,
+    success: limited(LocalQuestionWaitResult),
+    failure: OutsideToolFailure,
+  }),
+  "Wait for a local question",
+);
+
 /**
  * The outside endpoint's tools. A "starts work" tool is declared with `work`, which sets its
  * level and hides it while `canStartWork` says no, in one step; handlers check the level again
@@ -777,6 +804,39 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
     true,
   );
 
+  const AskAboutLocalChanges = work(
+    Tool.make("ask_about_local_changes", {
+      description: `Asks the agent that wrote a guide of local changes (not a pull request) a question about all the changes, one chapter or some diff lines, on the latest accepted guide revision unless revision says. It returns at once with the question's id: call wait_for_local_question, then read_local_questions. The answer is read-only and never touches the repository. Only one question per local review is answered at a time; asking again after a stop or failure is how to retry.${LOCAL_HINT}`,
+      parameters: AskAboutLocalInput,
+      success: limited(AskedLocalQuestion),
+      failure: OutsideToolFailure,
+    }),
+    "Ask about local changes",
+    false,
+  );
+
+  const StopLocalQuestion = work(
+    Tool.make("stop_local_question", {
+      description: `Stops a question about a guide of local changes that is still being answered. What the agent wrote so far stays as the answer.${LOCAL_HINT}`,
+      parameters: LocalQuestionInput,
+      success: limited(OutsideQuestion),
+      failure: OutsideToolFailure,
+    }),
+    "Stop a local question",
+    true,
+  );
+
+  const PinLocalAnswer = work(
+    Tool.make("pin_local_answer", {
+      description: `Pins an answered question and its answer to its chapter in the local guide in prkit, or unpins it. Local to prkit: it never touches the repository.${LOCAL_HINT}`,
+      parameters: PinLocalInput,
+      success: limited(OutsideQuestion),
+      failure: OutsideToolFailure,
+    }),
+    "Pin a local answer to the guide",
+    true,
+  );
+
   const TickManualCheck = work(
     Tool.make("tick_manual_check_steps", {
       description: `Ticks steps of a guide's manualCheck (how to see the change working by hand), or unticks them with ticked: false, as the owner's checkbox does in prkit. Name the revision you read and the steps by their 1-based number. A tick follows its step into later revisions while the step reads the same. It sets, never toggles, so repeating a call changes nothing. The ticks stay in prkit and never reach GitHub.${TARGET_HINT}`,
@@ -830,6 +890,8 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
     ListLocalGuides,
     ReadLocalGuide,
     WaitForLocalGuide,
+    ReadLocalQuestions,
+    WaitForLocalQuestion,
     OpenPullRequest,
     GenerateGuide,
     StopGuide,
@@ -852,6 +914,9 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
     MarkFilesReviewed,
     GenerateLocalGuide,
     StopLocalGuide,
+    AskAboutLocalChanges,
+    StopLocalQuestion,
+    PinLocalAnswer,
     TickManualCheck,
   );
 };

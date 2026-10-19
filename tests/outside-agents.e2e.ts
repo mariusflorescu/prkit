@@ -68,6 +68,8 @@ const READS = [
   "list_local_guides",
   "read_local_guide",
   "wait_for_local_guide",
+  "read_local_questions",
+  "wait_for_local_question",
 ].sort();
 const ALL = [
   ...READS,
@@ -93,6 +95,9 @@ const ALL = [
   "mark_files_reviewed",
   "generate_local_guide",
   "stop_local_guide",
+  "ask_about_local_changes",
+  "stop_local_question",
+  "pin_local_answer",
   "tick_manual_check_steps",
 ].sort();
 const NOT_OPEN = "prkit isn't open. Open it, then try again.";

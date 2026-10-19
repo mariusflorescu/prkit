@@ -7,7 +7,7 @@ import { useForm } from "react-hook-form";
 import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
 
-import { BUSY, PLACEHOLDERS, scopeLabel, WHOLE_PR } from "./askPresentation";
+import { askWords, BUSY, PLACEHOLDERS, scopeLabel } from "./askPresentation";
 import { useAskStore, useDock } from "./askStore";
 import type { AskTarget } from "./askTarget";
 import { ScopeChip } from "./ScopeChip";
@@ -15,7 +15,7 @@ import { useRevisionGuide } from "./useRevisionGuide";
 
 /**
  * The dock's one row: what the question is about, the question, Ask, and the toggle for the
- * history. The words live in the PR's dock, so leaving the tab or the revision keeps them.
+ * history. The words live in the review's dock, so leaving the tab or the revision keeps them.
  * One question per review is answered at a time, so the field waits while one is.
  */
 export function AskComposer({
@@ -35,7 +35,8 @@ export function AskComposer({
   const focus = useDock(key, "focus");
   const draft = useDock(key, "draft");
   const choice = picked?.revision === target.revision ? picked : null;
-  const scope = choice?.scope ?? WHOLE_PR;
+  const words = askWords(key);
+  const scope = choice?.scope ?? words.whole;
   const { guide } = useRevisionGuide(key, target.revision);
   const form = useForm<{ text: string }>({ defaultValues: { text: draft } });
   const field = form.register("text", {
@@ -87,7 +88,14 @@ export function AskComposer({
         <div className="flex h-8 shrink-0 items-center">
           <ScopeChip
             label={scopeLabel(scope, guide)}
-            {...(choice === null ? {} : { onRemove: () => update(key, { choice: null }) })}
+            {...(choice === null
+              ? {}
+              : {
+                  remove: {
+                    label: words.removeScope,
+                    onClick: () => update(key, { choice: null }),
+                  },
+                })}
           />
         </div>
         <textarea

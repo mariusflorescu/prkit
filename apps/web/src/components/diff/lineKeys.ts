@@ -1,6 +1,12 @@
 import type { LinePoint } from "@prkit/contracts";
 
-import type { LineRange } from "./types";
+import type { DiffInteraction, LineRange } from "./types";
+
+/** How a line number is announced, by what picking lines does on this diff. */
+const GUTTER_VERB: Record<DiffInteraction["kind"], string> = {
+  comment: "Comment on",
+  ask: "Ask about",
+};
 
 const NUMBER = "[data-gutter] > [data-column-number]";
 
@@ -23,12 +29,12 @@ const numbersOf = (gutter: Element | null) =>
   gutter === null ? [] : [...gutter.querySelectorAll<HTMLElement>(":scope > [data-column-number]")];
 
 /** The one cell of its gutter that Tab reaches. */
-const makeStop = (cell: HTMLElement, point: LinePoint) => {
+const makeStop = (cell: HTMLElement, point: LinePoint, verb: string) => {
   for (const other of numbersOf(cell.parentElement))
     if (other !== cell && other.tabIndex === 0) other.tabIndex = -1;
   cell.tabIndex = 0;
   cell.role = "button";
-  cell.ariaLabel = `Comment on ${point.side === "old" ? "old " : ""}line ${point.line}`;
+  cell.ariaLabel = `${verb} ${point.side === "old" ? "old " : ""}line ${point.line}`;
 };
 
 /** The gutter cell numbering `point` inside a rendered diff, if the diff shows that line. */
@@ -36,11 +42,11 @@ export const cellAt = (root: ParentNode, point: LinePoint) =>
   [...root.querySelectorAll<HTMLElement>(NUMBER)].find((cell) => sameLine(pointOf(cell), point));
 
 /**
- * Line numbers as a keyboard path to comments, which Pierre only offers to a pointer.
+ * Line numbers as a keyboard path to picking lines, which Pierre only offers to a pointer.
  * Each gutter is one tab stop. Arrows, Home and End move along it, Shift extends a
- * range, Enter or Space comments on the line or range, and Escape or leaving the line
+ * range, Enter or Space picks the line or range, and Escape or leaving the line
  * numbers drops the range. Assistive tech's click (VoiceOver's VO+Space, Voice
- * Control's "click") comments like Enter.
+ * Control's "click") picks like Enter.
  */
 export const makeLineKeys = (
   /** The range Shift is extending, to highlight; null once dropped or used. */
@@ -48,6 +54,7 @@ export const makeLineKeys = (
 ) => {
   let host: HTMLElement | null = null;
   let onSelect: (range: LineRange) => void = () => {};
+  let verb = GUTTER_VERB.comment;
   let current: LinePoint | null = null;
   let anchor: { cell: HTMLElement; point: LinePoint } | null = null;
   let range: LineRange | null = null;
@@ -59,7 +66,7 @@ export const makeLineKeys = (
     if (next === null) anchor = null;
     onRange(next);
   };
-  const commentFrom = (point: LinePoint) => {
+  const selectFrom = (point: LinePoint) => {
     returnTo = point;
     onSelect(range ?? { start: point, end: point });
     setRange(null);
@@ -71,7 +78,7 @@ export const makeLineKeys = (
     if (point === null) return;
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      if (!event.repeat) commentFrom(point);
+      if (!event.repeat) selectFrom(point);
       return;
     }
     if (event.key === "Escape" && range !== null) {
@@ -104,7 +111,7 @@ export const makeLineKeys = (
       );
     } else if (range !== null) setRange(null);
     current = nextPoint;
-    makeStop(next, nextPoint);
+    makeStop(next, nextPoint, verb);
     next.focus();
   };
   const onFocusIn = (event: Event) => {
@@ -113,7 +120,7 @@ export const makeLineKeys = (
     if (point === null) return;
     current = point;
     focused = event.target;
-    makeStop(event.target, point);
+    makeStop(event.target, point, verb);
   };
   // A pointer's click on a line number is Pierre's line selection; a click with no
   // pointer behind it (detail 0) is assistive tech pressing the button.
@@ -121,7 +128,7 @@ export const makeLineKeys = (
     if (!(event instanceof MouseEvent) || event.detail !== 0) return;
     const cell = event.target instanceof Element ? event.target.closest(NUMBER) : null;
     const point = cell === null ? null : pointOf(cell);
-    if (point !== null) commentFrom(point);
+    if (point !== null) selectFrom(point);
   };
   const onFocusOut = (event: Event) => {
     const cell = event.target;
@@ -136,11 +143,16 @@ export const makeLineKeys = (
   };
   return {
     /** After each Pierre render: listens on its shadow root and marks each gutter's tab stop. */
-    attach: (rendered: HTMLElement, select: (range: LineRange) => void) => {
+    attach: (
+      rendered: HTMLElement,
+      select: (range: LineRange) => void,
+      kind: DiffInteraction["kind"],
+    ) => {
       const root = rendered.shadowRoot;
       if (root === null) return;
       host = rendered;
       onSelect = select;
+      verb = GUTTER_VERB[kind];
       root.addEventListener("keydown", onKeyDown);
       root.addEventListener("focusin", onFocusIn);
       root.addEventListener("focusout", onFocusOut);
@@ -149,7 +161,7 @@ export const makeLineKeys = (
         const numbers = numbersOf(gutter);
         const stop = numbers.find((cell) => sameLine(pointOf(cell), current)) ?? numbers[0];
         const point = stop === undefined ? null : pointOf(stop);
-        if (stop !== undefined && point !== null) makeStop(stop, point);
+        if (stop !== undefined && point !== null) makeStop(stop, point, verb);
       }
       if (focused !== null && !focused.isConnected) {
         const lost = document.activeElement === document.body;

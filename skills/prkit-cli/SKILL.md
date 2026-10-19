@@ -1,6 +1,6 @@
 ---
 name: prkit-cli
-description: Use prkit, the desktop app on this Mac for reviewing GitHub pull requests, whenever the user mentions prkit, a guide or guided review, their review queue, PRs assigned to them, or asks you to prepare, summarize or follow up on pull request reviews on this machine, or to show the user a guided review of local changes, yours or theirs, before a pull request exists. Use it even if they don't mention the CLI. Read their inbox and diffs, choose an installed agent and model to write a guide, follow its progress, ask the guide's agent questions about a PR, and hand local draft comments to prkit's fix agent. Start with prkit status; keep GitHub writes in the app for the user to approve.
+description: Use prkit, the desktop app on this Mac for reviewing GitHub pull requests, whenever the user mentions prkit, a guide or guided review, their review queue, PRs assigned to them, or asks you to prepare, summarize or follow up on pull request reviews on this machine, or to show the user a guided review of local changes, yours or theirs, before a pull request exists. Use it even if they don't mention the CLI. Read their inbox and diffs, choose an installed agent and model to write a guide, follow its progress, ask the guide's agent questions about a PR or about local changes, and hand local draft comments to prkit's fix agent. Start with prkit status; keep GitHub writes in the app for the user to approve.
 ---
 
 # prkit CLI
@@ -115,6 +115,16 @@ prkit local read --json
 
 Never stash, commit, switch branches or touch the user's files to make it work: prkit reads the folder as it is. `prkit local stop` stops a guide while it is written. Removing a local guide is the user's click in prkit.
 
+To ask the agent that wrote a local guide something the guide doesn't say, use `prkit local questions`. It answers read-only, from a copy of the snapshot, and never touches the repository:
+
+```sh
+prkit local questions ask --question "Why is the limit read at startup?" --request-id ask-limit
+prkit local questions wait --question-id <question-id> --timeout 600
+prkit local questions list --json
+```
+
+The folder needs a guide first. Without `--scope` the question is about all the changes on the latest accepted revision (`--revision` picks another). For one chapter, pass `--scope '{"_tag":"chapter","chapterId":"<id>"}'` with an id from `prkit local read --json`; for diff lines, a lines scope as for a PR question. One question per local review is answered at a time, so wait for it or stop it with `prkit local questions stop --question-id <question-id>`. `wait` follows that one question until it is answered, stopped or failed; check its `state` and `message`. Asking again retries a stopped or failed question. `prkit local questions pin --question-id <question-id> --pinned` pins an answered question to its chapter in prkit.
+
 ### Ask the guide's agent about a PR
 
 When you or the user need something the guide doesn't say, ask the agent that wrote it. It already read the whole PR, answers read-only, and never touches GitHub.
@@ -148,7 +158,7 @@ Tell the user what changed and that the commit is waiting for Push in prkit. To 
 
 ## Retries
 
-`prkit comments add <pr>`, `prkit fix send <pr>`, `prkit fix change <pr>` and `prkit questions ask <pr>` take `--request-id <id>`. If a call timed out and you don't know whether it went through, retry with the same id: prkit returns the first answer instead of doing it twice. A lost response isn't automatically replayed. Read the current state before retrying other work commands.
+`prkit comments add <pr>`, `prkit fix send <pr>`, `prkit fix change <pr>`, `prkit questions ask <pr>` and `prkit local questions ask` take `--request-id <id>`. If a call timed out and you don't know whether it went through, retry with the same id: prkit returns the first answer instead of doing it twice. A lost response isn't automatically replayed. Read the current state before retrying other work commands.
 
 ## GitHub budget
 

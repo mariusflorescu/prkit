@@ -882,7 +882,7 @@ export const make = Effect.gen(function* () {
 
   const reads = yield* makeOutsideReads(resolve, guideStatusOf);
   const actions = yield* makeOutsideActions(resolve, guideStatusOf, openPullRequests);
-  const local = yield* makeOutsideLocal;
+  const local = yield* makeOutsideLocal(idempotent);
   return {
     ...reads,
     ...actions,

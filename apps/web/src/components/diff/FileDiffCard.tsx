@@ -6,11 +6,12 @@ import { flushSync } from "react-dom";
 import { DiffStat } from "./DiffStat";
 import { useFileReveal } from "./diffListContext";
 import { InlineMarkdown } from "./InlineMarkdown";
+import { commentsOf } from "./interaction";
 import { LazyDiffBody } from "./LazyDiffBody";
 import { alignIfAbove } from "./readingLine";
 import { RenderBoundary } from "./RenderBoundary";
 import { ReviewedToggle } from "./ReviewedToggle";
-import type { DiffAnnotation, DiffComments, LoadContents, ReviewedControl } from "./types";
+import type { DiffAnnotation, DiffInteraction, LoadContents, ReviewedControl } from "./types";
 import "./diff.css";
 
 const noAnnotations: ReadonlyArray<DiffAnnotation> = [];
@@ -18,8 +19,8 @@ const noAnnotations: ReadonlyArray<DiffAnnotation> = [];
 export type FileDiffCardProps = {
   file: DiffFile;
   annotations?: ReadonlyArray<DiffAnnotation>;
-  /** Review comments; without them the diff is read-only. */
-  comments?: DiffComments | undefined;
+  /** Review comments or asking; without one the diff is read-only. */
+  interaction?: DiffInteraction | undefined;
   loadContents?: LoadContents | undefined;
   note?: string | null;
   defaultCollapsed?: boolean;
@@ -37,7 +38,7 @@ export type FileDiffCardProps = {
 export function FileDiffCard({
   file,
   annotations = noAnnotations,
-  comments,
+  interaction,
   loadContents,
   note,
   defaultCollapsed = false,
@@ -65,6 +66,7 @@ export function FileDiffCard({
   }
   const ref = useRef<HTMLElement>(null);
   const bodyId = useId();
+  const comments = commentsOf(interaction);
   const risks = annotations.filter((annotation) => annotation.tone === "risk").length;
   const questions = annotations.filter((annotation) => annotation.tone === "question").length;
   return (
@@ -142,7 +144,7 @@ export function FileDiffCard({
             <LazyDiffBody
               file={file}
               annotations={annotations}
-              comments={comments}
+              interaction={interaction}
               loadContents={loadContents}
               trailingLines={trailingLines}
               prUrl={prUrl}

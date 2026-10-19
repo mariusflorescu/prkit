@@ -1,4 +1,6 @@
+import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
+import * as NodeOs from "node:os";
 import * as NodePath from "node:path";
 
 import type { Browser } from "@e2e-dev/web";
@@ -60,3 +62,116 @@ export const revealedLine = (browser: Browser) =>
       shown: box !== undefined && dock !== undefined && box.top > 0 && box.bottom <= dock.top,
     };
   });
+
+export const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+export const sha256 = (file: string) =>
+  NodeCrypto.createHash("sha256").update(NodeFS.readFileSync(file)).digest("hex");
+
+/** Where Claude keeps the session it started in `cwd`. */
+export const claudeSessionFile = (cwd: string, session: string) =>
+  NodePath.join(
+    process.env.CLAUDE_CONFIG_DIR ?? NodePath.join(NodeOs.homedir(), ".claude"),
+    "projects",
+    cwd.replaceAll(/[^a-zA-Z0-9]/g, "-"),
+    `${session}.jsonl`,
+  );
+
+/** Where Codex, run in prkit's Codex home under `home`, keeps the thread `session`. */
+export const codexThreadFile = (home: string, session: string) =>
+  NodeFS.globSync(`codex/sessions/**/rollout-*-${session}.jsonl`, { cwd: home }).map((path) =>
+    NodePath.join(home, path),
+  )[0];
+
+/** The server log's entries, each its header line and the fields printed under it. */
+export const logEntries = (file: string) =>
+  NodeFS.readFileSync(file, "utf8").split(/\n(?=\[\d{2}:\d{2}:\d{2}\.\d{3}\] )/);
+
+/** The entries named `message` with this decision, logged after the question's turn began. */
+export const decisionsAfter = (
+  file: string,
+  questionId: string,
+  message: string,
+  decision: string,
+) => {
+  const entries = logEntries(file);
+  const start = entries.findIndex(
+    (entry) => entry.includes("): Answering a question") && entry.includes(questionId),
+  );
+  return start === -1
+    ? []
+    : entries
+        .slice(start + 1)
+        .filter(
+          (entry) => entry.includes(`): ${message} {`) && entry.includes(`decision: '${decision}'`),
+        );
+};
+
+/** Two added lines in a row in a chapter's drawn diff, the first one's number and its file. */
+export const twoAddedLines = (browser: Browser) =>
+  browser.evaluate(() => {
+    for (const card of document.querySelectorAll("[data-file-diff-card]")) {
+      const root = card.querySelector("diffs-container")?.shadowRoot;
+      const numbers = new Set(
+        [
+          ...(root?.querySelectorAll('[data-gutter] > [data-line-type="change-addition"]') ?? []),
+        ].map((cell) => Number(cell.getAttribute("data-column-number"))),
+      );
+      const start = [...numbers].toSorted((a, b) => a - b).find((line) => numbers.has(line + 1));
+      const path = card.getAttribute("data-path");
+      if (start !== undefined && path !== null) return { path, start };
+    }
+    return null;
+  });
+
+/** Whether a card has answer text on screen yet. */
+export const hasText = (browser: Browser, question: string) =>
+  browser.evaluate(
+    (text: string) =>
+      ([...document.querySelectorAll("article[data-question-state]")]
+        .find((card) => card.getAttribute("aria-label") === text)
+        ?.querySelector(".pr-markdown")
+        ?.textContent?.trim() ?? "") !== "",
+    question,
+  );
+
+export const cardStates = (browser: Browser) =>
+  browser.evaluate(() =>
+    Object.fromEntries(
+      [...document.querySelectorAll("article[data-question-state]")].map((card) => [
+        card.getAttribute("aria-label"),
+        card.getAttribute("data-question-state"),
+      ]),
+    ),
+  );
+
+export const pinPlace = (browser: Browser) =>
+  browser.evaluate(() => {
+    const pin = document.querySelector("[data-ask-pin]");
+    const overview = [...document.querySelectorAll("h1, h2, h3")].find(
+      (heading) => heading.textContent?.trim() === "Overview",
+    );
+    const firstChapter = [...document.querySelectorAll("button")].find(
+      (button) => button.textContent?.trim() === "Ask about this chapter",
+    );
+    const follows = (a: Element | null | undefined, b: Element | null | undefined) =>
+      a !== null &&
+      a !== undefined &&
+      b !== null &&
+      b !== undefined &&
+      (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    return {
+      afterOverview: follows(overview, pin),
+      beforeChapters: follows(pin, firstChapter),
+      inDiff: pin === null ? null : pin.closest("[data-path]") !== null,
+    };
+  });
+
+export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

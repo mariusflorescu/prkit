@@ -1,14 +1,40 @@
-import type {
-  AnswerBasis,
-  AnswerPart,
-  AskScope,
-  CommentAnchor,
-  FreshReason,
-  NormalizedGuide,
-  Question,
+import {
+  type AnswerBasis,
+  type AnswerPart,
+  type AskScope,
+  type CommentAnchor,
+  type FreshReason,
+  isLocalReviewKey,
+  type NormalizedGuide,
+  type Question,
+  type ReviewKey,
 } from "@prkit/contracts";
 
-export const WHOLE_PR: AskScope = { _tag: "pull-request" };
+/** What a review's subject is called in the dock, one record per subject. */
+export type AskWords = {
+  /** The scope a question has until the reader picks a chapter or lines. */
+  readonly whole: AskScope;
+  /** The label of the chip's remove button, which puts `whole` back. */
+  readonly removeScope: string;
+  /** What the history says before the first question. */
+  readonly empty: string;
+};
+
+const PULL_REQUEST_WORDS: AskWords = {
+  whole: { _tag: "pull-request" },
+  removeScope: "Ask about the whole PR instead",
+  empty: "Ask the agent that wrote this guide. It already read the whole pull request.",
+};
+
+const LOCAL_WORDS: AskWords = {
+  whole: { _tag: "local-changes" },
+  removeScope: "Ask about all the changes instead",
+  empty: "Ask the agent that wrote this guide. It already read all of these changes.",
+};
+
+/** The subject's words, chosen by the key: a local review's guide explains no pull request. */
+export const askWords = (key: ReviewKey) =>
+  isLocalReviewKey(key) ? LOCAL_WORDS : PULL_REQUEST_WORDS;
 
 export const BUSY = "Wait for this answer or stop it to ask another.";
 
@@ -79,11 +105,13 @@ export const answerBlocks = (parts: ReadonlyArray<AnswerPart>) => {
 const rowsLabel = ({ start, end }: CommentAnchor) =>
   `${start.side === "old" ? "old " : ""}${start.line === end.line ? start.line : `${start.line}-${end.line}`}`;
 
-/** "Whole PR", "Chapter 2: Retry policy" or "src/retry.ts 12-18". */
+/** "Whole PR", "All changes", "Chapter 2: Retry policy" or "src/retry.ts 12-18". */
 export const scopeLabel = (scope: AskScope, guide: NormalizedGuide | undefined) => {
   switch (scope._tag) {
     case "pull-request":
       return "Whole PR";
+    case "local-changes":
+      return "All changes";
     case "chapter": {
       const index = guide?.chapters.findIndex((chapter) => chapter.id === scope.chapterId) ?? -1;
       const chapter = guide?.chapters[index];
@@ -94,8 +122,10 @@ export const scopeLabel = (scope: AskScope, guide: NormalizedGuide | undefined) 
   }
 };
 
+/** The field's placeholder, and for a whole scope the dock's name, by what is asked about. */
 export const PLACEHOLDERS: Record<AskScope["_tag"], string> = {
   "pull-request": "Ask about this pull request",
+  "local-changes": "Ask about these changes",
   chapter: "Ask about this chapter",
   lines: "Ask about these lines",
 };

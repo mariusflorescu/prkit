@@ -193,7 +193,7 @@ const layerHandlers = WsRpcGroup.toLayer(
         }),
       [WS_METHODS.localReviewsStop]: ({ key }) => reviews.local.stop(key),
       [WS_METHODS.localReviewsRetry]: ({ key }) => reviews.local.retry(key),
-      [WS_METHODS.localReviewsRemove]: ({ key }) => reviews.local.remove(key).pipe(Effect.as({})),
+      [WS_METHODS.localReviewsRemove]: ({ key }) => asks.removeLocalReview(key).pipe(Effect.as({})),
       [WS_METHODS.localReviewsFileContents]: (input) => reviews.local.fileContents(input),
       [WS_METHODS.asksWatch]: ({ reviewId }) => asks.watch(reviewId),
       [WS_METHODS.asksAsk]: (input) => asks.ask(input),

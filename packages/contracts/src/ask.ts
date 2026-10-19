@@ -11,16 +11,27 @@ import { CommentAnchor } from "./reviewComments.ts";
 export const QuestionId = Schema.NonEmptyString.pipe(Schema.brand("QuestionId"));
 export type QuestionId = typeof QuestionId.Type;
 
+const WholePullRequest = Schema.TaggedStruct("pull-request", {});
+const WholeLocalChanges = Schema.TaggedStruct("local-changes", {});
+const ChapterScope = Schema.TaggedStruct("chapter", { chapterId: Schema.NonEmptyString });
+const LinesScope = Schema.TaggedStruct("lines", { anchor: CommentAnchor });
+
 /**
- * What a question is about: the whole pull request, one chapter of the revision's guide, or
- * diff rows of one file, named the way a review comment names them.
+ * What a question is about: the whole subject (a pull request, or a local review's changes),
+ * one chapter of the revision's guide, or diff rows of one file, named the way a review comment
+ * names them. A whole-subject scope must match its review's subject (`Asks` refuses the other).
  */
 export const AskScope = Schema.Union([
-  Schema.TaggedStruct("pull-request", {}),
-  Schema.TaggedStruct("chapter", { chapterId: Schema.NonEmptyString }),
-  Schema.TaggedStruct("lines", { anchor: CommentAnchor }),
+  WholePullRequest,
+  WholeLocalChanges,
+  ChapterScope,
+  LinesScope,
 ]);
 export type AskScope = typeof AskScope.Type;
+/** The scopes a question about a pull request takes. */
+export const PullRequestAskScope = Schema.Union([WholePullRequest, ChapterScope, LinesScope]);
+/** The scopes a question about a local review's changes takes. */
+export const LocalAskScope = Schema.Union([WholeLocalChanges, ChapterScope, LinesScope]);
 
 export const QUESTION_MAX_LENGTH = 4000;
 
@@ -174,7 +185,7 @@ type GuideChapter = NormalizedGuide["chapters"][number];
 
 /**
  * The chapter a question is about: its own, or the one holding its lines' file. Null for the
- * whole pull request, undefined when the guide has no such chapter.
+ * whole subject, undefined when the guide has no such chapter.
  */
 export const askedChapter = (
   scope: AskScope,
@@ -182,6 +193,7 @@ export const askedChapter = (
 ): GuideChapter | null | undefined => {
   switch (scope._tag) {
     case "pull-request":
+    case "local-changes":
       return null;
     case "chapter":
       return guide.chapters.find((chapter) => chapter.id === scope.chapterId);

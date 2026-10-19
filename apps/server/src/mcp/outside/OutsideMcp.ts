@@ -126,6 +126,12 @@ const handlers = (toolkit: OutsideToolkit) =>
         wait_for_local_guide: reads((input) =>
           respond("wait_for_local_guide", input, () => work.waitLocal(input)),
         ),
+        read_local_questions: reads((input) =>
+          respond("read_local_questions", input, () => work.questionsLocal(input)),
+        ),
+        wait_for_local_question: reads((input) =>
+          respond("wait_for_local_question", input, () => work.waitForLocalQuestion(input)),
+        ),
         open_pull_request: startsWork((input) =>
           respond("open_pull_request", input, () => work.open(input)),
         ),
@@ -187,6 +193,15 @@ const handlers = (toolkit: OutsideToolkit) =>
         ),
         stop_local_guide: startsWork((input) =>
           respond("stop_local_guide", input, () => work.stopLocal(input)),
+        ),
+        ask_about_local_changes: startsWork((input) =>
+          respond("ask_about_local_changes", input, () => work.askLocal(input)),
+        ),
+        stop_local_question: startsWork((input) =>
+          respond("stop_local_question", input, () => work.stopLocalQuestion(input)),
+        ),
+        pin_local_answer: startsWork((input) =>
+          respond("pin_local_answer", input, () => work.pinLocalAnswer(input)),
         ),
         tick_manual_check_steps: startsWork((input) =>
           respond("tick_manual_check_steps", input, () => work.tickManualCheck(input)),

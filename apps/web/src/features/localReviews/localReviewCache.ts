@@ -8,6 +8,7 @@ import type {
 import type { QueryClient } from "@tanstack/react-query";
 
 import { mergeActivity } from "~/components/review/reviewCache";
+import { useAskStore } from "~/features/ask/askStore";
 import { localReviewQuery, localReviewsQuery } from "~/rpc/queries";
 
 /** What a removed review reads as: no review, so its page says it is gone. */
@@ -50,6 +51,7 @@ export const forgetLocalReview = (client: QueryClient, key: LocalReviewKey) => {
   const review = client.getQueryData(localReviewQuery(key).queryKey)?.review;
   if (review != null) removed.add(review.id);
   void client.cancelQueries({ queryKey: localReviewQuery(key).queryKey });
+  useAskStore.getState().forget(key);
   // Its guides, drafts and diffs go too: a review made again for the branch starts at revision 1.
   client.removeQueries({
     predicate: (query) => query.queryKey[0] !== "localReview" && query.queryKey[1] === key,

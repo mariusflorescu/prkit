@@ -284,6 +284,7 @@ const GuideRow = Schema.Struct({
 });
 const RevisionContextRow = Schema.Struct({
   pr_key: ReviewKey,
+  local: Schema.NullOr(Schema.fromJsonString(LocalSource)),
   provider: AgentProviderKind,
   instance_id: AgentInstanceId,
   model: Schema.NullOr(Schema.String),
@@ -649,7 +650,11 @@ const mergeRange = (
 /** What a question about one accepted revision needs to know (`asks/Asks.ts`), read in one call. */
 export interface RevisionContext {
   readonly reviewId: ReviewId;
-  /** What the prompt calls the change: "acme/widgets#12" for a pull request. */
+  readonly key: ReviewKey;
+  /**
+   * What the prompt calls the change: "acme/widgets#12" for a pull request, "the local changes
+   * in widgets on `main`" for a local review.
+   */
   readonly label: string;
   readonly revision: number;
   readonly headSha: string;
@@ -2398,7 +2403,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       // rowid follows insertion, and a review's attempts run one at a time.
       const rows = yield* sql`
-        SELECT v.pr_key, v.provider, v.instance_id, v.model, v.model_options,
+        SELECT v.pr_key, v.local, v.provider, v.instance_id, v.model, v.model_options,
           a.provider AS writer_provider, a.instance_id AS writer_instance,
           r.head_sha, r.guide, a.snapshot, a.config,
           CASE WHEN NOT EXISTS (
@@ -2423,11 +2428,13 @@ export const make = Effect.gen(function* () {
           : { _tag: "pull-request", ref };
       return {
         reviewId,
-        label: isLocalKey(key)
-          ? "local changes"
-          : ref === null
-            ? key
-            : `${ref.owner}/${ref.repo}#${ref.number}`,
+        key,
+        label:
+          row.local !== null
+            ? `the local changes in ${row.local.name} on ${row.local.branch === null ? "a detached HEAD" : `\`${row.local.branch}\``}`
+            : ref === null
+              ? key
+              : `${ref.owner}/${ref.repo}#${ref.number}`,
         revision,
         headSha: row.head_sha,
         guide: row.guide,

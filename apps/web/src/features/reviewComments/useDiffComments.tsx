@@ -178,6 +178,7 @@ export function useDiffComments(
       if (visibleComposer && open)
         pinAt(open.placement.anchor.end).composer = { composer: visibleComposer, placed: open };
       return {
+        kind: "comment",
         pins: [...pins.values()].map((pin) => pin.point),
         render: (point) => {
           const pin = pins.get(`${point.side}:${point.line}`);

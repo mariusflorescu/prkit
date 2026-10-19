@@ -15,7 +15,8 @@
  *       question (a `<prkit-ask>` prompt), it tries `submit_guide` with the turn's token, then
  *       streams an answer in a few `text_delta` chunks: whether it got `--resume` and
  *       `--fork-session`, the first changed line of the numbered diff as `path:line`, and the
- *       refusal prkit gave it.
+ *       refusal prkit gave it. With an `ask-writes` file it first writes `made-by-agent.txt` in its
+ *       working directory and stages it with git, as an agent past every guard would, and says so.
  *
  * In FAKE_CLAUDE_DIR, a `hold` file keeps a guide, fix or resolution writing until the file is
  * removed, a `hold-ask` file holds an answer after its first chunk the same way, a `fail` file
@@ -43,7 +44,7 @@
  *   linger    a `sleep` that a command left in the background; the command runs in a session
  *             of its own for a second, as Claude Code runs commands. Its PID goes in `linger.pid`
  *
- * Every turn appends `{configDir, session, resumed, forked}` to `runs.log` there, and its prompt
+ * Every turn appends `{configDir, cwd, session, resumed, forked}` to `runs.log` there, and its prompt
  * to `prompts.jsonl` with a copy of the context file the prompt names (`context-<turn>.json`). A
  * fork (`--fork-session`) gets a new session, as Claude Code's does. With CLAUDE_CONFIG_DIR set to
  * a folder under `.e2e/`, it also saves the session as Claude Code does, under `projects/` in the
@@ -196,7 +197,7 @@ const record = () => {
   if (control !== "")
     NodeFS.appendFileSync(
       NodePath.join(control, "runs.log"),
-      `${JSON.stringify({ configDir, session: sessionId, resumed: resumed !== null, forked })}\n`,
+      `${JSON.stringify({ configDir, cwd: process.cwd(), session: sessionId, resumed: resumed !== null, forked })}\n`,
     );
   const scratch = NodePath.resolve(import.meta.dirname, "..", ".e2e") + NodePath.sep;
   if (configDir === null || !NodePath.resolve(configDir).startsWith(scratch)) return;
@@ -413,7 +414,7 @@ const keepPrompt = (prompt: string) => {
 
 /** The first changed line of the numbered diff the prompt names, as `path:line` with its new line number. */
 const firstChangedLine = (prompt: string) => {
-  const file = /(\S+\/pull-request\.diff)/.exec(prompt)?.[1];
+  const file = /(\S+\/(?:pull-request|changes)\.diff)/.exec(prompt)?.[1];
   if (file === undefined || !NodeFS.existsSync(file)) return null;
   let path: string | null = null;
   for (const line of NodeFS.readFileSync(file, "utf8").split("\n")) {
@@ -426,6 +427,20 @@ const firstChangedLine = (prompt: string) => {
   return null;
 };
 
+/**
+ * What an agent past every guard would do when told to write a file: write it in its working
+ * directory and stage it with git there. Says how that went.
+ */
+const writeAndStage = () => {
+  try {
+    NodeFS.writeFileSync("made-by-agent.txt", "Written by the stand-in agent.\n");
+    NodeChildProcess.execFileSync("git", ["add", "made-by-agent.txt"], { stdio: "ignore" });
+    return "It wrote made-by-agent.txt and staged it.";
+  } catch (error) {
+    return `It couldn't write and stage made-by-agent.txt: ${error instanceof Error ? error.message : String(error)}.`;
+  }
+};
+
 /** Answers a question in `text_delta` chunks, as Claude Code streams a reply, then the whole message. */
 const answer = async (prompt: string) => {
   const refused = await mcp("tools/call", {
@@ -433,8 +448,10 @@ const answer = async (prompt: string) => {
     arguments: { summary: "Not a guide.", chapters: [{ title: "Nothing", files: [] }] },
   });
   const cited = firstChangedLine(prompt);
+  const wrote = flagged("ask-writes") ? writeAndStage() : null;
   const chunks = [
     "The stand-in agent answers. ",
+    ...(wrote === null ? [] : [`${wrote} `]),
     `It got ${resumed === null ? "no --resume" : `--resume ${resumed}`} and ${forked ? "--fork-session" : "no --fork-session"}. `,
     cited === null ? "It found no changed line to cite. " : `The change starts at \`${cited}\`. `,
     refused.ok ? "prkit let it call submit_guide." : `prkit refused submit_guide: ${refused.said}`,

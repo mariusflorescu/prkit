@@ -248,7 +248,7 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
                   id={`pr-file-${index}`}
                   loadContents={loadContents}
                   prUrl={detail.url}
-                  comments={commentsFor(file)}
+                  interaction={commentsFor(file)}
                   annotations={notes?.files.get(file.path)?.annotations ?? noNotes}
                   note={notes?.files.get(file.path)?.note ?? null}
                   fromGuide

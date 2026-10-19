@@ -74,6 +74,11 @@ export const commandMap = {
   wait_for_local_guide: { path: ["local", "wait"], target: "local" },
   generate_local_guide: { path: ["local", "guide"], target: "local" },
   stop_local_guide: { path: ["local", "stop"], target: "local" },
+  read_local_questions: { path: ["local", "questions", "list"], target: "local" },
+  wait_for_local_question: { path: ["local", "questions", "wait"], target: "local" },
+  ask_about_local_changes: { path: ["local", "questions", "ask"], target: "local" },
+  stop_local_question: { path: ["local", "questions", "stop"], target: "local" },
+  pin_local_answer: { path: ["local", "questions", "pin"], target: "local" },
   tick_manual_check_steps: { path: ["guide", "tick"], target: "pr" },
 } satisfies Record<ToolName, CommandMapping>;
 
