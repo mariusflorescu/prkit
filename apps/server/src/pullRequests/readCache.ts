@@ -1,4 +1,4 @@
-import type { AccountId, GitHubProblem } from "@prkit/contracts";
+import { type AccountId, GitHubProblem } from "@prkit/contracts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
@@ -36,6 +36,7 @@ interface Entry<V> extends Cached<V> {
 const PERSIST_MAX_BYTES = 4 * 1024 * 1024;
 
 const isGitHubError = Schema.is(GitHubRequestError);
+const encodeProblem = Schema.encodeSync(Schema.fromJsonString(GitHubProblem));
 
 /**
  * The problem to show next to a cached answer; null when the failure must not
@@ -384,6 +385,8 @@ export const makeObservedReadCache = <V>(
       string,
       { readonly configDir: string; readonly problem: GitHubProblem; readonly at: number }
     >();
+    /** The gh config dir each key was last read through; a read through an older one keeps nothing. */
+    const readThrough = new Map<string, string>();
     const runningFor = (key: CacheKey) => {
       const claim = running.get(id(key));
       return claim?.configDir === key.configDir ? claim : undefined;
@@ -403,17 +406,19 @@ export const makeObservedReadCache = <V>(
     const outcome = (key: CacheKey, result: ReadOutcome<V>, startedAt: number) =>
       Effect.gen(function* () {
         const name = id(key);
+        if (readThrough.get(name) !== key.configDir) return;
         if (result._tag === "read") {
           yield* store(key, result.value, startedAt);
           failures.delete(name);
           yield* options.changed(key);
           return;
         }
-        const before = failureOf(key);
-        const same = before !== undefined && before.problem._tag === result.problem._tag;
+        const before = failureOf(key)?.problem;
+        const same =
+          before !== undefined && encodeProblem(before) === encodeProblem(result.problem);
         failures.set(name, {
           configDir: key.configDir,
-          problem: same ? before.problem : result.problem,
+          problem: result.problem,
           at: yield* Clock.currentTimeMillis,
         });
         for (const oldest of failures.keys()) {
@@ -430,9 +435,10 @@ export const makeObservedReadCache = <V>(
       Effect.gen(function* () {
         const current = runningFor(key);
         if (current !== undefined) return current.done;
-        const done = yield* Deferred.make<ReadOutcome<V>>();
+        const done = Deferred.makeUnsafe<ReadOutcome<V>>();
         const claim = { configDir: key.configDir, done };
         running.set(id(key), claim);
+        readThrough.set(id(key), key.configDir);
         // Off the running list before anyone waiting hears, so a caller that needs a newer read starts one.
         const release = Effect.sync(() => {
           if (running.get(id(key)) === claim) running.delete(id(key));
