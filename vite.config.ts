@@ -100,6 +100,7 @@ export default defineConfig({
         files: [
           "apps/server/src/reviews/localReviews.ts",
           "apps/server/src/repo/localCapture.ts",
+          "apps/server/src/repo/localWorkingTree.ts",
           "apps/server/src/outside/OutsideLocal.ts",
         ],
         rules: {
