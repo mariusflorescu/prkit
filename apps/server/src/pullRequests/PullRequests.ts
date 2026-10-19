@@ -25,13 +25,20 @@ import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import { GitHubAccounts } from "../accounts/GitHubAccounts.ts";
 import { isoAt } from "../github/budget.ts";
-import { GitHubApi, inBackground } from "../github/GitHubApi.ts";
+import { GitHubApi } from "../github/GitHubApi.ts";
 import { makeActions } from "./actions.ts";
 import { FRESH_MS, makeDetailReads } from "./detailReads.ts";
 import { PullRequestFingerprint, stackShape, statusOf } from "./fingerprint.ts";
 import { accountEntries, CachedInboxEntry, mergeAccounts } from "./inboxEntries.ts";
 import { InboxResponse, inboxQuery } from "./inboxQuery.ts";
-import { type Cached, type CacheKey, makeReadCache, readProblem } from "./readCache.ts";
+import {
+  type CacheKey,
+  makeObservedReadCache,
+  type Observation,
+  type ObservedRead,
+  type ReadOutcome,
+  readProblem,
+} from "./readCache.ts";
 import { withDeadline } from "./readDeadline.ts";
 import { makeRepositoryReads } from "./repositoryReads.ts";
 import { makeReviewWaits, WaitsByNode, withWaits } from "./reviewWaits.ts";
@@ -97,7 +104,7 @@ export const make = Effect.gen(function* () {
       }),
     stackChanged: (accountId) => publish({ _tag: "stack", accountId }),
   });
-  const inboxCache = yield* makeReadCache({
+  const inboxCache = yield* makeObservedReadCache({
     name: "inbox",
     json: Schema.fromJsonString(AccountInbox),
     maxEntries: 32,
@@ -121,7 +128,7 @@ export const make = Effect.gen(function* () {
   });
 
   const reviewWaits = yield* makeReviewWaits;
-  const inboxKey = (account: Account): CacheKey => ({
+  const inboxKey = (account: Pick<Account, "id" | "configDir">): CacheKey => ({
     accountId: account.id,
     configDir: account.configDir,
     key: "",
@@ -135,37 +142,48 @@ export const make = Effect.gen(function* () {
       );
       const previous = (yield* inboxCache.peek(inboxKey(account)))?.value.waits ?? {};
       const waits = yield* reviewWaits.read(account, found.entries, previous);
-      return { ...found, waits } satisfies AccountInbox;
-    });
+      return { _tag: "read", value: { ...found, waits } } satisfies ReadOutcome<AccountInbox>;
+    }).pipe(
+      Effect.catchTag("GitHubRequestError", (error) =>
+        Effect.succeed({
+          _tag: "failed",
+          problem: readProblem(error),
+        } satisfies ReadOutcome<AccountInbox>),
+      ),
+    );
   const row = (
     accountId: AccountId,
-    cached: Cached<AccountInbox> | undefined,
+    kept: Observation<AccountInbox>["kept"],
     problem: GitHubProblem | null,
   ) => ({
     accountId,
     inbox: {
-      entries: withWaits(accountId, cached?.value.entries ?? [], cached?.value.waits ?? {}),
-      truncated: cached?.value.truncated ?? [],
+      entries: withWaits(accountId, kept?.value.entries ?? [], kept?.value.waits ?? {}),
+      truncated: kept?.value.truncated ?? [],
     },
-    fetchedAt: cached === undefined ? null : isoAt(cached.fetchedAt),
+    fetchedAt: kept === undefined ? null : isoAt(kept.fetchedAt),
     problem,
   });
-  /** One account's inbox: cached, read now, or the last answer with why it couldn't be read. */
-  const readAccount = (account: Account, refresh: boolean) => {
-    const key = inboxKey(account);
-    if (account.status._tag === "error") {
-      const problem = { _tag: "account" as const, message: account.status.message };
-      return inboxCache.peek(key).pipe(Effect.map((cached) => row(account.id, cached, problem)));
-    }
-    return inboxCache.read(key, fetchAccount(account), { refresh }).pipe(
-      Effect.map((cached) => row(account.id, cached, cached.problem)),
-      Effect.catchTag("GitHubRequestError", (error) =>
-        inboxCache
-          .peek(key)
-          .pipe(Effect.map((cached) => row(account.id, cached, readProblem(error)))),
-      ),
+  const accountRow = (account: Pick<Account, "id" | "status">, seen: Observation<AccountInbox>) =>
+    row(
+      account.id,
+      seen.kept,
+      account.status._tag === "error"
+        ? { _tag: "account", message: account.status.message }
+        : seen.problem,
     );
-  };
+  /** One account's inbox as kept; an account prkit can't read is never read, only shown. */
+  const readAccount = (account: Account, mode: ObservedRead) =>
+    (account.status._tag === "error"
+      ? inboxCache.observe(inboxKey(account))
+      : inboxCache.read(inboxKey(account), fetchAccount(account), mode)
+    ).pipe(Effect.map((seen) => accountRow(account, seen)));
+  const modeOf = (read: InboxRead, account: Account): ObservedRead =>
+    read._tag === "refresh" || (read._tag === "retry" && read.accountId === account.id)
+      ? "refresh"
+      : read._tag === "cached"
+        ? "cached"
+        : "snapshot";
   const result = (
     rows: ReadonlyArray<ReturnType<typeof row>>,
     configDirProblems: ReadonlyArray<ConfigDirProblem>,
@@ -185,46 +203,39 @@ export const make = Effect.gen(function* () {
       const discovered = yield* accounts.list();
       const rows = yield* Effect.forEach(
         discovered.accounts,
-        (account) =>
-          readAccount(
-            account,
-            read._tag === "refresh" || (read._tag === "retry" && read.accountId === account.id),
-          ),
+        (account) => readAccount(account, modeOf(read, account)),
         { concurrency: 4 },
       );
-      return result(rows, discovered.configDirProblems);
+      if (read._tag === "snapshot") return result(rows, discovered.configDirProblems);
+      // What the reads it waited for brought, and every other account as it is by then.
+      const settled = yield* Effect.forEach(discovered.accounts, (account) =>
+        inboxCache.observe(inboxKey(account)).pipe(Effect.map((seen) => accountRow(account, seen))),
+      );
+      return result(settled, discovered.configDirProblems);
     });
   /**
-   * The inbox across accounts. Before accounts are discovered (a relaunch), it answers at
-   * once with each account the gh config directories list and what was kept of its inbox
-   * from that directory, then discovers and tells windows to read again.
+   * The inbox across accounts. A snapshot never waits for GitHub: before accounts are
+   * discovered (a relaunch), it answers with each account the gh config directories list and
+   * what was kept of its inbox from that directory, then discovers and tells windows to read
+   * again.
    */
   const inbox = (read: InboxRead): Effect.Effect<InboxResult, InboxError> =>
     Effect.gen(function* () {
-      if (read._tag === "cached" && (yield* accounts.known) === null) {
-        const persisted = yield* inboxCache.persisted;
+      if (read._tag === "snapshot" && (yield* accounts.known) === null) {
         const configured = yield* accounts.configured;
-        const rows = configured.accounts.map((account) =>
-          row(
-            account.id,
-            persisted.find(
-              (item) => item.accountId === account.id && item.configDir === account.configDir,
-            )?.cached,
-            account.status._tag === "error"
-              ? { _tag: "account", message: account.status.message }
-              : null,
-          ),
+        const rows = yield* Effect.forEach(configured.accounts, (account) =>
+          inboxCache
+            .observe(inboxKey(account))
+            .pipe(Effect.map((seen) => accountRow(account, seen))),
         );
-        if (rows.some((item) => item.fetchedAt !== null)) {
-          yield* Effect.forkIn(
-            inBackground(readAll(read)).pipe(
-              Effect.andThen(publish({ _tag: "inbox" })),
-              Effect.catchCause((cause) => Effect.logWarning("Inbox catch-up failed", cause)),
-            ),
-            scope,
-          );
-          return result(rows, configured.configDirProblems);
-        }
+        yield* Effect.forkIn(
+          readAll(read).pipe(
+            Effect.andThen(publish({ _tag: "inbox" })),
+            Effect.catchCause((cause) => Effect.logWarning("Inbox catch-up failed", cause)),
+          ),
+          scope,
+        );
+        return result(rows, configured.configDirProblems);
       }
       return yield* readAll(read);
     }).pipe(

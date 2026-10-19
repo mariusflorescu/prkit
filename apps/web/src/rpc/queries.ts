@@ -72,7 +72,7 @@ export const accountsQuery = queryOptions({
  */
 export const inboxQuery = queryOptions({
   queryKey: ["inbox"],
-  queryFn: () => listInbox(),
+  queryFn: () => listInbox({ _tag: "snapshot" }),
   staleTime: Infinity,
   retry: false,
 });

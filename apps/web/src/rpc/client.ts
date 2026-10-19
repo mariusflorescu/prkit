@@ -191,7 +191,7 @@ export const addConfigDir = (path: string): Promise<AccountsResult> =>
   call((client) => client[WS_METHODS.accountsAddConfigDir]({ path }));
 export const removeConfigDir = (path: string): Promise<AccountsResult> =>
   call((client) => client[WS_METHODS.accountsRemoveConfigDir]({ path }));
-export const listInbox = (read: InboxRead = { _tag: "cached" }): Promise<InboxResult> =>
+export const listInbox = (read: InboxRead): Promise<InboxResult> =>
   call((client) => client[WS_METHODS.inboxList]({ read }));
 export const listRepositories = (
   read: RepositoryListRead = { _tag: "cached" },

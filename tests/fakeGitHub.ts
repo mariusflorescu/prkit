@@ -167,10 +167,26 @@ export const startFakeGitHub = async (
       post(`request-review?pr=${pr}&${reviewerQuery(who)}&minutes=${minutesAgo}`),
     unrequest: (pr: number, who: Reviewer) => post(`unrequest?pr=${pr}&${reviewerQuery(who)}`),
     unreadable: (pr: number) => post(`unreadable?pr=${pr}`),
-    /** `message` is what GitHub says about the refusal; without one the answer is `{}`. */
-    fail: (kind: string, times: number, status = 502, message?: string) =>
+    /**
+     * `message` is what GitHub says about the refusal; without one the answer is `{}`. With
+     * `login`, only that login's requests fail, each `ms` later.
+     */
+    fail: (
+      kind: string,
+      times: number,
+      status = 502,
+      message?: string,
+      only: { login?: string; ms?: number } = {},
+    ) =>
       post(
-        `fail?kind=${encodeURIComponent(kind)}&status=${status}&times=${times}${message === undefined ? "" : `&message=${encodeURIComponent(message)}`}`,
+        `fail?${new URLSearchParams([
+          ["kind", kind],
+          ["status", String(status)],
+          ["times", String(times)],
+          ...(message === undefined ? [] : [["message", message]]),
+          ...(only.login === undefined ? [] : [["login", only.login]]),
+          ...(only.ms === undefined ? [] : [["ms", String(only.ms)]]),
+        ])}`,
       ),
     behind: (pr: number, by: number) => post(`behind?pr=${pr}&by=${by}`),
     /** Who opened the PR and its description, either one. */

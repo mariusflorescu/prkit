@@ -68,11 +68,13 @@
  *                                       request event that long ago (default 0); asking twice adds the event only
  *   POST unrequest?pr=<n>&login=<l>|team=<slug>   takes the request back, as a submitted review does; events stay
  *   POST unreadable?pr=<n>              the waits read answers a null node and a FORBIDDEN error for it from now on
- *   POST fail?kind=<kind>&status=<s>&times=<n>&message=<m>
+ *   POST fail?kind=<kind>&status=<s>&times=<n>&message=<m>&login=<l>&ms=<d>
  *                                       the next n requests counted as `kind` (say `graphql:review-waits`)
  *                                       get that status (default 502) and `{}`, or `{"message": m}` with a
  *                                       message, counted as `<kind>:failed`; a refused write changes
- *                                       nothing. n defaults to 1, 0 clears it, and reset-stats leaves it alone
+ *                                       nothing. n defaults to 1, 0 clears it, and reset-stats leaves it alone.
+ *                                       With a login, only that login's requests fail; with ms, each
+ *                                       failure answers that much later, as GitHub's 502s and 504s do
  *   POST behind?pr=<n>&by=<k>           its base gained k commits, so Update branch applies
  *   POST describe?pr=<n>                its author or description, as JSON `{ "author", "body" }`,
  *                                       either one (bumps updatedAt). PATCH on the pull request
@@ -164,7 +166,11 @@ const latency: Record<Resource, number> = { core: 0, graphql: 0 };
 /** Answers a `hold` keeps back until `release`, per resource; null when nothing is held. */
 const held: Record<Resource, Array<() => void> | null> = { core: null, graphql: null };
 
-const failures = new Map<string, { status: number; times: number; message: string | null }>();
+/** By kind, or by kind and login (`<kind>@<login>`) for one account's requests. */
+const failures = new Map<
+  string,
+  { status: number; times: number; message: string | null; ms: number }
+>();
 
 const remaining = (resource: Resource) =>
   Date.now() < quotas[resource].limitedUntil ? 0 : Math.max(0, LIMIT - quotas[resource].used);
@@ -211,18 +217,27 @@ const send = (
   else queue.push(write);
 };
 
-const failedByControl = (response: NodeHttp.ServerResponse, resource: Resource, kind: string) => {
-  const failure = failures.get(kind);
+const failedByControl = (
+  response: NodeHttp.ServerResponse,
+  resource: Resource,
+  kind: string,
+  token = "",
+) => {
+  const own = `${kind}@${tokenOwner(token).login}`;
+  const key = failures.has(own) ? own : kind;
+  const failure = failures.get(key);
   if (failure === undefined) return false;
   failure.times--;
-  if (failure.times <= 0) failures.delete(kind);
-  count(`${kind}:failed`, failure.status, 0);
-  send(
-    response,
-    resource,
-    failure.status,
-    failure.message === null ? "{}" : encodeJson({ message: failure.message }),
-  );
+  if (failure.times <= 0) failures.delete(key);
+  count(`${kind}:failed`, failure.status, 0, token);
+  setTimeout(() => {
+    send(
+      response,
+      resource,
+      failure.status,
+      failure.message === null ? "{}" : encodeJson({ message: failure.message }),
+    );
+  }, failure.ms);
   return true;
 };
 
@@ -254,15 +269,18 @@ const control = (url: URL, method: string, text: string, response: NodeHttp.Serv
   }
   if (name === "fail") {
     const kind = url.searchParams.get("kind") ?? "";
+    const login = url.searchParams.get("login");
+    const key = login === null ? kind : `${kind}@${login}`;
     const times = Number(url.searchParams.get("times") ?? "1");
     if (times > 0)
-      failures.set(kind, {
+      failures.set(key, {
         status: Number(url.searchParams.get("status") ?? "502"),
         times,
         message: url.searchParams.get("message"),
+        ms: Number(url.searchParams.get("ms") ?? "0"),
       });
-    else failures.delete(kind);
-    return answer({ ok: true, kind, times });
+    else failures.delete(key);
+    return answer({ ok: true, kind, login, times });
   }
   const pull = pulls.get(Number(url.searchParams.get("pr")));
   const gitHead = url.searchParams.get("sha");
@@ -512,7 +530,7 @@ const server = NodeHttp.createServer((request, response) => {
         return;
       }
       const answer = graphql(body, tokenLogin(request));
-      if (failedByControl(response, "graphql", answer.kind)) return;
+      if (failedByControl(response, "graphql", answer.kind, request.headers.authorization)) return;
       quotas.graphql.used += answer.cost;
       count(answer.kind, 200, answer.cost, request.headers.authorization);
       const withCost =
@@ -551,7 +569,7 @@ const server = NodeHttp.createServer((request, response) => {
       request.headers["if-none-match"],
       request.headers.authorization ?? "",
     );
-    if (failedByControl(response, "core", answer.kind)) return;
+    if (failedByControl(response, "core", answer.kind, request.headers.authorization)) return;
     if ("commit" in answer) answer.commit();
     const cost = answer.status === 304 ? 0 : 1;
     quotas.core.used += cost;
