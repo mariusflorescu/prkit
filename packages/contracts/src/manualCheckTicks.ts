@@ -42,6 +42,15 @@ export const ManualCheckCode = Schema.NonEmptyArray(
 );
 export type ManualCheckCode = typeof ManualCheckCode.Type;
 
+/** A file of the chapter a step exercises, with its version in one revision. */
+export const StepFile = Schema.Struct({
+  path: Schema.String,
+  /** Where a renamed file came from. */
+  previousPath: Schema.optional(Schema.String),
+  version: FileVersion,
+});
+export type StepFile = typeof StepFile.Type;
+
 /** One decision about a step version made against some code. `order` grows with every saved decision. */
 export const ManualCheckTick = Schema.Struct({
   step: ManualCheckStepVersion,
@@ -54,10 +63,23 @@ export type ManualCheckTick = typeof ManualCheckTick.Type;
 export const ManualCheckTicks = Schema.Struct({ ticks: Schema.Array(ManualCheckTick) });
 export type ManualCheckTicks = typeof ManualCheckTicks.Type;
 
-/** Ticks or unticks these versions. Setting, never toggling, so a retry changes nothing. */
+/**
+ * Ticks or unticks these versions, each against its chapter's files as the reader sees them,
+ * renames included, so a write compares code the way a read does. Setting, never toggling,
+ * so a retry changes nothing.
+ */
 export const ManualCheckDecision = Schema.Struct({
   steps: Schema.NonEmptyArray(
-    Schema.Struct({ step: ManualCheckStepVersion, code: Schema.NullOr(ManualCheckCode) }),
+    Schema.Struct({
+      step: ManualCheckStepVersion,
+      files: Schema.Array(StepFile).check(
+        Schema.makeFilter(
+          (files) =>
+            new Set(files.map((file) => file.path)).size === files.length ||
+            "A file can't appear twice in one step.",
+        ),
+      ),
+    }),
   ),
   ticked: Schema.Boolean,
 });
@@ -85,14 +107,6 @@ export class ManualCheckTicksError extends Schema.TaggedError<ManualCheckTicksEr
  */
 export const ManualCheckStepState = Schema.Literals(["ticked", "changed", "unticked"]);
 export type ManualCheckStepState = typeof ManualCheckStepState.Type;
-
-/** A file of the chapter a step exercises, with its version in one revision. */
-export type StepFile = {
-  readonly path: string;
-  /** Where a renamed file came from. */
-  readonly previousPath?: string | undefined;
-  readonly version: FileVersion;
-};
 
 const byPath = Order.mapInput(Order.String, (file: { readonly path: string }) => file.path);
 

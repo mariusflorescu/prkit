@@ -15,7 +15,6 @@ import {
   type ManualCheckTicksChange,
   type PullRequestKey,
   type ReviewSubject,
-  sortedCode,
   stepFiles,
 } from "@prkit/contracts";
 import * as Context from "effect/Context";
@@ -133,9 +132,9 @@ export const make = Effect.gen(function* () {
             );
             let changed = false;
             for (const entry of decision.steps) {
-              const code = entry.code === null ? null : sortedCode(entry.code);
-              const decided = manualCheckDecided(index.get(entry.step) ?? [], code ?? []);
+              const decided = manualCheckDecided(index.get(entry.step) ?? [], entry.files);
               if (decided?.compared === "same" && decided.tick.ticked === decision.ticked) continue;
+              const code = manualCheckCode(entry.files);
               const stored = code === null ? "" : yield* encodeCode(code);
               yield* sql`
                 INSERT INTO manual_check_ticks (subject, step, code, ticked, seq, decided_at)
@@ -202,7 +201,7 @@ export const make = Effect.gen(function* () {
           : [
               {
                 step: manualCheckStepVersion(step),
-                code: manualCheckCode(stepFiles(step, guide.normalized.chapters, files)),
+                files: stepFiles(step, guide.normalized.chapters, files),
               },
             ];
       });

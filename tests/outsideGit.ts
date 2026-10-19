@@ -113,6 +113,17 @@ process.exit(result.status ?? 1);
       git("update-ref", `refs/pull/${number}/head`, "HEAD");
       return git("rev-parse", "HEAD").trim();
     },
+    /** Moves a file on the PR's branch and edits it, as a push would. Returns the new head. */
+    rename: (number: number, from: string, to: string, change: (text: string) => string) => {
+      git("checkout", "-q", `feature-${number}`);
+      git("mv", from, to);
+      const target = NodePath.join(source, to);
+      NodeFS.writeFileSync(target, change(NodeFS.readFileSync(target, "utf8")));
+      git("add", ".");
+      git("commit", "-qm", `Rename in fixture ${number}`);
+      git("update-ref", `refs/pull/${number}/head`, "HEAD");
+      return git("rev-parse", "HEAD").trim();
+    },
     /** A file's patch in the PR's diff as GitHub's files API has it: the hunks alone. */
     patch: (number: number, path: string) => {
       const diff = git("diff", `main...refs/pull/${number}/head`, "--", path);

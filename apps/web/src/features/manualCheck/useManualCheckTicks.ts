@@ -1,6 +1,5 @@
 import {
   indexTicks,
-  manualCheckCode,
   type ManualCheckDecision,
   type ManualCheckStep,
   manualCheckStepState,
@@ -54,7 +53,7 @@ export function useManualCheckTicks(subject: ReviewSubject): ManualCheckBinding 
       // The query hands new data to components in a later notify batch. Waiting for it means
       // the box is drawn from the saved ticks by the time the caller hears it worked.
       mutateAsync({
-        steps: [{ step: manualCheckStepVersion(step), code: manualCheckCode(files) }],
+        steps: [{ step: manualCheckStepVersion(step), files }],
         ticked: tick,
       }).then(
         () => new Promise<boolean>((resolve) => notifyManager.schedule(() => resolve(true))),

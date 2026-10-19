@@ -26,6 +26,7 @@ const guideUrl = (base: string) =>
   `${base}/pr/github.com/budget/fixtures/9?account=${encodeURIComponent(ACCOUNT)}&tab=guide`;
 
 const LIMITS = "src/limits.ts";
+const RENAMED = "src/bounds.ts";
 const DETAIL = "src/change-0.ts";
 const PILL = "Code changed since you checked";
 
@@ -66,6 +67,12 @@ const decisions = (home: string) =>
     paths: row.code === "" ? null : decodeCode(row.code).map((file) => file.path),
     ticked: row.ticked,
   }));
+
+const rows = (home: string) =>
+  readRows(
+    home,
+    `SELECT step, code, ticked, seq, decided_at FROM manual_check_ticks WHERE subject = '${SUBJECT}' ORDER BY seq, step, code`,
+  );
 
 const codesOf = (home: string, step: number) =>
   readRows(
@@ -308,9 +315,9 @@ test(
         { step: 1, paths: [LIMITS], ticked: 1 },
       ]);
       expect(new Set(codesOf(run.home, 1)).size).toBe(2);
-      const saved = decisions(run.home);
+      const saved = rows(run.home);
       expect(tickByCli(2, ["1"])).toEqual({ revision: 2, manualCheckTicked: [1, 2, 3, 4] });
-      expect(decisions(run.home)).toEqual(saved);
+      expect(rows(run.home)).toEqual(saved);
 
       git.commit(9, { [DETAIL]: detail("Edited fixture 9") });
       await fake.gitHead(9, git.head(9));
@@ -359,6 +366,25 @@ test(
       ).toBe(true);
       await screenshotLightAndDark(app, browser, "manual-check-code-changed-640");
       await browser.setViewport({ width: 1280, height: 900 });
+
+      await plan.scrollIntoView();
+      await box(1).tap();
+      await expect(box(1)).toHaveAttribute("aria-checked", "false");
+      await box(1).tap();
+      await expect(box(1)).toHaveAttribute("aria-checked", "true");
+      expect(decisions(run.home).at(-1)).toEqual({ step: 1, paths: [DETAIL, LIMITS], ticked: 1 });
+      claude.chapters([{ title: "Limits", files: [RENAMED, DETAIL] }]);
+      const renamed = git.rename(9, LIMITS, RENAMED, (text) =>
+        text.replace("title: 120", "title: 140"),
+      );
+      await fake.gitHead(9, renamed);
+      await expect(revision).toContainText("r6 · ", { timeout: 120_000 });
+      await ticked("false", "false", "true", "true");
+      await expect(step(1).getByText(PILL)).toBeVisible();
+      await box(1).tap();
+      await expect(box(1)).toHaveAttribute("aria-checked", "true");
+      await expect(step(1).getByText(PILL)).toHaveCount(0);
+      expect(decisions(run.home).at(-1)).toEqual({ step: 1, paths: [RENAMED, DETAIL], ticked: 1 });
 
       expect(await fake.writes()).toEqual([]);
       expect(git.pushes()).toEqual([]);
