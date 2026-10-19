@@ -62,6 +62,12 @@ export const sameRepository = (left: RepositoryFilter | null, right: RepositoryF
     : repositoryKey(left) === repositoryKey(right) &&
       left.accountIds.join() === right.accountIds.join();
 
+export const sameFilters = (left: InboxFilters, right: InboxFilters) =>
+  left.search === right.search &&
+  left.account === right.account &&
+  left.sort === right.sort &&
+  sameRepository(left.repository, right.repository);
+
 /**
  * Saved filters without the accounts removed since: an account filter on one shows every
  * account, and a repository is read through the accounts left, or dropped when none is.
