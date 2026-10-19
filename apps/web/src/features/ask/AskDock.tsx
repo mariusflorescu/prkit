@@ -10,17 +10,20 @@ import { useDock } from "./askStore";
 import type { AskTarget } from "./askTarget";
 import { useAskActions } from "./useAskActions";
 import { useAsks } from "./useAsks";
+import { useDockCover } from "./useDockCover";
 import { useKeepAskedLines } from "./useKeepAskedLines";
 
 /**
  * Ask, held at the bottom of the Guide tab while the guide scrolls under it. Closed it is
- * one row of fixed height, so the guide never moves when an answer arrives; open, the
- * history takes a fixed share of the window above it.
+ * one row of fixed height, so the guide never moves when an answer arrives; open, it is as
+ * tall as its questions, up to about half the window, and grows upward as an answer comes in
+ * so the field stays where it is.
  */
 export function AskDock({ target }: { target: AskTarget }) {
   const open = useDock(target.key, "open");
   const section = useRef<HTMLElement>(null);
   useKeepAskedLines(section, target);
+  useDockCover(section);
   const { state, retry } = useAsks(target.reviewId);
   const actions = useAskActions(target.reviewId);
   const questions = state._tag === "ready" ? state.questions : [];
@@ -32,7 +35,7 @@ export function AskDock({ target }: { target: AskTarget }) {
       data-ask-dock={open ? "open" : "closed"}
       className={cn(
         "sticky bottom-0 z-10 flex shrink-0 flex-col border-t border-border bg-background",
-        open && "h-[45dvh] min-h-60",
+        open && "max-h-[max(45dvh,15rem)]",
       )}
     >
       {open && state._tag === "ready" && state.problem !== null && (

@@ -47,6 +47,7 @@ const Frame = Schema.Struct({
   floor: Schema.Number,
   dock: Schema.String,
   height: Schema.Number,
+  field: Schema.Number,
   scroll: Schema.Number,
 });
 type Frame = typeof Frame.Type;
@@ -94,6 +95,7 @@ const recordFrames = (browser: Browser, picked: Picked) =>
             floor: docked.top,
             dock: dock.dataset.askDock ?? "",
             height: docked.height,
+            field: dock.querySelector("textarea")?.getBoundingClientRect().bottom ?? 0,
             scroll: scroller.scrollTop,
           });
           if (frames.length === 1) resolve(true);
@@ -145,7 +147,7 @@ const hidden = (frames: ReadonlyArray<Frame>) => {
     : `${out.length} of ${frames.length}, first ${JSON.stringify(out[0])}`;
 };
 
-const distinct = (frames: ReadonlyArray<Frame>, field: "scroll" | "height") => [
+const distinct = (frames: ReadonlyArray<Frame>, field: "scroll" | "height" | "field") => [
   ...new Set(frames.map((frame) => Math.round(frame[field]))),
 ];
 
@@ -189,6 +191,26 @@ const askButtonLine = (browser: Browser, path: string) =>
     path,
   );
 
+/** The line number that has focus inside a file's drawn diff, if one has. */
+const focusedLine = (browser: Browser, path: string) =>
+  browser.evaluate(
+    (file: string) =>
+      document
+        .querySelector(`[data-file-diff-card][data-path="${file}"] diffs-container`)
+        ?.shadowRoot?.activeElement?.getAttribute("data-column-number") ?? null,
+    path,
+  );
+
+/** Puts keyboard focus on a file's line numbers where Tab reaches them, and says which line. */
+const focusGutter = (browser: Browser, path: string) =>
+  browser.evaluate((file: string) => {
+    const stop = document
+      .querySelector(`[data-file-diff-card][data-path="${file}"] diffs-container`)
+      ?.shadowRoot?.querySelector<HTMLElement>('[data-gutter] > [tabindex="0"]');
+    stop?.focus();
+    return stop?.getAttribute("data-column-number") ?? null;
+  }, path);
+
 /** One end's line number cell, for e2e to scroll to, drag from and drag to. */
 const endCell = (browser: Browser, { path }: Picked, end: End) =>
   browser.locator(`[data-path="${path}"] ${numberCell(end).replace("[data-gutter] > ", "")}`);
@@ -196,6 +218,49 @@ const endCell = (browser: Browser, { path }: Picked, end: End) =>
 /** Drags across the picked lines' numbers, from start to end. */
 const dragAcross = (browser: Browser, picked: Picked) =>
   endCell(browser, picked, picked.start).dragTo(endCell(browser, picked, picked.end));
+
+/** Whether Pierre draws each end of the picked lines as picked. */
+const endsHighlighted = (browser: Browser, picked: Picked) =>
+  browser.evaluate(
+    ({ path, cells }: { path: string; cells: readonly [string, string] }) => {
+      const root = document.querySelector(
+        `[data-file-diff-card][data-path="${path}"] diffs-container`,
+      )?.shadowRoot;
+      return cells.map(
+        (cell) => root?.querySelector(cell)?.hasAttribute("data-selected-line") ?? false,
+      );
+    },
+    { path: picked.path, cells: [numberCell(picked.start), numberCell(picked.end)] as const },
+  );
+
+/** The open dock's height, and how far its questions' region is from fitting what it holds. */
+const dockFit = (browser: Browser) =>
+  browser.evaluate(() => {
+    const dock = document.querySelector("[data-ask-dock]");
+    const region = dock?.querySelector('[role="region"][aria-label="Your questions"]');
+    const content = region?.firstElementChild;
+    if (!dock || !region || !content) return null;
+    return {
+      height: Math.round(dock.getBoundingClientRect().height),
+      spare: Math.round(region.clientHeight - content.getBoundingClientRect().height),
+      overflow: Math.round(region.scrollHeight - region.clientHeight),
+    };
+  });
+
+/** An open dock with nothing asked yet is as tall as what it shows, light and dark. */
+const checkEmptyDock = async ({ app, browser }: Page, dock: Surface["dock"], size: string) => {
+  await dock.getByRole("textbox", "Your question").tap();
+  await expect(dock).toHaveAttribute("data-ask-dock", "open");
+  await expect(dock.getByRole("region", "Your questions")).toContainText(
+    "Ask the agent that wrote this guide.",
+  );
+  await keepLightAndDark(app, browser, `${size}-empty-dock`);
+  const fit = await dockFit(browser);
+  if (fit === null) throw new Error(`${size}: the open dock has no questions region.`);
+  expect(fit.spare, `${size}: the empty dock has no spare room`).toBeLessThanOrEqual(1);
+  expect(fit.overflow, `${size}: the empty dock shows all it holds`).toBeLessThanOrEqual(1);
+  await dock.getByRole("button", "Hide questions").tap();
+};
 
 /**
  * One page's way of asking about the picked lines: a PR opens the comment composer, whose Ask
@@ -222,17 +287,115 @@ const askAboutPicked = async ({ browser }: Page, surface: Surface, y: number) =>
 };
 
 /**
+ * The first answer on an empty dock: lines picked where only a full dock would reach stay in
+ * view in every frame as the answer grows the dock, the field never moves, and the dock only
+ * grows, never past its full height.
+ */
+const checkGrowth = async (
+  page: Page,
+  surface: Surface,
+  size: string,
+  claude: ReturnType<typeof setUpFakeClaude>,
+) => {
+  const { app, browser } = page;
+  const { dock } = surface;
+  const field = dock.getByRole("textbox", "Your question");
+  const tops = await dockTops(browser);
+  if (tops === null) throw new Error("The dock isn't on the page.");
+  await askAboutPicked(page, surface, tops.open + 40);
+  await recordFrames(browser, surface.picked);
+  claude.holdAnswers();
+  await field.fill(QUESTION);
+  await field.press("Meta+Enter");
+  const answer = dock.getByRole("article", QUESTION);
+  await expect(answer).toContainText(FIRST_CHUNK, { timeout: 60_000 });
+  await keep(app, `${size}-streaming`);
+  claude.releaseAnswers();
+  await expect(answer).toContainText("Claude answered", { timeout: 60_000 });
+  await keep(app, `${size}-answered`);
+  const answering = await stopFrames(browser);
+  const heights = answering.map((frame) => frame.height);
+  expect(hidden(answering)).toBe("none");
+  expect(distinct(answering, "field"), "the field stays where it is").toHaveLength(1);
+  expect(
+    heights.every((height, index) => index === 0 || height >= (heights[index - 1] ?? 0)),
+    "the dock only grows while the answer comes in",
+  ).toBe(true);
+  expect(heights.at(-1) ?? 0, "the answer grew the dock").toBeGreaterThan(heights[0] ?? 0);
+  expect(Math.max(...heights)).toBeLessThanOrEqual(Math.ceil(Math.max(720 * 0.45, 240)) + 1);
+  await dock.getByRole("button", "Hide questions").tap();
+};
+
+/** Asks until the open dock is at its full height and scrolls its own questions. */
+const fillDock = async ({ browser }: Page, dock: Surface["dock"]) => {
+  const field = dock.getByRole("textbox", "Your question");
+  await field.tap();
+  for (const question of [
+    "What else changes?",
+    "Is anything left out?",
+    "What should I read last?",
+  ]) {
+    const fit = await dockFit(browser);
+    if (fit !== null && fit.overflow > 1) break;
+    await field.fill(question);
+    await field.press("Meta+Enter");
+    await expect(dock.getByRole("article", question)).toContainText("Claude answered", {
+      timeout: 60_000,
+    });
+  }
+  expect((await dockFit(browser))?.overflow ?? 0, "the dock is full").toBeGreaterThan(1);
+  const scrolled = await browser.evaluate(() => {
+    const region = document.querySelector<HTMLElement>(
+      '[data-ask-dock] [role="region"][aria-label="Your questions"]',
+    );
+    const scroller =
+      document.querySelector("[data-pr-scroll]") ?? document.querySelector("[data-guide-scroll]");
+    if (!region || !scroller) return null;
+    const guide = scroller.scrollTop;
+    const before = region.scrollTop;
+    region.scrollTop = 0;
+    return { moved: before - region.scrollTop, guide: scroller.scrollTop - guide };
+  });
+  expect(scrolled, "the full dock scrolls its own questions, not the guide").toEqual({
+    moved: expect.any(Number),
+    guide: 0,
+  });
+  expect(scrolled?.moved ?? 0).toBeGreaterThan(0);
+  await dock.getByRole("button", "Hide questions").tap();
+};
+
+/** An answer streaming into a full dock moves nothing: not the dock, the field or the guide. */
+const checkCappedStream = async (
+  { browser }: Page,
+  surface: Surface,
+  claude: ReturnType<typeof setUpFakeClaude>,
+) => {
+  const { dock } = surface;
+  const field = dock.getByRole("textbox", "Your question");
+  await field.tap();
+  await expect(dock).toHaveAttribute("data-ask-dock", "open");
+  await recordFrames(browser, surface.picked);
+  claude.holdAnswers();
+  await field.fill("And the tests?");
+  await field.press("Meta+Enter");
+  const answer = dock.getByRole("article", "And the tests?");
+  await expect(answer).toContainText(FIRST_CHUNK, { timeout: 60_000 });
+  claude.releaseAnswers();
+  await expect(answer).toContainText("Claude answered", { timeout: 60_000 });
+  const frames = await stopFrames(browser);
+  expect(distinct(frames, "height"), "the full dock keeps its height").toHaveLength(1);
+  expect(distinct(frames, "field"), "the field stays where it is").toHaveLength(1);
+  expect(distinct(frames, "scroll"), "the guide stays where it is").toHaveLength(1);
+  await dock.getByRole("button", "Hide questions").tap();
+};
+
+/**
  * The checks both pages share, in one window size. Lines are picked at the very bottom, just
  * under where the open dock reaches, and above it. Lines the open dock would cover come just
  * above it in the very frame it opens, and stay put while an answer streams. Lines that still
  * fit stay exactly where they were. Lines the reader scrolled away from stay away.
  */
-const checkDock = async (
-  page: Page,
-  surface: Surface,
-  size: string,
-  streaming: ReturnType<typeof setUpFakeClaude> | null,
-) => {
+const checkDock = async (page: Page, surface: Surface, size: string) => {
   const { app, browser } = page;
   const { dock } = surface;
   const field = dock.getByRole("textbox", "Your question");
@@ -249,10 +412,14 @@ const checkDock = async (
     const frames = await askAboutPicked(page, surface, y);
     if (at === "under-open-dock") await keepLightAndDark(app, browser, `${size}-${at}`);
     else await keep(app, `${size}-${at}`);
-    const covered = (frames[0]?.bottom ?? 0) > tops.open;
     const opened = frames.find((frame) => frame.dock === "open");
     expect(frames[0]?.dock, `${at}: the first frame is before the dock opens`).toBe("closed");
     if (opened === undefined) throw new Error(`${at}: no frame drew the open dock.`);
+    const covered = (frames[0]?.bottom ?? 0) > opened.floor;
+    expect(
+      await endsHighlighted(browser, surface.picked),
+      `${at}: the asked lines are picked`,
+    ).toEqual([true, true]);
     expect(hidden(frames), at).toBe("none");
     if (covered) {
       expect(opened.floor - (opened.bottom ?? 0), at).toBeLessThanOrEqual(16);
@@ -276,21 +443,6 @@ const checkDock = async (
       expect(distinct(moving, "scroll"), `${at}, moving focus`).toHaveLength(1);
     }
 
-    if (at === "under-open-dock" && streaming !== null) {
-      await recordFrames(browser, surface.picked);
-      streaming.holdAnswers();
-      await field.fill(QUESTION);
-      await field.press("Meta+Enter");
-      const answer = dock.getByRole("article", QUESTION);
-      await expect(answer).toContainText(FIRST_CHUNK, { timeout: 60_000 });
-      await keep(app, `${size}-streaming`);
-      streaming.releaseAnswers();
-      await expect(answer).toContainText("Claude answered", { timeout: 60_000 });
-      const answering = await stopFrames(browser);
-      expect(hidden(answering)).toBe("none");
-      expect(distinct(answering, "scroll")).toHaveLength(1);
-      expect(distinct(answering, "height")).toHaveLength(1);
-    }
     await hide.tap();
   }
   expect(outcomes).toContain("covered");
@@ -391,9 +543,30 @@ test(
           await screen.getByRole("button", "Ask about these lines").tap();
         },
       };
-      await checkDock(page, surface, "pr-1280", claude);
+      await checkEmptyDock(page, dock, "pr-1280");
       await browser.setViewport({ width: 720, height: 720 });
-      await checkDock(page, surface, "pr-720", null);
+      await checkEmptyDock(page, dock, "pr-720");
+      await browser.setViewport({ width: 1280, height: 720 });
+      await checkGrowth(page, surface, "pr-1280", claude);
+      await fillDock(page, dock);
+      await checkCappedStream(page, surface, claude);
+      await checkDock(page, surface, "pr-1280");
+
+      // A comment opened from a line number by keyboard, while lines 30-31 are asked about, hands
+      // focus back to that line when it closes, and the asked lines stay highlighted.
+      expect(await focusGutter(browser, picked.path)).toBe("1");
+      await browser.keyboard.press("ArrowDown");
+      await browser.keyboard.press("ArrowDown");
+      expect(await focusedLine(browser, picked.path)).toBe("3");
+      await browser.keyboard.press("Enter");
+      const composer = screen.getByRole("textbox", "Comment on line 3");
+      await expect(composer).toBeFocused();
+      await browser.keyboard.press("Escape");
+      await expect(composer).toHaveCount(0);
+      await expect.poll(() => focusedLine(browser, picked.path)).toBe("3");
+      expect(await endsHighlighted(browser, picked)).toEqual([true, true]);
+      await browser.setViewport({ width: 720, height: 720 });
+      await checkDock(page, surface, "pr-720");
     } finally {
       stopFakeInstance(name, { keepHome: false });
       fake.stop();
@@ -450,7 +623,14 @@ test(
         end: { side: "new", line: 16 },
         label: `${HANDBOOK} 15-16`,
       });
-      await checkDock(page, surface, "local-1280", claude);
+      await checkEmptyDock(page, dock, "local-1280");
+      await browser.setViewport({ width: 720, height: 720 });
+      await checkEmptyDock(page, dock, "local-720");
+      await browser.setViewport({ width: 1280, height: 720 });
+      await checkGrowth(page, surface, "local-1280", claude);
+      await fillDock(page, dock);
+      await checkCappedStream(page, surface, claude);
+      await checkDock(page, surface, "local-1280");
 
       // Pierre keeps its Ask button on the last picked line while lines are picked, so hovering
       // another line leaves the button where it was. A tap on that line's number asks about it.
@@ -480,12 +660,11 @@ test(
           label: `${HANDBOOK} old 16-15`,
         }),
         "local-split",
-        null,
       );
       await screen.getByRole("button", "Unified").tap();
 
       await browser.setViewport({ width: 720, height: 720 });
-      await checkDock(page, surface, "local-720", null);
+      await checkDock(page, surface, "local-720");
     } finally {
       stopFakeInstance(name, { keepHome: false });
       fake.stop();

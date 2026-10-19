@@ -68,18 +68,11 @@
   scroll-padding-top: var(--pr-pinned-height);
   scrollbar-gutter: stable;
 }
-/* A length, so readingLine reads the open dock's max() in pixels rather than as text. */
+/* What the Ask dock covers at the foot of the scroller, as the dock measures itself; 0 without one. */
 @property --pr-covered-bottom {
   syntax: "<length>";
   inherits: true;
   initial-value: 0px;
-}
-/* What the Ask dock covers at the bottom of the guide; a diff line scrolled to stops above it. */
-[data-pr-scroll]:has([data-ask-dock="closed"]) {
-  --pr-covered-bottom: 56px;
-}
-[data-pr-scroll]:has([data-ask-dock="open"]) {
-  --pr-covered-bottom: max(45dvh, 15rem);
 }
 /*
  * What scrolls into view in the guide's chapters stops above the dock. The dock sits in the same

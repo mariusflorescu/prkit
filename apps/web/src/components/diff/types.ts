@@ -32,6 +32,8 @@ export type DiffComments = {
   render: (point: LinePoint) => ReactNode;
   /** The lines being commented on, highlighted while the composer is open. */
   selection: LineRange | null;
+  /** Lines a question is about, highlighted while no comment is being written on the file. */
+  asked?: LineRange | null | undefined;
   /** A click on a line's comment button or a drag across line numbers. */
   onSelect: (range: LineRange) => void;
   /** Shown under the diff, for comments whose lines are no longer in it. */

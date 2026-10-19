@@ -15,6 +15,7 @@ import { GuideView } from "~/components/guide";
 import { askAside } from "~/features/ask/askAside";
 import { AskDock } from "~/features/ask/AskDock";
 import { AskTargetContext } from "~/features/ask/askTarget";
+import { useAskedHighlight } from "~/features/ask/useAskedHighlight";
 import { useAsks } from "~/features/ask/useAsks";
 import { useGuideAskTarget } from "~/features/ask/useGuideAskTarget";
 import { CommentsWithoutDiff } from "~/features/reviewComments/CommentsWithoutDiff";
@@ -144,6 +145,7 @@ export function GuideReady({
     outdated: false,
     notes: { on: "guide", revision: revision.revision },
   });
+  const interaction = useAskedHighlight(target, askable, comments);
   return (
     <div className="flex h-full min-h-0 flex-col">
       <AskTargetContext value={askable ? target : null}>
@@ -219,7 +221,7 @@ export function GuideReady({
                 source={{ _tag: "attempt", key: detail.key, attemptId: revision.attemptId }}
                 prUrl={detail.url}
                 prDescription={detail.body}
-                interaction={comments}
+                interaction={interaction}
                 {...(askable ? { aside } : {})}
                 {...(current ? { loadContents } : {})}
                 reviewed={reviewed.status === "ready" ? reviewed : undefined}
