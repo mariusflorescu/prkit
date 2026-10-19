@@ -1,6 +1,7 @@
 import {
   type AccountId,
   forReader,
+  leftOutInView,
   matchesInboxFilter,
   orderInbox,
   primaryInboxReason,
@@ -271,9 +272,7 @@ export const make = Effect.gen(function* () {
             (input.accountId === undefined || entry.accountId === input.accountId) &&
             (input.reason === undefined || entry.reason === input.reason),
         ),
-        githubLeftOut: result.leftOut.filter(
-          (item) => input.accountId === undefined || item.accountId === input.accountId,
-        ),
+        githubLeftOut: leftOutInView(result, input.accountId ?? null),
         configDirProblems: result.configDirProblems.map((problem) => problem.message),
         nextCursor: paged.nextCursor,
         total: paged.total,

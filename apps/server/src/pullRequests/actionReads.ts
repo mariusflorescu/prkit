@@ -9,7 +9,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { nodesOf } from "../github/connection.ts";
-import { GitHubApi, GitHubRequestError } from "../github/GitHubApi.ts";
+import { GitHubApi, unreachable } from "../github/GitHubApi.ts";
 
 const Method = Schema.Literals(["MERGE", "SQUASH", "REBASE"]);
 const Pull = Schema.Struct({
@@ -107,12 +107,7 @@ export const makeActionReads = Effect.gen(function* () {
       });
       const pull = repository?.pullRequest;
       if (repository == null || pull == null)
-        return yield* new GitHubRequestError({
-          accountId,
-          reason: "not-found",
-          status: null,
-          message: `${ref.owner}/${ref.repo}#${ref.number} wasn't found, or ${accountId} has no access to it.`,
-        });
+        return yield* unreachable(accountId, `${ref.owner}/${ref.repo}#${ref.number}`);
       const canWrite =
         !repository.isArchived &&
         ["ADMIN", "MAINTAIN", "WRITE"].includes(repository.viewerPermission ?? "");

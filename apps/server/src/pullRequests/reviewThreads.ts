@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { nodesOf } from "../github/connection.ts";
-import { GitHubApi, GitHubRequestError } from "../github/GitHubApi.ts";
+import { GitHubApi, unreachable } from "../github/GitHubApi.ts";
 
 const PAGES = 10;
 const THREADS_QUERY = `query PrkitReviewThreads($owner: String!, $name: String!, $number: Int!, $cursor: String) {
@@ -179,12 +179,7 @@ export const makeReviewThreads = Effect.gen(function* () {
         );
         const pullRequest = response.repository?.pullRequest;
         if (pullRequest == null)
-          return yield* new GitHubRequestError({
-            accountId,
-            reason: "not-found",
-            status: null,
-            message: `${ref.owner}/${ref.repo}#${ref.number} wasn't found, or ${accountId} has no access to it.`,
-          });
+          return yield* unreachable(accountId, `${ref.owner}/${ref.repo}#${ref.number}`);
         if (page === 0) headSha = pullRequest.headRefOid;
         const connection = pullRequest.reviewThreads;
         for (const node of connection.nodes) threads.push(toThread(node));

@@ -27,12 +27,15 @@ const SHOWN = {
 } as const;
 const MALFORMED = 18;
 const REFUSED = 19;
+const FIELD_ERROR = 20;
 const SAML = "Resource protected by organization SAML enforcement.";
+const SECOND = "github.com/budget-second";
 
 const seed = async (fake: FakeGitHub) => {
   for (const [number, shape] of Object.entries(SHOWN)) await fake.odd(Number(number), shape);
   await fake.odd(MALFORMED, { malformed: true });
   await fake.odd(REFUSED, { refused: true });
+  await fake.odd(FIELD_ERROR, { fieldError: true });
   await fake.requestReview(12, { team: "budget/web" });
   await fake.checking(14);
 };
@@ -74,13 +77,13 @@ test("the Inbox shows every pull request GitHub sends and leaves out only the on
     await expect(notice).toContainText(`Some pull requests couldn't be shown for ${ACCOUNT}.`);
     await expect(notice).toContainText("prkit couldn't read what GitHub sent.");
     await expect(notice).toContainText(`GitHub said: ${SAML}`);
-    const link = screen.getByRole("link", `Open budget/fixtures#${MALFORMED} on GitHub`);
-    await expect(link).toHaveAttribute(
-      "href",
-      `https://github.com/budget/fixtures/pull/${MALFORMED}`,
-    );
-    await expect(browser.locator(`a[data-pr-number="${MALFORMED}"]`)).toHaveCount(0);
-    await expect(browser.locator(`a[data-pr-number="${REFUSED}"]`)).toHaveCount(0);
+    await expect(notice).toContainText("GitHub said: Resource not accessible by integration");
+    for (const number of [MALFORMED, FIELD_ERROR])
+      await expect(
+        screen.getByRole("link", `Open budget/fixtures#${number} on GitHub`),
+      ).toHaveAttribute("href", `https://github.com/budget/fixtures/pull/${number}`);
+    for (const number of [MALFORMED, REFUSED, FIELD_ERROR])
+      await expect(browser.locator(`a[data-pr-number="${number}"]`)).toHaveCount(0);
     await app.screenshot("inbox-light");
     await involved.scrollIntoView();
     await app.screenshot("inbox-involved-light");
@@ -106,6 +109,48 @@ test("the Inbox shows every pull request GitHub sends and leaves out only the on
     expect(log).not.toContain("GitHub returned an unreadable response");
   } finally {
     stopFakeInstance("github-shapes", { keepHome: false });
+    fake.stop();
+  }
+});
+
+test("each account says what it left out, and no empty state claims nothing needs you", async ({
+  app,
+  screen,
+  browser,
+}) => {
+  const fake = await startFakeGitHub("github-shapes-accounts", { secondAccount: true });
+  try {
+    await seed(fake);
+    await fake.inboxOnly("budget-test", [MALFORMED]);
+    await fake.inboxOnly("budget-second", [MALFORMED, 10]);
+    const run = startFakeInstance("github-shapes-accounts", fake);
+    await emulateOsColorScheme(browser, "light");
+    await app.open(run.openUrl);
+    await expect(screen.getByRole("link", /#10 Odd fixture 10/)).toBeVisible({ timeout: 30_000 });
+    const first = browser.locator(`[data-inbox-left-out="${ACCOUNT}"]`);
+    const second = browser.locator(`[data-inbox-left-out="${SECOND}"]`);
+    for (const notice of [first, second])
+      await expect(notice).toContainText(`1 pull request couldn't be shown for`);
+    await app.screenshot("accounts-all");
+
+    const accounts = screen.getByRole("combobox", "Filter by GitHub account");
+    await choose(screen, accounts, "budget-second");
+    await expect(second).toBeVisible();
+    await expect(first).toHaveCount(0);
+    await choose(screen, accounts, "budget-test");
+    await expect(first).toBeVisible();
+    await expect(second).toHaveCount(0);
+    await expect(screen.getByRole("heading", "No matching pull requests")).toHaveCount(0);
+    await choose(
+      screen,
+      screen.getByRole("button", "Filter by repository: All repositories"),
+      "fixtures",
+    );
+    await expect(screen.getByRole("heading", "Nothing in budget/fixtures to show")).toBeVisible();
+    await expect(screen.getByText(/one there may still need you/)).toBeVisible();
+    await app.screenshot("accounts-repository-incomplete");
+  } finally {
+    stopFakeInstance("github-shapes-accounts", { keepHome: false });
     fake.stop();
   }
 });
@@ -136,6 +181,9 @@ test("a repository's open pull requests leave out only the one prkit can't read"
         (a, b) => a - b,
       ),
     ).toEqual([1, 2, 3, 4, 5, 6, ...Object.keys(SHOWN).map(Number)]);
+    await expect(
+      open.getByRole("link", `Open budget/fixtures#${FIELD_ERROR} on GitHub`),
+    ).toBeVisible();
     const notice = browser.locator(
       `section[aria-label="Open in budget/fixtures"] [data-inbox-left-out="${ACCOUNT}"]`,
     );

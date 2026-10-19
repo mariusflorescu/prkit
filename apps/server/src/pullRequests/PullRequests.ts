@@ -30,13 +30,7 @@ import { GitHubApi, queryFailure } from "../github/GitHubApi.ts";
 import { makeActions } from "./actions.ts";
 import { FRESH_MS, makeDetailReads } from "./detailReads.ts";
 import { PullRequestFingerprint, stackShape, statusOf } from "./fingerprint.ts";
-import {
-  accountEntries,
-  CachedInboxEntry,
-  mergeAccounts,
-  mergeLeftOut,
-  SEARCH_NODES,
-} from "./inboxEntries.ts";
+import { accountEntries, CachedInboxEntry, mergeAccounts, SEARCH_NODES } from "./inboxEntries.ts";
 import { InboxResponse, inboxQuery, isNodeError } from "./inboxQuery.ts";
 import {
   type CacheKey,
@@ -216,10 +210,7 @@ export const make = Effect.gen(function* () {
     const entries = mergeAccounts(rows.flatMap((item) => item.inbox.entries));
     return {
       entries,
-      leftOut: mergeLeftOut(
-        rows.flatMap((item) => item.inbox.leftOut),
-        entries,
-      ),
+      leftOut: rows.flatMap((item) => item.inbox.leftOut),
       accounts: rows.map((item) => ({
         accountId: item.accountId,
         count: item.inbox.entries.length,

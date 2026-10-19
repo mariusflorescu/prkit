@@ -51,6 +51,7 @@ const authorNode = (pull: Pull) => {
   return author.type === "deleted" ? null : { login: author.login, avatarUrl: "" };
 };
 const labelsNode = (pull: Pull) => {
+  if (oddShapes.get(pull.number)?.fieldError === true) return null;
   const labels = oddShapes.get(pull.number)?.labels;
   return labels === undefined ? { nodes: [] } : labels === null ? null : { nodes: labels };
 };
@@ -75,12 +76,28 @@ const searchNode = (pull: Pull) => ({
   labels: labelsNode(pull),
   commits: { nodes: [{ commit: { statusCheckRollup: { state: rollup(pull) } } }] },
 });
-/** A pull request GitHub refuses comes back as a null node, with an error naming its place. */
+/**
+ * A pull request GitHub refuses comes back as a null node, with an error naming its place; a
+ * field GitHub couldn't resolve comes back null, with an error naming the field.
+ */
 const listNode = (pull: Pull) =>
   oddShapes.get(pull.number)?.refused === true ? null : searchNode(pull);
-const refusals = (at: ReadonlyArray<string>, nodes: ReadonlyArray<object | null>) =>
+const refusals = (
+  at: ReadonlyArray<string>,
+  nodes: ReadonlyArray<{ readonly number: number } | null>,
+) =>
   nodes.flatMap((node, index) =>
-    node === null ? [{ type: "FORBIDDEN", path: [...at, index], message: REFUSED_MESSAGE }] : [],
+    node === null
+      ? [{ type: "FORBIDDEN", path: [...at, index], message: REFUSED_MESSAGE }]
+      : oddShapes.get(node.number)?.fieldError === true
+        ? [
+            {
+              type: "FORBIDDEN",
+              path: [...at, index, "labels"],
+              message: "Resource not accessible by integration",
+            },
+          ]
+        : [],
   );
 const fingerprint = (pull: Pull) => ({
   ...stackFields(pull),

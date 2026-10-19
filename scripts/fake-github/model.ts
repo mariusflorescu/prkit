@@ -71,7 +71,8 @@ export const unreadable = new Set<number>();
  * What makes a pull request unusual in GitHub's answers. A `deleted` author answers
  * `author: null` in GraphQL and GitHub's ghost user in REST; `labels: null` is the null
  * connection GitHub's schema allows; `malformed` breaks GitHub's own schema (a null title);
- * `refused` is a null search node with a FORBIDDEN error naming it.
+ * `refused` is a null search node with a FORBIDDEN error naming it; `fieldError` nulls its
+ * labels with an error naming that field, the rest of the node intact.
  */
 export const OddShape = Schema.Struct({
   author: Schema.optionalKey(
@@ -90,6 +91,7 @@ export const OddShape = Schema.Struct({
   archived: Schema.optionalKey(Schema.Boolean),
   malformed: Schema.optionalKey(Schema.Boolean),
   refused: Schema.optionalKey(Schema.Boolean),
+  fieldError: Schema.optionalKey(Schema.Boolean),
 });
 export type OddShape = typeof OddShape.Type;
 /** Pull requests `odd` added, each in the inbox's involved search, by number. */

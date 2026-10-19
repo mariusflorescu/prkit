@@ -15,7 +15,8 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 
-import { GitHubApi, GitHubRequestError } from "../github/GitHubApi.ts";
+import { nodesOf } from "../github/connection.ts";
+import { GitHubApi, GitHubRequestError, unreachable } from "../github/GitHubApi.ts";
 import { makeKeyedGate } from "../github/keyedGate.ts";
 import { repositoryIdentity } from "./actionReads.ts";
 
@@ -47,9 +48,11 @@ const PageInfo = Schema.Struct({
   endCursor: Schema.NullOr(Schema.String),
 });
 const UserPage = Schema.Struct({
-  repository: Schema.Struct({
-    assignableUsers: Schema.Struct({ nodes: Schema.Array(RawReviewer), pageInfo: PageInfo }),
-  }),
+  repository: Schema.NullOr(
+    Schema.Struct({
+      assignableUsers: Schema.Struct({ nodes: nodesOf(RawReviewer), pageInfo: PageInfo }),
+    }),
+  ),
 });
 const Label = PullRequestCandidates.fields.labels.value;
 
@@ -355,23 +358,27 @@ export const makeActions = (reads: {
                 accountId,
                 `query PrkitBranchPullRequests($owner: String!, $name: String!, $branch: String!) { repository(owner: $owner, name: $name) { pullRequests(headRefName: $branch, states: OPEN, first: 100) { nodes { number headRefOid headRepository { nameWithOwner } } pageInfo { hasNextPage } } } }`,
                 Schema.Struct({
-                  repository: Schema.Struct({
-                    pullRequests: Schema.Struct({
-                      nodes: Schema.Array(
-                        Schema.Struct({
-                          number: Schema.Int,
-                          headRefOid: Schema.String,
-                          headRepository: Schema.NullOr(
-                            Schema.Struct({ nameWithOwner: Schema.String }),
-                          ),
-                        }),
-                      ),
-                      pageInfo: Schema.Struct({ hasNextPage: Schema.Boolean }),
+                  repository: Schema.NullOr(
+                    Schema.Struct({
+                      pullRequests: Schema.Struct({
+                        nodes: nodesOf(
+                          Schema.Struct({
+                            number: Schema.Int,
+                            headRefOid: Schema.String,
+                            headRepository: Schema.NullOr(
+                              Schema.Struct({ nameWithOwner: Schema.String }),
+                            ),
+                          }),
+                        ),
+                        pageInfo: Schema.Struct({ hasNextPage: Schema.Boolean }),
+                      }),
                     }),
-                  }),
+                  ),
                 }),
                 { owner: ref.owner, name: ref.repo, branch: pull.head.ref },
               );
+              if (matchingHeads.repository === null)
+                return yield* unreachable(accountId, `${ref.owner}/${ref.repo}`);
               const heads = matchingHeads.repository.pullRequests;
               const exact = heads.nodes.filter(
                 (head) =>
@@ -501,9 +508,12 @@ export const makeActions = (reads: {
             UserPage,
             { owner: ref.owner, name: ref.repo, cursor },
           );
-          reviewers.push(...page.repository.assignableUsers.nodes);
-          if (!page.repository.assignableUsers.pageInfo.hasNextPage) break;
-          cursor = page.repository.assignableUsers.pageInfo.endCursor;
+          if (page.repository === null)
+            return yield* unreachable(accountId, `${ref.owner}/${ref.repo}`);
+          const users = page.repository.assignableUsers;
+          reviewers.push(...users.nodes);
+          if (!users.pageInfo.hasNextPage) break;
+          cursor = users.pageInfo.endCursor;
           if (pageNumber === 30 || cursor === null || cursors.has(cursor))
             return yield* incomplete();
           cursors.add(cursor);

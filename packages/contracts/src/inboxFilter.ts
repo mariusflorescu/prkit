@@ -2,7 +2,9 @@ import type { RiskLevel } from "./guide.ts";
 import type { AccountId } from "./ids.ts";
 import {
   type InboxEntry,
+  type InboxLeftOut,
   InboxReason,
+  type InboxResult,
   inboxReasonPriority,
   primaryInboxReason,
   pullRequestKey,
@@ -11,6 +13,36 @@ import { compareRanks, INBOX_SORTS, type InboxSort } from "./inboxTriage.ts";
 
 export const repositoryKey = (repository: { host: string; owner: string; name: string }) =>
   `${repository.host}/${repository.owner}/${repository.name}`.toLowerCase();
+
+/**
+ * What the Inbox left out for `account` (every account when null), less a pull request the
+ * list still shows through another account's row. Each account keeps its own, so filtering to
+ * one still says what it couldn't show.
+ */
+export const leftOutInView = (
+  result: Pick<InboxResult, "entries" | "leftOut">,
+  account: AccountId | null,
+) => {
+  const shown = new Set(
+    result.entries
+      .filter((entry) => account === null || entry.accountId === account)
+      .map((entry) => pullRequestKey(entry.ref)),
+  );
+  return result.leftOut.filter(
+    (item) =>
+      (account === null || item.accountId === account) &&
+      (item.pullRequest === null || !shown.has(pullRequestKey(item.pullRequest.ref))),
+  );
+};
+
+/** Whether a pull request left out may be in `repository`; one GitHub's answer doesn't name may. */
+export const mayBeIn = (
+  item: InboxLeftOut,
+  repository: { host: string; owner: string; name: string },
+) =>
+  item.pullRequest === null ||
+  repositoryKey({ ...item.pullRequest.ref, name: item.pullRequest.ref.repo }) ===
+    repositoryKey(repository);
 
 export const matchesInboxFilter = (
   entry: InboxEntry,

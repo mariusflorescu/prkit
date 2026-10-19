@@ -15,7 +15,8 @@ import * as Schema from "effect/Schema";
 
 import { GitHubAccounts } from "../accounts/GitHubAccounts.ts";
 import { isoAt } from "../github/budget.ts";
-import { GitHubApi, GitHubRequestError, queryFailure } from "../github/GitHubApi.ts";
+import { nodesOf } from "../github/connection.ts";
+import { GitHubApi, GitHubRequestError, queryFailure, unreachable } from "../github/GitHubApi.ts";
 import { FRESH_MS } from "./detailReads.ts";
 import { summaryOf } from "./inboxEntries.ts";
 import { isNodeError, pullRequestRowFragment, readNodes } from "./inboxQuery.ts";
@@ -45,15 +46,13 @@ const RepositoriesPage = Schema.Struct({
         hasNextPage: Schema.Boolean,
         endCursor: Schema.NullOr(Schema.String),
       }),
-      nodes: Schema.Array(
-        Schema.NullOr(
-          Schema.Struct({
-            name: Schema.String,
-            isPrivate: Schema.Boolean,
-            isArchived: Schema.Boolean,
-            owner: Schema.Struct({ login: Schema.String }),
-          }),
-        ),
+      nodes: nodesOf(
+        Schema.Struct({
+          name: Schema.String,
+          isPrivate: Schema.Boolean,
+          isArchived: Schema.Boolean,
+          owner: Schema.Struct({ login: Schema.String }),
+        }),
       ),
     }),
   }),
@@ -145,7 +144,7 @@ export const makeRepositoryReads = Effect.fnUntraced(function* (options: {
         const connection = response.viewer.repositories;
         total = connection.totalCount;
         for (const node of connection.nodes)
-          if (node !== null && !node.isArchived)
+          if (!node.isArchived)
             repositories.push({
               owner: node.owner.login,
               name: node.name,
@@ -244,13 +243,7 @@ export const makeRepositoryReads = Effect.fnUntraced(function* (options: {
           Effect.gen(function* () {
             if (data === null || errors.some((error) => !isNodeError(error, PULLS_AT)))
               return yield* queryFailure(account.id, errors);
-            if (data.repository === null)
-              return yield* new GitHubRequestError({
-                accountId: account.id,
-                reason: "not-found",
-                status: null,
-                message: `${owner}/${name} wasn't found, or ${account.id} has no access to it.`,
-              });
+            if (data.repository === null) return yield* unreachable(account.id, `${owner}/${name}`);
             const read = readNodes(
               account,
               PULLS_AT,

@@ -1,4 +1,9 @@
-import type { AccountId, GitHubProblem, InboxResult } from "@prkit/contracts";
+import {
+  type AccountId,
+  type GitHubProblem,
+  type InboxResult,
+  leftOutInView,
+} from "@prkit/contracts";
 import { useQuery } from "@tanstack/react-query";
 
 import { ReviewFeedNotice } from "~/components/review/ReviewFeedNotice";
@@ -31,6 +36,7 @@ export function InboxNotices({
     select: (feed) => (feed._tag === "failed" ? feed : null),
   }).data;
   const riskiest = useInboxStore((state) => state.sort === "risk");
+  const leftOut = leftOutInView(result, account);
   return (
     <div className="space-y-2 px-3">
       {failed && (
@@ -71,7 +77,7 @@ export function InboxNotices({
       {result.accounts
         .filter((row) => account === null || account === row.accountId)
         .flatMap((row) => {
-          const items = result.leftOut.filter((item) => item.accountId === row.accountId);
+          const items = leftOut.filter((item) => item.accountId === row.accountId);
           return items.length === 0
             ? []
             : [<InboxLeftOutNotice key={row.accountId} accountId={row.accountId} items={items} />];

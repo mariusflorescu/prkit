@@ -105,7 +105,8 @@ export const isNodeError = (error: GraphQLError, at: ReadonlyArray<string>) =>
 /**
  * A list's pull request nodes, each read on its own. One prkit can't read is left out, named
  * when its number and address still read, with where it broke for the log, never what it held.
- * A null node is one GitHub refused when an error names it, and nothing otherwise.
+ * One an error names is left out with GitHub's words even when it reads, since GitHub nulled
+ * what the error broke. A null node no error names is nothing.
  */
 export const readNodes = (
   account: Pick<Account, "id" | "host">,
@@ -119,7 +120,7 @@ export const readNodes = (
   nodes.forEach((raw, index) => {
     const refused = errors.find((error) => isAt(error, [...at, index]));
     const decoded = raw === null ? null : decodeNode(raw);
-    if (decoded !== null && Result.isSuccess(decoded)) {
+    if (refused === undefined && decoded !== null && Result.isSuccess(decoded)) {
       rows.push(decoded.success);
       return;
     }
@@ -141,7 +142,7 @@ export const readNodes = (
             },
       message: refused?.message ?? null,
     });
-    if (decoded !== null) {
+    if (decoded !== null && Result.isFailure(decoded)) {
       const problem = decodeProblem(decoded.failure);
       problems.push({
         path: [...at, index, ...(problem.path === "" ? [] : [problem.path])].join("."),

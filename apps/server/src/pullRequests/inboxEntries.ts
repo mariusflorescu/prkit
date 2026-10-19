@@ -122,21 +122,6 @@ export const accountEntries = (
   return { entries: [...entries.values()], truncated, leftOut: [...leftOut.values()], problems };
 };
 
-/** What the accounts left out, less what another account shows; a pull request is named once. */
-export const mergeLeftOut = (
-  leftOut: ReadonlyArray<InboxLeftOut>,
-  shown: ReadonlyArray<InboxEntry>,
-) => {
-  const named = new Set(shown.map((entry) => pullRequestKey(entry.ref)));
-  return leftOut.filter((item) => {
-    if (item.pullRequest === null) return true;
-    const key = pullRequestKey(item.pullRequest.ref);
-    if (named.has(key)) return false;
-    named.add(key);
-    return true;
-  });
-};
-
 const strongestReason = (reasons: InboxEntry["reasons"]) =>
   inboxReasonPriority[primaryInboxReason(reasons)];
 export const mergeAccounts = (entries: ReadonlyArray<InboxEntry>) => {

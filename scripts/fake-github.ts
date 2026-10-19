@@ -72,7 +72,8 @@
  *                                       unusual shape the JSON body names (see `OddShape` in fake-github/model.ts):
  *                                       an author GitHub types as deleted, a bot, a mannequin or an enterprise
  *                                       account, a deleted fork, labels (or a null label connection), an archived
- *                                       repository, a node that breaks GitHub's own schema, or one GitHub refuses
+ *                                       repository, a node that breaks GitHub's own schema, one GitHub refuses,
+ *                                       or one whose labels GitHub nulls with an error naming the field
  *   POST fail?kind=<kind>&status=<s>&times=<n>&message=<m>&login=<l>&ms=<d>
  *                                       the next n requests counted as `kind` (say `graphql:review-waits`)
  *                                       get that status (default 502) and `{}`, or `{"message": m}` with a
