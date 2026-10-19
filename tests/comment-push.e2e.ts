@@ -785,3 +785,31 @@ test(
     }
   },
 );
+
+test(
+  "comment words: Files comes back after a push lands while a comment open there waits on another tab",
+  { timeout: 300_000 },
+  async ({ app, screen, browser }) => {
+    const name = "comment-words-away";
+    const { fake, commit, run } = await withGuide(name);
+    try {
+      await openFiles({ app, screen, browser }, run);
+      const tabs = screen.getByRole("navigation", "Pull request tabs");
+      await lineNumber(browser, 7).tap();
+      await screen.getByRole("textbox", "Comment on line 7").fill(LINES);
+      await tabs.getByRole("link", "Conversation").tap();
+      const pullReads = await reads(fake, "rest:pull");
+      await commit({ "src/change-0.ts": 'export const change0 = "Second fixture 9";\n' });
+      await expect
+        .poll(() => reads(fake, "rest:pull"), { timeout: 60_000 })
+        .toBeGreaterThan(pullReads);
+      await tabs.getByRole("link", "Files").tap();
+      await expect(screen.getByRole("textbox", "Comment on line 7")).toHaveValue(LINES, {
+        timeout: 30_000,
+      });
+    } finally {
+      stopFakeInstance(name, { keepHome: false });
+      fake.stop();
+    }
+  },
+);
