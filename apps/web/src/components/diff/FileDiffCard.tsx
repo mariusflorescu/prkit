@@ -1,6 +1,6 @@
 import type { DiffFile } from "@prkit/contracts";
 import { ChevronDown, ChevronRight, FileCode2 } from "lucide-react";
-import { useId, useRef, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
 import { DiffStat } from "./DiffStat";
@@ -74,6 +74,11 @@ export function FileDiffCard({
     setSeenReopened(reopened);
     if (!defaultCollapsed) setOpen(true);
   }
+  // A tick saved after a push was for the version it was ticked on, so it folds nothing now.
+  const shownVersion = useRef(version);
+  useLayoutEffect(() => {
+    shownVersion.current = version;
+  });
   const ref = useRef<HTMLElement>(null);
   const bodyId = useId();
   const comments = commentsOf(interaction);
@@ -127,8 +132,10 @@ export function FileDiffCard({
               name={file.path}
               state={reviewed.state}
               onChange={async (next) => {
+                const tickedOn = shownVersion.current;
                 const saved = await reviewed.onChange(next);
                 if (!saved) return false;
+                if (shownVersion.current !== tickedOn) return true;
                 // Only the user's own tick folds the file; marks arriving from elsewhere leave it.
                 flushSync(() => setOpen(!next));
                 if (next && ref.current) alignIfAbove(ref.current);
@@ -153,6 +160,7 @@ export function FileDiffCard({
           >
             <LazyDiffBody
               file={file}
+              version={version}
               annotations={annotations}
               interaction={interaction}
               loadContents={loadContents}

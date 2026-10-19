@@ -157,15 +157,13 @@ export function useDiffComments(
       const fileThreads = (threadList ?? []).filter((thread) => thread.path === file.path);
       const before = carried?.find((entry) => entry.path === file.path)?.patch;
       const beforeRows = before?._tag === "text" ? diffRows(before.patch) : null;
-      // Its lines on this diff, or the one place its own lines still read the same.
+      // Its lines on this diff where they and the rows around them read the same, else none:
+      // its own lines alone can read the same on unrelated code.
       const follow = (anchor: ReviewThread["anchor"]) => {
         const placement =
           anchor && beforeRows && threadsHead ? capture(beforeRows, anchor, threadsHead) : null;
         const placed = placement && place(placement, rows, commitSha);
-        if (placed === null) return null;
-        return placed._tag === "outdated"
-          ? (placed.suggestion?.anchor ?? null)
-          : placed.placement.anchor;
+        return placed === null || placed._tag === "outdated" ? null : placed.placement.anchor;
       };
       const outdatedThreads: Array<ReviewThread> = [];
       for (const read of fileThreads) {

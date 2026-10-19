@@ -80,38 +80,47 @@ const onCheck = (line: number | null, resolved = false) => ({
  * One entry each time a frame draws the thread card or the guide note differently: the card's
  * label, whether it reads resolved, and its top and height inside the file's card, or the outdated
  * group that holds it; the note's top and height inside the file's card. Where the file's card
- * itself sits goes to `__listTops`. Recording starts again on `__pushFramesReset`.
+ * itself sits goes to `__listTops`. Once the file has shown, a frame without it, or with two of
+ * anything, is recorded too. Recording starts again on `__pushFramesReset`.
  */
 const FRAME_TRACE = `(() => {
   const seen = [];
   const tops = [];
   let last = "";
+  let shown = false;
   window.__pushFrames = seen;
   window.__listTops = tops;
   window.__pushFramesReset = () => { seen.length = 0; tops.length = 0; last = ""; };
   const read = () => {
-    const file = document.querySelector('[data-file-diff-card][data-path="${LIMITS}"]');
-    if (file === null) return null;
+    const files = document.querySelectorAll('[data-file-diff-card][data-path="${LIMITS}"]');
+    if (files.length === 0) return shown ? "no file" : null;
+    shown = true;
+    if (files.length > 1) return files.length + " files";
+    const file = files[0];
     const origin = file.getBoundingClientRect().top;
     const where = (node) => {
       const box = node.getBoundingClientRect();
       return Math.round(box.top - origin) + "+" + Math.round(box.height);
     };
-    const card = [...file.querySelectorAll("article")].find(
+    const cards = [...file.querySelectorAll("article")].filter(
       (node) => (node.getAttribute("aria-label") ?? "").startsWith("Thread by octocat") && node.checkVisibility(),
     );
+    const card = cards[0];
     const group = file.querySelector("[data-outdated-comments] details > summary");
-    const note = [...file.querySelectorAll("[data-guide-note]")].find(
+    const notes = [...file.querySelectorAll("[data-guide-note]")].filter(
       (node) => node.textContent.includes(${JSON.stringify(SLUG)}) && node.checkVisibility(),
     );
-    const thread = card
+    const note = notes.length > 1 ? null : notes[0];
+    const thread = cards.length > 1
+      ? cards.length + " threads"
+      : card
       ? card.getAttribute("aria-label") + (card.textContent.includes("Resolved") ? " resolved" : " open") + " @" + where(card)
       : group
         ? "group " + group.textContent
         : "no thread";
     const top = Math.round(origin);
     if (tops[tops.length - 1] !== top) tops.push(top);
-    return thread + " | " + (note ? "note @" + where(note) : "no note");
+    return thread + " | " + (notes.length > 1 ? notes.length + " notes" : note ? "note @" + where(note) : "no note");
   };
   const tick = () => {
     const now = read();

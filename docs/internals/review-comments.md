@@ -42,7 +42,7 @@ All draft writes, submissions and reconciliation for one PR and account go throu
 
 ## Review threads
 
-Threads are read with GraphQL through the PR's bound account, with the head GitHub numbered them against. The web places a thread by its lines only on a diff of that head, and reads the threads again when the diff moves on. Until that answers, each thread stays where its code is: captured from the diff it was numbered on and placed on the new one with `place`, on its own lines alone when only they still read the same in one place, or among the outdated threads when they are gone. GitHub's answer then moves it, marks it outdated or drops it. On an older guide revision no threads are shown. A reply or a resolve first checks that the thread is one of this PR's, so a thread id from elsewhere can never be written through this PR's account.
+Threads are read with GraphQL through the PR's bound account, with the head GitHub numbered them against. The web places a thread by its lines only on a diff of that head, and reads the threads again when the diff moves on. Until that answers, each thread stays where its code is: captured from the diff it was numbered on and placed on the new one with `place`, or among the outdated threads when its lines and the rows around them no longer read the same. Its own lines alone are not enough, since they can read the same on unrelated code. GitHub's answer then moves it, marks it outdated or drops it. On an older guide revision no threads are shown. A reply or a resolve first checks that the thread is one of this PR's, so a thread id from elsewhere can never be written through this PR's account.
 
 ## Writing on a diff
 
