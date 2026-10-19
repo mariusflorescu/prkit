@@ -462,6 +462,9 @@ describe("settings failed saves", { tags: ["settings-failed-saves"] }, () => {
         await expect(confirm).toBeHidden();
 
         // Edit is a draft with its own Save: a failed save keeps the words, with Retry below.
+        await expect(screen.getByText(/^Turned (on|off) Codex$/)).toHaveCount(0, {
+          timeout: 20_000,
+        });
         await card.getByRole("button", "Edit").tap();
         const editor = card.getByRole("form", "Edit Codex");
         await editor.getByRole("textbox", "Label").fill("Codex work");
@@ -475,6 +478,8 @@ describe("settings failed saves", { tags: ["settings-failed-saves"] }, () => {
             frame: "settings-failed-agent-edit",
           });
           await expect(editor.getByRole("textbox", "Label")).toHaveValue("Codex work");
+          await editor.getByRole("alert").scrollIntoView();
+          await screenshotLightAndDark(app, browser, "settings-failed-agent-edit-scrolled");
         } finally {
           refuseEdit();
         }
