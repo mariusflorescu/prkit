@@ -379,7 +379,7 @@ describe("Cursor's agent, live", { tags: ["agent", "cursor"], skip: NEEDS_FIXTUR
     async ({ app, screen, browser }) => {
       test.skip(!LIVE, SKIP);
       const fixture = createFixFixture(`${Date.now()}`);
-      const run = startInstance(NAME, ["--e2e", "--cursor-sdk", SDK]);
+      const run = startInstance(NAME, ["--e2e", "--cursor-sdk", SDK], { kept: true });
       const home = NodePath.join(run.home, "cursor-instances", "cursor", "home");
       try {
         // (d) A guide only arrives through prkit's MCP tools, which the runner calls with the
@@ -432,7 +432,7 @@ describe("Cursor's agent, live", { tags: ["agent", "cursor"], skip: NEEDS_FIXTUR
     async ({ app, screen, browser }) => {
       test.skip(!LIVE, SKIP);
       const fixture = createFixFixture(`${Date.now()}`);
-      const run = startInstance(NAME, ["--e2e", "--cursor-sdk", SDK]);
+      const run = startInstance(NAME, ["--e2e", "--cursor-sdk", SDK], { kept: true });
       try {
         await browser.setViewport({ width: 1280, height: 860 });
         await app.open(run.openUrl);
@@ -486,7 +486,7 @@ describe("Cursor's agent, live", { tags: ["agent", "cursor"], skip: NEEDS_FIXTUR
     async ({ app, screen, browser }) => {
       test.skip(!LIVE, SKIP);
       const fixture = createFixFixture(`${Date.now()}`);
-      const run = startInstance(NAME, ["--e2e", "--cursor-sdk", SDK]);
+      const run = startInstance(NAME, ["--e2e", "--cursor-sdk", SDK], { kept: true });
       try {
         const key = await startGuide({ app, screen, browser }, run, fixture.number);
         await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r1 · ", {

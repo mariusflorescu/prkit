@@ -24,7 +24,12 @@ import {
 import { repoRoot } from "../scripts/verify-run.ts";
 import { cliFixture } from "./cliFixture.ts";
 import { setUpFakeClaude } from "./fakeClaude.ts";
-import { startFakeGitHub, startFakeInstance, stopFakeInstance } from "./fakeGitHub.ts";
+import {
+  instanceHome,
+  startFakeGitHub,
+  startFakeInstance,
+  stopFakeInstance,
+} from "./fakeGitHub.ts";
 import { startBridge } from "./outsideBridge.ts";
 
 const Json = Schema.fromJsonString(Schema.Json);
@@ -35,9 +40,9 @@ test("unsafe launcher folders leave startup running and explain both setup block
   screen,
 }) => {
   const name = "u71-unsafe-launchers";
+  const home = instanceHome(name);
   const fake = await startFakeGitHub(name);
   const claude = setUpFakeClaude(name);
-  const home = NodePath.join(repoRoot, ".e2e/homes", name);
   const directory = NodePath.join(fake.home, "foreign-bin");
   const bin = NodePath.join(home, "bin");
   const variables = {

@@ -4,7 +4,7 @@ import * as NodePath from "node:path";
 import { type Browser, describe, test } from "@e2e-dev/web";
 import { expect, type Screen, type TestFixtures } from "e2e";
 
-import { type RunFile, repoRoot } from "../scripts/verify-run.ts";
+import type { RunFile } from "../scripts/verify-run.ts";
 import {
   alive,
   cardStates,
@@ -92,10 +92,6 @@ const journey = (agent: Agent) => async (page: Page) => {
   const evidence: Array<string> = [];
   const note = (key: string, value: object | string | null) =>
     evidence.push(`${key}: ${JSON.stringify(value)}`);
-  NodeFS.rmSync(NodePath.join(repoRoot, ".e2e", "homes", instance), {
-    recursive: true,
-    force: true,
-  });
   let run = startInstance(instance, INSTANCE_ARGS);
   try {
     await openGuide(page, run);

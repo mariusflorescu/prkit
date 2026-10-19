@@ -7,7 +7,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import type { ContextSeed } from "../scripts/fake-github/context.ts";
-import { readRun, repoRoot } from "../scripts/verify-run.ts";
+import { instancePaths, liveProcesses, readRun, repoRoot } from "../scripts/verify-run.ts";
 
 const Ready = Schema.fromJsonString(
   Schema.Struct({ type: Schema.Literal("ready"), url: Schema.String }),
@@ -186,15 +186,51 @@ export const startFakeGitHub = async (
 export type FakeGitHub = Awaited<ReturnType<typeof startFakeGitHub>>;
 
 /**
- * A prkit instance of the journey's own, on this machine's real accounts unless `extra`
- * points it at a fake, for a journey that restarts it. Stop it with `stopFakeInstance`.
+ * Instance names this run claimed the home of or started, until a stop that drops the home. A run
+ * stops only these. Two runs of one journey at once in one worktree aren't supported: they would
+ * share this name, and `startFakeGitHub` already wipes the other run's fake.
  */
-export const startInstance = (name: string, extra: ReadonlyArray<string> = []) => {
+const owned = new Set<string>();
+
+/**
+ * The home of the journey's instance `name`. The first use in a run removes whatever an earlier
+ * run left there, since a run killed before its `finally` keeps its home, so a journey never
+ * starts on another run's settings, tabs or reviews. Later uses, such as a relaunch after
+ * `stopFakeInstance(name, { keepHome: true })`, find the home as the journey left it. An instance
+ * of that name still running keeps its home, and the journey fails until someone stops it.
+ */
+export const instanceHome = (name: string) => {
+  const { home } = instancePaths(name);
+  if (!owned.has(name)) {
+    const live = Option.match(readRun(name), { onNone: () => [], onSome: liveProcesses });
+    if (live.length > 0)
+      throw new Error(
+        `${name} is still running (pids ${live.join(", ")}); stop it with \`pnpm verify:app stop --name ${name}\` first.`,
+      );
+    NodeFS.rmSync(home, { recursive: true, force: true });
+  }
+  owned.add(name);
+  return home;
+};
+
+/**
+ * A prkit instance of the journey's own, on this machine's real accounts unless `extra`
+ * points it at a fake, for a journey that restarts it. It starts in `instanceHome(name)`, or,
+ * with `kept`, in a home kept between runs on purpose, like the signed-in `cursor-live`.
+ * Stop it with `stopFakeInstance`.
+ */
+export const startInstance = (
+  name: string,
+  extra: ReadonlyArray<string> = [],
+  { kept = false } = {},
+) => {
+  if (!kept) instanceHome(name);
   NodeChildProcess.execFileSync(
     process.execPath,
     ["scripts/verify-app.ts", "start", "--name", name, "--detach", ...extra],
     { cwd: repoRoot, stdio: "ignore" },
   );
+  owned.add(name);
   return Option.getOrThrowWith(readRun(name), () => new Error(`${name} wrote no run file.`));
 };
 
@@ -204,10 +240,17 @@ export const startFakeInstance = (
   extra: ReadonlyArray<string> = [],
 ) => startInstance(name, ["--github-api", fake.url, "--gh-home", fake.home, ...extra]);
 
-/** Stops an instance a journey started, fake or not, and keeps or removes its home. */
-export const stopFakeInstance = (name: string, options: { keepHome: boolean }) =>
+/**
+ * Stops an instance a journey started, fake or not, and keeps or removes its home. A name this run
+ * never claimed or started, such as one whose start failed because an instance an earlier run left
+ * still holds it, is left alone.
+ */
+export const stopFakeInstance = (name: string, options: { keepHome: boolean }) => {
+  if (!owned.has(name)) return;
   NodeChildProcess.execFileSync(
     process.execPath,
     ["scripts/verify-app.ts", "stop", "--name", name, ...(options.keepHome ? ["--keep-home"] : [])],
     { cwd: repoRoot, stdio: "ignore" },
   );
+  if (!options.keepHome) owned.delete(name);
+};
