@@ -17,6 +17,7 @@ import { AskDock } from "~/features/ask/AskDock";
 import { AskTargetContext } from "~/features/ask/askTarget";
 import { useAsks } from "~/features/ask/useAsks";
 import { useGuideAskTarget } from "~/features/ask/useGuideAskTarget";
+import { CommentsWithoutDiff } from "~/features/reviewComments/CommentsWithoutDiff";
 import {
   useComposers,
   useReviewCommentsStore,
@@ -205,6 +206,11 @@ export function GuideReady({
               {guide.data.normalized.guidanceNote !== null && (
                 <GuidanceNoteLine note={guide.data.normalized.guidanceNote} />
               )}
+              <CommentsWithoutDiff
+                pr={detail}
+                files={guide.data.snapshot.files}
+                site={{ on: "guide", revision: revision.revision }}
+              />
               <GuideView
                 key={revision.revision}
                 revision={revision.revision}

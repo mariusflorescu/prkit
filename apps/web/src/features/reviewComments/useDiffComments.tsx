@@ -31,6 +31,7 @@ import { storePending } from "./reviewCommentsCache";
 import {
   type Composer,
   type ComposerSite,
+  onSite,
   useComposers,
   useReviewCommentsStore,
 } from "./reviewCommentsStore";
@@ -104,16 +105,13 @@ export function useDiffComments(
   const filesNotes = scope.notes.on === "files" ? scope.notes.notes : null;
   const drafts = pending.data?.comments;
   const fromNotes = pending.data?.fromNotes;
+  const site = useMemo<ComposerSite>(
+    () => (guideRevision === null ? { on: "files" } : { on: "guide", revision: guideRevision }),
+    [guideRevision],
+  );
   // A composer's lines are read against the diff it is on, so only that surface shows it, and
   // on the Guide only that revision.
-  const visibleComposers = useMemo(
-    () =>
-      composers.filter(
-        ({ site }) =>
-          site.on === noteOn && (site.on === "files" || site.revision === guideRevision),
-      ),
-    [composers, noteOn, guideRevision],
-  );
+  const visibleComposers = useMemo(() => composers.filter(onSite(site)), [composers, site]);
   // GitHub numbers threads against the head it had when they were read, so they are
   // placed only on a diff of that head, and read again once the diff moves on.
   const threadsHead = threads.data?.headSha;
@@ -125,11 +123,9 @@ export function useDiffComments(
   }, [staleThreads, client, key, accountId]);
   return useMemo(() => {
     const owner = { key, accountId };
-    const site: ComposerSite =
-      guideRevision === null ? { on: "files" } : { on: "guide", revision: guideRevision };
     const byNote = new Map((fromNotes ?? []).map((comment) => [comment.note, comment]));
     const composing = new Set<NoteKey>(
-      visibleComposers.flatMap(({ note }) => (note === null ? [] : [note.key])),
+      visibleComposers.flatMap(({ note }) => (note === null ? [] : [note.remark])),
     );
     const build = (file: DiffFile): DiffComments | undefined => {
       if (drafts === undefined || file.patch._tag !== "text") return undefined;
@@ -217,8 +213,6 @@ export function useDiffComments(
           else if (moving?.path === file.path) moveComment({ id: moving.id, placement });
           else compose({ pr: owner, site, placement, note: null });
         },
-        // The Guide leaves outdated drafts and threads to Files, but never hides words being
-        // written, which a picked revision can leave without their lines.
         footer:
           (showOutdated && (outdatedDrafts.length > 0 || outdatedThreads.length > 0)) ||
           lost.length > 0 ? (
@@ -264,6 +258,7 @@ export function useDiffComments(
     showOutdated,
     noteOn,
     guideRevision,
+    site,
     filesNotes,
     compose,
     moveComment,

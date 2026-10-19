@@ -206,7 +206,7 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
       </TabActions>
       <ReviewCommentsAlerts pr={detail} />
       <FilesGuideNotesStatus state={guideNotes} />
-      <CommentsWithoutDiff pr={detail} files={files} />
+      <CommentsWithoutDiff pr={detail} files={files} site={{ on: "files" }} />
       {snapshot.changedFiles > files.length && (
         <p
           role="status"

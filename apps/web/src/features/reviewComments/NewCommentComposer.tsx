@@ -37,10 +37,10 @@ export function NewCommentComposer({
   const client = useQueryClient();
   const closeComposer = useReviewCommentsStore((state) => state.closeComposer);
   const sendFailed = useReviewCommentsStore((state) => state.sendFailed);
-  const close = () => closeComposer(composer);
   const ask = useAskTarget();
   const { placement, note } = composer;
   const form = composerForm(composer);
+  const close = () => closeComposer(form);
   const sending = useFormSending(form);
   // GitHub's diff no longer has the note's line, so the server would refuse it as the note's.
   const fromNote = placed._tag === "outdated" ? null : note;

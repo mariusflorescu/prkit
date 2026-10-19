@@ -31,7 +31,6 @@ export function NoteCommentButton({
 }: {
   pr: { key: PullRequestKey; accountId: AccountId };
   note: ShownNote;
-  /** The remark the note makes, the same on every surface and revision. */
   noteKey: NoteKey | null;
   composing: boolean;
 }) {
@@ -61,7 +60,7 @@ export function NoteCommentButton({
           placement: here,
           note: {
             ref,
-            key: noteKey,
+            remark: noteKey,
             text: written.text,
             movedTo: samePoint(placed.placement.anchor.end, at) ? null : placed.placement.anchor,
           },

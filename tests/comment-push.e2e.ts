@@ -578,7 +578,12 @@ const withGuide = async (name: string) => {
   const run = git.start(() =>
     startFakeInstance(name, fake, ["--claude", claude.file, "--e2e", "--watch-interval", "5000"]),
   );
-  return { fake, git, run, commit };
+  const revisions = () =>
+    readRows(
+      run.home,
+      `SELECT COUNT(*) AS n FROM review_revisions r JOIN reviews v ON v.id = r.review_id WHERE v.pr_key = '${KEY}'`,
+    )[0]?.n;
+  return { fake, claude, git, run, commit, revisions };
 };
 
 const openFiles = async (
@@ -613,12 +618,7 @@ test(
   { timeout: 420_000 },
   async ({ app, screen, browser }) => {
     const name = "comment-words-kept";
-    const { fake, run, commit } = await withGuide(name);
-    const revisions = () =>
-      readRows(
-        run.home,
-        `SELECT COUNT(*) AS n FROM review_revisions r JOIN reviews v ON v.id = r.review_id WHERE v.pr_key = '${KEY}'`,
-      )[0]?.n;
+    const { fake, run, commit, revisions } = await withGuide(name);
     try {
       await openFiles({ app, screen, browser }, run);
       const tabs = screen.getByRole("navigation", "Pull request tabs");
@@ -657,7 +657,8 @@ test(
       await expect(slugField).toHaveValue(SLUG_EDIT);
       await expect(braceField).toHaveValue(BRACE);
 
-      // The same note on the Guide takes its comment there, words and all.
+      // The same note on the Guide takes its comment there, words and all, even none.
+      await braceField.fill("");
       await tabs.getByRole("link", "Guide").tap();
       const revision = screen.getByRole("combobox", "Guide revision");
       await expect(revision).toContainText("r1 · ", { timeout: 30_000 });
@@ -666,6 +667,11 @@ test(
       await expect(onGuide).toHaveValue(SLUG_EDIT);
       await expect(onGuide).toBeFocused();
       await expect(slug.getByRole("button", "Add as comment, question on line 3")).toBeDisabled();
+      await noteIn(browser, BRACE).getByRole("button", "Add as comment, question on line 15").tap();
+      const braceOnGuide = screen.getByRole("textbox", "Comment on line 15");
+      await expect(braceOnGuide).toHaveValue("");
+      await braceOnGuide.press("Escape");
+      await expect(braceOnGuide).toHaveCount(0);
 
       // A revision accepted meanwhile waits behind the comment; picking it takes the comment along.
       await commit({ "src/change-0.ts": 'export const change0 = "Second fixture 9";\n' });
@@ -678,13 +684,33 @@ test(
       await expect(onGuide).toHaveValue(SLUG_EDIT, { timeout: 30_000 });
       await expect(slug.getByRole("button", "Add as comment, question on line 3")).toBeDisabled();
       await frames(app, browser, "picked-revision-composer", `New comment on line 3, in ${LIMITS}`);
+
+      // A send still on its way when its comment moves to another revision closes it once it lands.
+      await revision.tap();
+      await screen.getByRole("option", /^r1 · /).tap();
+      await expect(revision).toContainText("r1 · ", { timeout: 30_000 });
+      await expect(onGuide).toHaveValue(SLUG_EDIT, { timeout: 30_000 });
+      await fake.latency(4_000, "core");
+      const pulls = await reads(fake, "rest:pull");
       await onGuide.focus();
       await browser.keyboard.press("Meta+Enter");
-      await expect(slug.getByRole("status")).toHaveText("In your review.", { timeout: 30_000 });
+      await expect(screen.getByRole("button", "Adding...")).toBeVisible();
+      // The add's read of the PR keeps its delay once GitHub has it; r2's diff loads at full speed.
+      await expect.poll(() => reads(fake, "rest:pull")).toBeGreaterThan(pulls);
+      await fake.latency(0, "core");
+      await revision.tap();
+      await screen.getByRole("option", /^r2 · /).tap();
+      await expect(revision).toContainText("r2 · ", { timeout: 30_000 });
+      await expect(screen.getByRole("button", "Review, 1 pending").first()).toBeVisible({
+        timeout: 30_000,
+      });
+      await slug.scrollIntoView({ timeout: 30_000 });
+      await expect(slug.getByRole("status")).toHaveText("In your review.");
+      await expect(onGuide).toHaveCount(0);
 
       await tabs.getByRole("link", "Files").tap();
       await expect(moved).toHaveValue(LINES, { timeout: 30_000 });
-      await expect(braceField).toHaveValue(BRACE);
+      await expect(braceField).toHaveCount(0);
       await expect(slug.getByRole("status")).toHaveText("In your review.");
       await moved.focus();
       await browser.keyboard.type(" are two enough?");
@@ -692,9 +718,6 @@ test(
       await expect(file.getByRole("article", `Pending comment on ${LIMITS} line 9`)).toContainText(
         `${LINES} are two enough?`,
       );
-      await braceField.focus();
-      await browser.keyboard.press("Escape");
-      await expect(braceField).toHaveCount(0);
       expect(
         readRows(
           run.home,
@@ -705,6 +728,61 @@ test(
         { body: `${LINES} are two enough?`, line: 9, fromNote: 0 },
       ]);
       expect(await fake.writes()).toEqual([]);
+    } finally {
+      stopFakeInstance(name, { keepHome: false });
+      fake.stop();
+    }
+  },
+);
+
+test(
+  "comment words: a guide revision without the file keeps the comment being written above its chapters",
+  { timeout: 300_000 },
+  async ({ app, screen, browser }) => {
+    const name = "comment-words-no-file";
+    const { fake, claude, git, run, revisions } = await withGuide(name);
+    try {
+      await openFiles({ app, screen, browser }, run);
+      await screen.getByRole("navigation", "Pull request tabs").getByRole("link", "Guide").tap();
+      const revision = screen.getByRole("combobox", "Guide revision");
+      await expect(revision).toContainText("r1 · ", { timeout: 30_000 });
+      await noteIn(browser, SLUG)
+        .getByRole("button", "Add as comment, question on line 3")
+        .tap({ timeout: 30_000 });
+      const onLine = screen.getByRole("textbox", "Comment on line 3");
+      await onLine.fill(SLUG_EDIT);
+
+      // A push takes the file out of the PR, so the next revision has no diff of it.
+      claude.notes({});
+      const sha = git.commit(9, {
+        [LIMITS]: BASE_LIMITS,
+        "src/slugs.ts": "export const slugLimit = 64;\n",
+      });
+      await fake.files(9, [served(git.patch(9, "src/slugs.ts"), "src/slugs.ts")]);
+      await fake.gitHead(9, sha);
+      await expect.poll(revisions, { timeout: 120_000 }).toBeGreaterThan(1);
+      await expect(revision).toContainText("r1 · ");
+      await expect(onLine).toHaveValue(SLUG_EDIT);
+      await revision.tap();
+      await screen.getByRole("option", /^r2 · /).tap();
+      await expect(revision).toContainText("r2 · ", { timeout: 30_000 });
+      const waiting = screen
+        .getByRole("region", "Comments on files without a diff")
+        .getByRole("group", `Comments on ${LIMITS}`);
+      await expect(waiting.getByRole("textbox", "Comment written on line 3")).toHaveValue(
+        SLUG_EDIT,
+        { timeout: 30_000 },
+      );
+      await expect(waiting).toContainText(
+        "GitHub shows no diff for this file now. Add the comment to keep it with your drafts.",
+      );
+      await frames(app, browser, "no-file-revision", `New comment written on line 3, in ${LIMITS}`);
+
+      // Back on r1 it sits on its line again.
+      await revision.tap();
+      await screen.getByRole("option", /^r1 · /).tap();
+      await expect(onLine).toHaveValue(SLUG_EDIT, { timeout: 30_000 });
+      await expect(waiting).toHaveCount(0);
     } finally {
       stopFakeInstance(name, { keepHome: false });
       fake.stop();

@@ -19,10 +19,15 @@ export type ComposerSite =
   | { readonly on: "files" }
   | { readonly on: "guide"; readonly revision: number };
 /**
- * A comment started from a guide note. `key` names the remark on every surface and revision,
+ * A comment started from a guide note. `remark` names it on every surface and revision,
  * `ref` the note it was opened from, and `movedTo` where its line is now if the code moved.
  */
-export type NoteDraft = { ref: NoteRef; key: NoteKey; text: string; movedTo: CommentAnchor | null };
+export type NoteDraft = {
+  ref: NoteRef;
+  remark: NoteKey;
+  text: string;
+  movedTo: CommentAnchor | null;
+};
 /**
  * Where a new comment is being written: one under picked lines per PR, like GitHub, and one per
  * guide remark. Its lines are captured with the rows around them, so after a push it follows
@@ -55,7 +60,7 @@ type Focus = { readonly form: FormKey; readonly take: "opened" | "lost" };
 const ownerOf = ({ key, accountId }: Owner) => `${accountId} ${key}`;
 export const noteForm = (pr: Owner, note: NoteKey): FormKey => `note:${ownerOf(pr)} ${note}`;
 export const composerForm = ({ pr, note }: Composer): FormKey =>
-  note === null ? `composer:${ownerOf(pr)}` : noteForm(pr, note.key);
+  note === null ? `composer:${ownerOf(pr)}` : noteForm(pr, note.remark);
 export const editForm = (id: ReviewCommentId): FormKey => `edit:${id}`;
 export const replyForm = (pr: Owner, threadId: string): FormKey =>
   `reply:${ownerOf(pr)} ${threadId}`;
@@ -65,11 +70,11 @@ const without = <K, V>(map: ReadonlyMap<K, V>, key: K) => {
   next.delete(key);
   return next;
 };
-/** Opens a form holding `text`, unless it already holds words: those are never replaced. */
+/** Opens a form holding `text`, unless it is open already: what it holds is never replaced. */
 const opened = (words: ReadonlyMap<FormKey, Writing>, form: FormKey, text: string) =>
-  (words.get(form)?.text.trim() ?? "") === ""
-    ? new Map(words).set(form, { text, start: text.length, end: text.length, failed: null })
-    : words;
+  words.has(form)
+    ? words
+    : new Map(words).set(form, { text, start: text.length, end: text.length, failed: null });
 
 type State = {
   composers: ReadonlyMap<FormKey, Composer>;
@@ -85,9 +90,9 @@ export const useReviewCommentsStore = create<
   State & {
     /** Opens a composer, or moves the one already open for the same lines or remark, words and all. */
     compose: (composer: Composer) => void;
-    /** Closes this composer, unless another one has taken its place since. */
-    closeComposer: (composer: Composer) => void;
-    /** Takes a PR's composers on the Guide to the revision picked there, placed on its diff. */
+    /** Closes a composer, wherever it moved since it opened. */
+    closeComposer: (form: FormKey) => void;
+    /** Takes a PR's composers on the Guide to the revision picked there. */
     moveToRevision: (pr: Owner, revision: number) => void;
     /** Opens an edit or a reply holding `text`, or keeps the words it already holds. */
     beginWriting: (form: FormKey, text: string) => void;
@@ -119,10 +124,9 @@ export const useReviewCommentsStore = create<
         focus: { form, take: "opened" },
       };
     }),
-  closeComposer: (composer) =>
+  closeComposer: (form) =>
     set((state) => {
-      const form = composerForm(composer);
-      if (state.composers.get(form) !== composer) return state;
+      if (!state.composers.has(form)) return state;
       return {
         composers: without(state.composers, form),
         words: without(state.words, form),
@@ -176,6 +180,12 @@ export const useReviewCommentsStore = create<
       forms: { ...state.forms, [key]: Math.max(0, (state.forms[key] ?? 0) - 1) },
     })),
 }));
+
+/** Whether a composer is on this surface, and on the Guide on this revision. */
+export const onSite =
+  (site: ComposerSite) =>
+  ({ site: at }: Composer) =>
+    at.on === "files" ? site.on === "files" : site.on === "guide" && at.revision === site.revision;
 
 /** The composers open on a PR as this account reads it, on any surface. */
 export const useComposers = (pr: Owner) =>

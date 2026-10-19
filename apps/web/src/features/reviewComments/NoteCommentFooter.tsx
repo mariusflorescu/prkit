@@ -22,7 +22,6 @@ export function NoteCommentFooter({
   pr: { key: PullRequestKey; accountId: AccountId };
   note: ShownNote;
   fromNotes: ReadonlyMap<NoteKey, NoteComment>;
-  /** The remarks whose comment is being written on this diff. */
   composing: ReadonlySet<NoteKey>;
 }) {
   if (!COMMENTABLE[note.written.tone]) return null;
