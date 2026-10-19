@@ -41,6 +41,9 @@ const handlers = (toolkit: OutsideToolkit) =>
         ),
         read_fix: reads((input) => respond("read_fix", input, () => work.fix(input))),
         wait_for: reads((input) => respond("wait_for", input, () => work.waitFor(input))),
+        wait_for_question: reads((input) =>
+          respond("wait_for_question", input, () => work.waitForQuestion(input)),
+        ),
         list_accounts: reads((input) =>
           respond("list_accounts", input, () => work.listAccounts(input)),
         ),

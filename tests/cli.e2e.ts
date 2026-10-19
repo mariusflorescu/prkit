@@ -19,6 +19,7 @@ import {
   OutsideQuestion,
   PullRequestResult,
   QuestionsResult,
+  QuestionWaitResult,
 } from "../apps/server/src/outside/schemas.ts";
 import { repoRoot } from "../scripts/verify-run.ts";
 import { cliFixture } from "./cliFixture.ts";
@@ -27,6 +28,7 @@ import { startFakeGitHub, startFakeInstance, stopFakeInstance } from "./fakeGitH
 import { startBridge } from "./outsideBridge.ts";
 
 const Json = Schema.fromJsonString(Schema.Json);
+const decodeQuestionWait = Schema.decodeSync(Schema.fromJsonString(QuestionWaitResult));
 
 test("unsafe launcher folders leave startup running and explain both setup blocks", async ({
   app,
@@ -134,6 +136,21 @@ test(
         );
         return { code: result.status, stdout: result.stdout, stderr: result.stderr };
       };
+      /** The same command left running, as in a second terminal, while this one goes on. */
+      const cliInBackground = (args: string[]) =>
+        new Promise<{ code: number | null; stdout: string }>((resolve) => {
+          const child = NodeChildProcess.spawn(launcher, args, {
+            env: { HOME: fake.home, PATH: process.env.PATH ?? "/usr/bin:/bin", NO_COLOR: "1" },
+          });
+          let stdout = "";
+          let stderr = "";
+          child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+          child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+          child.on("close", (code) => {
+            log.push(`$ prkit ${args.join(" ")} (background)\nexit ${code}\n${stdout}${stderr}`);
+            resolve({ code, stdout });
+          });
+        });
       expect(NodeFS.statSync(launcher).mode & 0o777).toBe(0o700);
       expect(NodeFS.readFileSync(launcher, "utf8")).toContain("cli");
       expect(cli(["--version"]).code).toBe(0);
@@ -430,9 +447,23 @@ test(
       const started = Schema.decodeSync(Schema.fromJsonString(AskedQuestion))(question.stdout);
       expect(started.state).toBe("starting");
       expect(cli(askArgs).stdout).toBe(question.stdout);
-      expect(
-        cli(["wait", "budget/fixtures#9", "--for", "question", "--timeout", "60", "--json"]).code,
-      ).toBe(0);
+      const waitFor = (questionId: string) => [
+        "questions",
+        "wait",
+        "budget/fixtures#9",
+        "--question-id",
+        questionId,
+        "--timeout",
+        "60",
+        "--json",
+      ];
+      const waited = cli(waitFor(started.questionId));
+      expect(waited.code).toBe(0);
+      expect(decodeQuestionWait(waited.stdout)).toMatchObject({
+        finished: true,
+        question: { id: started.questionId, state: "answered" },
+      });
+      expect(cli(["wait", "budget/fixtures#9", "--for", "question"]).code).toBe(2);
       const questions = cli(["questions", "list", "budget/fixtures#9", "--json"]);
       expect(questions.code).toBe(0);
       const answered = Schema.decodeSync(Schema.fromJsonString(QuestionsResult))(questions.stdout)
@@ -482,6 +513,42 @@ test(
       expect(Schema.decodeSync(Schema.fromJsonString(OutsideQuestion))(stopped.stdout).state).toBe(
         "answered",
       );
+
+      // Two terminals asking about the same pull request: each wait wakes on its own question.
+      claude.holdAnswers();
+      const other = Schema.decodeSync(Schema.fromJsonString(AskedQuestion))(
+        cli([
+          "questions",
+          "ask",
+          "budget/fixtures#9",
+          "--question",
+          "Is the old limit still read anywhere?",
+          "--request-id",
+          "cli-other",
+          "--json",
+        ]).stdout,
+      );
+      const theirs = cliInBackground(waitFor(other.questionId));
+      const mine = cli(waitFor(started.questionId));
+      expect(mine.code).toBe(0);
+      expect(decodeQuestionWait(mine.stdout)).toMatchObject({
+        finished: true,
+        question: { id: started.questionId, state: "answered" },
+      });
+      expect(
+        await Promise.race([
+          theirs.then(() => "woke"),
+          new Promise((resolve) => setTimeout(() => resolve("waiting"), 2_000)),
+        ]),
+        "the other terminal's wait sleeps through this one's",
+      ).toBe("waiting");
+      claude.releaseAnswers();
+      const woke = await theirs;
+      expect(woke.code).toBe(0);
+      expect(decodeQuestionWait(woke.stdout)).toMatchObject({
+        finished: true,
+        question: { id: other.questionId, state: "answered" },
+      });
       const { headSha } = Schema.decodeSync(Schema.fromJsonString(PullRequestResult))(
         cli(["pr", "read", "budget/fixtures#9", "--json"]).stdout,
       );

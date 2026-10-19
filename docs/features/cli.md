@@ -51,7 +51,7 @@ prkit wait acme/widgets#42 --for guide --timeout 600
 prkit guide read acme/widgets#42 --json
 prkit guide revisions acme/widgets#42 --json
 prkit questions ask acme/widgets#42 --question 'Why does the retry stop after three tries?' --request-id ask-42
-prkit wait acme/widgets#42 --for question --timeout 600
+prkit questions wait acme/widgets#42 --question-id <question-id> --timeout 600
 prkit questions list acme/widgets#42 --json
 prkit questions pin acme/widgets#42 --question-id <question-id> --pinned
 prkit pr diff acme/widgets#42 --attempt-id <attempt-id> --json
@@ -75,7 +75,7 @@ prkit local questions list --json
 prkit local questions pin --question-id <question-id> --pinned
 ```
 
-The command tree covers all 69 tools: status, accounts, agents, settings, inbox (and filters save), repos list/prs, pr read/files/file/timeline/threads/checks/conversation/stack/candidates/diff/open/reviewed (and reviewed set), guide list/read/generate/stop/revisions/revision/progress/duration/settings/scope/repositories/repository/tick, guide settings save, questions list/ask/stop/pin, fix list/read/turn/diff/patch/access/send/change/stop/retry/resolve, comments list/add/edit/move, tabs list/close/focus/reorder, local guide/read/wait/stop/list, local questions list/ask/wait/stop/pin, and wait.
+The command tree covers all 70 tools: status, accounts, agents, settings, inbox (and filters save), repos list/prs, pr read/files/file/timeline/threads/checks/conversation/stack/candidates/diff/open/reviewed (and reviewed set), guide list/read/generate/stop/revisions/revision/progress/duration/settings/scope/repositories/repository/tick, guide settings save, questions list/ask/wait/stop/pin, fix list/read/turn/diff/patch/access/send/change/stop/retry/resolve, comments list/add/edit/move, tabs list/close/focus/reorder, local guide/read/wait/stop/list, local questions list/ask/wait/stop/pin, and wait.
 
 PRs accept HTTPS URLs or `owner/repo#number`, with `--host` for an Enterprise short form. Repository commands take `owner/repo`. `--account` selects the account when prkit asks for one; never switch accounts to work around a failure. Inbox `--repo owner/repo` selects a repository on github.com; quoted JSON with `host`, `owner` and `name` selects an Enterprise repository. Inbox also accepts reason, state, draft, checks, search and stacks selectors, and `--sort updated|waiting|size|risk` for the order of each section (`updated` when omitted). These read filters do not change the app's saved filters. `prkit inbox filters save` replaces the saved search, account, repository and sort together, so it needs all four.
 
@@ -94,7 +94,7 @@ prkit questions ask acme/widgets#42 --scope '{"_tag":"chapter","chapterId":"retr
 prkit questions ask acme/widgets#42 --revision 1 --scope '{"_tag":"lines","anchor":{"path":"src/retry.ts","start":{"side":"new","line":12},"end":{"side":"new","line":18}}}' --question 'What happens at the last attempt?'
 ```
 
-It returns the question's id at once. `prkit wait acme/widgets#42 --for question` returns when no question is being answered, and `prkit questions list acme/widgets#42 --json` reads the answers. One question is answered at a time, so asking while another is being answered fails. `prkit questions stop acme/widgets#42 --question-id <question-id>` keeps the text written so far. `prkit questions pin` with `--pinned` or `--no-pinned` pins an answered question to its chapter in the guide, in prkit only. Asking again retries a stopped or failed question.
+It returns the question's id at once. `prkit questions wait acme/widgets#42 --question-id <question-id>` follows that one question until it is answered, stopped or failed and returns it with its answer, and `prkit questions list acme/widgets#42 --json` reads them all. One question is answered at a time, so asking while another is being answered fails. `prkit questions stop acme/widgets#42 --question-id <question-id>` keeps the text written so far. `prkit questions pin` with `--pinned` or `--no-pinned` pins an answered question to its chapter in the guide, in prkit only. Asking again retries a stopped or failed question.
 
 `apps/server/src/cli/commands.ts` is the command map. Flags and validation come from each outside tool's parameter schema; the parity test fails when a tool has no command or a command has no tool. As outside tools acquire filters or new options, their commands acquire those flags. A new tool needs a map entry.
 

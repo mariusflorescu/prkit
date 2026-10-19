@@ -570,10 +570,12 @@ export const PinInput = Schema.Struct({
   ),
 });
 
-// wait_for
+// wait_for / wait_for_question
+/** How long a wait lasts when the caller names no timeout, as the timeouts' descriptions say. */
+export const WAIT_DEFAULT_SECONDS = 50;
 export const WaitInput = Schema.Struct({
   ...TargetFields,
-  what: describe(Schema.Literals(["guide", "fix", "question"]), "What to wait for."),
+  what: describe(Schema.Literals(["guide", "fix"]), "What to wait for."),
   timeoutSeconds: Schema.optionalKey(
     describe(
       Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 600 })),
@@ -585,12 +587,18 @@ export const WaitResult = Schema.Struct({
   finished: Schema.Boolean,
   guide: Schema.NullOr(GuideStatus),
   fix: Schema.NullOr(FixResult),
-  question: describe(
-    Schema.NullOr(OutsideQuestion),
-    "The pull request's newest question, for what: question.",
-  ),
 });
 export type WaitResult = typeof WaitResult.Type;
+export const QuestionWaitInput = Schema.Struct({
+  ...QuestionInput.fields,
+  timeoutSeconds: WaitInput.fields.timeoutSeconds,
+});
+/** One question once it is answered, stopped or failed, or as it stands when the wait timed out. */
+export const QuestionWaitResult = Schema.Struct({
+  finished: Schema.Boolean,
+  question: OutsideQuestion,
+});
+export type QuestionWaitResult = typeof QuestionWaitResult.Type;
 
 // Local reviews: guides of a repository's changes before a pull request exists
 export const LocalTargetFields = {
@@ -777,8 +785,3 @@ export const LocalQuestionWaitInput = Schema.Struct({
   ...LocalQuestionInput.fields,
   timeoutSeconds: LocalWaitInput.fields.timeoutSeconds,
 });
-export const LocalQuestionWaitResult = Schema.Struct({
-  finished: Schema.Boolean,
-  question: OutsideQuestion,
-});
-export type LocalQuestionWaitResult = typeof LocalQuestionWaitResult.Type;

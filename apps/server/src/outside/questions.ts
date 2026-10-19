@@ -1,7 +1,10 @@
 import { answerText, type AnswerBasis, AskScope, type Question } from "@prkit/contracts";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 
-import type { OutsideQuestion } from "./schemas.ts";
+import { type OutsideQuestion, WAIT_DEFAULT_SECONDS } from "./schemas.ts";
 
 /** The states in which a question is still being answered. */
 export const ACTIVE = new Set(["starting", "waiting", "answering"]);
@@ -52,3 +55,27 @@ export const outsideQuestion = (question: Question): OutsideQuestion => {
     pinned: question.pinnedAt !== null,
   };
 };
+
+/**
+ * Waits until `changes` show the question answered, stopped, failed or gone, and returns it as
+ * it settled, so a retry right after can't pass for an answer. After a timeout it reads the
+ * question as it stands (undefined once gone). A timeout stops the waiting, never the question.
+ */
+export const waitForAnswer = <Change, E1, R1, E2, R2>(
+  read: Effect.Effect<Question | undefined, E1, R1>,
+  changes: Stream.Stream<Change, E2, R2>,
+  timeoutSeconds: number | undefined,
+) =>
+  Effect.gen(function* () {
+    const settled = Option.flatten(
+      yield* changes.pipe(
+        Stream.mapEffect(() => read),
+        Stream.filter((question) => question === undefined || !ACTIVE.has(question.state._tag)),
+        Stream.runHead,
+        Effect.timeoutOption(`${timeoutSeconds ?? WAIT_DEFAULT_SECONDS} seconds`),
+      ),
+    );
+    return Option.isSome(settled)
+      ? { finished: true, question: settled.value }
+      : { finished: false, question: yield* read };
+  });

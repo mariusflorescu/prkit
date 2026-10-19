@@ -59,12 +59,12 @@ import {
   Target,
   type TargetInput,
   type WaitResult,
+  WAIT_DEFAULT_SECONDS,
   HOST_NAME,
   OWNER_NAME,
   REPO_NAME,
 } from "./schemas.ts";
 
-const WAIT_DEFAULT_SECONDS = 50;
 const DIFF_LIMIT = 60_000;
 const WORKING_TURNS = new Set(["queued", "preparing", "running", "pushing"]);
 
@@ -174,7 +174,7 @@ export const make = Effect.gen(function* () {
       );
     }).pipe(Effect.mapError(asFailure));
 
-  const { waitForQuestion, ...questions } = yield* makeOutsideAsks(resolve, idempotent);
+  const questions = yield* makeOutsideAsks(resolve, idempotent);
 
   // Reads.
 
@@ -625,14 +625,13 @@ export const make = Effect.gen(function* () {
    */
   const waitFor = (
     input: TargetInput & {
-      readonly what: "guide" | "fix" | "question";
+      readonly what: "guide" | "fix";
       readonly timeoutSeconds?: number;
     },
   ) =>
     Effect.gen(function* () {
       const target = yield* resolve(input);
       const timeout = `${input.timeoutSeconds ?? WAIT_DEFAULT_SECONDS} seconds` as const;
-      if (input.what === "question") return yield* waitForQuestion(input, timeout);
       if (input.what === "guide") {
         const start = yield* reviews.get(target.key);
         if (start.review === null)
@@ -653,7 +652,6 @@ export const make = Effect.gen(function* () {
           finished: Option.isSome(settled) && Option.isSome(settled.value),
           guide: guideStatusOf(now),
           fix: null,
-          question: null,
         };
         return result;
       }
@@ -671,7 +669,6 @@ export const make = Effect.gen(function* () {
         finished: Option.isSome(settled) && Option.isSome(settled.value),
         guide: null,
         fix: fixResultOf(snapshot, yield* latestDiff(target.key, snapshot)),
-        question: null,
       };
       return result;
     }).pipe(Effect.mapError(asFailure));

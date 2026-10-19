@@ -1,6 +1,4 @@
-import type { ReviewId } from "@prkit/contracts";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 
 import { Asks } from "../asks/Asks.ts";
@@ -9,15 +7,16 @@ import { asFailure, fail } from "./errors.ts";
 import type { makeIdempotent } from "./idempotent.ts";
 import { makePager } from "./paging.ts";
 import type { ResolveTarget } from "./OutsideReads.ts";
-import { ACTIVE, askFingerprint, outsideQuestion } from "./questions.ts";
+import { askFingerprint, outsideQuestion, waitForAnswer } from "./questions.ts";
 import {
   AskedQuestion,
   type AskAboutInput,
   type PinInput,
   type QuestionInput,
+  type QuestionWaitInput,
+  type QuestionWaitResult,
   type ReadQuestionsInput,
   type TargetInput,
-  type WaitResult,
 } from "./schemas.ts";
 
 const NO_GUIDE = "This pull request has no guide yet.";
@@ -63,7 +62,7 @@ export const makeOutsideAsks = (
             "not-found",
             "This question isn't on this pull request. Read read_pull_request_questions for its ids.",
           );
-        return { target, question };
+        return { target, review, question };
       });
 
     const questions = (input: typeof ReadQuestionsInput.Type) =>
@@ -116,31 +115,22 @@ export const makeOutsideAsks = (
       }).pipe(Effect.mapError(asFailure));
 
     /**
-     * Waits on the stream the app's panel watches, until no question on the review is being
-     * answered. A timeout stops the waiting, never the question.
+     * Waits on the stream the app's panel watches until the named question is answered,
+     * stopped or failed, so two agents asking about one pull request each wait for their own.
      */
-    const waitForQuestion = (input: TargetInput, timeout: `${number} seconds`) =>
+    const waitForQuestion = (input: typeof QuestionWaitInput.Type) =>
       Effect.gen(function* () {
-        const { review } = yield* reviewOf(input);
-        const newest = (reviewId: ReviewId) =>
-          asks.list(reviewId).pipe(Effect.map((rows) => rows.at(-1)));
-        if ((yield* newest(review.id)) === undefined)
-          return yield* fail("not-found", "No question was asked about this pull request.");
-        const settled = yield* asks.watch(review.id).pipe(
-          Stream.filter((event) => event._tag === "snapshot" || event._tag === "question"),
-          Stream.mapEffect(() => asks.list(review.id)),
-          Stream.filter((rows) => !rows.some((row) => ACTIVE.has(row.state._tag))),
-          Stream.runHead,
-          Effect.timeoutOption(timeout),
+        const { review, question: asked } = yield* questionOnThisPullRequest(input);
+        const { finished, question } = yield* waitForAnswer(
+          asks.list(review.id).pipe(Effect.map((rows) => rows.find((row) => row.id === asked.id))),
+          asks
+            .watch(review.id)
+            .pipe(Stream.filter((event) => event._tag === "snapshot" || event._tag === "question")),
+          input.timeoutSeconds,
         );
-        const latest = yield* newest(review.id);
-        const result: WaitResult = {
-          finished: Option.isSome(settled) && Option.isSome(settled.value),
-          guide: null,
-          fix: null,
-          question: latest === undefined ? null : outsideQuestion(latest),
-        };
-        return result;
+        if (question === undefined)
+          return yield* fail("not-found", "This question is no longer on this pull request.");
+        return { finished, question: outsideQuestion(question) } satisfies QuestionWaitResult;
       }).pipe(Effect.mapError(asFailure));
 
     return { questions, askQuestion, stopQuestion, pinAnswer, waitForQuestion };

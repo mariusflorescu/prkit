@@ -11,7 +11,7 @@ import { requestedAgent } from "./agentSelection.ts";
 import { asFailure, fail } from "./errors.ts";
 import type { makeIdempotent } from "./idempotent.ts";
 import { makePager } from "./paging.ts";
-import { ACTIVE, askFingerprint, outsideQuestion } from "./questions.ts";
+import { askFingerprint, outsideQuestion, waitForAnswer } from "./questions.ts";
 import {
   AskedLocalQuestion,
   type AskAboutLocalInput,
@@ -30,10 +30,9 @@ import {
   type ReadLocalGuideInput,
   type ReadLocalQuestionsInput,
   type LocalQuestionWaitInput,
-  type LocalQuestionWaitResult,
+  type QuestionWaitResult,
+  WAIT_DEFAULT_SECONDS,
 } from "./schemas.ts";
-
-const WAIT_DEFAULT_SECONDS = 50;
 
 /** A repository problem crosses as something the client can act on; the sentence is the user's. */
 const CODES: Record<LocalReviewError["reason"], OutsideToolFailure["code"]> = {
@@ -316,26 +315,22 @@ export const makeOutsideLocal = (idempotent: Effect.Success<typeof makeIdempoten
     const waitForLocalQuestion = (input: typeof LocalQuestionWaitInput.Type) =>
       Effect.gen(function* () {
         const { review, question: asked } = yield* questionOnThisReview(input);
-        const current = asks
-          .list(review.id)
-          .pipe(Effect.map((rows) => rows.find((row) => row.id === asked.id)));
-        const settled = yield* Stream.merge(
-          asks
-            .watch(review.id)
-            .pipe(Stream.filter((event) => event._tag === "snapshot" || event._tag === "question")),
-          reviews.local.watch(review.key).pipe(Stream.filter((event) => event._tag === "removed")),
-        ).pipe(
-          Stream.mapEffect(() => current),
-          Stream.filter((question) => question === undefined || !ACTIVE.has(question.state._tag)),
-          Stream.runHead,
-          Effect.timeoutOption(`${input.timeoutSeconds ?? WAIT_DEFAULT_SECONDS} seconds`),
+        const { finished, question } = yield* waitForAnswer(
+          asks.list(review.id).pipe(Effect.map((rows) => rows.find((row) => row.id === asked.id))),
+          Stream.merge(
+            asks
+              .watch(review.id)
+              .pipe(
+                Stream.filter((event) => event._tag === "snapshot" || event._tag === "question"),
+              ),
+            reviews.local
+              .watch(review.key)
+              .pipe(Stream.filter((event) => event._tag === "removed")),
+          ),
+          input.timeoutSeconds,
         );
-        const latest = yield* current;
-        if (latest === undefined) return yield* fail("not-found", REMOVED);
-        return {
-          finished: Option.isSome(settled) && Option.isSome(settled.value),
-          question: outsideQuestion(latest),
-        } satisfies LocalQuestionWaitResult;
+        if (question === undefined) return yield* fail("not-found", REMOVED);
+        return { finished, question: outsideQuestion(question) } satisfies QuestionWaitResult;
       }).pipe(Effect.mapError(asFailure));
 
     return {

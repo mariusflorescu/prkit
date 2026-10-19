@@ -8,7 +8,7 @@ import * as Schema from "effect/Schema";
 import {
   AskedLocalQuestion,
   GenerateLocalGuideResult,
-  LocalQuestionWaitResult,
+  QuestionWaitResult,
   LocalWaitResult,
   OutsideQuestion,
 } from "../apps/server/src/outside/schemas.ts";
@@ -23,7 +23,7 @@ import { emulateOsColorScheme } from "./osColorScheme.ts";
 const decodeGenerate = Schema.decodeSync(Schema.fromJsonString(GenerateLocalGuideResult));
 const decodeWait = Schema.decodeSync(Schema.fromJsonString(LocalWaitResult));
 const decodeAsked = Schema.decodeSync(Schema.fromJsonString(AskedLocalQuestion));
-const decodeQuestionWait = Schema.decodeSync(Schema.fromJsonString(LocalQuestionWaitResult));
+const decodeQuestionWait = Schema.decodeSync(Schema.fromJsonString(QuestionWaitResult));
 const decodeQuestions = Schema.decodeSync(
   Schema.fromJsonString(Schema.Struct({ items: Schema.Array(OutsideQuestion) })),
 );

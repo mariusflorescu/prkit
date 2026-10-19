@@ -54,6 +54,7 @@ const READS = [
   "read_guide_progress",
   "read_review_diff",
   "read_pull_request_questions",
+  "wait_for_question",
   "read_guide_duration",
   "read_guide_settings",
   "read_guide_scope",
