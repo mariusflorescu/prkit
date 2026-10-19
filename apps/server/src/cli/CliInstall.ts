@@ -117,6 +117,7 @@ export const make = Effect.gen(function* () {
         pathSource,
         pathCommand: `export PATH=${shellQuote(directory)}:"$PATH"`,
         skillCommand,
+        opensTerminal: process.platform === "darwin",
       } satisfies CliInstallState;
     }).pipe(
       Effect.catchTag("PlatformError", () =>
