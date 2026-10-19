@@ -29,13 +29,14 @@ import {
 } from "../pullRequests/fingerprint.ts";
 import { CheckRun, Status, shownCheckRuns, shownStatuses } from "../pullRequests/detailReads.ts";
 import { PullRequests } from "../pullRequests/PullRequests.ts";
+import { ReadingState } from "../readingState/ReadingState.ts";
 import { Workspace } from "../workspace/Workspace.ts";
 import type { Observation } from "./lifecycle.ts";
 import { Reviews, type WatchedReview } from "./Reviews.ts";
 
 /** At most this many PRs per GraphQL request. */
 const BATCH_SIZE = 50;
-/** Closed and merged tabs, and failed reviews, are read this often. */
+/** Closed and merged tabs, failed reviews, and PRs left with something marked, are read this often. */
 const SLOW_MS = 15 * 60_000;
 /** The active PR's pending checks are asked about this often; a 304 costs nothing. */
 const CHECKS_MS = 15_000;
@@ -101,11 +102,13 @@ interface Target {
 /**
  * The one loop that reads GitHub on its own. Every tick it fingerprints, in one
  * aliased query per account: every review that is preparing, writing or watching, every open
- * PR tab while a window is visible, and (every 15 minutes) failed reviews and
- * closed or merged tabs. A changed fingerprint marks that PR's cached reads stale;
- * a review also learns about merges and new heads (docs/internals/architecture.md
- * "The watcher"). While visible it also keeps the inbox revalidated and, every 15
- * seconds, asks GitHub with ETags whether the active PR's pending checks moved.
+ * PR tab while a window is visible, and (every 15 minutes) failed reviews, closed or merged
+ * tabs, and PRs with reviewed files or checked steps that no tab shows. A changed fingerprint
+ * marks that PR's cached reads stale; a review also learns about merges and new heads
+ * (docs/internals/architecture.md "The watcher"), and what GitHub says of every PR read
+ * decides whether its reading state is forgotten. While visible it also keeps the inbox
+ * revalidated and, every 15 seconds, asks GitHub with ETags whether the active PR's pending
+ * checks moved.
  */
 export class ReviewWatcher extends Context.Service<ReviewWatcher, Effect.Success<typeof make>>()(
   "@prkit/server/reviews/ReviewWatcher",
@@ -118,65 +121,71 @@ export const make = Effect.gen(function* () {
   const api = yield* GitHubApi;
   const pullRequests = yield* PullRequests;
   const workspace = yield* Workspace;
+  const readingState = yield* ReadingState;
   const once = yield* Semaphore.make(1);
   const checkedAt = new Map<string, number>();
   const etags = new Map<string, string>();
 
-  /** Each alias is handled on its own; one failed read doesn't touch the others. */
+  /**
+   * Each alias is handled on its own; one failed read doesn't touch the others. Gives back
+   * what GitHub answered for the PRs it could read.
+   */
   const readBatch = (accountId: AccountId, batch: ReadonlyArray<Target>) =>
     Effect.gen(function* () {
       const { query, variables } = fingerprintQuery(batch.map((entry) => entry.ref));
       const read = yield* inBackground(
         api.graphqlResult(accountId, query, variables, FingerprintResponse),
       ).pipe(Effect.result);
-      yield* Effect.forEach(
-        batch,
-        (entry, index) =>
-          Effect.gen(function* () {
-            const alias = `p${index}`;
-            let observation: Observation;
-            if (Result.isFailure(read)) {
-              const error = read.failure;
-              observation =
-                error.reason === "unauthorized"
-                  ? { _tag: "refused", message: error.message }
-                  : { _tag: "unreadable", message: error.message };
-            } else {
-              const pull = read.success.data?.[alias]?.pullRequest;
-              if (pull == null)
-                observation = {
-                  _tag: "unreadable",
-                  message: aliasProblem(
-                    accountId,
-                    read.success.errors.find((error) => error.path?.[0] === alias) ??
-                      read.success.errors[0],
-                  ),
-                };
-              else {
-                yield* pullRequests.observe(entry.key, accountId, pull);
-                observation = {
-                  _tag: "pull",
-                  state: pullRequestState(pull),
-                  headSha: pull.headRefOid,
-                  baseRef: pull.baseRefName,
-                };
-              }
-            }
-            if (entry.review !== null) yield* reviews.observed(entry.review, observation);
-          }).pipe(
-            Effect.catchCauseIf(
-              (cause) => !Cause.hasInterruptsOnly(cause),
-              (cause) =>
-                Effect.logWarning("Watcher couldn't apply a read", cause).pipe(
-                  Effect.annotateLogs({ key: entry.key }),
+      const answered = yield* Effect.forEach(batch, (entry, index) =>
+        Effect.gen(function* () {
+          const alias = `p${index}`;
+          let observation: Observation;
+          if (Result.isFailure(read)) {
+            const error = read.failure;
+            observation =
+              error.reason === "unauthorized"
+                ? { _tag: "refused", message: error.message }
+                : { _tag: "unreadable", message: error.message };
+          } else {
+            const pull = read.success.data?.[alias]?.pullRequest;
+            if (pull == null)
+              observation = {
+                _tag: "unreadable",
+                message: aliasProblem(
+                  accountId,
+                  read.success.errors.find((error) => error.path?.[0] === alias) ??
+                    read.success.errors[0],
                 ),
-            ),
+              };
+            else {
+              yield* pullRequests.observe(entry.key, accountId, pull);
+              observation = {
+                _tag: "pull",
+                state: pullRequestState(pull),
+                headSha: pull.headRefOid,
+                baseRef: pull.baseRefName,
+              };
+            }
+          }
+          if (entry.review !== null) yield* reviews.observed(entry.review, observation);
+          return observation._tag === "pull"
+            ? { key: entry.key, accountId, state: observation.state }
+            : undefined;
+        }).pipe(
+          Effect.catchCauseIf(
+            (cause) => !Cause.hasInterruptsOnly(cause),
+            (cause) =>
+              Effect.logWarning("Watcher couldn't apply a read", cause).pipe(
+                Effect.annotateLogs({ key: entry.key }),
+                Effect.as(undefined),
+              ),
           ),
-        { discard: true },
+        ),
       );
+      return answered.filter((answer) => answer !== undefined);
     });
 
-  /** Reviews always; open tabs only while a window shows them. */
+  /** Reviews and PRs with something marked always; open tabs only while a window shows them. */
   const targets = Effect.gen(function* () {
     const visible = (yield* SubscriptionRef.get(pullRequests.presence)) > 0;
     const found = new Map<string, Target>();
@@ -213,6 +222,11 @@ export const make = Effect.gen(function* () {
           slow: status !== undefined && status.state !== "open",
         });
       }
+    for (const { key, accountId } of yield* readingState.unshown) {
+      const ref = refFromKey(key);
+      if (ref === null) continue;
+      add({ key, accountId, ref, review: null, slow: true });
+    }
     return { visible, targets: [...found.values()] };
   });
 
@@ -275,7 +289,7 @@ export const make = Effect.gen(function* () {
             checkedAt.set(`${target.accountId}:${target.key}`, now);
             byAccount.set(target.accountId, [...(byAccount.get(target.accountId) ?? []), target]);
           }
-          yield* Effect.forEach(
+          const reads = yield* Effect.forEach(
             byAccount,
             ([accountId, entries]) =>
               Effect.forEach(
@@ -283,10 +297,10 @@ export const make = Effect.gen(function* () {
                   entries.slice(index * BATCH_SIZE, (index + 1) * BATCH_SIZE),
                 ),
                 (batch) => readBatch(accountId, batch),
-                { discard: true },
               ),
-            { concurrency: 4, discard: true },
+            { concurrency: 4 },
           );
+          yield* readingState.settle(reads.flat(2));
           yield* Effect.logDebug("Watcher read fingerprints").pipe(
             Effect.annotateLogs({ due: due.length, accounts: byAccount.size, visible }),
           );

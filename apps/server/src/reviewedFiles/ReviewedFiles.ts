@@ -100,6 +100,10 @@ export const make = Effect.gen(function* () {
 
   const marks = (target: ReviewedTarget) => readMarks(target).pipe(readFailure(target));
 
+  /** Tells every window to read this PR's marks again; call it after the write is saved. */
+  const announceChanged = (target: ReviewedTarget) =>
+    PubSub.publish(announced, { _tag: "changed", key: target.key, accountId: target.accountId });
+
   /**
    * Records what the user decided about these versions. A decision the newest matching mark
    * already says changes nothing, its order included, so repeating one is safe and a file
@@ -134,12 +138,7 @@ export const make = Effect.gen(function* () {
             return changed;
           }),
         );
-        if (changed)
-          yield* PubSub.publish(announced, {
-            _tag: "changed",
-            key: target.key,
-            accountId: target.accountId,
-          });
+        if (changed) yield* announceChanged(target);
         return yield* readMarks(target);
       }).pipe(saveFailure(target)),
     );
@@ -259,7 +258,7 @@ export const make = Effect.gen(function* () {
       };
     });
 
-  return { marks, decide, changes, report, decidePaths };
+  return { marks, decide, announceChanged, changes, report, decidePaths };
 });
 
 export const layer = Layer.effect(ReviewedFiles, make);
