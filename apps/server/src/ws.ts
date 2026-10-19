@@ -139,8 +139,9 @@ const layerHandlers = WsRpcGroup.toLayer(
       [WS_METHODS.workspaceOpenLocal]: ({ key }) => workspace.command({ kind: "open-local", key }),
       [WS_METHODS.workspaceCloseLocal]: ({ key }) =>
         workspace.command({ kind: "close-local", key }),
+      // Announced, so every window drops the notice, not just the one that asked.
       [WS_METHODS.workspaceRemoveDamaged]: ({ keys }) =>
-        workspace.command({ kind: "remove-damaged", keys }),
+        workspace.command({ kind: "remove-damaged", keys }, { focus: false }),
       [WS_METHODS.workspaceSaveInboxFilters]: (filters) =>
         workspace.saveInboxFilters(filters).pipe(Effect.map((saved) => saved.workspace)),
       [WS_METHODS.workspaceChanges]: () => workspace.changes(),

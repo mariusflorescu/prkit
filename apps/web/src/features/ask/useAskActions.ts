@@ -40,7 +40,7 @@ export function useAskActions(reviewId: ReviewId) {
     onError: failed("Couldn't change the pin"),
   });
   const removeDamaged = useMutation({
-    mutationFn: (ids: ReadonlyArray<QuestionId>) => removeDamagedQuestions(reviewId, ids),
+    mutationFn: (ids: ReadonlyArray<string>) => removeDamagedQuestions(reviewId, ids),
     onError: failed("Couldn't remove it"),
   });
   return { ask, stop, retry, pin, removeDamaged };

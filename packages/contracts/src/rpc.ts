@@ -631,7 +631,7 @@ export const WsRpcGroup = RpcGroup.make(
   }),
   /** Deletes the questions named that prkit still can't read; the rest stay. */
   Rpc.make(WS_METHODS.asksRemoveDamaged, {
-    payload: Schema.Struct({ reviewId: ReviewId, questionIds: Schema.Array(QuestionId) }),
+    payload: Schema.Struct({ reviewId: ReviewId, questionIds: Schema.Array(Schema.String) }),
     success: Schema.Void,
     error: AskError,
   }),

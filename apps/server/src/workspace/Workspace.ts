@@ -153,11 +153,13 @@ export const make = Effect.gen(function* () {
             yield* sql`UPDATE workspace SET active_key = NULL WHERE id = 1`;
             for (const row of current.open)
               yield* sql`DELETE FROM open_pull_requests WHERE key = ${row.key}`;
-            // Remove deletes a stored tab only while prkit still can't read it.
+            // Remove deletes a stored tab only while prkit still can't read it, never a readable
+            // local tab that happens to share its key.
             if (input.kind === "remove-damaged")
               for (const key of input.keys.filter((key) => current.damaged.includes(key))) {
                 yield* sql`DELETE FROM open_pull_requests WHERE key = ${key}`;
-                yield* sql`DELETE FROM open_local_reviews WHERE key = ${key}`;
+                if (!current.local.some((row) => row.key === key))
+                  yield* sql`DELETE FROM open_local_reviews WHERE key = ${key}`;
               }
             for (const row of next.open)
               yield* sql`INSERT INTO open_pull_requests (key, account_id, position) VALUES (${row.key}, ${row.accountId}, ${row.position})

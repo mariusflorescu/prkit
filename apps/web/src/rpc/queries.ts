@@ -17,7 +17,6 @@ import {
   type LocalReviewKey,
   newerWorkspace,
   type Question,
-  type QuestionId,
   type ReviewId,
   Workspace,
 } from "@prkit/contracts";
@@ -214,7 +213,7 @@ export type AsksState =
       readonly _tag: "ready";
       readonly questions: ReadonlyArray<Question>;
       /** Stored questions prkit couldn't read, left out of `questions`. */
-      readonly damaged: ReadonlyArray<QuestionId>;
+      readonly damaged: ReadonlyArray<string>;
       readonly problem: string | null;
     };
 /** Written only by `asks.watch`; see `useAsks`. */

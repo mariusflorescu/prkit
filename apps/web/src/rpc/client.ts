@@ -610,7 +610,7 @@ export const pinAnswer = (questionId: QuestionId, pinned: boolean): Promise<Ques
   call((client) => client[WS_METHODS.asksPin]({ questionId, pinned }));
 export const removeDamagedQuestions = (
   reviewId: ReviewId,
-  questionIds: ReadonlyArray<QuestionId>,
+  questionIds: ReadonlyArray<string>,
 ): Promise<void> =>
   call((client) => client[WS_METHODS.asksRemoveDamaged]({ reviewId, questionIds }));
 

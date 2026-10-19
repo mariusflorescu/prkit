@@ -118,7 +118,6 @@ const decodeQuestions = Schema.decodeUnknownEffect(Schema.Array(QuestionRow));
 /** A review's questions read every one they can, and leave a damaged one out (logged and named). */
 const decodeEachQuestion = decodeEach("ask_questions", QuestionRow);
 const decodeIds = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ id: QuestionId })));
-const decodeQuestionId = Schema.decodeUnknownOption(QuestionId);
 /** Each unfinished question on its own: one whose agent can't be read still fails as interrupted. */
 const decodeStale = decodeEach(
   "ask_questions",
@@ -318,7 +317,7 @@ export const make = Effect.gen(function* () {
       Effect.map(([rows, damaged]) => ({
         _tag: "snapshot" as const,
         questions: rows.map(toQuestion),
-        damaged: damaged.flatMap((row) => Option.toArray(decodeQuestionId(row.id))),
+        damaged: damaged.flatMap((row) => (row.id === null ? [] : [row.id])),
       })),
     );
   /** Refuses a question because another on the review is still being answered, naming that one. */
@@ -997,7 +996,7 @@ export const make = Effect.gen(function* () {
    * Deletes the named questions of the review that prkit still can't read, never one it can,
    * and sends every window watching the review its questions again.
    */
-  const removeDamaged = (reviewId: ReviewId, ids: ReadonlyArray<QuestionId>) =>
+  const removeDamaged = (reviewId: ReviewId, ids: ReadonlyArray<string>) =>
     Effect.gen(function* () {
       yield* sql.withTransaction(
         Effect.gen(function* () {

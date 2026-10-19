@@ -1,4 +1,3 @@
-import type { QuestionId } from "@prkit/contracts";
 import { TriangleAlertIcon } from "lucide-react";
 
 import { Button } from "~/components/ui/button";
@@ -13,7 +12,7 @@ export function DamagedQuestionsNotice({
   ids,
   removeDamaged,
 }: {
-  ids: ReadonlyArray<QuestionId>;
+  ids: ReadonlyArray<string>;
   removeDamaged: AskActions["removeDamaged"];
 }) {
   return (
