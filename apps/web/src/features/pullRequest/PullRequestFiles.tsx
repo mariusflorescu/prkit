@@ -22,6 +22,7 @@ import { useGuideNotesOnFiles } from "~/features/guideNotes/useGuideNotesOnFiles
 import { ReviewedCount } from "~/features/reviewedFiles/ReviewedCount";
 import { useReviewedFiles, versionOf } from "~/features/reviewedFiles/useReviewedFiles";
 import { ReviewCommentsAlerts } from "~/features/reviewComments/ReviewCommentsAlerts";
+import { CommentsWithoutDiff } from "~/features/reviewComments/CommentsWithoutDiff";
 import { useReviewCommentsStore, writingOn } from "~/features/reviewComments/reviewCommentsStore";
 import { useDiffComments } from "~/features/reviewComments/useDiffComments";
 import {
@@ -98,7 +99,7 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
   }, []);
   const filterRequest = useFilterKey(root, revealTree);
   const notesShown = useGuideNotesOnFiles();
-  const writing = useReviewCommentsStore(writingOn(detail.key));
+  const writing = useReviewCommentsStore(writingOn(detail));
   const guideNotes = useFilesGuideNotes(detail, query.data, notesShown.shown, writing);
   const notes = guideNotes._tag === "ready" ? guideNotes.notes : null;
   const commentsFor = useDiffComments(detail, files, {
@@ -205,6 +206,7 @@ export function PullRequestFiles({ detail }: { detail: PullRequestDetail }) {
       </TabActions>
       <ReviewCommentsAlerts pr={detail} />
       <FilesGuideNotesStatus state={guideNotes} />
+      <CommentsWithoutDiff pr={detail} files={files} />
       {snapshot.changedFiles > files.length && (
         <p
           role="status"

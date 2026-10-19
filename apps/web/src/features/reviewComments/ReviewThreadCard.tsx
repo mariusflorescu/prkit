@@ -9,9 +9,12 @@ import { replyToThread, resolveThread } from "~/rpc/client";
 import { CommentCard } from "./CommentCard";
 import { CommentForm } from "./CommentForm";
 import { DiffSnippet } from "./DiffSnippet";
+import { PlacementTag } from "./PlacementTag";
 import { ThreadComment } from "./ThreadComment";
 import { storeThreads } from "./reviewCommentsCache";
 import { hunkTail, rangeLabel } from "./reviewCommentPresentation";
+import { replyForm, useReviewCommentsStore } from "./reviewCommentsStore";
+import { sendingKey, useFormSending } from "./useFormSending";
 import { useOpenForm } from "./useOpenForm";
 
 /**
@@ -32,14 +35,19 @@ export function ReviewThreadCard({
 }) {
   const client = useQueryClient();
   const store = storeThreads(client, pr.key, pr.accountId);
-  const [open, setOpen] = useState(!thread.resolved);
-  const [replying, setReplying] = useState(false);
+  const form = replyForm(pr, thread.id);
+  const replying = useReviewCommentsStore((state) => state.words.has(form));
+  const beginWriting = useReviewCommentsStore((state) => state.beginWriting);
+  const stopWriting = useReviewCommentsStore((state) => state.stopWriting);
+  const [open, setOpen] = useState(!thread.resolved || replying);
   useOpenForm(pr.key, open && thread.canReply && replying);
+  const sending = useFormSending(form);
   const reply = useMutation({
+    mutationKey: sendingKey(form),
     mutationFn: (body: string) => replyToThread({ ...pr, threadId: thread.id, body }),
     onSuccess: (threads) => {
       store(threads);
-      setReplying(false);
+      stopWriting(form);
     },
   });
   const resolve = useMutation({
@@ -71,9 +79,7 @@ export function ReviewThreadCard({
           {thread.resolved ? "Resolved" : "Open"} · {count} {count === 1 ? "comment" : "comments"}
           {!open && ` · ${author}`}
         </button>
-        {thread.anchor === null && (
-          <span className="rounded border border-border/60 px-1 text-3xs">Outdated</span>
-        )}
+        {thread.anchor === null && <PlacementTag moved={false} />}
         {!thread.resolved && (
           <span className="ml-auto">
             <SendToAgentButton
@@ -130,16 +136,17 @@ export function ReviewThreadCard({
           {thread.canReply &&
             (replying ? (
               <CommentForm
+                form={form}
                 label={`Reply to ${author}`}
                 submitLabel="Reply"
                 pendingLabel="Replying..."
                 error={reply.error?.message ?? null}
-                pending={reply.isPending}
+                pending={sending}
                 onSubmit={(body) => reply.mutate(body)}
-                onCancel={() => setReplying(false)}
+                onCancel={() => stopWriting(form)}
               />
             ) : (
-              <Button size="xs" variant="outline" onClick={() => setReplying(true)}>
+              <Button size="xs" variant="outline" onClick={() => beginWriting(form, "")}>
                 Reply
               </Button>
             ))}

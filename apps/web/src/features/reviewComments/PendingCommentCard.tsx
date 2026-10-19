@@ -7,7 +7,7 @@ import type {
 } from "@prkit/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { PencilIcon, Trash2Icon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 import { Button } from "~/components/ui/button";
 import { SendToAgentButton } from "~/features/fixes/SendToAgentButton";
@@ -16,9 +16,11 @@ import { deletePendingComment, editPendingComment, movePendingComment } from "~/
 import { CommentCard } from "./CommentCard";
 import { CommentForm } from "./CommentForm";
 import { DiffSnippet } from "./DiffSnippet";
+import { PlacementTag } from "./PlacementTag";
 import { storePending } from "./reviewCommentsCache";
 import { OUTDATED_WHY, rangeLabel, suggestionLabel } from "./reviewCommentPresentation";
-import { useReviewCommentsStore } from "./reviewCommentsStore";
+import { editForm, useReviewCommentsStore } from "./reviewCommentsStore";
+import { sendingKey, useFormSending } from "./useFormSending";
 import { useOpenForm } from "./useOpenForm";
 
 /**
@@ -37,17 +39,22 @@ export function PendingCommentCard({
 }) {
   const client = useQueryClient();
   const store = storePending(client, pr.key, pr.accountId);
-  const [editing, setEditing] = useState(false);
+  const form = editForm(comment.id);
+  const editing = useReviewCommentsStore((state) => state.words.has(form));
+  const beginWriting = useReviewCommentsStore((state) => state.beginWriting);
+  const stopWriting = useReviewCommentsStore((state) => state.stopWriting);
   useOpenForm(pr.key, editing);
   const moving = useReviewCommentsStore((state) => state.moving?.id === comment.id);
   const startMove = useReviewCommentsStore((state) => state.startMove);
   const stopMove = useReviewCommentsStore((state) => state.stopMove);
   const here = placed._tag === "outdated" ? null : placed.placement;
+  const sending = useFormSending(form);
   const edit = useMutation({
+    mutationKey: sendingKey(form),
     mutationFn: (body: string) => editPendingComment(comment.id, body),
     onSuccess: (comments) => {
       store(comments);
-      setEditing(false);
+      stopWriting(form);
     },
   });
   const remove = useMutation({
@@ -79,11 +86,7 @@ export function PendingCommentCard({
         <span className="rounded bg-warning-surface px-1.5 py-0.5 text-3xs font-medium text-warning-foreground">
           {withAgent ? "With the agent" : "Pending"}
         </span>
-        {placed._tag !== "kept" && (
-          <span className="rounded border border-border/60 px-1 text-3xs">
-            {placed._tag === "moved" ? "Moved" : "Outdated"}
-          </span>
-        )}
+        {placed._tag !== "kept" && <PlacementTag moved={placed._tag === "moved"} />}
         <span className="min-w-0 truncate">
           {where}
           {written !== null && `, written on ${written}`}
@@ -100,7 +103,7 @@ export function PendingCommentCard({
             variant="ghost-muted"
             aria-label="Edit pending comment"
             disabled={editing}
-            onClick={() => setEditing(true)}
+            onClick={() => beginWriting(form, comment.body)}
           >
             <PencilIcon />
           </Button>
@@ -123,51 +126,53 @@ export function PendingCommentCard({
             context={comment.context}
             label="Lines this comment was written on"
           />
-          <div className="flex flex-wrap items-center gap-2">
-            {placed.suggestion && (
-              <Button
-                size="xs"
-                variant="outline"
-                disabled={move.isPending}
-                onClick={() => placed.suggestion && move.mutate(placed.suggestion)}
-              >
-                {suggestionLabel(comment.anchor, placed.suggestion.anchor)}
-              </Button>
-            )}
-            {moving ? (
-              <>
-                <span role="status" className="text-xs text-foreground">
-                  Click a line in this file to move the comment there.
-                </span>
-                <Button size="xs" variant="ghost" onClick={stopMove}>
-                  Cancel
+          {placed.why !== "file" && (
+            <div className="flex flex-wrap items-center gap-2">
+              {placed.suggestion && (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={move.isPending}
+                  onClick={() => placed.suggestion && move.mutate(placed.suggestion)}
+                >
+                  {suggestionLabel(comment.anchor, placed.suggestion.anchor)}
                 </Button>
-              </>
-            ) : (
-              <Button
-                size="xs"
-                variant="ghost"
-                onClick={() =>
-                  startMove({ key: pr.key, path: comment.anchor.path, id: comment.id })
-                }
-              >
-                Pick a new line
-              </Button>
-            )}
-          </div>
+              )}
+              {moving ? (
+                <>
+                  <span role="status" className="text-xs text-foreground">
+                    Click a line in this file to move the comment there.
+                  </span>
+                  <Button size="xs" variant="ghost" onClick={stopMove}>
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() =>
+                    startMove({ key: pr.key, path: comment.anchor.path, id: comment.id })
+                  }
+                >
+                  Pick a new line
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       )}
       <div className="mt-2">
         {editing ? (
           <CommentForm
+            form={form}
             label="Edit pending comment"
             submitLabel="Save"
             pendingLabel="Saving..."
-            defaultValue={comment.body}
             error={edit.error?.message ?? null}
-            pending={edit.isPending}
+            pending={sending}
             onSubmit={(body) => edit.mutate(body)}
-            onCancel={() => setEditing(false)}
+            onCancel={() => stopWriting(form)}
           />
         ) : (
           <PullRequestMarkdown body={comment.body} />

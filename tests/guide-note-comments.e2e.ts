@@ -301,14 +301,13 @@ test(
 
       const tabs = screen.getByRole("navigation", "Pull request tabs");
       await slug.getByRole("button", "Add as comment, question on line 3").tap();
-      await field.fill("Words left behind with the Guide tab");
+      await field.fill("Words kept across a trip to Files");
       await tabs.getByRole("link", "Files").tap();
       await tabs.getByRole("link", "Guide").tap();
       await slug.scrollIntoView({ timeout: 30_000 });
-      await expect(field).toBeHidden();
-      await expect(slug.getByRole("button", "Add as comment, question on line 3")).toBeEnabled();
+      await expect(field).toHaveValue("Words kept across a trip to Files");
+      await expect(slug.getByRole("button", "Add as comment, question on line 3")).toBeDisabled();
 
-      await slug.getByRole("button", "Add as comment, question on line 3").tap();
       await field.fill("Words the server refuses");
       const pushed = git.commit(9, {
         [LIMITS]:

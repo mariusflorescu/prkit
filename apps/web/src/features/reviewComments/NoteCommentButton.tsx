@@ -31,7 +31,7 @@ export function NoteCommentButton({
   composing: boolean;
 }) {
   const compose = useReviewCommentsStore((state) => state.compose);
-  const { on, ref, written, writtenRows, writtenHead, at } = note;
+  const { on, ref, written, writtenRows, writtenHead, at, rows, head } = note;
   const start = useMutation({
     // Read again on every click: the Files tab's copy never goes stale on its own.
     mutationFn: () => getPullRequestFiles(pr.key, pr.accountId),
@@ -43,17 +43,20 @@ export function NoteCommentButton({
         writtenHead,
       );
       const placed = captured && placeOn(captured, files);
-      if (placed === null || placed._tag === "outdated")
-        toastManager.add({ type: "warning", ...NOTE_LOST[placed?.why ?? "lines"] });
+      const here = capture(rows, { path: ref.path, start: at, end: at }, head);
+      if (placed === null || placed._tag === "outdated" || here === null)
+        toastManager.add({
+          type: "warning",
+          ...NOTE_LOST[placed?._tag === "outdated" ? placed.why : "lines"],
+        });
       else
         compose({
-          key: pr.key,
-          path: ref.path,
-          range: { start: at, end: at },
+          pr,
+          site: on === "files" ? { on } : { on, revision: ref.revision },
+          placement: here,
           note: {
             ref,
             text: written.text,
-            on,
             movedTo: samePoint(placed.placement.anchor.end, at) ? null : placed.placement.anchor,
           },
         });
