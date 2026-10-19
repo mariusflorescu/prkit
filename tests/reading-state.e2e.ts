@@ -1,9 +1,15 @@
+import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
 import { test } from "@e2e-dev/web";
 import { expect } from "e2e";
+import * as Schema from "effect/Schema";
 
+import {
+  MarkedFilesResult,
+  ReviewedFilesResult,
+} from "../apps/server/src/outside/paritySchemas.ts";
 import { setUpFakeClaude } from "./fakeClaude.ts";
 import { startFakeGitHub, startFakeInstance, stopFakeInstance } from "./fakeGitHub.ts";
 import { readRows } from "./fixturePr.ts";
@@ -31,7 +37,6 @@ const STATS = {
   chapter: 1,
 };
 
-/** What the reader marked, as the two tables hold it. */
 const marks = (home: string) => ({
   files: readRows(
     home,
@@ -40,7 +45,6 @@ const marks = (home: string) => ({
   steps: readRows(home, "SELECT subject, ticked FROM manual_check_ticks ORDER BY subject, step"),
 });
 
-/** Everything a guide keeps that the reading state must never take with it. */
 const kept = (home: string) =>
   readRows(
     home,
@@ -157,7 +161,7 @@ test(
       expect(guideKept).toEqual([{ revisions: 1, questions: 1, pins: 1, reviews: 1 }]);
       expect(reviewOf(run.home, 9)).toEqual([{ state: "watching", reason: null }]);
 
-      // One pass reads both, so once PR 9's marks are gone PR 1 was already read closed.
+      // PR 1's tab is read every tick, so by the time PR 9's marks go it was read closed.
       await fake.close(1);
       await fake.merge(9);
       await expect
@@ -205,6 +209,58 @@ test(
       await app.screenshot("merged-guide-after-forgetting");
       await closeTab(9);
 
+      await app.open(`${run.url}/settings/outside-agents`);
+      await screen.getByRole("switch", "Let my coding agents use prkit").tap();
+      await screen.getByRole("radio", "Read and start work").tap();
+      await expect(
+        screen.getByText("Outside agents can read and start work", { exact: true }),
+      ).toBeVisible();
+      const cli = (args: ReadonlyArray<string>) => {
+        const result = NodeChildProcess.spawnSync(
+          NodePath.join(run.home, "bin/prkit"),
+          [...args, "--account", ACCOUNT, "--json"],
+          {
+            encoding: "utf8",
+            env: { HOME: fake.home, PATH: process.env.PATH ?? "/usr/bin:/bin", NO_COLOR: "1" },
+          },
+        );
+        expect({ args, code: result.status, stderr: result.stderr }).toEqual({
+          args,
+          code: 0,
+          stderr: "",
+        });
+        return result.stdout;
+      };
+      await fake.merge(4);
+      const { headSha } = Schema.decodeSync(Schema.fromJsonString(ReviewedFilesResult))(
+        cli(["pr", "reviewed", "budget/fixtures#4"]),
+      );
+      const marked = Schema.decodeSync(Schema.fromJsonString(MarkedFilesResult))(
+        cli([
+          "pr",
+          "reviewed",
+          "set",
+          "budget/fixtures#4",
+          "--head-sha",
+          headSha,
+          "--paths",
+          "src/change-0.ts",
+        ]),
+      );
+      expect(marked.files).toEqual([
+        { path: "src/change-0.ts", previousPath: null, state: "reviewed" },
+      ]);
+      await expect
+        .poll(() => marks(run.home), { timeout: 30_000, interval: 500 })
+        .toEqual({
+          files: [
+            { subject: subjectOf(1), path: "src/change-0.ts", reviewed: 1 },
+            { subject: subjectOf(3), path: "src/change-0.ts", reviewed: 1 },
+          ],
+          steps: [],
+        });
+      expect(forgotten(run.log)).toHaveLength(3);
+
       await closeTab(1);
       await relaunch();
       await expect
@@ -214,7 +270,7 @@ test(
           steps: [],
         });
       expect(kept(run.home)).toEqual(guideKept);
-      expect(forgotten(run.log)).toHaveLength(3);
+      expect(forgotten(run.log)).toHaveLength(4);
       for (const line of forgotten(run.log)) expect(line).toMatch(/pullRequests\W+1\b/);
 
       const fingerprints = async () => (await fake.stats()).byKind["graphql:fingerprint"] ?? 0;
@@ -224,12 +280,14 @@ test(
       await app.open(run.openUrl);
       await expect(screen.getByRole("link", "Inbox")).toBeVisible({ timeout: 30_000 });
       await expect.poll(fingerprints, { timeout: 30_000 }).toBeGreaterThan(before);
+      // The pass that sent that read settles after it, so wait out two more ticks.
+      await new Promise((resolve) => setTimeout(resolve, 4_000));
       expect(marks(run.home)).toEqual({
         files: [{ subject: subjectOf(3), path: "src/change-0.ts", reviewed: 1 }],
         steps: [],
       });
       expect(kept(run.home)).toEqual(guideKept);
-      expect(forgotten(run.log)).toHaveLength(3);
+      expect(forgotten(run.log)).toHaveLength(4);
 
       expect(await fake.writes()).toEqual([]);
       expect(git.pushes()).toEqual([]);

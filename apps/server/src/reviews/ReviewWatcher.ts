@@ -126,10 +126,7 @@ export const make = Effect.gen(function* () {
   const checkedAt = new Map<string, number>();
   const etags = new Map<string, string>();
 
-  /**
-   * Each alias is handled on its own; one failed read doesn't touch the others. Gives back
-   * what GitHub answered for the PRs it could read.
-   */
+  /** Each alias is handled on its own; one failed read doesn't touch the others. */
   const readBatch = (accountId: AccountId, batch: ReadonlyArray<Target>) =>
     Effect.gen(function* () {
       const { query, variables } = fingerprintQuery(batch.map((entry) => entry.ref));

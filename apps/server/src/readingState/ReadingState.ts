@@ -1,5 +1,4 @@
 import type { AccountId, PullRequestKey, PullRequestState } from "@prkit/contracts";
-import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -22,10 +21,8 @@ const decodeSubjects = Schema.decodeUnknownEffect(
 );
 
 /**
- * What the reader marked on a pull request while reading it: reviewed files and checked
- * manual check steps. It stays until GitHub says the PR was merged or closed and no tab
- * shows it (docs/internals/architecture.md "Reviewed files"). Stopping a review changes
- * nothing, and a guide's revisions, questions, drafts and the review itself are not touched.
+ * A pull request's reviewed files and checked manual check steps, kept until GitHub says it
+ * was merged or closed and no tab shows it (docs/internals/architecture.md "Reviewed files").
  */
 export class ReadingState extends Context.Service<ReadingState, Effect.Success<typeof make>>()(
   "@prkit/server/readingState/ReadingState",
@@ -37,15 +34,12 @@ export const make = Effect.gen(function* () {
   const reviewedFiles = yield* ReviewedFiles;
   const manualCheckTicks = yield* ManualCheckTicks;
 
-  /** A failure here is logged and never stops the watcher's pass over its other reads. */
-  const logged =
-    <B>(message: string, fallback: B) =>
-    <A, E, R>(self: Effect.Effect<A, E, R>) =>
-      self.pipe(
-        Effect.catchCauseIf(
-          (cause) => !Cause.hasInterruptsOnly(cause),
-          (cause) => Effect.logWarning(message, cause).pipe(Effect.as(fallback)),
-        ),
+  const skipped =
+    <A>(message: string, fallback: A) =>
+    (error: { readonly message: string }) =>
+      Effect.logWarning(message).pipe(
+        Effect.annotateLogs({ error: error.message }),
+        Effect.as(fallback),
       );
 
   /**
@@ -65,7 +59,13 @@ export const make = Effect.gen(function* () {
         found.push({ key: subject.key, accountId: subject.accountId });
     }
     return found;
-  }).pipe(logged("Couldn't list the pull requests with something marked", []));
+  }).pipe(
+    Effect.catchTags({
+      WorkspaceError: skipped("Couldn't read the open tabs", []),
+      SqlError: skipped("Couldn't list the pull requests with something marked", []),
+      SchemaError: skipped("Couldn't list the pull requests with something marked", []),
+    }),
+  );
 
   /**
    * Drops what was read on a PR, unless a tab shows it by the time this runs. The rows go with
@@ -111,7 +111,10 @@ export const make = Effect.gen(function* () {
         }),
       ),
       Effect.uninterruptible,
-      logged("Couldn't forget what was read on merged or closed pull requests", undefined),
+      Effect.catchTag(
+        "SqlError",
+        skipped("Couldn't forget what was read on merged or closed pull requests", undefined),
+      ),
     );
   };
 

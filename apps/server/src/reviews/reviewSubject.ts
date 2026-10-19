@@ -10,7 +10,6 @@ export const subjectKey = (subject: ReviewSubject) =>
 
 const decodeSubject = Schema.decodeUnknownOption(ReviewSubject);
 
-/** The subject a stored text names, or undefined for text `subjectKey` never wrote. */
 export const subjectFromKey = (text: string) => {
   const [kind, ...parts] = text.split(" ");
   if (kind === "pull-request" && parts.length === 2)
