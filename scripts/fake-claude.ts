@@ -24,8 +24,9 @@
  * `{ [path]: [{ line, side, tone, text }] }`, gives those files line notes in the guide,
  * read when the guide is submitted; without it the guide has none. A `file-notes` file,
  * `{ [path]: note }`, gives those files a file note. A `chapters` file, JSON of
- * `[{ title, files: [path], kind?, risk? }]`, splits the guide into those chapters, in that
- * order and with that kind and level, with every file they leave out in a last one. A
+ * `[{ title, files: [path], kind?, risk?, body?, pseudocode? }]`, splits the guide into those
+ * chapters, in that order and with that kind and level, with every file they leave out in a
+ * last one. A chapter's `body` and `pseudocode` go into `submit_guide` exactly as given. A
  * `manual-check` file holds the guide's `manualCheck` as JSON; without it the guide has nothing
  * to check by hand. When the prompt asks for the author's pre-flight, the guide sends the JSON a
  * `preflight` file holds as it is, or `{}` (nothing to flag) without one. A `flow` file holds the
@@ -149,6 +150,8 @@ const Chapters = Schema.fromJsonString(
         Schema.Literals(["core", "supporting", "data", "config", "tests", "docs", "generated"]),
       ),
       risk: Schema.optionalKey(Schema.Literals(["low", "medium", "high"])),
+      body: Schema.optionalKey(Schema.Json),
+      pseudocode: Schema.optionalKey(Schema.Json),
     }),
   ),
 );
@@ -520,17 +523,19 @@ const turn = async (prompt: string) => {
     kind?: (typeof Chapters.Type)[number]["kind"] | undefined;
     level?: (typeof Chapters.Type)[number]["risk"] | undefined;
     files: ReadonlyArray<string>;
+    text?: Pick<(typeof Chapters.Type)[number], "body" | "pseudocode">;
   };
   const groups: ReadonlyArray<Planned> = flagged("split")
     ? files.map((path) => ({ title: `Change in ${path}`, files: [path] }))
     : flagged("chapters")
       ? Schema.decodeSync(Chapters)(
           NodeFS.readFileSync(NodePath.join(control, "chapters"), "utf8"),
-        ).map(({ title, files: paths, kind, risk: level }) => ({
+        ).map(({ title, files: paths, kind, risk: level, ...text }) => ({
           title,
           kind,
           level,
           files: paths.filter((path) => files.includes(path)),
+          text,
         }))
       : [];
   const placed = new Set(groups.flatMap((chapter) => chapter.files));
@@ -550,9 +555,10 @@ const turn = async (prompt: string) => {
         ...chapters.map((chapter) => levels.indexOf(chapter.level ?? risk.guide.level)),
       )
     ];
-  const chapterJson = ({ title, kind, level, files: paths }: Planned) => {
+  const chapterJson = ({ title, kind, level, files: paths, text }: Planned) => {
     const chapter = {
       title,
+      ...text,
       files: paths.map(entryOf),
       risk:
         level === undefined ? risk.chapter(paths) : { level, reasons: risk.chapter(paths).reasons },
