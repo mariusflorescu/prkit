@@ -1,10 +1,25 @@
-import { useId } from "react";
+import { useEffect, useId, useState } from "react";
 
 import { Button } from "~/components/ui/button";
 import { ButtonLabel } from "~/components/ui/button-label";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { noNotesHere } from "./placeGuideNotes";
 import type { FilesGuideNotesState } from "./useFilesGuideNotes";
+
+/** A read quicker than this says nothing, so a guide landing never flashes "Loading". */
+const LOADING_WORDS_AFTER_MS = 500;
+
+/** Whether the notes have been loading long enough for the reader to wait on them. */
+function useLongLoad(loading: boolean) {
+  const [long, setLong] = useState(false);
+  if (!loading && long) setLong(false);
+  useEffect(() => {
+    if (!loading) return;
+    const timer = setTimeout(() => setLong(true), LOADING_WORDS_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [loading]);
+  return long;
+}
 
 /** What the tab row says about the notes. */
 type NotesStatus = {
@@ -91,13 +106,15 @@ const statusOf = (state: FilesGuideNotesState): NotesStatus | null => {
  */
 export function FilesGuideNotesStatus({ state }: { state: FilesGuideNotesState }) {
   const storyId = useId();
-  const status = statusOf(state);
+  const loading = state._tag === "loading";
+  const longLoad = useLongLoad(loading);
+  const status = loading && !longLoad ? null : statusOf(state);
   const told = status !== null && status.story !== status.words;
   return (
     <span
       role="status"
       aria-atomic="true"
-      aria-busy={status?.busy === true || undefined}
+      aria-busy={loading || status?.busy === true || undefined}
       data-guide-notes-status=""
       className="flex items-center gap-1.5 text-xs text-muted-foreground"
     >
