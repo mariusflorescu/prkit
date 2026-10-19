@@ -81,15 +81,22 @@ Scope reads accept `{"_tag":"repository","repositoryId":"<id>"}` or `{"_tag":"pu
 
 ## Local changes
 
-| Command                                          | What it returns or changes                                                                                                        |
-| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| `prkit local guide --description 'What and why'` | Snapshots the folder's working tree on its current branch and starts a guide; `outcome` says `started`, `running` or `unchanged`. |
-| `prkit local read --json`                        | State, what the run took (base, head, files left out) and the latest guide; `--revision 1` reads an earlier one.                  |
-| `prkit local wait --timeout 600 --json`          | Waits for the guide to stop running; a timeout never stops it.                                                                    |
-| `prkit local stop`                               | Stops a guide while it is written; revisions stay readable.                                                                       |
-| `prkit local list --json`                        | Paged local guides, the latest changed first.                                                                                     |
+| Command                                                 | What it returns or changes                                                                                                        |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `prkit local guide --description 'What and why'`        | Snapshots the folder's working tree on its current branch and starts a guide; `outcome` says `started`, `running` or `unchanged`. |
+| `prkit local read --json`                               | State, what the run took (base, head, files left out) and the latest guide; `--revision 1` reads an earlier one.                  |
+| `prkit local wait --timeout 600 --json`                 | Waits for the guide to stop running; a timeout never stops it.                                                                    |
+| `prkit local stop`                                      | Stops a guide while it is written; revisions stay readable.                                                                       |
+| `prkit local list --json`                               | Paged local guides, the latest changed first.                                                                                     |
+| `prkit local questions list --json`                     | Paged questions about the folder's guide, oldest first; `--revision` narrows to one guide revision.                               |
+| `prkit local questions ask --question 'Why?'`           | Asks the guide's agent and returns the question's id at once; optional `--revision`, `--scope` and `--request-id`.                |
+| `prkit local questions wait --question-id <id>`         | Waits until that question is answered, stopped or failed; a timeout never stops it.                                               |
+| `prkit local questions stop --question-id <id>`         | Stops a question being answered; the text so far stays as its answer.                                                             |
+| `prkit local questions pin --question-id <id> --pinned` | Pins an answered question to its chapter in prkit; `--no-pinned` unpins it.                                                       |
 
 `prkit local guide` takes `--path` for another folder, `--branch <name>` for that branch's last commit alone, `--base <branch>` for the base, `--description` for the author's words, `--regenerate` to write the guide again with nothing changed, and `--agent`, `--model` and `--option` as guide generation does. Read, wait and stop name the review by `--key local:<16 hex>`, by `--path`, or by the working directory, with `--branch` for a branch-tip review. Without `--key` or `--path` every local command sends the working directory.
+
+`prkit local questions ask` is about all the changes unless `--scope` says otherwise: `{"_tag":"local-changes"}` (the default), a chapter with an id from `prkit local read --json`, or a lines scope as for a PR question, side `new` for the changed file and `old` for the base. One question per local review is answered at a time. A folder without a guide has nothing to ask about.
 
 ## Questions about a guide
 
@@ -136,7 +143,7 @@ A question's `state` is `starting`, `waiting` (for a free agent), `answering`, `
 
 A move names lines the way an add does, as GitHub numbers them in the PR's diff now. `--head-sha` is the `headSha` that `prkit pr read <pr> --json` returned, the head those numbers are on. If the PR moved since, nothing is added or moved and the command fails with `conflict`. Read it again. prkit keeps the rows around them, so the draft follows its code when commits land. `comments list` reports where each draft sits now and whether it is outdated; read it and the PR files before moving a comment.
 
-Only comments add, fix send, fix change and questions ask take `--request-id`. Reuse it after an uncertain response to avoid starting the same action twice. Other work commands aren't automatically replayed; read their current state before retrying. Fix commits started here wait for Push in the app.
+Only comments add, fix send, fix change, questions ask and local questions ask take `--request-id`. Reuse it after an uncertain response to avoid starting the same action twice. Other work commands aren't automatically replayed; read their current state before retrying. Fix commits started here wait for Push in the app.
 
 ## Reviewed files
 
@@ -166,4 +173,4 @@ Read `prkit pr reviewed <pr> --json` first for the paths and its `headSha`. If t
 | `prkit tabs focus <pr>`                                                                | Focuses an already open tab.                                                           |
 | `prkit tabs reorder --keys github.com/owner/repo#123 --keys github.com/owner/repo#124` | Saves the complete tab order; stale or incomplete lists fail. Read the tab list first. |
 
-All reads work at Read only, `prkit local read`, `wait` and `list` included. Local changes, guide/fix work, questions, `prkit local guide` and `stop`, and PR settings saves require Read and start work, enforced by the server. There are no GitHub write commands. `prkit --version` and `prkit --completions zsh` also work offline.
+All reads work at Read only, `prkit local read`, `wait`, `list` and `questions list` and `wait` included. Local changes, guide/fix work, questions, `prkit local guide`, `stop` and `questions ask`, `stop` and `pin`, and PR settings saves require Read and start work, enforced by the server. There are no GitHub write commands. `prkit --version` and `prkit --completions zsh` also work offline.

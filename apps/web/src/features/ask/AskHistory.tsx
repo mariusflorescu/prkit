@@ -4,6 +4,7 @@ import { ReviewAlert } from "~/components/review/ReviewAlert";
 import { Skeleton } from "~/components/ui/skeleton";
 import type { AsksState } from "~/rpc/queries";
 
+import { askWords } from "./askPresentation";
 import type { AskTarget } from "./askTarget";
 import { QuestionCard } from "./QuestionCard";
 import type { AskActions } from "./useAskActions";
@@ -70,7 +71,7 @@ export function AskHistory({
           <ReviewAlert title="Couldn't load your questions" message={state.message} retry={retry} />
         ) : questions.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
-            Ask the agent that wrote this guide. It already read the whole pull request.
+            {askWords(target.key).empty}
           </p>
         ) : (
           questions.map((question) => (

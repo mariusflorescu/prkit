@@ -5,8 +5,10 @@ export { FileTree, type FileTreeProps } from "./FileTree";
 export { DiffControls } from "./DiffControls";
 export type {
   DiffAnnotation,
+  DiffAsk,
   DiffComments,
   DiffContents,
+  DiffInteraction,
   LineRange,
   LoadContents,
   ReviewedControl,

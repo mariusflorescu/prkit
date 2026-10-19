@@ -9,11 +9,13 @@ import {
   GuidanceEdit,
   GuideItemId,
   GuideOverride,
+  PullRequestAskScope,
   PullRequestDetail,
   GitHubProblem,
   InboxReason,
   InboxResult,
   InboxSort,
+  LocalAskScope,
   LocalHead,
   LocalLeftOut,
   LocalReviewKey,
@@ -533,7 +535,7 @@ export const AskAboutInput = Schema.Struct({
   ),
   scope: Schema.optionalKey(
     describe(
-      AskScope,
+      PullRequestAskScope,
       `What the question is about, the whole pull request when omitted: {"_tag":"pull-request"}, {"_tag":"chapter","chapterId":"<id from read_guide>"}, or {"_tag":"lines","anchor":{"path":"src/a.ts","start":{"side":"new","line":3},"end":{"side":"new","line":5}}} for diff rows, side new (the pull request's version) or old (the base's).`,
     ),
   ),
@@ -728,3 +730,49 @@ export const LocalListResult = Schema.Struct({
   items: Schema.Array(LocalGuideStatus),
 });
 export type LocalListResult = typeof LocalListResult.Type;
+
+// Questions about a local guide: read_local_questions / wait_for_local_question / ask_about_local_changes / stop_local_question / pin_local_answer
+export const ReadLocalQuestionsInput = Schema.Struct({
+  ...LocalTargetFields,
+  ...PageFields,
+  revision: ReadQuestionsInput.fields.revision,
+});
+export const AskAboutLocalInput = Schema.Struct({
+  ...LocalTargetFields,
+  revision: Schema.optionalKey(
+    describe(
+      Schema.Int.check(Schema.isGreaterThan(0)),
+      "The guide revision to ask about, from read_local_guide; the latest accepted one when omitted.",
+    ),
+  ),
+  scope: Schema.optionalKey(
+    describe(
+      LocalAskScope,
+      `What the question is about, all the changes when omitted: {"_tag":"local-changes"}, {"_tag":"chapter","chapterId":"<id from read_local_guide>"}, or {"_tag":"lines","anchor":{"path":"src/a.ts","start":{"side":"new","line":3},"end":{"side":"new","line":5}}} for diff rows, side new (the changed version) or old (the base's).`,
+    ),
+  ),
+  question: AskAboutInput.fields.question,
+  clientRequestId: AskAboutInput.fields.clientRequestId,
+});
+export const AskedLocalQuestion = Schema.Struct({
+  ...AskedQuestion.fields,
+  key: LocalReviewKey,
+});
+export type AskedLocalQuestion = typeof AskedLocalQuestion.Type;
+export const LocalQuestionInput = Schema.Struct({
+  ...LocalTargetFields,
+  questionId: describe(QuestionId, "A question's id, from read_local_questions."),
+});
+export const PinLocalInput = Schema.Struct({
+  ...LocalQuestionInput.fields,
+  pinned: PinInput.fields.pinned,
+});
+export const LocalQuestionWaitInput = Schema.Struct({
+  ...LocalQuestionInput.fields,
+  timeoutSeconds: LocalWaitInput.fields.timeoutSeconds,
+});
+export const LocalQuestionWaitResult = Schema.Struct({
+  finished: Schema.Boolean,
+  question: OutsideQuestion,
+});
+export type LocalQuestionWaitResult = typeof LocalQuestionWaitResult.Type;

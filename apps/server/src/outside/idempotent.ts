@@ -1,4 +1,4 @@
-import type { PullRequestKey } from "@prkit/contracts";
+import type { ReviewKey } from "@prkit/contracts";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -18,8 +18,8 @@ const encodeFingerprint = Schema.encodeSync(
 );
 
 /**
- * Runs a tool's work once per client request: the tool, the client, the pull request and its
- * `clientRequestId`. A retry gets the first answer; the same id with other input is a
+ * Runs a tool's work once per client request: the tool, the client, the review (a pull request
+ * or local changes) and its `clientRequestId`. A retry gets the first answer; the same id with other input is a
  * conflict. Answers are kept a day.
  */
 export const makeIdempotent = Effect.gen(function* () {
@@ -47,7 +47,7 @@ export const makeIdempotent = Effect.gen(function* () {
     request: {
       readonly tool: string;
       readonly clientRequestId: string | undefined;
-      readonly key: PullRequestKey;
+      readonly key: ReviewKey;
       /** The input that names the request, in a fixed order. */
       readonly input: ReadonlyArray<string | number | null>;
     },

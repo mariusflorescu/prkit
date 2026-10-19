@@ -13,6 +13,7 @@ import {
   AskScope,
   type AskWatchEvent,
   findAgentModel,
+  type LocalReviewKey,
   NormalizedGuide,
   type Question,
   QuestionId,
@@ -49,6 +50,7 @@ import { processStartTime, reapAgentGroup } from "../agents/agentProcess.ts";
 import { Agents } from "../agents/Agents.ts";
 import { turnTmpDir } from "../agents/commandReach.ts";
 import * as ServerConfig from "../config.ts";
+import { makeKeyedGate } from "../github/keyedGate.ts";
 import { boundPort } from "../listenAddress.ts";
 import { McpTokens } from "../mcp/McpTokens.ts";
 import { StartedBy } from "../outside/StartedBy.ts";
@@ -58,6 +60,7 @@ import { type RevisionContext, Reviews } from "../reviews/Reviews.ts";
 import { catchUp, foldAnswer } from "./answer.ts";
 import { forkSources } from "./plan.ts";
 import { askPrompt, EARLIER_ANSWERS } from "./prompt.ts";
+import { SUBJECTS, subjectOf } from "./subject.ts";
 
 /** Why an answer ended without one: the question's `failed` state. */
 class AnswerFailure extends Schema.TaggedError<AnswerFailure>()("AnswerFailure", {
@@ -264,6 +267,11 @@ export const make = Effect.gen(function* () {
     readonly event: AskWatchEvent;
   }>();
   const running = new Map<QuestionId, { readonly live: Live; readonly fiber: Fiber.Fiber<void> }>();
+  /**
+   * Asking, retrying and removing a local review take turns per review, so no question starts
+   * while a removal stops the review's answers and deletes them.
+   */
+  const lifecycle = makeKeyedGate<ReviewId>(1);
 
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   // The OS random source failing is not something a question can recover from.
@@ -396,7 +404,7 @@ export const make = Effect.gen(function* () {
       const place: Place = {
         checkout,
         contextDir,
-        diffFile: path.join(contextDir, "pull-request.diff"),
+        diffFile: path.join(contextDir, SUBJECTS[subjectOf(context.key)].diffFile),
         guideFile: path.join(contextDir, "guide.json"),
       };
       yield* fs.writeFileString(place.diffFile, numberedDiff(context.snapshot).text);
@@ -561,6 +569,7 @@ export const make = Effect.gen(function* () {
         readableDirs: [place.contextDir],
         instructions,
         prompt: askPrompt({
+          subject: subjectOf(context.key),
           label: context.label,
           revision: context.revision,
           headSha: context.headSha,
@@ -759,7 +768,10 @@ export const make = Effect.gen(function* () {
   const scopeProblem = (scope: AskScope, context: RevisionContext) => {
     switch (scope._tag) {
       case "pull-request":
-        return null;
+      case "local-changes": {
+        const subject = subjectOf(context.key);
+        return scope._tag === subject ? null : SUBJECTS[subject].otherWhole;
+      }
       case "chapter":
         return askedChapter(scope, context.guide) === undefined
           ? `Revision ${context.revision}'s guide has no chapter \`${scope.chapterId}\`.`
@@ -776,32 +788,35 @@ export const make = Effect.gen(function* () {
    * never stops it. Returns at once; the answer arrives on `watch`.
    */
   const ask = (input: AskInput) =>
-    Effect.gen(function* () {
-      const context = yield* reviews.revisionContext(input.reviewId, input.revision);
-      if (context === null)
-        return yield* refuse("not-found", `This review has no guide revision ${input.revision}.`);
-      const problem = scopeProblem(input.scope, context);
-      if (problem !== null) return yield* refuse("invalid", problem);
-      if ((yield* agents.usable(context.agent.instance, context.agent.kind)) === null)
-        return yield* refuse("not-ready", AGENT_OFF);
-      const id = QuestionId.make(yield* newId);
-      const askedBy = yield* StartedBy;
-      const at = yield* now;
-      const question = yield* start(
-        sql`
+    lifecycle(
+      input.reviewId,
+      Effect.gen(function* () {
+        const context = yield* reviews.revisionContext(input.reviewId, input.revision);
+        if (context === null)
+          return yield* refuse("not-found", `This review has no guide revision ${input.revision}.`);
+        const problem = scopeProblem(input.scope, context);
+        if (problem !== null) return yield* refuse("invalid", problem);
+        if ((yield* agents.usable(context.agent.instance, context.agent.kind)) === null)
+          return yield* refuse("not-ready", AGENT_OFF);
+        const id = QuestionId.make(yield* newId);
+        const askedBy = yield* StartedBy;
+        const at = yield* now;
+        const question = yield* start(
+          sql`
           INSERT INTO ask_questions (id, review_id, revision, scope, text, asked_by, asked_at, state, run_id)
           SELECT ${id}, ${input.reviewId}, ${input.revision}, ${encodeScope(input.scope)}, ${input.text},
             ${askedBy}, ${at}, 'starting', ${runId}
           WHERE NOT EXISTS (SELECT 1 FROM ask_questions
             WHERE review_id = ${input.reviewId} AND state IN ${sql.in(ACTIVE)})
           RETURNING *`.pipe(Effect.flatMap(decodeQuestions)),
-      );
-      if (question === null) return yield* refuseBusy(input.reviewId);
-      yield* Effect.logInfo("Question asked").pipe(
-        Effect.annotateLogs({ questionId: id, reviewId: input.reviewId }),
-      );
-      return question;
-    }).pipe(
+        );
+        if (question === null) return yield* refuseBusy(input.reviewId);
+        yield* Effect.logInfo("Question asked").pipe(
+          Effect.annotateLogs({ questionId: id, reviewId: input.reviewId }),
+        );
+        return question;
+      }),
+    ).pipe(
       Effect.catchTags({
         ...storeFailures,
         ReviewError: (error) => refuse("failed", error.message),
@@ -827,6 +842,14 @@ export const make = Effect.gen(function* () {
   /** Answers a stopped or failed question again, in place. Safe to repeat. */
   const retry = (id: QuestionId) =>
     Effect.gen(function* () {
+      const asked = yield* find(id);
+      if (asked === null) return yield* refuse("not-found", "That question doesn't exist.");
+      return yield* lifecycle(asked.reviewId, retryIn(id));
+    }).pipe(Effect.catchTags(storeFailures));
+
+  /** Inside the review's turn: answers the question again if it may, or says why not. */
+  const retryIn = (id: QuestionId) =>
+    Effect.gen(function* () {
       const started = yield* start(
         sql`
           UPDATE ask_questions SET state = 'starting', answer = '[]', failure = NULL, message = NULL,
@@ -851,7 +874,7 @@ export const make = Effect.gen(function* () {
         case "failed":
           return yield* refuseBusy(question.reviewId);
       }
-    }).pipe(Effect.catchTags(storeFailures));
+    });
 
   /** Pins an answered question to its chapter, or unpins it. Safe to repeat. */
   const pin = (id: QuestionId, pinned: boolean) =>
@@ -927,9 +950,32 @@ export const make = Effect.gen(function* () {
     );
   });
 
+  /**
+   * Removes a local review with its questions. The answers still being written stop first, and
+   * their rows go only once their agents have, so a crash in between leaves rows startup reaps.
+   * No question on the review starts meanwhile. Safe to repeat.
+   */
+  const removeLocalReview = (key: LocalReviewKey) =>
+    Effect.gen(function* () {
+      const review = (yield* reviews.local.get(key)).review;
+      if (review === null) return yield* reviews.local.remove(key);
+      // Read inside the review's turn, so a question that started just before is stopped too.
+      const stopAll = Effect.suspend(() =>
+        Effect.forEach(
+          [...running.values()].filter((run) => run.live.reviewId === review.id),
+          (run) => {
+            run.live.stopped = true;
+            return Fiber.interrupt(run.fiber);
+          },
+          { discard: true },
+        ),
+      );
+      return yield* lifecycle(review.id, stopAll.pipe(Effect.andThen(reviews.local.remove(key))));
+    }).pipe(Effect.uninterruptible);
+
   yield* reconcile;
 
-  return { watch, list, ask, stop, retry, pin };
+  return { watch, list, ask, stop, retry, pin, removeLocalReview };
 });
 
 export const layer = Layer.effect(Asks, make);

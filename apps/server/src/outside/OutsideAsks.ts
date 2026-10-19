@@ -1,13 +1,6 @@
-import {
-  answerText,
-  type AnswerBasis,
-  AskScope,
-  type Question,
-  type ReviewId,
-} from "@prkit/contracts";
+import type { ReviewId } from "@prkit/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import { Asks } from "../asks/Asks.ts";
@@ -16,10 +9,10 @@ import { asFailure, fail } from "./errors.ts";
 import type { makeIdempotent } from "./idempotent.ts";
 import { makePager } from "./paging.ts";
 import type { ResolveTarget } from "./OutsideReads.ts";
+import { ACTIVE, askFingerprint, outsideQuestion } from "./questions.ts";
 import {
   AskedQuestion,
   type AskAboutInput,
-  type OutsideQuestion,
   type PinInput,
   type QuestionInput,
   type ReadQuestionsInput,
@@ -27,49 +20,7 @@ import {
   type WaitResult,
 } from "./schemas.ts";
 
-const encodeScope = Schema.encodeSync(Schema.fromJsonString(AskScope));
 const NO_GUIDE = "This pull request has no guide yet.";
-const ACTIVE = new Set(["starting", "waiting", "answering"]);
-
-const FRESH_REASONS = {
-  "cant-continue": "this agent can't continue the guide's conversation",
-  "moved-on": "the guide's conversation may have gone on past this revision",
-  "other-agent": "the guide was written by a different agent",
-  "session-gone": "the agent no longer has the guide's conversation",
-} as const;
-
-/** Where an answer's conversation came from, as the app says it. */
-const basisWords = (basis: AnswerBasis) => {
-  switch (basis._tag) {
-    case "guide-session":
-      return "A fork of the conversation that wrote this guide.";
-    case "follow-up":
-      return `A fork of the answer to question ${basis.of}.`;
-    case "fresh":
-      return `A new conversation, since ${FRESH_REASONS[basis.why]}.`;
-  }
-};
-
-export const outsideQuestion = (question: Question): OutsideQuestion => {
-  const { state } = question;
-  return {
-    id: question.id,
-    revision: question.revision,
-    scope: question.scope,
-    text: question.text,
-    askedBy: question.askedBy,
-    askedAt: question.askedAt,
-    state: state._tag,
-    basis:
-      (state._tag === "answering" || state._tag === "answered" || state._tag === "stopped") &&
-      state.basis !== null
-        ? basisWords(state.basis)
-        : null,
-    message: state._tag === "failed" ? state.message : null,
-    answer: answerText(question.answer),
-    pinned: question.pinnedAt !== null,
-  };
-};
 
 /**
  * Questions about a guide for outside agents: the same `Asks` calls the app's panel makes,
@@ -138,7 +89,7 @@ export const makeOutsideAsks = (
             tool: "ask_about_pull_request",
             clientRequestId: input.clientRequestId,
             key: target.key,
-            input: [input.revision ?? null, encodeScope(scope), text],
+            input: askFingerprint(input.revision, scope, text),
           },
           AskedQuestion,
           asks.ask({ reviewId: review.id, revision, scope, text }).pipe(

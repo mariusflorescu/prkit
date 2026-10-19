@@ -3,7 +3,7 @@ import { cn } from "~/lib/utils";
 
 import { AskComposer } from "./AskComposer";
 import { AskHistory } from "./AskHistory";
-import { isActive, stateWords } from "./askPresentation";
+import { askWords, isActive, PLACEHOLDERS, stateWords } from "./askPresentation";
 import { useDock } from "./askStore";
 import type { AskTarget } from "./askTarget";
 import { useAskActions } from "./useAskActions";
@@ -22,7 +22,7 @@ export function AskDock({ target }: { target: AskTarget }) {
   const newest = questions.at(-1);
   return (
     <section
-      aria-label="Ask about this pull request"
+      aria-label={PLACEHOLDERS[askWords(target.key).whole._tag]}
       data-ask-dock={open ? "open" : "closed"}
       className={cn(
         "sticky bottom-0 z-10 flex shrink-0 flex-col border-t border-border bg-background",

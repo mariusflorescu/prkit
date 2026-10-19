@@ -4,12 +4,13 @@ import {
   type FileDiffContentsLoader,
   type FileDiffOptions,
 } from "@pierre/diffs/react";
-import type { AnnotationSide, SelectedLineRange } from "@pierre/diffs";
+import type { AnnotationSide, GetHoveredLineResult, SelectedLineRange } from "@pierre/diffs";
 import type { DiffFile, LinePoint } from "@prkit/contracts";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "~/components/ui/button";
 
+import { AskLineButton } from "./AskLineButton";
 import { DIFF_THEMES } from "./DiffWorkerPoolProvider";
 import { GuideNote } from "./GuideNote";
 import { MoveChip } from "./MoveChip";
@@ -17,6 +18,7 @@ import { useFileMoves, useFileReveal, useFileScopes } from "./diffListContext";
 import { useDiffPrefs } from "./diffPrefs";
 import { DIFF_CSS } from "./diffStyles";
 import { buildFileDiff, fileRows, labelTrailingSeparator } from "./fileDiff";
+import { commentsOf } from "./interaction";
 import { cellAt, makeLineKeys } from "./lineKeys";
 import { movedCss } from "./movedCss";
 import { chipLine, type Move } from "./moves";
@@ -24,8 +26,8 @@ import { paintScopes } from "./paintScopes";
 import type {
   ContentsState,
   DiffAnnotation,
-  DiffComments,
   DiffContents,
+  DiffInteraction,
   LineRange,
   LoadContents,
   RevealLines,
@@ -50,6 +52,21 @@ const fromPierre = (range: SelectedLineRange): LineRange => ({
     line: range.end,
   },
 });
+/**
+ * The lines a click on the Ask button asks about: the dock's own lines when the button sits on
+ * their last line, where Pierre keeps it while they are selected, else the line it sits on.
+ */
+const clickedRange = (line: GetHoveredLineResult<"diff">, selection: LineRange | null) => {
+  const point: LinePoint = {
+    side: line.side === "deletions" ? "old" : "new",
+    line: line.lineNumber,
+  };
+  return selection !== null &&
+    selection.end.side === point.side &&
+    selection.end.line === point.line
+    ? selection
+    : { start: point, end: point };
+};
 const reportCell = (rendered: HTMLElement | null, reveal: RevealLines | null) => {
   const root = rendered?.shadowRoot;
   if (!root || reveal?.range == null) return;
@@ -60,7 +77,7 @@ const reportCell = (rendered: HTMLElement | null, reveal: RevealLines | null) =>
 export function DiffBody({
   file,
   annotations,
-  comments,
+  interaction,
   loadContents,
   trailingLines,
   prUrl,
@@ -68,7 +85,7 @@ export function DiffBody({
 }: {
   file: DiffFile;
   annotations: ReadonlyArray<DiffAnnotation>;
-  comments?: DiffComments | undefined;
+  interaction?: DiffInteraction | undefined;
   loadContents?: LoadContents | undefined;
   trailingLines?: number | undefined;
   prUrl?: string | undefined;
@@ -88,13 +105,14 @@ export function DiffBody({
   });
   const contents: ContentsState = loaded.file === file ? loaded.contents : { kind: "idle" };
   const [retry, setRetry] = useState(0);
+  const comments = commentsOf(interaction);
   // Pierre re-renders a whole diff when an option or the annotation list changes
   // identity, which also drops the hovered line's comment button until the pointer
   // moves. So the handlers it calls are read through a ref, and pins are keyed by the
   // lines they sit on. Only a file whose comments moved renders again.
-  const latest = useRef({ comments, loadContents, reveal, scopes });
+  const latest = useRef({ interaction, loadContents, reveal, scopes });
   useLayoutEffect(() => {
-    latest.current = { comments, loadContents, reveal, scopes };
+    latest.current = { interaction, loadContents, reveal, scopes };
   });
   const loadFiles = useCallback<FileDiffContentsLoader>(async () => {
     const load = latest.current.loadContents;
@@ -123,7 +141,7 @@ export function DiffBody({
       newFile: { name: file.path, contents: read.newContents },
     };
   }, [file]);
-  const commentable = comments !== undefined;
+  const kind = interaction?.kind;
   const [keyRange, setKeyRange] = useState<LineRange | null>(null);
   const [lineKeys] = useState(() => makeLineKeys(setKeyRange));
   const host = useRef<HTMLElement | null>(null);
@@ -147,23 +165,30 @@ export function DiffBody({
         host.current = phase === "unmount" ? null : rendered;
         if (host.current?.shadowRoot) paintScopes(host.current.shadowRoot, latest.current.scopes);
         reportCell(host.current, latest.current.reveal);
-        if (!commentable) return;
+        if (kind === undefined) return;
         if (phase === "unmount") lineKeys.detach();
-        else lineKeys.attach(rendered, (range) => latest.current.comments?.onSelect(range));
+        else
+          lineKeys.attach(rendered, (range) => latest.current.interaction?.onSelect(range), kind);
       },
-      ...(commentable
+      ...(kind !== undefined
         ? {
             enableGutterUtility: true,
             enableLineSelection: true,
-            onGutterUtilityClick: (range: SelectedLineRange) =>
-              latest.current.comments?.onSelect(fromPierre(range)),
+            // Pierre takes one gutter API: with our own Ask button, a press on it is a press on
+            // the line number, which selection already reports.
+            ...(kind === "comment"
+              ? {
+                  onGutterUtilityClick: (range: SelectedLineRange) =>
+                    latest.current.interaction?.onSelect(fromPierre(range)),
+                }
+              : {}),
             onLineSelectionEnd: (range: SelectedLineRange | null) => {
-              if (range !== null) latest.current.comments?.onSelect(fromPierre(range));
+              if (range !== null) latest.current.interaction?.onSelect(fromPierre(range));
             },
           }
         : {}),
     };
-  }, [diffStyle, wrap, loadFiles, trailingLines, commentable, lineKeys, file, moves]);
+  }, [diffStyle, wrap, loadFiles, trailingLines, kind, lineKeys, file, moves]);
   const chips = useMemo<Array<DiffLineAnnotation<Pin>>>(() => {
     const rows = fileRows(file);
     return [
@@ -221,7 +246,22 @@ export function DiffBody({
       ),
     [prUrl, renderComment, noteFooter, fromGuide],
   );
-  const selection = comments?.selection;
+  // Asking has one meaning for a line, so it gets an Ask button in Pierre's gutter slot;
+  // comments keep Pierre's own button.
+  const renderAskButton = useCallback(
+    (hovered: () => GetHoveredLineResult<"diff"> | undefined) => (
+      <AskLineButton
+        onAsk={() => {
+          const line = hovered();
+          const { interaction } = latest.current;
+          if (line !== undefined && interaction !== undefined)
+            interaction.onSelect(clickedRange(line, interaction.selection));
+        }}
+      />
+    ),
+    [],
+  );
+  const selection = interaction?.selection;
   const composing = selection ? `${pointKey(selection.start)},${pointKey(selection.end)}` : "";
   useEffect(() => {
     if (composing === "") lineKeys.restore();
@@ -287,6 +327,7 @@ export function DiffBody({
         lineAnnotations={lineAnnotations}
         renderAnnotation={renderAnnotation}
         selectedLines={selectedLines}
+        {...(kind === "ask" ? { renderGutterUtility: renderAskButton } : {})}
         className="block [color-scheme:inherit]"
       />
     </>

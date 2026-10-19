@@ -34,7 +34,12 @@ const Tools = Schema.Struct({ tools: Schema.Array(Schema.Struct({ name: Schema.S
 const ToolFailure = Schema.Struct({ code: Schema.String });
 
 /** Waits, and a local guide's snapshot of a large working tree, can outlast a minute. */
-const LONG_CALLS = new Set(["wait_for", "wait_for_local_guide", "generate_local_guide"]);
+const LONG_CALLS = new Set([
+  "wait_for",
+  "wait_for_local_guide",
+  "wait_for_local_question",
+  "generate_local_guide",
+]);
 
 export const callTool = (home: string, name: string, args: Schema.Json) =>
   Effect.gen(function* () {

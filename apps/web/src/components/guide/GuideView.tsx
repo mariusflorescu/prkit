@@ -13,7 +13,7 @@ import { flushSync } from "react-dom";
 import {
   DiffControls,
   DiffList,
-  type DiffComments,
+  type DiffInteraction,
   type DiffListHandle,
   type LoadContents,
 } from "~/components/diff";
@@ -45,8 +45,8 @@ export type GuideViewProps = {
   prUrl?: string;
   prDescription?: string;
   loadContents?: LoadContents;
-  /** Review comments on the chapters' diffs; without it they stay read-only. */
-  comments?: (file: DiffFile) => DiffComments | undefined;
+  /** What picking lines on the chapters' diffs does; without it they stay read-only. */
+  interaction?: (file: DiffFile) => DiffInteraction | undefined;
   /** Chapters a streaming draft has planned but not written yet: shown as faded titles. */
   pendingChapterIds?: ReadonlySet<string>;
   /**
@@ -89,7 +89,7 @@ export function GuideView({
   prUrl,
   prDescription,
   loadContents,
-  comments,
+  interaction,
   pendingChapterIds = noPending,
   draft,
   reviewed,
@@ -301,7 +301,7 @@ export function GuideView({
                     onLine={onLine}
                     onFile={onFile}
                     loadContents={loadContents}
-                    comments={comments}
+                    interaction={interaction}
                     prUrl={prUrl}
                     reviewed={reviewed}
                     review={

@@ -94,6 +94,30 @@ diffs-container {
   display: block;
   color-scheme: inherit;
 }
+[data-ask-line-button] {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1lh;
+  height: 1lh;
+  margin-right: calc(-1lh + 1ch);
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background-color: var(--diffs-modified-base);
+  color: var(--diffs-bg);
+  font-size: var(--diffs-font-size, 13px);
+  line-height: var(--diffs-line-height, 20px);
+  cursor: pointer;
+  touch-action: none;
+}
+[data-ask-line-button]::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 0 -4px;
+}
 [data-diff-placeholder] {
   padding: 16px;
   color: var(--muted-foreground);

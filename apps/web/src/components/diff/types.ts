@@ -26,6 +26,7 @@ export type RevealLines =
 
 /** Review comments on one file's diff, opted into by the caller. */
 export type DiffComments = {
+  kind: "comment";
   /** The lines that have something under them, drawn by `render`. */
   pins: ReadonlyArray<LinePoint>;
   render: (point: LinePoint) => ReactNode;
@@ -39,6 +40,21 @@ export type DiffComments = {
   noteFooter?: ((note: DiffAnnotation, index: number) => ReactNode) | undefined;
   count: number;
 };
+
+/**
+ * Picking lines to ask the guide's agent about, opted into by the caller. The lines are
+ * picked the same ways as for comments, but nothing is drawn under them.
+ */
+export type DiffAsk = {
+  kind: "ask";
+  /** The lines the dock is asking about, highlighted while it is. */
+  selection: LineRange | null;
+  /** A click on a line's Ask button, a drag across line numbers, or Enter on a focused one. */
+  onSelect: (range: LineRange) => void;
+};
+
+/** What picking lines on a file's diff does; without one the diff is read-only. */
+export type DiffInteraction = DiffComments | DiffAsk;
 
 /** A file's Reviewed checkbox, opted into by the caller. `onChange` resolves true once saved. */
 export type ReviewedControl = {

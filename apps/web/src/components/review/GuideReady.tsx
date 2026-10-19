@@ -8,15 +8,15 @@ import {
   type RevisionSummary,
 } from "@prkit/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import type { LoadContents } from "~/components/diff";
-import { useLineFocus } from "~/components/diff/lineFocus";
 import { GuideView } from "~/components/guide";
 import { askAside } from "~/features/ask/askAside";
 import { AskDock } from "~/features/ask/AskDock";
-import { type AskTarget, AskTargetContext } from "~/features/ask/askTarget";
+import { AskTargetContext } from "~/features/ask/askTarget";
 import { useAsks } from "~/features/ask/useAsks";
+import { useGuideAskTarget } from "~/features/ask/useGuideAskTarget";
 import { composerOn, useReviewCommentsStore } from "~/features/reviewComments/reviewCommentsStore";
 import { useDiffComments } from "~/features/reviewComments/useDiffComments";
 import { useManualCheckTicks } from "~/features/manualCheck/useManualCheckTicks";
@@ -91,22 +91,12 @@ export function GuideReady({
     },
     [composer, composingRevision, closeComposer, describing, latest.revision],
   );
-  const reveal = useLineFocus((state) => state.reveal);
-  const clear = useLineFocus((state) => state.clear);
-  // A line asked for here is for this guide only.
-  useEffect(() => () => clear(), [clear]);
-  const target = useMemo<AskTarget>(
-    () => ({
-      key: detail.key,
-      reviewId: review.id,
-      revision: revision.revision,
-      openLine: (asked, path, line) => {
-        if (asked !== revision.revision) pick(asked);
-        reveal({ revision: asked, path, line });
-      },
-    }),
-    [detail.key, review.id, revision.revision, pick, reveal],
-  );
+  const target = useGuideAskTarget({
+    key: detail.key,
+    reviewId: review.id,
+    revision: revision.revision,
+    pick,
+  });
   const aside = useMemo(() => askAside(target), [target]);
   const showingDraft = picked === "draft" && draft !== null;
   // Answers can repeat the author's pre-flight, so like it they are the review's own account's.
@@ -219,7 +209,7 @@ export function GuideReady({
                 source={{ _tag: "attempt", key: detail.key, attemptId: revision.attemptId }}
                 prUrl={detail.url}
                 prDescription={detail.body}
-                comments={comments}
+                interaction={comments}
                 {...(askable ? { aside } : {})}
                 {...(current ? { loadContents } : {})}
                 reviewed={reviewed.status === "ready" ? reviewed : undefined}

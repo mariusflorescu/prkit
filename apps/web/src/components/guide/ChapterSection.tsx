@@ -1,7 +1,7 @@
 import type { DiffFile, DiffLineRef } from "@prkit/contracts";
 import type { ReactNode } from "react";
 
-import { FileDiffCard, type DiffComments, type LoadContents } from "~/components/diff";
+import { FileDiffCard, type DiffInteraction, type LoadContents } from "~/components/diff";
 
 import { ChapterNarration } from "./ChapterNarration";
 import type { ChapterReviewedControl, GuideChapter, ReviewedBinding } from "./types";
@@ -20,7 +20,7 @@ export function ChapterSection({
   onLine,
   onFile,
   loadContents,
-  comments,
+  interaction,
   prUrl,
   reviewed,
   review,
@@ -41,7 +41,7 @@ export function ChapterSection({
   onLine: (at: DiffLineRef) => void;
   onFile: (path: string) => void;
   loadContents?: LoadContents | undefined;
-  comments?: ((file: DiffFile) => DiffComments | undefined) | undefined;
+  interaction?: ((file: DiffFile) => DiffInteraction | undefined) | undefined;
   prUrl?: string | undefined;
   reviewed?: ReviewedBinding | undefined;
   /** The chapter's Reviewed checkbox; null when nothing in it can be marked. */
@@ -82,7 +82,7 @@ export function ChapterSection({
                 annotations={entry.annotations}
                 defaultCollapsed={entry.collapsed || chapter.kind === "generated"}
                 loadContents={loadContents}
-                comments={comments?.(file)}
+                interaction={interaction?.(file)}
                 prUrl={prUrl}
                 reviewed={
                   reviewed && {

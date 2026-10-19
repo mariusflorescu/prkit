@@ -3,6 +3,7 @@ import { DiffSkeleton } from "./DiffSkeleton";
 import { useFileMoves, useFileReveal } from "./diffListContext";
 import { useDiffPrefs } from "./diffPrefs";
 import { estimateDiffHeight } from "./fileDiff";
+import { commentsOf } from "./interaction";
 import { useDeferredMount } from "./useDeferredMount";
 import type { ComponentProps } from "react";
 
@@ -14,7 +15,7 @@ export function LazyDiffBody(props: ComponentProps<typeof DiffBody>) {
   const height = estimateDiffHeight(
     props.file,
     diffStyle,
-    props.annotations.length + (props.comments?.pins.length ?? 0),
+    props.annotations.length + (commentsOf(props.interaction)?.pins.length ?? 0),
     moves.cut.length + moves.landed.length,
   );
   return (

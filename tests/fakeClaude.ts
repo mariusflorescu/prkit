@@ -8,6 +8,7 @@ import { repoRoot } from "../scripts/verify-run.ts";
 const Run = Schema.fromJsonString(
   Schema.Struct({
     configDir: Schema.NullOr(Schema.String),
+    cwd: Schema.String,
     session: Schema.String,
     resumed: Schema.Boolean,
     forked: Schema.Boolean,
@@ -46,6 +47,7 @@ const Prompt = Schema.fromJsonString(
  * The stand-in Claude Code of scripts/fake-claude.ts, in a folder of its own: pass `file` to
  * `verify-app start --claude`. `hold` keeps its next guides, fixes and resolutions writing until
  * `release`, `holdAnswers` keeps its next answers after their first chunk until `releaseAnswers`,
+ * `writingAnswers` has them write and stage a file where they run,
  * `failing` makes them end with an error instead, `notes` gives its guides line notes,
  * `fileNotes` file notes, `manualCheck` their plan for checking the change by hand, `split`
  * gives each file of their guides a chapter of its own, `chapters` splits them into named
@@ -67,7 +69,15 @@ export const setUpFakeClaude = (name: string) => {
     { mode: 0o755 },
   );
   const flag = (
-    name: "hold" | "hold-ask" | "fail" | "split" | "draft" | "draft-hold" | "chapter-hold",
+    name:
+      | "hold"
+      | "hold-ask"
+      | "ask-writes"
+      | "fail"
+      | "split"
+      | "draft"
+      | "draft-hold"
+      | "chapter-hold",
     on: boolean,
   ) =>
     on
@@ -80,6 +90,8 @@ export const setUpFakeClaude = (name: string) => {
     holdAnswers: () => flag("hold-ask", true),
     releaseAnswers: () => flag("hold-ask", false),
     failing: (on: boolean) => flag("fail", on),
+    /** Has its next answers write `made-by-agent.txt` where they run and stage it with git. */
+    writingAnswers: (on: boolean) => flag("ask-writes", on),
     notes: (notes: Record<string, ReadonlyArray<FakeNote>>) =>
       NodeFS.writeFileSync(NodePath.join(dir, "notes"), JSON.stringify(notes)),
     fileNotes: (notes: Record<string, string>) =>
@@ -135,7 +147,7 @@ export const setUpFakeClaude = (name: string) => {
           };
         });
     },
-    /** Every turn so far: the config folder it ran with, its session, and whether it resumed or forked. */
+    /** Every turn so far: the config folder and directory it ran in, its session, and whether it resumed or forked. */
     runs: () => {
       const file = NodePath.join(dir, "runs.log");
       if (!NodeFS.existsSync(file)) return [];

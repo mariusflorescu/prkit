@@ -478,7 +478,8 @@ export const makeLocalReviews = (port: LocalPort, capture: LocalCaptureService) 
     /**
      * Deletes the review, its revisions and questions, the reader's ticks and prkit's copy of its snapshots. Rows first, in one
      * transaction (foreign keys make a table this misses fail loudly), then the copy: a crash
-     * between the two leaves a copy without a review, which startup's sweep removes.
+     * between the two leaves a copy without a review, which startup's sweep removes. The app
+     * removes through `Asks.removeLocalReview`, which stops the review's answers first.
      */
     const remove = (key: LocalReviewKey) =>
       command(
