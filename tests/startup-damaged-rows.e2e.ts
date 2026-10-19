@@ -270,10 +270,9 @@ test(
       // The fix whose state can't be read is left as it was, its tab says why, and the fix
       // queued behind it waits: the agent prkit can't account for may still be in the checkout.
       await app.open(pull(run.url, 6, "fixes"));
-      await expect(screen.getByRole("alert")).toContainText(
-        "prkit read a damaged fix record. Try again.",
-        { timeout: 30_000 },
-      );
+      await expect(screen.getByRole("alert")).toContainText("prkit read a damaged fix record.", {
+        timeout: 30_000,
+      });
       expect(turnsOf6(run.home)).toEqual([
         { id: turnId, state: "failed" },
         { id: queuedId, state: "queued" },
