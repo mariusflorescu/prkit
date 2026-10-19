@@ -21,7 +21,6 @@ const terminals = [
 export const defaultTerminalScript =
   'ObjC.import("CoreServices"); ObjC.unwrap(ObjC.castRefToObject($.LSCopyDefaultRoleHandlerForContentType($("public.unix-executable"), $.kLSRolesShell)))';
 
-/** Where to open a file, in order: the default terminal when it's one prkit knows, then Terminal. */
 export const terminalsToTry = (defaultBundleId: string) => {
   // Launch Services ignores case, and iTerm2 stores Terminal as com.apple.terminal.
   const id = defaultBundleId.trim().toLowerCase();

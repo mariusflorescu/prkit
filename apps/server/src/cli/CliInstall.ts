@@ -219,46 +219,49 @@ export const make = Effect.gen(function* () {
     });
 
   const openSkillInstaller = () =>
-    writing.withPermits(1)(
-      Effect.gen(function* () {
-        if (skillWords === null)
-          return yield* fail(
-            "This build has no skill repository. Install a release build, or build with GITHUB_REPOSITORY set.",
-          );
-        if (process.platform !== "darwin")
-          return yield* fail("Copy the command and run it in your terminal.");
-        const defaultTerminal = yield* spawner
-          .string(macTool("osascript", ["-l", "JavaScript", "-e", defaultTerminalScript]))
-          .pipe(
-            Effect.timeout("5 seconds"),
-            Effect.catchTags({
-              PlatformError: () => Effect.succeed(""),
-              TimeoutError: () => Effect.succeed(""),
-            }),
-          );
-        yield* fs.makeDirectory(installerFolder, { recursive: true, mode: 0o700 });
-        yield* requireDirectory(installerFolder);
-        const file = path.join(installerFolder, "prkit-skill-installer");
-        const staged = `${file}.tmp`;
-        yield* fs.remove(staged, { force: true });
-        yield* fs.writeFileString(staged, skillInstallerScript(skillWords), {
-          flag: "wx",
-          mode: 0o700,
-        });
-        yield* fs.rename(staged, file);
-        for (const terminal of terminalsToTry(defaultTerminal)) {
-          const code = yield* spawner
-            .exitCode(macTool("open", ["-b", terminal.bundleId, file]))
-            .pipe(Effect.catchTag("PlatformError", () => Effect.succeed(-1)));
-          if (code === 0) return { terminal: terminal.name, isDefault: terminal.isDefault };
-        }
-        yield* fs.remove(file, { force: true }).pipe(Effect.ignore);
-        return yield* fail("prkit couldn't open your terminal. Copy the command and run it there.");
-      }).pipe(
-        Effect.catchTag("PlatformError", () =>
-          fail(
-            `prkit couldn't write the skill installer in ${installerFolder}. Check the folder's permissions.`,
-          ),
+    Effect.gen(function* () {
+      if (skillWords === null)
+        return yield* fail(
+          "This build has no skill repository. Install a release build, or build with GITHUB_REPOSITORY set.",
+        );
+      if (process.platform !== "darwin")
+        return yield* fail("Copy the command and run it in your terminal.");
+      // A terminal types the file's path into the shell, where a control character acts as a key.
+      if (/\p{Cc}/u.test(installerFolder))
+        return yield* fail(
+          "prkit's folder name has control characters, which a terminal would read as keys. Copy the command and run it in your terminal.",
+        );
+      const defaultTerminal = yield* spawner
+        .string(macTool("osascript", ["-l", "JavaScript", "-e", defaultTerminalScript]))
+        .pipe(
+          Effect.timeout("5 seconds"),
+          Effect.catchTags({
+            PlatformError: () => Effect.succeed(""),
+            TimeoutError: () => Effect.succeed(""),
+          }),
+        );
+      yield* fs.makeDirectory(installerFolder, { recursive: true, mode: 0o700 });
+      yield* requireDirectory(installerFolder);
+      yield* fs.chmod(installerFolder, 0o700);
+      // A folder per click, since a terminal may run its file after the next click.
+      const folder = yield* fs.makeTempDirectory({ directory: installerFolder });
+      const file = path.join(folder, "prkit-skill-installer");
+      yield* fs.writeFileString(file, skillInstallerScript(skillWords), {
+        flag: "wx",
+        mode: 0o700,
+      });
+      for (const terminal of terminalsToTry(defaultTerminal)) {
+        const code = yield* spawner
+          .exitCode(macTool("open", ["-b", terminal.bundleId, file]))
+          .pipe(Effect.catchTag("PlatformError", () => Effect.succeed(-1)));
+        if (code === 0) return { terminal: terminal.name, isDefault: terminal.isDefault };
+      }
+      yield* fs.remove(folder, { recursive: true, force: true }).pipe(Effect.ignore);
+      return yield* fail("prkit couldn't open your terminal. Copy the command and run it there.");
+    }).pipe(
+      Effect.catchTag("PlatformError", () =>
+        fail(
+          `prkit couldn't write the skill installer in ${installerFolder}. Check the folder's permissions.`,
         ),
       ),
     );

@@ -12,7 +12,6 @@ export const CliInstallState = Schema.Struct({
 });
 export type CliInstallState = typeof CliInstallState.Type;
 
-/** The terminal the skill installer opened in, and whether it's the user's default terminal. */
 export const SkillInstallerOpened = Schema.Struct({
   terminal: Schema.String,
   isDefault: Schema.Boolean,

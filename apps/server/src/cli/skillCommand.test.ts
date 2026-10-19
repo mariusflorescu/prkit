@@ -16,7 +16,7 @@ it("pins the remote skill to the build commit and refuses shell input in build m
   expect(skillInstallWords("acme/widgets", "$(echo no)")).toBeNull();
 });
 
-it("runs the installer's words as written, from home, and removes itself first", () => {
+it("runs the installer's words as written, from home, and removes itself and its folder first", () => {
   const root = NodeFs.realpathSync(NodeFs.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "prkit-")));
   try {
     const folder = NodePath.join(root, `it's "$(touch made)" \`touch made\``);
@@ -42,7 +42,7 @@ it("runs the installer's words as written, from home, and removes itself first",
       root,
       ...words.slice(1),
     ]);
-    expect(NodeFs.readdirSync(folder)).toEqual([]);
+    expect(NodeFs.existsSync(folder)).toBe(false);
     expect(NodeFs.existsSync(NodePath.join(root, "made"))).toBe(false);
   } finally {
     NodeFs.rmSync(root, { recursive: true, force: true });
