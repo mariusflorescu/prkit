@@ -111,7 +111,6 @@ const Discovery = Schema.fromJsonString(
   Schema.Struct({ _tag: Schema.Literal("on"), port: Schema.Number, token: Schema.String }),
 );
 
-/** What the discovery file tells clients: "on" or "off". */
 const discovery = (home: string) =>
   Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({ _tag: Schema.String })))(
     NodeFS.readFileSync(NodePath.join(home, "outside-agents.json"), "utf8"),
