@@ -554,9 +554,12 @@ const withGuide = async (name: string) => {
   const fake = await startFakeGitHub(name);
   const claude = setUpFakeClaude(name);
   const git = outsideGit(name);
-  const sha = git.commit(9, { [LIMITS]: CHECKS });
-  await fake.files(9, [served(git.patch(9, LIMITS))]);
-  await fake.gitHead(9, sha);
+  const commit = async (files: Record<string, string>) => {
+    const sha = git.commit(9, files);
+    await fake.files(9, [served(git.patch(9, LIMITS))]);
+    await fake.gitHead(9, sha);
+  };
+  await commit({ [LIMITS]: CHECKS });
   await fake.context(9, {
     checks: [],
     issues: [],
@@ -575,13 +578,15 @@ const withGuide = async (name: string) => {
   const run = git.start(() =>
     startFakeInstance(name, fake, ["--claude", claude.file, "--e2e", "--watch-interval", "5000"]),
   );
-  return { fake, git, run };
+  return { fake, git, run, commit };
 };
 
-const openGuide = async (
-  { app, screen }: { app: TestFixtures["app"]; screen: Screen },
+const openFiles = async (
+  { app, screen, browser }: { app: TestFixtures["app"]; screen: Screen; browser: Browser },
   run: { url: string; openUrl: string },
 ) => {
+  await browser.setViewport({ width: 1280, height: 900 });
+  await emulateOsColorScheme(browser, "light");
   await app.open(run.openUrl);
   await expect(screen.getByRole("link", "Inbox")).toBeVisible({ timeout: 30_000 });
   await app.open(`${run.url}${FILES.replace("tab=files", "tab=guide")}`);
@@ -589,27 +594,117 @@ const openGuide = async (
   await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r1 · ", {
     timeout: 120_000,
   });
+  await screen.getByRole("navigation", "Pull request tabs").getByRole("link", "Files").tap();
+  await expect(lineNumber(browser, 7)).toBeVisible({ timeout: 30_000 });
+};
+
+/** Light and dark frames at 1280 and at 760 wide, with the card labelled `card` in the middle. */
+const frames = async (app: TestFixtures["app"], browser: Browser, shot: string, card: string) => {
+  await centre(browser, card);
+  await screenshotLightAndDark(app, browser, shot);
+  await browser.setViewport({ width: 760, height: 900 });
+  await centre(browser, card);
+  await screenshotLightAndDark(app, browser, `${shot}-narrow`);
+  await browser.setViewport({ width: 1280, height: 900 });
 };
 
 test(
-  "comment words: a guide note's comment opens beside words being written and never replaces them",
-  { timeout: 300_000 },
+  "comment words: a guide note's comment opens beside words being written, and no other comment or revision replaces them",
+  { timeout: 420_000 },
   async ({ app, screen, browser }) => {
     const name = "comment-words-kept";
-    const { fake, run } = await withGuide(name);
+    const { fake, run, commit } = await withGuide(name);
+    const revisions = () =>
+      readRows(
+        run.home,
+        `SELECT COUNT(*) AS n FROM review_revisions r JOIN reviews v ON v.id = r.review_id WHERE v.pr_key = '${KEY}'`,
+      )[0]?.n;
     try {
-      await browser.setViewport({ width: 1280, height: 900 });
-      await emulateOsColorScheme(browser, "light");
-      await openGuide({ app, screen }, run);
+      await openFiles({ app, screen, browser }, run);
       const tabs = screen.getByRole("navigation", "Pull request tabs");
-      await tabs.getByRole("link", "Files").tap();
-      await expect(lineNumber(browser, 7)).toBeVisible({ timeout: 30_000 });
+      const file = screen.getByRole("region", LIMITS);
+      const slug = noteIn(browser, SLUG);
+      const addSlug = slug.getByRole("button", "Add as comment, question on line 3");
+      const addBrace = noteIn(browser, BRACE).getByRole(
+        "button",
+        "Add as comment, question on line 15",
+      );
+
       await lineNumber(browser, 7).tap();
       const lines = screen.getByRole("textbox", "Comment on line 7");
       await lines.fill(LINES);
-      await noteIn(browser, SLUG).getByRole("button", "Add as comment, question on line 3").tap();
-      await expect(screen.getByRole("textbox", "Comment on line 3")).toHaveValue(SLUG);
+      await addSlug.tap();
+      const slugField = screen.getByRole("textbox", "Comment on line 3");
+      await expect(slugField).toHaveValue(SLUG);
+      await expect(slugField).toBeFocused();
       await expect(lines).toHaveValue(LINES);
+      await expect(addSlug).toBeDisabled();
+      await slugField.fill(SLUG_EDIT);
+      await addBrace.tap();
+      const braceField = screen.getByRole("textbox", "Comment on line 15");
+      await expect(braceField).toHaveValue(BRACE);
+      await expect(braceField).toBeFocused();
+      await expect(slugField).toHaveValue(SLUG_EDIT);
+      await expect(lines).toHaveValue(LINES);
+      await expect(file.getByRole("article", /^New comment on line/)).toHaveCount(3);
+      await frames(app, browser, "three-composers", `New comment on line 7, in ${LIMITS}`);
+
+      // A click on other lines takes the line comment's words along and leaves the notes' alone.
+      await lineNumber(browser, 9).tap();
+      const moved = screen.getByRole("textbox", "Comment on line 9");
+      await expect(moved).toHaveValue(LINES);
+      await expect(lines).toHaveCount(0);
+      await expect(slugField).toHaveValue(SLUG_EDIT);
+      await expect(braceField).toHaveValue(BRACE);
+
+      // The same note on the Guide takes its comment there, words and all.
+      await tabs.getByRole("link", "Guide").tap();
+      const revision = screen.getByRole("combobox", "Guide revision");
+      await expect(revision).toContainText("r1 · ", { timeout: 30_000 });
+      await slug.getByRole("button", "Add as comment, question on line 3").tap({ timeout: 30_000 });
+      const onGuide = screen.getByRole("textbox", "Comment on line 3");
+      await expect(onGuide).toHaveValue(SLUG_EDIT);
+      await expect(onGuide).toBeFocused();
+      await expect(slug.getByRole("button", "Add as comment, question on line 3")).toBeDisabled();
+
+      // A revision accepted meanwhile waits behind the comment; picking it takes the comment along.
+      await commit({ "src/change-0.ts": 'export const change0 = "Second fixture 9";\n' });
+      await expect.poll(revisions, { timeout: 120_000 }).toBeGreaterThan(1);
+      await expect(revision).toContainText("r1 · ");
+      await expect(onGuide).toHaveValue(SLUG_EDIT);
+      await revision.tap();
+      await screen.getByRole("option", /^r2 · /).tap();
+      await expect(revision).toContainText("r2 · ", { timeout: 30_000 });
+      await expect(onGuide).toHaveValue(SLUG_EDIT, { timeout: 30_000 });
+      await expect(slug.getByRole("button", "Add as comment, question on line 3")).toBeDisabled();
+      await frames(app, browser, "picked-revision-composer", `New comment on line 3, in ${LIMITS}`);
+      await onGuide.focus();
+      await browser.keyboard.press("Meta+Enter");
+      await expect(slug.getByRole("status")).toHaveText("In your review.", { timeout: 30_000 });
+
+      await tabs.getByRole("link", "Files").tap();
+      await expect(moved).toHaveValue(LINES, { timeout: 30_000 });
+      await expect(braceField).toHaveValue(BRACE);
+      await expect(slug.getByRole("status")).toHaveText("In your review.");
+      await moved.focus();
+      await browser.keyboard.type(" are two enough?");
+      await moved.press("Meta+Enter");
+      await expect(file.getByRole("article", `Pending comment on ${LIMITS} line 9`)).toContainText(
+        `${LINES} are two enough?`,
+      );
+      await braceField.focus();
+      await browser.keyboard.press("Escape");
+      await expect(braceField).toHaveCount(0);
+      expect(
+        readRows(
+          run.home,
+          `SELECT body, end_line AS line, note_key IS NOT NULL AS fromNote FROM pending_comments WHERE pr_key = '${KEY}' ORDER BY created_at, id`,
+        ),
+      ).toEqual([
+        { body: SLUG_EDIT, line: 3, fromNote: 1 },
+        { body: `${LINES} are two enough?`, line: 9, fromNote: 0 },
+      ]);
+      expect(await fake.writes()).toEqual([]);
     } finally {
       stopFakeInstance(name, { keepHome: false });
       fake.stop();
@@ -619,30 +714,71 @@ test(
 
 test(
   "comment words: a failed send keeps its error through a rebuild until the words change or go again",
-  { timeout: 300_000 },
+  { timeout: 360_000 },
   async ({ app, screen, browser }) => {
     const name = "comment-words-failed";
-    const { fake, run } = await withGuide(name);
+    const { fake, run, commit } = await withGuide(name);
     try {
-      await browser.setViewport({ width: 1280, height: 900 });
-      await emulateOsColorScheme(browser, "light");
-      await openGuide({ app, screen }, run);
+      await openFiles({ app, screen, browser }, run);
       const tabs = screen.getByRole("navigation", "Pull request tabs");
-      await tabs.getByRole("link", "Files").tap();
       const file = screen.getByRole("region", LIMITS);
-      const thread = file.getByRole("article", `Thread by octocat on ${LIMITS} line 10`);
+      const threadCard = `Thread by octocat on ${LIMITS} line 10`;
+      const thread = file.getByRole("article", threadCard);
       await thread.getByRole("button", "Reply").tap({ timeout: 30_000 });
       const reply = thread.getByRole("textbox", "Reply to octocat");
       await reply.fill(ON_REPLY);
       await reply.press("Meta+Enter");
       const refused = thread.getByRole("alert");
-      await expect(refused).toBeVisible({ timeout: 30_000 });
-      const said = (await refused.textContent()) ?? "";
-      console.log(`reply refused: ${said}`);
+      await expect(refused).toHaveText(
+        "GitHub couldn't complete the query. The fake GitHub doesn't answer this mutation.",
+        { timeout: 30_000 },
+      );
+
+      // A push redraws the file and a trip to Conversation remounts it: both keep the error.
+      const before = await filesRead(fake);
+      await commit({ "src/change-0.ts": 'export const change0 = "Second fixture 9";\n' });
+      await expect.poll(() => filesRead(fake), { timeout: 60_000 }).toBeGreaterThan(before);
+      await expect(reply).toHaveValue(ON_REPLY, { timeout: 30_000 });
+      await expect(refused).toHaveText(/doesn't answer this mutation/);
       await tabs.getByRole("link", "Conversation").tap();
       await tabs.getByRole("link", "Files").tap();
       await expect(reply).toHaveValue(ON_REPLY, { timeout: 30_000 });
-      await expect(thread.getByRole("alert")).toHaveText(said);
+      await expect(refused).toHaveText(/doesn't answer this mutation/);
+      await expect(reply).toBeEnabled();
+      await frames(app, browser, "reply-error-after-rebuild", threadCard);
+
+      // New words clear it, and sending them again says it again.
+      await reply.focus();
+      await browser.keyboard.type(" it can go");
+      await expect(refused).toHaveCount(0);
+      await reply.press("Meta+Enter");
+      await expect(refused).toHaveText(/doesn't answer this mutation/, { timeout: 30_000 });
+      await reply.press("Escape");
+      await expect(reply).toHaveCount(0);
+
+      // A note's comment that GitHub fails to place keeps the error through a trip to Conversation.
+      const slug = noteIn(browser, SLUG);
+      await slug.getByRole("button", "Add as comment, question on line 3").tap();
+      const slugField = screen.getByRole("textbox", "Comment on line 3");
+      await slugField.fill(SLUG_EDIT);
+      await fake.fail("rest:pull", 1, 502);
+      await slugField.press("Meta+Enter");
+      const slugCard = `New comment on line 3, in ${LIMITS}`;
+      const failed = file.getByRole("article", slugCard).getByRole("alert");
+      await expect(failed).toBeVisible({ timeout: 30_000 });
+      expect(await reads(fake, "rest:pull:failed")).toBe(1);
+      const why = (await failed.textContent()) ?? "";
+      expect(why).not.toBe("");
+      await tabs.getByRole("link", "Conversation").tap();
+      await tabs.getByRole("link", "Files").tap();
+      await expect(slugField).toHaveValue(SLUG_EDIT, { timeout: 30_000 });
+      await expect(failed).toHaveText(why);
+      await frames(app, browser, "note-error-after-rebuild", slugCard);
+      await slugField.focus();
+      await browser.keyboard.press("Meta+Enter");
+      await expect(slug.getByRole("status")).toHaveText("In your review.", { timeout: 30_000 });
+      await expect(failed).toHaveCount(0);
+      expect(draftRows(run.home)).toEqual([{ body: SLUG_EDIT, line: 3 }]);
     } finally {
       stopFakeInstance(name, { keepHome: false });
       fake.stop();

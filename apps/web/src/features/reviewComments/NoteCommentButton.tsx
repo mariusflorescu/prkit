@@ -2,6 +2,7 @@ import {
   type AccountId,
   capture,
   NOTE_LOST,
+  type NoteKey,
   notePoint,
   placeOn,
   type PullRequestKey,
@@ -17,17 +18,21 @@ import { useReviewCommentsStore } from "./reviewCommentsStore";
 import { samePoint, type ShownNote } from "./shownNote";
 
 /**
- * Opens the composer under a question or risk note, holding the note's words. The click
- * reads GitHub's diff now, so a line that changed after the guide was written is refused
- * before anyone types; the server places the draft again when it is added.
+ * Opens the note's own composer under a question or risk note, holding the note's words, beside
+ * any other comment being written. The click reads GitHub's diff now, so a line that changed
+ * after the guide was written is refused before anyone types; the server places the draft again
+ * when it is added.
  */
 export function NoteCommentButton({
   pr,
   note,
+  noteKey,
   composing,
 }: {
   pr: { key: PullRequestKey; accountId: AccountId };
   note: ShownNote;
+  /** The remark the note makes, the same on every surface and revision. */
+  noteKey: NoteKey | null;
   composing: boolean;
 }) {
   const compose = useReviewCommentsStore((state) => state.compose);
@@ -44,7 +49,7 @@ export function NoteCommentButton({
       );
       const placed = captured && placeOn(captured, files);
       const here = capture(rows, { path: ref.path, start: at, end: at }, head);
-      if (placed === null || placed._tag === "outdated" || here === null)
+      if (placed === null || placed._tag === "outdated" || here === null || noteKey === null)
         toastManager.add({
           type: "warning",
           ...NOTE_LOST[placed?._tag === "outdated" ? placed.why : "lines"],
@@ -56,6 +61,7 @@ export function NoteCommentButton({
           placement: here,
           note: {
             ref,
+            key: noteKey,
             text: written.text,
             movedTo: samePoint(placed.placement.anchor.end, at) ? null : placed.placement.anchor,
           },

@@ -36,10 +36,11 @@ export function NewCommentComposer({
 }) {
   const client = useQueryClient();
   const closeComposer = useReviewCommentsStore((state) => state.closeComposer);
+  const sendFailed = useReviewCommentsStore((state) => state.sendFailed);
   const close = () => closeComposer(composer);
   const ask = useAskTarget();
   const { placement, note } = composer;
-  const form = composerForm(pr);
+  const form = composerForm(composer);
   const sending = useFormSending(form);
   // GitHub's diff no longer has the note's line, so the server would refuse it as the note's.
   const fromNote = placed._tag === "outdated" ? null : note;
@@ -49,12 +50,14 @@ export function NewCommentComposer({
       fromNote === null
         ? addPendingComment({ ...pr, placement, body })
         : addNoteComment({ ...pr, note: fromNote.ref, body }),
+    onMutate: () => sendFailed(form, null),
     onSuccess: (comments) => {
       storePending(client, pr.key, pr.accountId)(comments);
       close();
     },
     // A draft this note made elsewhere then shows on the note, and these words stay.
-    onError: () => {
+    onError: (error) => {
+      sendFailed(form, error.message);
       if (fromNote !== null)
         void client.invalidateQueries({
           queryKey: pendingCommentsQuery(pr.key, pr.accountId).queryKey,
@@ -96,7 +99,6 @@ export function NewCommentComposer({
         label={label}
         submitLabel="Add review comment"
         pendingLabel="Adding..."
-        error={add.error?.message ?? null}
         pending={sending}
         onSubmit={(body) => add.mutate(body)}
         onCancel={close}

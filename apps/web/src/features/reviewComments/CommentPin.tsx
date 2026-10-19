@@ -8,20 +8,20 @@ import type {
 
 import { NewCommentComposer } from "./NewCommentComposer";
 import { PendingCommentCard } from "./PendingCommentCard";
-import { type Composer, composerKey } from "./reviewCommentsStore";
+import { type Composer, composerForm } from "./reviewCommentsStore";
 import { ReviewThreadCard } from "./ReviewThreadCard";
 
-/** Everything under one diff line: GitHub's threads, then drafts, then the composer. */
+/** Everything under one diff line: GitHub's threads, then drafts, then the comments being written. */
 export function CommentPin({
   pr,
   threads,
   drafts,
-  composer,
+  composers,
 }: {
   pr: { key: PullRequestKey; accountId: AccountId };
   threads: ReadonlyArray<ReviewThread>;
   drafts: ReadonlyArray<{ comment: PendingComment; placed: Landed }>;
-  composer: { composer: Composer; placed: Landed } | null;
+  composers: ReadonlyArray<{ composer: Composer; placed: Landed }>;
 }) {
   return (
     <div data-comment-pin="" className="py-1">
@@ -31,16 +31,16 @@ export function CommentPin({
       {drafts.map(({ comment, placed }) => (
         <PendingCommentCard key={comment.id} comment={comment} pr={pr} placed={placed} />
       ))}
-      {composer && (
+      {composers.map(({ composer, placed }) => (
         <NewCommentComposer
-          // Pierre keys its annotation slots by position, so one note's words would stay
-          // in the field when the composer moves to another note.
-          key={composerKey(composer.composer)}
+          // Pierre keys its annotation slots by position, so a field would keep another
+          // composer's words when that slot shows it.
+          key={composerForm(composer)}
           pr={pr}
-          composer={composer.composer}
-          placed={composer.placed}
+          composer={composer}
+          placed={placed}
         />
-      )}
+      ))}
     </div>
   );
 }

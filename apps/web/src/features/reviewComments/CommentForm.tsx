@@ -6,16 +6,15 @@ import { type FormKey, useReviewCommentsStore } from "./reviewCommentsStore";
 
 /**
  * One markdown field for a comment, an edit or a reply. Cmd+Enter sends, Escape
- * cancels. The words stay when sending fails, with the error under the field. They live in
- * the store under `form`, because a diff remounts what it shows under a line whenever its
- * lines or comments change.
+ * cancels. The words stay when sending fails, with the error under the field until they change
+ * or go again. Both live in the store under `form`, because a diff remounts what it shows under
+ * a line whenever its lines or comments change.
  */
 export function CommentForm({
   form,
   label,
   submitLabel,
   pendingLabel,
-  error,
   pending,
   onSubmit,
   onCancel,
@@ -25,7 +24,6 @@ export function CommentForm({
   label: string;
   submitLabel: string;
   pendingLabel: string;
-  error: string | null;
   pending: boolean;
   onSubmit: (body: string) => void;
   onCancel: () => void;
@@ -35,6 +33,7 @@ export function CommentForm({
   const keepWords = useReviewCommentsStore((state) => state.keepWords);
   const focusForm = useReviewCommentsStore((state) => state.focusForm);
   const blurForm = useReviewCommentsStore((state) => state.blurForm);
+  const failed = useReviewCommentsStore((state) => state.words.get(form)?.failed ?? null);
   const [kept] = useState(() => useReviewCommentsStore.getState().words.get(form)?.text ?? "");
   const {
     register,
@@ -68,7 +67,7 @@ export function CommentForm({
     shown.observe(node);
     return () => shown.disconnect();
   }, [form]);
-  const message = errors.body?.message ?? error;
+  const message = errors.body?.message ?? failed;
   return (
     <form
       data-comment-form=""

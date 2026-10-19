@@ -20,6 +20,3 @@ export type ShownNote = {
 };
 
 export const samePoint = (a: LinePoint, b: LinePoint) => a.side === b.side && a.line === b.line;
-
-export const sameRef = (a: NoteRef, b: NoteRef) =>
-  a.revision === b.revision && a.path === b.path && a.index === b.index;
