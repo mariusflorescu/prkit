@@ -80,6 +80,7 @@ The inventory covers every WebSocket RPC and the app's local presentation action
 | Appearance | appearance.get, appearance.update | `read_settings`; changes excluded B | Read / Excluded |
 | Outside agents state/access/reset | outsideAgents.get, outsideAgents.update, outsideAgents.reset | `read_settings`; enabling/disabling, access changes and Reset access excluded B | Read / Excluded |
 | CLI setup and skill installer | cliInstall.get, cliInstall.install, cliInstall.uninstall, cliInstall.skill | Setup status is presentation; installing/removing the launcher and opening the skill installer are excluded B: machine setup | Presentation / Excluded |
+| Server log: copy it, reveal the file | logs.recent, Electron show-log bridge | Excluded B: the log names the owner's repositories and GitHub accounts, so sharing it is the owner's to do by hand | Excluded |
 | Local guides: list, read, file contents | localReviews.list, localReviews.get, localReviews.fileContents, guides.get | `list_local_guides`, `read_local_guide` | Read |
 | Start and stop a local guide | localReviews.generate, localReviews.stop | `generate_local_guide` from a folder (the app's Run again takes the review's key), `stop_local_guide` | Work |
 | Open/close a local guide's tab | workspace.openLocal, workspace.closeLocal | `generate_local_guide` opens the tab without focus; closing it is app only | Work / App |

@@ -5,6 +5,7 @@ import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import { ServerReadyLineJson } from "@prkit/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stdio from "effect/Stdio";
@@ -41,6 +42,7 @@ import * as FixerWatcher from "./fixers/FixerWatcher.ts";
 import * as ReviewWatcher from "./reviews/ReviewWatcher.ts";
 import * as ServerHttp from "./http.ts";
 import { boundPort } from "./listenAddress.ts";
+import * as LogFile from "./logs/LogFile.ts";
 import * as HomeLock from "./persistence/HomeLock.ts";
 import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import * as Ws from "./ws.ts";
@@ -156,6 +158,15 @@ const layerServer = layerReadyLine.pipe(
   Layer.provideMerge(layerHttpServer),
 );
 
+// Everything the server logs goes to its file in the home as well as to stderr, which a
+// Finder launch throws away.
+const layerLogFile = Logger.layer(
+  [LogFile.LogFile.use((logFile) => Effect.succeed(logFile.logger))],
+  { mergeWithExisting: true },
+).pipe(Layer.provideMerge(LogFile.layer));
+
 // The CLI supplies ServerConfig. The home lock builds first, so a second server for the
-// same home never touches the database or listens.
-export const runServer = Layer.launch(layerServer.pipe(Layer.provide(HomeLock.layer)));
+// same home never touches the database, listens or writes into the first one's log.
+export const runServer = Layer.launch(
+  layerServer.pipe(Layer.provide(layerLogFile), Layer.provide(HomeLock.layer)),
+);
