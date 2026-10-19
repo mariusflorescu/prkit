@@ -30,6 +30,7 @@ import {
   decodeTurns,
   encodeStatus,
   type FixerRow,
+  readableFixers,
   toActivity,
   toFixer,
   toTurn,
@@ -274,7 +275,9 @@ export const makeFixerState = Effect.gen(function* () {
     });
 
   /** Every active fixer, with its PR's account, for the watcher. */
-  const watched = sql`SELECT * FROM fixers WHERE ended IS NULL`.pipe(Effect.flatMap(decodeFixers));
+  const watched = sql`SELECT * FROM fixers WHERE ended IS NULL`.pipe(
+    Effect.flatMap(readableFixers),
+  );
 
   return {
     contextDir,

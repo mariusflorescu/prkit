@@ -22,6 +22,8 @@ import {
 } from "@prkit/contracts";
 import * as Schema from "effect/Schema";
 
+import { decodeEach, decodeReadable } from "../persistence/damagedRows.ts";
+
 /** What a turn was asked to do, as stored; what came back lives in its own columns. */
 export const WorkRequest = Schema.Union([
   Schema.TaggedStruct("fix", {
@@ -98,6 +100,15 @@ export const ActivityRow = Schema.Struct({
 
 export const decodeFixers = Schema.decodeUnknownEffect(Schema.Array(FixerRow));
 export const decodeTurns = Schema.decodeUnknownEffect(Schema.Array(TurnRow));
+/** Lists read every row they can and leave a damaged one out (logged), so it fails alone. */
+export const readableFixers = decodeReadable("fixers", FixerRow);
+export const readableTurns = decodeReadable("fixer_turns", TurnRow);
+export const decodeEachFixer = decodeEach("fixers", FixerRow);
+/** Each turn's state on its own, so startup can leave one it can't read as it was. */
+export const decodeTurnStates = decodeEach(
+  "fixer_turns",
+  Schema.Struct({ id: FixerTurnId, status: Schema.fromJsonString(FixerTurnStatus) }),
+);
 export const decodeActivity = Schema.decodeUnknownEffect(Schema.Array(ActivityRow));
 export const decodeDiff = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ diff: Schema.NullOr(Schema.fromJsonString(FixerDiff)) })),

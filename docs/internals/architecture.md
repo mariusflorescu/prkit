@@ -66,7 +66,7 @@ Every child process (agents, `gh`, `git`) gets an environment built from an allo
 - `bin/prkit` - the CLI launcher, also mode 0700 and holding no secret. Both launchers pin this home, the running executable, the server entry and the app version, and are written atomically on each launch when the bin folder passes the trusted-folder check (see Command line).
 - `outside-agents.json` - how both clients find the running server, mode 0600: while the switch is on, the port, outside token and level with the pid and version; while off, only the pid and version. Removed when the server stops (see Outside agents).
 
-SQLite goes through `effect/sql` with a small driver over `node:sqlite`, WAL mode, migrations as TypeScript files under `apps/server/src/persistence/Migrations/`.
+SQLite goes through `effect/sql` with a small driver over `node:sqlite`, WAL mode, migrations as TypeScript files under `apps/server/src/persistence/Migrations/`. A stored row can be one prkit can't read: a newer prkit wrote it, or it was damaged. A list decodes each row on its own (`persistence/damagedRows.ts`) and leaves such a row out with a warning in the log, so it fails alone, while a read of that one row still fails with its own "damaged record" error. Startup never deletes or restarts on the strength of a row it couldn't read: that checkout, local copy or tab stays as it was, and a tab comes back whole once its pull request is opened again.
 
 Live PR data (titles, checks, comments, the current diff) is read from GitHub on demand and cached by the server; the last good answer of each read is also kept in `prkit.sqlite`, so a relaunch shows it before any network call (see GitHub reads). What prkit creates is persisted, including the exact diff each guide was written against, because a guide must keep rendering correctly after the PR moves on.
 
@@ -117,6 +117,7 @@ ReviewStatus =
   | { _tag: "done"; reason: "merged" | "closed" | "stopped" }
 FailureReason = "account" | "github" | "repository" | "agent-auth" | "agent" | "no-guide" | "interrupted"
               | "settings"                                   // the ignore rules skip every changed file
+              | "damaged"                                    // startup couldn't read the stored state
 Review = { id, key, accountId, provider: "claude" | "codex" | "cursor", instance: AgentInstanceId,
            model: string | null, modelOptions: Array<{ id, value }>,  // the agent selection
            sessionId: string | null, status: ReviewStatus, latestRevision: number | null,
@@ -192,7 +193,7 @@ The review is a state machine owned by `Reviews` on the server. It does not depe
 
 New comments and check results never start an attempt; only a new head or base does. An attempt does read the PR's failing and pending checks, open review threads and linked issues when it starts (see What the agent sees), and the user sends review comments to the fix agent to act on them.
 
-**Restarts.** On startup, before the watcher runs: attempts with no `finishedAt` are marked `failed(interrupted)` and their reviews re-run from a new attempt, a local review on that attempt's own snapshot; worktrees that belong to done reviews, to no review, or to a local review with nothing running are removed, and so are local copies whose review is gone; then the watcher resumes every pull request review that is not done. Running this twice in a row changes nothing the second time.
+**Restarts.** On startup, before the watcher runs: a review whose stored state prkit can't read (one a newer prkit wrote, or damaged), or whose unfinished attempt it can't read, stops at `failed(damaged)` naming its latest attempt, so the rest of the table reads as usual and Retry writes the guide again (a local review's on that attempt's snapshot); nothing restarts it by itself. Then attempts with no `finishedAt` are marked `failed(interrupted)` and their reviews re-run from a new attempt, a local review on that attempt's own snapshot; worktrees that belong to done reviews, to no review, or to a local review with nothing running are removed, and so are local copies whose review is gone; then the watcher resumes every pull request review that is not done. Running this twice in a row changes nothing the second time.
 
 **Orphaned agents.** An agent process can outlive a killed server and keep writing to the same session. Each attempt records the agent's PID, its start time, and the server boot's `run_id`. On startup prkit kills a recorded agent only if both its PID and start time still match, then reconciles; the `run_id` is how a boot tells its own attempts from earlier ones.
 

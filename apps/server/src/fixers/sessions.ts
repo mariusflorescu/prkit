@@ -24,9 +24,11 @@ import { turnTmpDir } from "../agents/commandReach.ts";
 import { RepoCache } from "../repo/RepoCache.ts";
 import { makeAgentChoice } from "./agentChoice.ts";
 import {
-  decodeTurns,
+  decodeEachFixer,
+  decodeTurnStates,
   encodeOptions,
   type FixerRow,
+  readableTurns,
   TURN_COLUMNS,
   type TurnRow,
 } from "./fixerRows.ts";
@@ -61,7 +63,6 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
       contextDir,
       dbFailures,
       findFixer,
-      fixerById,
       newId,
       now,
       publish,
@@ -70,7 +71,6 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
       snapshotOf,
       transition,
       turnsOf,
-      watched,
     } = state;
     const { advance, stopFiber } = queue;
 
@@ -218,9 +218,26 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
      * removed and queues advance. A second run changes nothing.
      */
     const reconcile = Effect.gen(function* () {
+      // A turn whose state prkit can't read (a newer prkit's, or damaged) stays as it was:
+      // guessing could lose its commit or redo a push. One that isn't JSON is quoted, so the
+      // state filters on the table still read past it.
+      const [, unreadableTurns] = yield* sql`SELECT id, status FROM fixer_turns`.pipe(
+        Effect.flatMap(decodeTurnStates),
+      );
+      for (const turn of unreadableTurns) {
+        yield* sql`UPDATE fixer_turns SET status = json_quote(status)
+          WHERE id = ${turn.id} AND NOT json_valid(status)`;
+        yield* Effect.logWarning("Left a fix turn whose state prkit can't read as it was").pipe(
+          Effect.annotateLogs({ turnId: turn.id ?? "", problem: turn.problem }),
+        );
+      }
+      const [fixers, unreadableFixers] = yield* sql`SELECT * FROM fixers`.pipe(
+        Effect.flatMap(decodeEachFixer),
+      );
+      const known = new Map(fixers.map((fixer) => [fixer.id, fixer]));
       const stale = yield* sql`SELECT ${sql.literal(TURN_COLUMNS)} FROM fixer_turns
         WHERE json_extract(status, '$._tag') IN ('preparing', 'running', 'pushing')
-          AND (run_id IS NULL OR run_id != ${runId})`.pipe(Effect.flatMap(decodeTurns));
+          AND (run_id IS NULL OR run_id != ${runId})`.pipe(Effect.flatMap(readableTurns));
       for (const row of stale) {
         // An agent outlives a killed server; stop it before anything resumes its session.
         if (row.agent_pid !== null && row.agent_started !== null) {
@@ -238,8 +255,8 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
           row.status._tag === "pushing"
             ? ({ _tag: "ended" } as const)
             : yield* leftovers.sweep(row.id, turnSince(row));
-        const fixer = yield* fixerById(row.fixer_id);
-        if (fixer === null) continue;
+        const fixer = known.get(row.fixer_id);
+        if (fixer === undefined) continue;
         const ref = refFromKey(fixer.pr_key);
         if (end._tag === "unfinished") {
           yield* leftovers.record(row.id, end);
@@ -296,14 +313,16 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
           yield* appendActivity(fixer.pr_key, row.id, "error", message);
         }
       }
-      const live = new Set((yield* watched).map((fixer) => fixer.id));
+      const live = new Set(fixers.filter((fixer) => fixer.ended === null).map((fixer) => fixer.id));
+      // A fixer whose record can't be read may still be working: its checkout stays.
+      const kept = new Set(unreadableFixers.map((fixer) => fixer.id));
       let removed = 0;
       for (const name of yield* repo.listFixers()) {
         const fixerId = FixerId.make(name);
-        if (live.has(fixerId)) continue;
+        if (live.has(fixerId) || kept.has(name)) continue;
         // The cache to prune comes from prkit's own record of the fixer, never the checkout.
-        const row = yield* fixerById(fixerId);
-        const ref = row === null ? null : refFromKey(row.pr_key);
+        const row = known.get(fixerId);
+        const ref = row === undefined ? null : refFromKey(row.pr_key);
         if (yield* repo.removeFixer(fixerId, ref).pipe(Effect.orElseSucceed(() => false)))
           removed++;
       }

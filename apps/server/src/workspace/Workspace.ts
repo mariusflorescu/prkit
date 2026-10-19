@@ -5,6 +5,8 @@ import {
   type InboxFilters,
   InboxSort,
   NO_INBOX_FILTERS,
+  OpenLocalReview,
+  OpenPullRequest,
   refFromKey,
   SavedInboxFilters,
   Workspace as WorkspaceSchema,
@@ -23,6 +25,8 @@ import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 
+import { decodeReadable } from "../persistence/damagedRows.ts";
+
 /** Filters saved before the sort existed keep their search and selections, and sort by recent activity. */
 const StoredFilters = Schema.fromJsonString(
   Schema.Struct({
@@ -31,6 +35,8 @@ const StoredFilters = Schema.fromJsonString(
   }),
 );
 const UNSAVED: SavedInboxFilters = { ...NO_INBOX_FILTERS, savedAt: null };
+const readableOpen = decodeReadable("open_pull_requests", OpenPullRequest);
+const readableLocal = decodeReadable("open_local_reviews", OpenLocalReview);
 /** Saved filters that don't decode start the Inbox unfiltered rather than fail the open tabs' read. */
 const decodeFilters = (stored: string | null) =>
   stored === null
@@ -54,9 +60,15 @@ export const make = Effect.gen(function* () {
     sql
       .withTransaction(
         Effect.gen(function* () {
+          // A tab prkit can't read is left out (logged), and the others still open.
           const open =
-            yield* sql`SELECT key, account_id AS accountId, position FROM open_pull_requests ORDER BY position`;
-          const local = yield* sql`SELECT key, position FROM open_local_reviews ORDER BY position`;
+            yield* sql`SELECT key, account_id AS accountId, position FROM open_pull_requests ORDER BY position`.pipe(
+              Effect.flatMap(readableOpen),
+            );
+          const local =
+            yield* sql`SELECT key, position FROM open_local_reviews ORDER BY position`.pipe(
+              Effect.flatMap(readableLocal),
+            );
           const rows =
             yield* sql`SELECT active_key AS activeKey, inbox_filters AS inboxFilters, version FROM workspace WHERE id = 1`.pipe(
               Effect.flatMap(
@@ -74,7 +86,8 @@ export const make = Effect.gen(function* () {
           return yield* Schema.decodeUnknownEffect(WorkspaceSchema)({
             open,
             local,
-            activeKey: rows[0]?.activeKey ?? null,
+            // The active tab, unless it was left out.
+            activeKey: open.find((row) => row.key === rows[0]?.activeKey)?.key ?? null,
             inboxFilters: decodeFilters(rows[0]?.inboxFilters ?? null),
             version: rows[0]?.version ?? 0,
           });
@@ -132,15 +145,21 @@ export const make = Effect.gen(function* () {
                 message: "The open list changed. Retry with the current list.",
               });
             const next = applyWorkspaceCommand(current, input);
+            // Only the tabs read here are written again: one prkit can't read stays as it was,
+            // until opening its pull request again replaces it.
             yield* sql`UPDATE workspace SET active_key = NULL WHERE id = 1`;
-            yield* sql`DELETE FROM open_pull_requests`;
+            for (const row of current.open)
+              yield* sql`DELETE FROM open_pull_requests WHERE key = ${row.key}`;
             for (const row of next.open)
-              yield* sql`INSERT INTO open_pull_requests (key, account_id, position) VALUES (${row.key}, ${row.accountId}, ${row.position})`;
+              yield* sql`INSERT INTO open_pull_requests (key, account_id, position) VALUES (${row.key}, ${row.accountId}, ${row.position})
+                ON CONFLICT (key) DO UPDATE SET account_id = excluded.account_id, position = excluded.position`;
             yield* sql`UPDATE workspace SET active_key = ${next.activeKey} WHERE id = 1`;
             if (next.local !== current.local) {
-              yield* sql`DELETE FROM open_local_reviews`;
+              for (const row of current.local)
+                yield* sql`DELETE FROM open_local_reviews WHERE key = ${row.key}`;
               for (const row of next.local)
-                yield* sql`INSERT INTO open_local_reviews (key, position) VALUES (${row.key}, ${row.position})`;
+                yield* sql`INSERT INTO open_local_reviews (key, position) VALUES (${row.key}, ${row.position})
+                  ON CONFLICT (key) DO UPDATE SET position = excluded.position`;
             }
             return yield* read();
           }),

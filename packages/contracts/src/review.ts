@@ -21,6 +21,8 @@ export const FailureReason = Schema.Literals([
   "interrupted",
   /** The reviewer's ignore rules skip every changed file. */
   "settings",
+  /** prkit couldn't read the state it had stored, so startup stopped it there. */
+  "damaged",
 ]);
 export type FailureReason = typeof FailureReason.Type;
 

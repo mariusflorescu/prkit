@@ -56,6 +56,7 @@ export const LOCAL_FAILURE_TITLES: Record<FailureReason, string> = {
   "no-guide": "The agent didn't finish the guide",
   interrupted: "prkit stopped while writing the guide",
   settings: "Your ignore rules skip every changed file",
+  damaged: "prkit couldn't read this guide's record",
 };
 
 /** One status in a few words, for the tab's tooltip and the palette. */

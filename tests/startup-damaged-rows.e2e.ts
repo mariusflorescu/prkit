@@ -24,7 +24,7 @@ const pull = (url: string, number: number, tab: string) =>
   `${url}/pr/github.com/budget/fixtures/${number}${ACCOUNT}&tab=${tab}`;
 const TITLE = "prkit couldn't read this guide's record";
 const MESSAGE =
-  "prkit couldn't read what this guide was doing, so it stopped it. Retry to write it again.";
+  "A newer version of prkit may have saved it, or it was damaged, so prkit stopped this guide. Retry writes it again.";
 const LOCAL_TAB = "Open the local review of widgets · feature/limits";
 const FIRST = "What does this pull request change?";
 const SECOND = "Which file should I read first?";
@@ -51,7 +51,10 @@ const generate = async ({ screen }: Page, number: number) => {
   await screen.getByRole("link", new RegExp(`#${number} `)).hover();
   await screen.getByRole("button", `Generate guide for budget/fixtures #${number}`).tap();
   await expect(
-    screen.getByRole("link", new RegExp(`#${number} Budget fixture ${number} Guide ready`)),
+    screen.getByRole(
+      "link",
+      new RegExp(`#${number} Budget fixture ${number} (Stack \\d/\\d )?Guide ready`),
+    ),
   ).toBeVisible({ timeout: 120_000 });
 };
 
@@ -67,7 +70,11 @@ const ask = async ({ screen }: Page, question: string) => {
 };
 
 /** Sends one comment on #9 to the fix agent; the PR merges first, so the turn ends at once. */
-const sendFix = async ({ app, screen, browser }: Page, url: string, merge: () => Promise<void>) => {
+const sendFix = async (
+  { app, screen, browser }: Page,
+  url: string,
+  merge: () => Promise<Response>,
+) => {
   await app.open(pull(url, 9, "files"));
   const file = screen.getByRole("region", "src/limits.ts");
   await expect(file.getByRole("button", "Comment on line 1")).toBeVisible({ timeout: 30_000 });
@@ -249,6 +256,8 @@ test(
       expect(serverLog).toContain("Left a fix turn whose state prkit can't read as it was");
       expect(serverLog).toContain("Left out a stored row prkit can't read");
       run = launch();
+      await app.open(run.openUrl);
+      await expect(screen.getByRole("link", "Inbox")).toBeVisible({ timeout: 30_000 });
       await app.open(pull(run.url, 6, "guide"));
       await expect(failure(screen)).toContainText(MESSAGE, { timeout: 30_000 });
       await app.open(pull(run.url, 4, "guide"));
@@ -257,6 +266,16 @@ test(
       });
       await expect(failure(screen)).toHaveCount(0);
       expect(attemptsOf(run.home, keyOf(6))).toBe(attemptsOf6);
+
+      // Opening #3 again replaces its damaged tab.
+      await app.open(pull(run.url, 3, "conversation"));
+      await expect(tabs.getByRole("link", /#3 /)).toBeVisible({ timeout: 30_000 });
+      expect(
+        readRows(
+          run.home,
+          `SELECT typeof(position) AS kind FROM open_pull_requests WHERE key = '${keyOf(3)}'`,
+        ),
+      ).toEqual([{ kind: "integer" }]);
     } finally {
       stopFakeInstance(name, { keepHome: false });
       fake.stop();

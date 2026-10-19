@@ -38,9 +38,9 @@ import { makeAgentRuns } from "./agentRuns.ts";
 import { makeConflictTurn } from "./conflictTurn.ts";
 import {
   decodeDiff,
-  decodeFixers,
   encodeStatus,
   type FixerRow,
+  readableFixers,
   type TurnRow,
 } from "./fixerRows.ts";
 import { clip, decodeCount, makeFixerState } from "./fixerState.ts";
@@ -60,6 +60,13 @@ const decodeCommits = Schema.decodeUnknownEffect(
 );
 
 const WORKING: ReadonlyArray<FixerTurnState> = ["queued", "preparing", "running", "pushing"];
+const decodeOpenStates = Schema.decodeUnknownEffect(
+  Schema.Array(
+    Schema.Struct({
+      state: Schema.Literals(["queued", "preparing", "running", "pushing", "ready"]),
+    }),
+  ),
+);
 
 export class Fixers extends Context.Service<Fixers, Effect.Success<typeof make>>()(
   "@prkit/server/fixers/Fixers",
@@ -542,7 +549,14 @@ export const make = Effect.gen(function* () {
 
   const feedEntry = (fixer: FixerRow) =>
     Effect.gen(function* () {
-      const open = fixer.ended === null ? yield* turnsOf(fixer.id, [...WORKING, "ready"]) : [];
+      // Only the states count, so a turn with damaged work or results can't hide the others.
+      const open =
+        fixer.ended === null
+          ? yield* sql`SELECT json_extract(status, '$._tag') AS state FROM fixer_turns
+              WHERE fixer_id = ${fixer.id} AND json_extract(status, '$._tag') IN ${sql.in([...WORKING, "ready"])}`.pipe(
+              Effect.flatMap(decodeOpenStates),
+            )
+          : [];
       const [all] =
         yield* sql`SELECT COUNT(*) AS count FROM fixer_turns WHERE fixer_id = ${fixer.id}`.pipe(
           Effect.flatMap(decodeCount),
@@ -550,7 +564,7 @@ export const make = Effect.gen(function* () {
       return {
         key: fixer.pr_key,
         accountId: fixer.account_id,
-        state: open.some((turn) => WORKING.includes(turn.status._tag))
+        state: open.some((turn) => WORKING.includes(turn.state))
           ? "working"
           : open.length > 0
             ? "waiting"
@@ -565,7 +579,7 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const changed = yield* PubSub.subscribe(changes);
         const noticed = yield* PubSub.subscribe(notices);
-        const all = yield* sql`SELECT * FROM fixers`.pipe(Effect.flatMap(decodeFixers));
+        const all = yield* sql`SELECT * FROM fixers`.pipe(Effect.flatMap(readableFixers));
         const entries = yield* Effect.forEach(all, feedEntry);
         const sent = new Map(entries.map((entry) => [entry.key, entry]));
         const updates = Stream.fromSubscription(changed).pipe(
