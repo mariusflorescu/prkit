@@ -28,10 +28,11 @@ export function OutsideAgentsForm({
   saving: boolean;
   onSave: (settings: OutsideAgentsSettings) => Promise<OutsideAgentsState>;
 }) {
-  // `values` moves the form to what the server says after each read and save.
+  // `values` moves the form to what prkit holds, or to the change being saved while it saves.
   const form = useForm<OutsideAgentsSettings>({ values: settings });
   const detailId = useId();
-  // A failed save leaves the server and `values` as they were, so only this takes the form back.
+  // A save can fail before the form ever saw it pending, leaving `values` as they were, so this
+  // takes the form back.
   const save = form.handleSubmit((values) => onSave(values).catch(() => form.reset()));
   return (
     <form

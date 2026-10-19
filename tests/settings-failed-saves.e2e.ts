@@ -1,6 +1,5 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
-import { DatabaseSync } from "node:sqlite";
 
 import { type Browser, describe, test } from "@e2e-dev/web";
 import { expect, type TestFixtures } from "e2e";
@@ -13,6 +12,7 @@ import {
   stopFakeInstance,
 } from "./fakeGitHub.ts";
 import { readRows } from "./fixturePr.ts";
+import { holdWrites, refuseWrites } from "./sqliteFaults.ts";
 import { emulateOsColorScheme, readPageTheme, screenshotLightAndDark } from "./osColorScheme.ts";
 
 type Fixtures = Pick<TestFixtures, "app" | "screen"> & { browser: Browser };
@@ -21,49 +21,6 @@ const WIDTHS = [
   { label: "wide", width: 1280 },
   { label: "narrow", width: 760 },
 ] as const;
-
-const database = (home: string) => {
-  const db = new DatabaseSync(NodePath.join(home, "prkit.sqlite"));
-  db.exec("PRAGMA busy_timeout = 5000");
-  return db;
-};
-
-/**
- * Makes every write to one of prkit's tables fail inside its own SQLite, the way a full disk
- * or a damaged file would, until the returned function lets writes through again.
- */
-const refuseWrites = (home: string, table: string) => {
-  const events = ["insert", "update", "delete"];
-  const exec = (statements: ReadonlyArray<string>) => {
-    const db = database(home);
-    try {
-      for (const statement of statements) db.exec(statement);
-    } finally {
-      db.close();
-    }
-  };
-  exec(
-    events.map(
-      (event) =>
-        `CREATE TRIGGER e2e_refuse_${event} BEFORE ${event.toUpperCase()} ON ${table}
-         BEGIN SELECT RAISE(ABORT, 'e2e refuses writes to ${table}'); END`,
-    ),
-  );
-  return () => exec(events.map((event) => `DROP TRIGGER IF EXISTS e2e_refuse_${event}`));
-};
-
-/**
- * Takes SQLite's write lock the way another process writing would, so prkit's next save waits
- * on it (up to its 5 second busy timeout) until the returned function lets go.
- */
-const holdWrites = (home: string) => {
-  const db = database(home);
-  db.exec("BEGIN IMMEDIATE");
-  return () => {
-    db.exec("ROLLBACK");
-    db.close();
-  };
-};
 
 /** The last control that saves: the last match of `selector` outside an alert, with `text` in it when given. */
 type Mark = { selector: string; text?: string };
@@ -225,21 +182,30 @@ describe("settings failed saves", { tags: ["settings-failed-saves"] }, () => {
         await expect(screen.getByRole("alert").filter({ hasText: message })).toHaveCount(0);
 
         // While a save waits, the cards show the theme being saved, dimmed, and take no second pick.
+        // The hold ends well inside prkit's 5 second busy timeout, so the save then succeeds.
         const release = holdWrites(run.home);
+        let saving: { dark: boolean; dimmed: string | null } | null = null;
         try {
           await theme.getByText("Dark").tap();
           await expect(theme.getByRole("radio", "Dark")).toBeChecked();
-          await expect(theme.getByRole("radio", "Light")).toHaveAttribute("aria-disabled", "true");
-          await app.screenshot("settings-failed-appearance-saving");
           // A click on Light right away, without waiting for the cards like a tap would.
-          await browser.evaluate(() => {
-            document.querySelector('input[name="theme"][value="light"]')?.closest("label")?.click();
-            return null;
+          saving = await browser.evaluate(() => {
+            const radio = (value: string) =>
+              document.querySelector<HTMLInputElement>(`input[name="theme"][value="${value}"]`);
+            radio("light")?.closest("label")?.click();
+            return {
+              dark: radio("dark")?.checked ?? false,
+              dimmed: radio("light")?.getAttribute("aria-disabled") ?? null,
+            };
           });
-          await expect(theme.getByRole("radio", "Dark")).toBeChecked();
+          await app.screenshot("settings-failed-appearance-saving");
         } finally {
           release();
         }
+        expect(saving, "the pick shows, dimmed, and a second one is refused").toEqual({
+          dark: true,
+          dimmed: "true",
+        });
         await expect(theme.getByRole("radio", "Light")).toHaveAttribute("aria-disabled", "false", {
           timeout: 20_000,
         });
@@ -413,6 +379,10 @@ describe("settings failed saves", { tags: ["settings-failed-saves"] }, () => {
           allow();
         }
 
+        // From the top of a fresh page: at the end of a scrolled page, a card that shrinks clamps the
+        // scroll, and Chrome's scroll anchoring scrolls back on the next growth, error or not.
+        await browser.reload();
+        await expect(codex).toBeEnabled({ timeout: 30_000 });
         // An agent's switch shows the change being saved while it waits, and prkit's answer after.
         await expect(codex).toHaveAttribute("aria-checked", "true");
         const release = holdWrites(run.home);
@@ -428,19 +398,93 @@ describe("settings failed saves", { tags: ["settings-failed-saves"] }, () => {
         });
         await expect(codex).toHaveAttribute("aria-checked", "false");
         await expect(codex).toBeEnabled();
+        const agentMessage = "prkit couldn't save that agent.";
+        const enabled = () =>
+          readRows(run.home, "SELECT enabled FROM agent_instances WHERE id = 'codex'");
         const refuse = refuseWrites(run.home, "agent_instances");
         try {
-          await codex.tap();
-          await expect(screen.getByText("Couldn't change the agent", { exact: true })).toBeVisible({
-            timeout: 20_000,
+          await failAndHold(fixtures, {
+            last: { selector: '[role="switch"][aria-label="Codex on"]' },
+            tap: () => codex.tap(),
+            message: agentMessage,
+            frame: "settings-failed-agent-switch",
           });
           await expect(codex).toHaveAttribute("aria-checked", "false");
-          expect(
-            readRows(run.home, "SELECT enabled FROM agent_instances WHERE id = 'codex'"),
-          ).toEqual([{ enabled: 0 }]);
+          expect(enabled()).toEqual([{ enabled: 0 }]);
         } finally {
           refuse();
         }
+        // Retry sends the switch again, showing it while it waits.
+        const retrying = holdWrites(run.home);
+        try {
+          await agents
+            .getByRole("alert")
+            .filter({ hasText: agentMessage })
+            .getByRole("button", "Retry")
+            .tap();
+          await expect(codex).toHaveAttribute("aria-checked", "true");
+        } finally {
+          retrying();
+        }
+        await expect.poll(enabled, { timeout: 20_000 }).toEqual([{ enabled: 1 }]);
+        await expect(agents.getByRole("alert").filter({ hasText: agentMessage })).toHaveCount(0);
+
+        // Reset to default asks first; a reset that fails leaves the dialog's buttons where they were.
+        const card = agents.getByRole("list", "Agents").getByRole("listitem", "Codex");
+        await card.getByRole("button", "Reset to default").tap();
+        const confirm = screen.getByRole("alertdialog", "Reset Codex to default?");
+        await expect(confirm).toBeVisible();
+        const dialogButtons = () =>
+          browser.evaluate(() =>
+            [...document.querySelectorAll('[role="alertdialog"] button')]
+              .filter((button) => button.closest('[role="alert"]') === null)
+              .map((button) => Math.round(button.getBoundingClientRect().top)),
+          );
+        // Measured once the dialog's opening scale has settled.
+        await browser.evaluate(async () => {
+          const dialog = document.querySelector('[role="alertdialog"]');
+          await Promise.all(dialog?.getAnimations().map((animation) => animation.finished) ?? []);
+          return null;
+        });
+        const beforeReset = await dialogButtons();
+        const refuseReset = refuseWrites(run.home, "agent_instances");
+        try {
+          await confirm.getByRole("button", "Reset").tap();
+          await expect(confirm.getByRole("alert")).toHaveText("prkit couldn't remove that agent.", {
+            timeout: 20_000,
+          });
+          expect(await dialogButtons(), "the dialog's buttons stay put").toEqual(beforeReset);
+          await app.screenshot("settings-failed-agent-reset");
+        } finally {
+          refuseReset();
+        }
+        await confirm.getByRole("button", "Cancel").tap();
+        await expect(confirm).toBeHidden();
+
+        // Edit is a draft with its own Save: a failed save keeps the words, with Retry below.
+        await card.getByRole("button", "Edit").tap();
+        const editor = card.getByRole("form", "Edit Codex");
+        await editor.getByRole("textbox", "Label").fill("Codex work");
+        await editor.getByRole("button", "Save").scrollIntoView();
+        const refuseEdit = refuseWrites(run.home, "agent_instances");
+        try {
+          await failAndHold(fixtures, {
+            last: { selector: 'form[aria-label="Edit Codex"] button' },
+            tap: () => editor.getByRole("button", "Save").tap(),
+            message: agentMessage,
+            frame: "settings-failed-agent-edit",
+          });
+          await expect(editor.getByRole("textbox", "Label")).toHaveValue("Codex work");
+        } finally {
+          refuseEdit();
+        }
+        await editor.getByRole("alert").getByRole("button", "Retry").tap();
+        await expect(screen.getByText("Saved Codex work", { exact: true })).toBeVisible({
+          timeout: 20_000,
+        });
+        expect(readRows(run.home, "SELECT label FROM agent_instances WHERE id = 'codex'")).toEqual([
+          { label: "Codex work" },
+        ]);
       } finally {
         stop(name, fake);
       }

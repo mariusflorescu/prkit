@@ -47,11 +47,6 @@ export function ResetAgentDialog({
                 : `It stops using ${entry.configDir}: it runs on the login of the default folder, and the guides and fixes that use it start new conversations.`}
             </p>
           </AlertDialog.Description>
-          {reset.error !== null && !reset.isPending && (
-            <p role="alert" className="mt-3 text-xs text-error-foreground">
-              {reset.error.message}
-            </p>
-          )}
           <div className="mt-5 flex justify-end gap-2">
             <AlertDialog.Close
               disabled={reset.isPending}
@@ -71,6 +66,11 @@ export function ResetAgentDialog({
               {reset.isPending ? "Resetting…" : reset.error !== null ? "Try again" : "Reset"}
             </Button>
           </div>
+          {reset.error !== null && !reset.isPending && (
+            <p role="alert" className="mt-3 text-xs text-error-foreground">
+              {reset.error.message}
+            </p>
+          )}
         </AlertDialog.Popup>
       </AlertDialog.Portal>
     </AlertDialog.Root>

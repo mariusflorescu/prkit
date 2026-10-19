@@ -308,9 +308,9 @@ export const make = Effect.gen(function* () {
       )
       .pipe(
         Effect.catchTags({
-          SqlError: fail("prkit couldn't save that agent. Try again."),
+          SqlError: fail("prkit couldn't save that agent."),
           SchemaError: fail("prkit read a damaged agent setting. Check Settings > Agents."),
-          PlatformError: fail("prkit couldn't save that agent's sensitive values. Try again."),
+          PlatformError: fail("prkit couldn't save that agent's sensitive values."),
         }),
       );
 

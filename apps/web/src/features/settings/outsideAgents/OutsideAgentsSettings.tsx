@@ -52,7 +52,12 @@ export function OutsideAgentsSettings() {
       ) : (
         <>
           <OutsideAgentsForm
-            settings={{ enabled: state.data.enabled, access: state.data.access }}
+            settings={
+              // A Retry saves without the form, so the form follows what is being saved too.
+              update.isPending && update.variables !== undefined
+                ? update.variables
+                : { enabled: state.data.enabled, access: state.data.access }
+            }
             saving={update.isPending}
             onSave={(settings) => update.mutateAsync(settings)}
           />

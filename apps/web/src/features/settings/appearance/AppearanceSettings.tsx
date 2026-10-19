@@ -9,7 +9,7 @@ import { useAppearance } from "./useAppearance";
 
 /** Settings > Appearance: System, Light or Dark, applied the moment a card is picked. */
 export function AppearanceSettings() {
-  const { appearance, update } = useAppearance();
+  const { appearance, update, saving } = useAppearance();
   return (
     <SettingsSection
       title="Appearance"
@@ -33,7 +33,7 @@ export function AppearanceSettings() {
                 label={option.label}
                 tones={option.tones}
                 selected={appearance.data.theme === option.value}
-                saving={update.isPending}
+                saving={saving}
                 onSelect={(theme) => update.mutate(theme)}
               />
             ))}

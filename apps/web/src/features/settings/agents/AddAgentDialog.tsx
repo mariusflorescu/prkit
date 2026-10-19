@@ -184,6 +184,11 @@ export function AddAgentDialog({
                         : "Add agent"}
               </Button>
             </div>
+            {create.error !== null && !create.isPending && (
+              <p role="alert" className="mt-3 text-xs text-error-foreground">
+                {create.error.message}
+              </p>
+            )}
           </form>
         </Dialog.Popup>
       </Dialog.Portal>

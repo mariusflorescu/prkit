@@ -63,11 +63,6 @@ export function RemoveAgentDialog({
             </p>
             <p>{LEFT_BEHIND[entry.kind](entry)}</p>
           </AlertDialog.Description>
-          {remove.error !== null && !remove.isPending && (
-            <p role="alert" className="mt-3 text-xs text-error-foreground">
-              {remove.error.message}
-            </p>
-          )}
           <div className="mt-5 flex justify-end gap-2">
             <AlertDialog.Close
               disabled={remove.isPending}
@@ -87,6 +82,11 @@ export function RemoveAgentDialog({
               {remove.isPending ? "Removing…" : remove.error !== null ? "Try again" : "Remove"}
             </Button>
           </div>
+          {remove.error !== null && !remove.isPending && (
+            <p role="alert" className="mt-3 text-xs text-error-foreground">
+              {remove.error.message}
+            </p>
+          )}
         </AlertDialog.Popup>
       </AlertDialog.Portal>
     </AlertDialog.Root>

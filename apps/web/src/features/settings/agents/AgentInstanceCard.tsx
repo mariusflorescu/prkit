@@ -8,6 +8,7 @@ import { ProviderIcon } from "~/components/review/agent/ProviderIcon";
 import { Button } from "~/components/ui/button";
 import { Switch } from "~/components/ui/switch";
 
+import { FailedSave } from "../FailedSave";
 import { AgentInstanceEditor } from "./AgentInstanceEditor";
 import { AgentSignInHelp } from "./AgentSignInHelp";
 import { agentStatus, type AgentStatusTone } from "./agentStatus";
@@ -92,6 +93,7 @@ export function AgentInstanceCard({
           </div>
         )}
         {editing && <AgentInstanceEditor entry={entry} onDone={() => setEditing(false)} />}
+        <FailedSave save={actions.toggle} />
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <Button
