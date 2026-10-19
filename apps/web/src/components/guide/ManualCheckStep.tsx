@@ -61,7 +61,7 @@ export function ManualCheckStep({
         {state === "changed" && (
           <span
             id={changedId}
-            className="self-start rounded-md bg-warning-surface px-1.5 py-0.5 text-xs text-warning-foreground"
+            className="self-start rounded-md bg-warning-surface px-1.5 py-0.5 text-2xs text-warning-foreground"
           >
             Code changed since you checked
           </span>

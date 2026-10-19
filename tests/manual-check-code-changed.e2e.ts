@@ -222,6 +222,11 @@ test(
       await expect(pills).toHaveCount(0);
       expect(decisions(run.home).at(-1)).toEqual({ step: 4, paths: null, ticked: 1 });
 
+      const reviewedLimits = screen.getByRole("checkbox", `Reviewed ${LIMITS}`);
+      await reviewedLimits.scrollIntoView();
+      await reviewedLimits.tap();
+      await expect(reviewedLimits).toHaveAttribute("aria-checked", "true");
+
       const edited = git.commit(9, { [LIMITS]: MORE_SCHEMES });
       const before = git.patch(9, LIMITS);
       await fake.gitHead(9, edited);
@@ -247,6 +252,11 @@ test(
       expect(decisions(run.home)).toHaveLength(4);
       await plan.scrollIntoView();
       await screenshotLightAndDark(app, browser, "manual-check-code-changed-pill");
+      const reviewedChanged = screen.getByText("Changed since you reviewed");
+      await reviewedChanged.scrollIntoView();
+      await expect(reviewedChanged).toBeVisible();
+      await expect(reviewedLimits).toHaveAttribute("aria-checked", "false");
+      await screenshotLightAndDark(app, browser, "manual-check-code-changed-beside-reviewed");
 
       const read = readByCli();
       expect(read.revision).toBe(2);
