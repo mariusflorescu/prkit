@@ -14,7 +14,6 @@ import { holdWrites } from "./sqliteFaults.ts";
 /** A row of buttons, found by a neighbour whose label never changes. */
 type Row = { scope: string; neighbour: string };
 
-/** The label and painted box of every button in the row. */
 const rowOf = (browser: Browser, row: Row) =>
   browser.evaluate(({ scope, neighbour }: Row) => {
     const anchor = [...document.querySelectorAll(`${scope} button`)].find(
@@ -36,7 +35,7 @@ const rowOf = (browser: Browser, row: Row) =>
 
 const boxesOf = (buttons: Awaited<ReturnType<typeof rowOf>>) => buttons.map((button) => button.box);
 
-/** Waits for every running animation and transition on the page to finish, a dialog's opening included. */
+/** A dialog opens with a scale and a pressed button eases back from one, both in its painted box. */
 const settled = (browser: Browser) =>
   expect
     .poll(() =>
@@ -74,6 +73,8 @@ const holdAndFail = async (
   let said: string | null = null;
   try {
     await scope.getByRole("button", idle).tap();
+    await expect(scope.getByRole("button", pending)).toBeVisible();
+    await settled(browser);
     await expect(scope.getByRole("button", pending)).toBeVisible();
     during = await rowOf(browser, row);
     await app.screenshot(`${frame}-pending`);

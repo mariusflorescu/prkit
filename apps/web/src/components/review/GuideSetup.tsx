@@ -135,6 +135,7 @@ export function GuideSetup({
         )
       : null;
   const pending = generate.isPending || stackGuides.pending;
+  const guides = stackGuides.asked ?? starting.length;
   const ready =
     selection !== null &&
     problem === null &&
@@ -237,11 +238,7 @@ export function GuideSetup({
           />
         </div>
         <GenerateGuideButton
-          label={
-            stacked
-              ? `Generate ${starting.length} guide${starting.length === 1 ? "" : "s"}`
-              : submitLabel
-          }
+          label={stacked ? `Generate ${guides} guide${guides === 1 ? "" : "s"}` : submitLabel}
           pending={pending}
           disabled={!ready}
           shortcut={!stacked}

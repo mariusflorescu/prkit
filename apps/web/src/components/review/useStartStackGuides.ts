@@ -74,6 +74,8 @@ export function useStartStackGuides() {
       readonly guidance?: GuidanceEdit;
     }) => mutation.mutate(input),
     pending: mutation.isPending,
+    /** How many layers the start in flight asked for, while the live count drops as they start. */
+    asked: mutation.isPending ? mutation.variables.layers.length : null,
     error: mutation.error,
   };
 }
