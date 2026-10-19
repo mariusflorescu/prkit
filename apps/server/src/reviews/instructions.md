@@ -43,10 +43,10 @@ A point is one thing you tell the reader: a decision, a concern, a fact about th
 - About **a whole file**: that file's `note`, one line above its diff, like "Description-only change".
 - About **the chapter**, or about code outside the diff (which can't take a line note): the chapter's body, or a callout when the reader must not miss it. Keep a callout under about 60 words.
 
-Don't say it anywhere else. The reader reads the Overview and the chapters as one page, so a point said twice reads like two points, and a point said five times buries the rest. In particular:
+Don't say it anywhere else. The reader reads the Overview and the chapters as one page, so a point said twice reads like two points. In particular:
 
-- The `summary` says what the change does and why. Leave concerns to the places below.
-- When one line shows a point, its line note says it and the chapter's body leaves it out.
+- The `summary` says what the change does and why, intended behavior changes included. Leave concerns to the places below, even one phrased as "One side effect to know about: ...".
+- When one line shows a point, its line note says it and the chapter's body leaves it out. So pick a chapter's line notes before you write its body. A body that says "`verifyToken()` turns an expired token away with a 410" above a note saying "Expired tokens get a 410" says one point twice: keep one, or make the note say what only its line shows ("`now > row.expiresAt` lets the link work exactly at its expiry time").
 - `risk` reasons, `focus` items and `manualCheck` each have their own job, set out in their sections. When one of them needs a point a chapter already makes, say what the point is in a few words and point at the chapter instead of explaining it again. A point the `risk` reasons already make doesn't go in `focus` too.
 
 Line notes, callouts and focus items take a `tone`: `note` (the default: explains a decision), `question` (you'd ask the author) or `risk` (could break something: a race, a missing check, a behavior change callers won't expect). Use `question` and `risk` only when you'd actually raise the point in a review; a page full of red is noise.
@@ -146,17 +146,17 @@ One tests chapter is usually right. When existing tests changed what they expect
 ### Chapter text
 
 - **Title.** What happens, as a short verb phrase: "Mobile opens the Thread screen". Titles are plain text, so no backticks.
-- **Body.** Short paragraphs, as many as the idea needs. Start with what this group of files does and why. If there's a subtle part (an ordering that matters, an edge case, something that must always stay true, a place that knowingly works differently from similar code), that's the part a reviewer would miss. When one line shows it, say it in that line's note. When it spans the chapter, give it its own paragraph.
+- **Body.** Short paragraphs, as many as the idea needs. Start with what this group of files does and why. A subtle part that spans the chapter (an ordering that matters, something that must always stay true, a place that knowingly works differently from similar code) is what a reviewer would miss, so give it its own paragraph.
 - **`pseudocode`.** For a long but mechanically simple file (150 lines of retry logic that really mean "fetch with exponential backoff"), write the algorithm in a few lines as one string. When the chapter changes how logic that already existed works, send a before and after pair instead (see below).
 - **`risk`.** How carefully to read this chapter. See "How carefully to read".
 
 ### Line notes
 
-`annotations` pin a note under a line in the diff. Use them only on lines carrying a decision that isn't obvious from the code ("encoded by hand because `encodeURIComponent` leaves `)` alone", not "imports the helper"): usually 0-3 per file, a few more on a file that holds several of the PR's ideas. Keep each under about 45 words, since they sit inside the diff. Take line numbers straight from the numbered diff: `"side": "additions"` uses the new number (on `+` and unchanged lines), `"side": "deletions"` uses the old number (on `-` lines). A line note must land inside a hunk, and binary, too-large and rename-only files can't take any.
+`annotations` pin a note under a line in the diff. Use them only on lines carrying a decision that isn't obvious from the code, and say what only that line shows: the exact condition, the edge case, why this line and not another ("encoded by hand because `encodeURIComponent` leaves `)` alone", not "imports the helper"). Usually 0-3 per file, a few more on a file that holds several of the PR's ideas. Keep each under about 45 words, since they sit inside the diff. Take line numbers straight from the numbered diff: `"side": "additions"` uses the new number (on `+` and unchanged lines), `"side": "deletions"` uses the old number (on `-` lines). A line note must land inside a hunk, and binary, too-large and rename-only files can't take any.
 
 ### Before and after in a chapter
 
-When a chapter changes how logic that already existed works, `pseudocode` is a pair: `{ "before": "...", "after": "..." }`. `before` is how the code worked before this change, and `after` is how it works now. Think of a new step in the middle, a check that moves earlier, a loop that becomes a lookup, an order that flips, a rule that changes. prkit compares the two sides line by line and marks what changed like a diff, so the reader sees the change in a few lines before they read the diff.
+When a chapter changes how logic that already existed works, `pseudocode` is a pair: `{ "before": "...", "after": "..." }`. `before` is how the code worked before this change, and `after` is how it works now. Think of a new step in the middle, a check that moves earlier, a loop that becomes a lookup, an order that flips, a rule that changes. prkit marks what changed between the two sides like a diff, so the reader sees the change before they read the code.
 
 Most chapters don't need one: a guide usually has one or two, on the core chapters that change how something works. Never send one for:
 
@@ -169,7 +169,7 @@ To write one:
 - Use 3-8 lines a side, and never more than 10. Keep lines short, under about 60 characters, in the code's own names.
 - Write one step per line, the way you'd sketch it on a whiteboard. Don't copy the code again.
 - Write the lines that work the same word for word, with the same indentation, on both sides. Then only the change stands out.
-- Start both sides with the same first line, usually the function's name: `verifyToken(token)`. Keep it the same even when a parameter changed, and show the new parameter as a line of its own ("takes an optional discount"). A pair that shares no line marks every line as changed.
+- Start each side with the function's signature as that side's code has it: `verifyToken(token)`. It is the same on both sides only when the signature didn't change.
 - Use plain text, with no backticks or markdown. Both sides are written, and they differ.
 
 For a PR that makes password reset links expire after an hour, the chapter that adds the expiry could show `verifyToken()` like this:
@@ -186,7 +186,7 @@ For a PR that makes password reset links expire after an hour, the chapter that 
 
 ## How carefully to read
 
-The reviewer's first question is "can I skim this, or do I need to read every line?" `risk` answers it, for the whole pull request and for each chapter. prkit shows the pull request's level and reasons at the top of the Overview, and each chapter's level on the chapter list and on the chapter itself.
+The reviewer's first question is "can I skim this, or do I need to read every line?" `risk` answers it, for the whole pull request and for each chapter.
 
 The levels say how carefully to read, nothing else:
 
@@ -205,7 +205,7 @@ The levels say how carefully to read, nothing else:
 
 **prkit's signals are evidence, not verdicts.** The prompt lists what prkit found in the reviewed files. The reviewer sees them next to your level whatever you decide, so don't repeat one as a reason unless you explain what it means here. Weigh them with what you read: a routine CI action bump can still be `low`; a one-line change to how money is rounded is `high` with no signal at all; a large rename is `low`. A chapter that holds a file under the reviewer's look-closely paths is at least `medium`: the reviewer asked for it.
 
-`risk` is not `tone: "risk"`. A line note, callout or focus item with `tone: "risk"` is one specific way the code could break, pinned where it lives. `risk` is how carefully to read.
+`risk` is not `tone: "risk"`, which marks one specific way the code could break, where it lives.
 
 For the password reset example above:
 
@@ -340,4 +340,4 @@ Globs match only files that no explicit entry already claimed, in diff order. `*
 
 ## Submitting
 
-Call `submit_guide` once the guide covers every changed file. prkit checks it the way the visualize-pr build does: every file in exactly one chapter, every reference resolves, every line note, flow row and risk line lands on a line inside a hunk, and the limits above on `flow`, `pseudocode`, `risk`, `manualCheck` and `preflight` hold. If the call fails, it lists every problem in plain words ("`src/a.ts`: additions line 12 is outside the diff hunks. Visible additions lines: 40-58"). Fix them all with `revise_guide`: send only the top-level fields and chapters you change, each chapter whole with its `id` and `files`. prkit applies them to the guide it rejected and checks the whole guide again. To drop a field the rejected guide has, like a `flow` that doesn't help, or when the call never reached prkit (Claude Code couldn't read its input as JSON), send the whole guide with `submit_guide` again. Warnings don't block the guide, but fix them if you can. Once a call succeeds, prkit ends your turn.
+Call `submit_guide` once the guide covers every changed file. prkit checks it: every file in exactly one chapter, every reference resolves, every line note, flow row and risk line lands on a line inside a hunk, and the limits above on `flow`, `pseudocode`, `risk`, `manualCheck` and `preflight` hold. If the call fails, it lists every problem in plain words ("`src/a.ts`: additions line 12 is outside the diff hunks. Visible additions lines: 40-58"). Fix them all with `revise_guide`: send only the top-level fields and chapters you change, each chapter whole with its `id` and `files`. prkit applies them to the guide it rejected and checks the whole guide again. To drop a field the rejected guide has, like a `flow` that doesn't help, or when the call never reached prkit (Claude Code couldn't read its input as JSON), send the whole guide with `submit_guide` again. Warnings don't block the guide, but fix them if you can. Once a call succeeds, prkit ends your turn.
