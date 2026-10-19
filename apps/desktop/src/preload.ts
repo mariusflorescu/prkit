@@ -33,6 +33,9 @@ contextBridge.exposeInMainWorld("prkitDesktop", {
   bringForward: () => {
     ipcRenderer.send("prkit:bring-forward");
   },
+  showServerLog: () => {
+    ipcRenderer.send("prkit:show-server-log");
+  },
   onOpenGuide: (callback: (target: GuideTarget) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, target: GuideTarget) => callback(target);
     ipcRenderer.on("prkit:open-guide", listener);

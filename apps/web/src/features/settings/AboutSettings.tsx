@@ -3,9 +3,10 @@ import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
 import { useAppInfo } from "~/hooks/useAppInfo";
 
+import { ServerLog } from "./ServerLog";
 import { SettingsSection } from "./SettingsSection";
 
-/** Settings > About: the lockup, the tagline, the version, and the build when this is one. */
+/** Settings > About: the lockup, the tagline, the version, the build when this is one, and the server log. */
 export function AboutSettings() {
   const appInfo = useAppInfo();
   return (
@@ -42,6 +43,7 @@ export function AboutSettings() {
           </>
         )}
       </div>
+      <ServerLog />
     </SettingsSection>
   );
 }

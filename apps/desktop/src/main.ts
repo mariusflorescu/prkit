@@ -1,4 +1,5 @@
 import * as NodeCrypto from "node:crypto";
+import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
@@ -10,6 +11,7 @@ import {
   ipcMain,
   nativeTheme,
   Notification,
+  shell,
 } from "electron";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -27,6 +29,8 @@ import { startDesktopUpdates } from "./updates/startDesktopUpdates.ts";
 // server port that Vite proxies /ws to.
 const devWebUrl = process.env.PRKIT_DEV_WEB_URL;
 const devServerPort = Number(process.env.PRKIT_SERVER_PORT ?? 0);
+
+const prkitHome = process.env.PRKIT_HOME ?? NodePath.join(NodeOS.homedir(), ".prkit");
 
 // A packaged app is named by its bundle ("prkit", or "prkit Nightly"). A dev run keeps a
 // Chromium profile of its own, so it never shares the single-instance lock with an install.
@@ -131,6 +135,17 @@ ipcMain.on("prkit:bring-forward", (event) => {
   bringForward();
 });
 
+// Settings > About > Show log file. The path is main's own, never the page's, so the page can
+// only ask to see prkit's log. Before the server writes its first line only the folder exists.
+ipcMain.on("prkit:show-server-log", (event) => {
+  const origin = URL.parse(event.senderFrame?.url ?? "")?.origin;
+  if (windowOptions === undefined || origin !== windowOptions.url.origin) return;
+  const logs = NodePath.join(prkitHome, "logs");
+  const file = NodePath.join(logs, "server.log");
+  if (NodeFS.existsSync(file)) shell.showItemInFolder(file);
+  else void shell.openPath(logs);
+});
+
 // Settings > Appearance: native chrome (title bar, menus, the Dock icon) follows the chosen
 // theme, and `prefers-color-scheme` in the page follows it too. `system` follows macOS live.
 ipcMain.on("prkit:set-theme", (event, payload) => {
@@ -159,7 +174,7 @@ async function boot() {
   const supervisor = createServerSupervisor({
     start: {
       entry: NodePath.resolve(desktopDir, "../server/dist/bin.mjs"),
-      home: process.env.PRKIT_HOME ?? NodePath.join(NodeOS.homedir(), ".prkit"),
+      home: prkitHome,
       token,
       target,
       // Launched from the Dock, the inherited working directory is `/`.

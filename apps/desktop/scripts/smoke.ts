@@ -361,6 +361,35 @@ try {
   await window.screenshot({ path: screenshotPath });
   step(`screenshot saved to ${NodePath.relative(repoRoot, screenshotPath)}`);
 
+  // Settings > About > Show log file: main reveals the server's own log, which holds its
+  // startup lines by now. `showItemInFolder` is replaced so the smoke never opens Finder.
+  await app.evaluate(({ shell }) => {
+    const revealed: Array<string> = [];
+    Reflect.set(shell, "smokeRevealed", revealed);
+    shell.showItemInFolder = (path) => {
+      revealed.push(path);
+    };
+  });
+  await window.evaluate(() => Reflect.get(window, "prkitDesktop").showServerLog());
+  const serverLog = NodePath.join(smokeHome, "logs", "server.log");
+  const revealed = await (async () => {
+    for (let tries = 0; tries < 50; tries++) {
+      const paths: Array<string> = await app.evaluate(({ shell }) =>
+        Reflect.get(shell, "smokeRevealed"),
+      );
+      if (paths.length > 0) return paths;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return [];
+  })();
+  if (revealed[0] !== serverLog)
+    throw new Error(
+      `expected Show log file to reveal ${serverLog}, got ${JSON.stringify(revealed)}`,
+    );
+  if (!NodeFS.readFileSync(serverLog, "utf8").includes("prkit server listening"))
+    throw new Error("the server log has no startup line");
+  step(`Show log file revealed ${NodePath.relative(repoRoot, serverLog)}`);
+
   // "Guide ready": the page asks main for a notification; clicking it opens that PR's Guide
   // tab. `show` is replaced so the smoke never puts a real banner on the screen.
   await app.evaluate(({ Notification }) => {
