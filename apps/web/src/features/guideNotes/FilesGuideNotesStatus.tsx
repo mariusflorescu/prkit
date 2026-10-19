@@ -12,7 +12,7 @@ type NotesStatus = {
   /** All of it, on hover and focus, and read out with the words. */
   readonly story: string;
   readonly busy: boolean;
-  /** Retry a failed read, or take the newer guide, whose button the words become. */
+  /** Beside the words, so what the keyboard is on never turns into something else. */
   readonly action: { readonly _tag: "retry" | "show"; readonly run: () => void } | null;
 };
 
@@ -68,8 +68,7 @@ const statusOf = (state: FilesGuideNotesState): NotesStatus | null => {
   if (story === "") return null;
   if (newer?.show != null)
     return {
-      words: newer.loading ? "Loading..." : "Show newer notes",
-      story,
+      ...said("Newer guide", story),
       busy: newer.loading,
       action: { _tag: "show", run: newer.show },
     };
@@ -93,10 +92,10 @@ export function FilesGuideNotesStatus({ state }: { state: FilesGuideNotesState }
   const storyId = useId();
   const status = statusOf(state);
   const told = status !== null && status.story !== status.words;
-  const show = status?.action?._tag === "show" ? status.action : null;
   return (
     <span
       role="status"
+      aria-atomic="true"
       aria-busy={status?.busy === true || undefined}
       data-guide-notes-status=""
       className="flex items-center gap-1.5 text-xs text-muted-foreground"
@@ -106,26 +105,16 @@ export function FilesGuideNotesStatus({ state }: { state: FilesGuideNotesState }
           <Tooltip>
             <TooltipTrigger
               render={
-                show !== null ? (
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    aria-describedby={told ? storyId : undefined}
-                    disabled={status.busy}
-                    onClick={show.run}
-                  />
-                ) : (
-                  // A column that may shrink to nothing: a narrow window cuts the words short
-                  // before the tab row scrolls.
-                  <button
-                    type="button"
-                    aria-describedby={told ? storyId : undefined}
-                    className="-mx-1 grid grid-cols-[minmax(0,max-content)] rounded-sm px-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  />
-                )
+                // A column that may shrink to nothing: a narrow window cuts the words short
+                // before the tab row scrolls.
+                <button
+                  type="button"
+                  aria-describedby={told ? storyId : undefined}
+                  className="-mx-1 grid grid-cols-[minmax(0,max-content)] rounded-sm px-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
               }
             >
-              {show !== null ? status.words : <span className="truncate">{status.words}</span>}
+              <span className="truncate">{status.words}</span>
             </TooltipTrigger>
             <TooltipPopup>{status.story}</TooltipPopup>
           </Tooltip>
@@ -134,9 +123,18 @@ export function FilesGuideNotesStatus({ state }: { state: FilesGuideNotesState }
               {status.story}
             </span>
           )}
-          {status.action?._tag === "retry" && (
-            <Button variant="ghost-muted" size="micro" onClick={status.action.run}>
-              Retry
+          {status.action !== null && (
+            <Button
+              variant={status.action._tag === "show" ? "outline" : "ghost-muted"}
+              size="micro"
+              disabled={status.busy}
+              onClick={status.action.run}
+            >
+              {status.action._tag === "retry"
+                ? "Retry"
+                : status.busy
+                  ? "Loading..."
+                  : "Show its notes"}
             </Button>
           )}
         </>

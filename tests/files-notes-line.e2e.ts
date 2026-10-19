@@ -121,7 +121,11 @@ const tabTo = async (browser: Browser, selector: string) => {
     if (there) return;
     await browser.keyboard.press("Tab");
   }
-  throw new Error(`Tab never reached ${selector}.`);
+  const there = await browser.evaluate(
+    (match: string) => document.activeElement?.matches(match) ?? false,
+    selector,
+  );
+  if (!there) throw new Error(`Tab never reached ${selector}.`);
 };
 
 /** What the tab row says beside the notes toggle now, or null without the toggle. */
@@ -252,17 +256,27 @@ test(
       await expect(tooltip).toHaveText(story);
       await settle();
       await screenshotLightAndDark(app, browser, "files-notes-line-older-story");
+
+      // The next guide is ready: the words say so where the keyboard already is, the tab row
+      // offers its notes beside them, and the notes stay until asked.
+      claude.release();
+      const show = tabs.getByRole("button", "Show its notes");
+      await expect(show).toBeVisible({ timeout: 120_000 });
+      const ready = tabs.getByRole("button", "Newer guide");
+      await expect(ready).toBeFocused();
+      await expect(tooltip).toHaveText(`${STORY} A newer guide is ready.`);
+      await expect(notesStatus).toContainText(`${STORY} A newer guide is ready.`);
+      await expect(older).toHaveCount(0);
+      expect(await tops(browser)).toEqual([start]);
       await browser.keyboard.press("Shift+Tab");
       await expect(tooltip).toHaveCount(0);
 
-      // The next guide is ready while a comment is being written: it waits for the comment.
+      // While a comment is being written, the newer notes wait for it.
       await note.getByRole("button", "Add as comment, question on line 3").tap();
       const field = screen.getByRole("textbox", "Comment on line 3");
       await expect(field).toHaveValue(SLUG);
-      claude.release();
-      await expect(tabs.getByRole("button", "Newer notes after your comment")).toBeVisible({
-        timeout: 120_000,
-      });
+      await expect(tabs.getByRole("button", "Newer notes after your comment")).toBeVisible();
+      await expect(show).toHaveCount(0);
       await expect(notesStatus).toContainText(
         `${STORY} A newer guide is ready. You can show its notes once your comment is done.`,
       );
@@ -270,17 +284,12 @@ test(
       await screenshotLightAndDark(app, browser, "files-notes-line-newer-writing");
       await field.press("Meta+Enter");
       await expect(note.getByRole("status")).toHaveText("In your review.");
-
-      // Then the tab row offers it, and the notes stay until asked.
-      const newer = tabs.getByRole("button", "Show newer notes");
-      await expect(newer).toBeVisible({ timeout: 30_000 });
-      await expect(notesStatus).toContainText(`${STORY} A newer guide is ready.`);
-      await expect(older).toHaveCount(0);
+      await expect(show).toBeVisible();
       expect(await tops(browser)).toEqual([start]);
       await shots(app, browser, "files-notes-line-newer");
 
-      await newer.tap();
-      await expect(newer).toHaveCount(0);
+      await show.tap();
+      await expect(show).toHaveCount(0);
       await expect(note.getByRole("status")).toHaveText("In your review.");
       await settle();
       expect(await tops(browser)).toEqual([start]);
@@ -351,7 +360,7 @@ test(
       await expect(file.getByRole("article", `Pending comment on ${LIMITS} line 9`)).toContainText(
         WORDS,
       );
-      await expect(tabs.getByRole("button", "Show newer notes")).toHaveCount(0);
+      await expect(tabs.getByRole("button", "Show its notes")).toHaveCount(0);
       await settle();
       expect(await tops(browser)).toEqual([start]);
       expect(await notesWords(browser)).toBe("");

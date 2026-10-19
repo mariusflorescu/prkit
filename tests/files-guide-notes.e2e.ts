@@ -233,7 +233,7 @@ test(
       });
       claude.release();
       await expect.poll(() => revisionCount(run.home), { timeout: 120_000 }).toBe(2);
-      const newer = tabs.getByRole("button", "Show newer notes");
+      const newer = tabs.getByRole("button", "Show its notes");
       await expect(newer).toBeVisible({ timeout: 30_000 });
       await expect(notesStatus).toContainText("A newer guide is ready.");
       await expect(check).toHaveCount(0);
