@@ -369,7 +369,7 @@ export const make = Effect.fn("CursorAgent.make")(function* (
               : Stream.fail(
                   new AgentError({
                     reason: "auth",
-                    message: "Cursor stopped before the sign-in finished. Try again.",
+                    message: "Cursor stopped before the sign-in finished.",
                   }),
                 ),
           ),
@@ -385,7 +385,7 @@ export const make = Effect.fn("CursorAgent.make")(function* (
         : Effect.fail(
             new AgentError({
               reason: "auth",
-              message: "prkit couldn't confirm Cursor signed out. Try again.",
+              message: "prkit couldn't confirm Cursor signed out.",
             }),
           ),
     ),

@@ -214,10 +214,10 @@ export const make = Effect.gen(function* () {
         return yield* state;
       }).pipe(
         Effect.catchTags({
-          SqlError: failure("prkit couldn't save this setting. Try again."),
-          SchemaError: failure("prkit couldn't save this setting. Try again."),
+          SqlError: failure("prkit couldn't save this setting."),
+          SchemaError: failure("prkit couldn't save this setting."),
           PlatformError: failure(
-            "prkit couldn't write its file for outside agents, so nothing changed. Try again.",
+            "prkit couldn't write its file for outside agents, so nothing changed.",
           ),
         }),
       ),
@@ -234,12 +234,8 @@ export const make = Effect.gen(function* () {
         return yield* state;
       }).pipe(
         Effect.catchTags({
-          PlatformError: failure(
-            "prkit couldn't write the new access for outside agents. Try again.",
-          ),
-          SchemaError: failure(
-            "prkit couldn't write the new access for outside agents. Try again.",
-          ),
+          PlatformError: failure("prkit couldn't write the new access for outside agents."),
+          SchemaError: failure("prkit couldn't write the new access for outside agents."),
         }),
       ),
     );

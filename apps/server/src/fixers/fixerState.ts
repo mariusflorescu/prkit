@@ -252,9 +252,8 @@ export const makeFixerState = Effect.gen(function* () {
 
   const dbFailures = {
     SqlError: () =>
-      Effect.fail(new FixerError({ message: "prkit couldn't read or save the fix. Try again." })),
-    SchemaError: () =>
-      Effect.fail(new FixerError({ message: "prkit read a damaged fix record. Try again." })),
+      Effect.fail(new FixerError({ message: "prkit couldn't read or save the fix." })),
+    SchemaError: () => Effect.fail(new FixerError({ message: "prkit read a damaged fix record." })),
   };
 
   /** The turn a command names, checked to belong to the PR it came with. */

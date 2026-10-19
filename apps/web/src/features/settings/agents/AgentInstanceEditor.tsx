@@ -3,6 +3,7 @@ import { Controller, useForm } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
 
+import { SettingsAlert } from "../SettingsAlert";
 import { AccentField } from "./AccentField";
 import { EnvironmentFields } from "./EnvironmentFields";
 import { configOf } from "./instanceConfig";
@@ -115,6 +116,9 @@ export function AgentInstanceEditor({
           {update.isPending ? "Saving…" : "Save"}
         </Button>
       </div>
+      {update.error !== null && (
+        <SettingsAlert message={update.error.message} retry={() => void submit()} />
+      )}
     </form>
   );
 }

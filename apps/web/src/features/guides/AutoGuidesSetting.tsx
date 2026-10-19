@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { ListError } from "~/components/ListError";
 import { ListSkeleton } from "~/components/ListSkeleton";
-import { SettingsAlert } from "~/features/settings/SettingsAlert";
+import { FailedSave } from "~/features/settings/FailedSave";
 import { accountsQuery } from "~/rpc/queries";
 
 import { AutoGuideAccountRow } from "./AutoGuideAccountRow";
@@ -19,16 +19,6 @@ export function AutoGuidesSetting() {
       : undefined;
   return (
     <>
-      {update.error !== null && (
-        <SettingsAlert
-          message={update.error.message}
-          retry={() => {
-            const last = update.variables;
-            update.reset();
-            if (last !== undefined) update.mutate(last);
-          }}
-        />
-      )}
       {loadError !== null ? (
         <ListError
           title="Couldn't load guide settings"
@@ -70,6 +60,7 @@ export function AutoGuidesSetting() {
               ))}
             </ul>
           )}
+          <FailedSave save={update} />
         </div>
       )}
     </>

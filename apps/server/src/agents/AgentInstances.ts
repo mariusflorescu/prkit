@@ -189,7 +189,7 @@ export const make = Effect.gen(function* () {
     return [...defaults, ...added].map(toResolved);
   }).pipe(
     Effect.catchTags({
-      SqlError: fail("prkit couldn't read your agents. Try again."),
+      SqlError: fail("prkit couldn't read your agents."),
       SchemaError: fail("prkit read a damaged agent setting. Check Settings > Agents."),
     }),
   );
@@ -308,9 +308,9 @@ export const make = Effect.gen(function* () {
       )
       .pipe(
         Effect.catchTags({
-          SqlError: fail("prkit couldn't save that agent. Try again."),
+          SqlError: fail("prkit couldn't save that agent."),
           SchemaError: fail("prkit read a damaged agent setting. Check Settings > Agents."),
-          PlatformError: fail("prkit couldn't save that agent's sensitive values. Try again."),
+          PlatformError: fail("prkit couldn't save that agent's sensitive values."),
         }),
       );
 
@@ -327,8 +327,8 @@ export const make = Effect.gen(function* () {
       )
       .pipe(
         Effect.catchTags({
-          SqlError: fail("prkit couldn't remove that agent. Try again."),
-          PlatformError: fail("prkit couldn't remove that agent's sensitive values. Try again."),
+          SqlError: fail("prkit couldn't remove that agent."),
+          PlatformError: fail("prkit couldn't remove that agent's sensitive values."),
         }),
       );
 
@@ -339,7 +339,7 @@ export const make = Effect.gen(function* () {
       const rows = yield* sql`UPDATE agent_instances SET enabled = ${enabled ? 1 : 0},
         updated_at = ${at} WHERE id = ${id} RETURNING id`;
       return rows.length > 0;
-    }).pipe(Effect.catchTag("SqlError", fail("prkit couldn't change that agent. Try again.")));
+    }).pipe(Effect.catchTag("SqlError", fail("prkit couldn't change that agent.")));
 
   /** Whether a guide attempt, a fix turn or an answer is running on `id` now. */
   const busy = (id: AgentInstanceId) =>
@@ -353,10 +353,7 @@ export const make = Effect.gen(function* () {
         AND state IN ('starting', 'waiting', 'answering')
       LIMIT 1`.pipe(
       Effect.map((found) => found.length > 0),
-      Effect.catchTag(
-        "SqlError",
-        fail("prkit couldn't check whether that agent is busy. Try again."),
-      ),
+      Effect.catchTag("SqlError", fail("prkit couldn't check whether that agent is busy.")),
     );
 
   return {

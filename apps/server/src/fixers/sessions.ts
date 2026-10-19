@@ -105,7 +105,7 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
         const fixer = yield* findFixer(key);
         if (fixer === null)
           return yield* new FixerError({
-            message: "prkit couldn't save the agent session. Try again.",
+            message: "prkit couldn't save the agent session.",
           });
         return fixer;
       });

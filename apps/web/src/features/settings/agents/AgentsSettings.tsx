@@ -9,6 +9,7 @@ import { toastManager } from "~/components/ui/toast";
 import { useGuideSettings } from "~/features/guides/useGuideSettings";
 import { agentCatalogQuery } from "~/rpc/queries";
 
+import { FailedSave } from "../FailedSave";
 import { SettingsAlert } from "../SettingsAlert";
 import { SettingsSection } from "../SettingsSection";
 import { AddAgentDialog } from "./AddAgentDialog";
@@ -60,16 +61,6 @@ export function AgentsSettings() {
       {checkAgain.error !== null && (
         <SettingsAlert message={checkAgain.error.message} retry={() => checkAgain.mutate()} />
       )}
-      {update.error !== null && (
-        <SettingsAlert
-          message={update.error.message}
-          retry={() => {
-            const last = update.variables;
-            update.reset();
-            if (last !== undefined) update.mutate(last);
-          }}
-        />
-      )}
       {loadError !== null ? (
         <ListError
           title="Couldn't load agents"
@@ -116,6 +107,7 @@ export function AgentsSettings() {
             }
             saving={update.isPending}
           />
+          <FailedSave save={update} />
           <AddAgentDialog catalog={data.catalog} open={adding} onOpenChange={setAdding} />
         </div>
       )}

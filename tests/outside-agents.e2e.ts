@@ -14,6 +14,7 @@ import { startFakeGitHub, startFakeInstance, stopFakeInstance } from "./fakeGitH
 import { draftOn, type Fixtures, openSendToAgent } from "./fixActions.ts";
 import { readRows } from "./fixturePr.ts";
 import { emulateOsColorScheme, screenshotLightAndDark } from "./osColorScheme.ts";
+import { holdWrites } from "./sqliteFaults.ts";
 import { outsideGit } from "./outsideGit.ts";
 import { StatusResult } from "../apps/server/src/outside/schemas.ts";
 import { AgentsResult, FixTurnResult } from "../apps/server/src/outside/paritySchemas.ts";
@@ -887,8 +888,7 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
     async ({ app, screen, browser }) => {
       const name = "outside-agents-failed-save";
       const fake = await startFakeGitHub(name);
-      const failure =
-        "prkit couldn't write its file for outside agents, so nothing changed. Try again.";
+      const failure = "prkit couldn't write its file for outside agents, so nothing changed.";
       const toggle = screen.getByRole("switch", "Let my coding agents use prkit");
       const tops = () =>
         browser.evaluate(() =>
@@ -926,7 +926,15 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
           NodeFS.chmodSync(run.home, 0o755);
         }
 
-        await screen.getByRole("button", "Retry", { exact: true }).tap();
+        // While the Retry waits on SQLite, the level shows the change it saves.
+        const release = holdWrites(run.home);
+        try {
+          await screen.getByRole("button", "Retry", { exact: true }).tap();
+          await expect(screen.getByRole("radio", "Read and start work")).toBeChecked();
+          await expect(screen.getByRole("radio", "Read and start work")).toBeDisabled();
+        } finally {
+          release();
+        }
         await expect(screen.getByText("Outside agents are off", { exact: true })).toBeVisible();
         await expect(screen.getByRole("radio", "Read and start work")).toBeChecked();
         await expect(screen.getByText(failure, { exact: true })).toHaveCount(0);

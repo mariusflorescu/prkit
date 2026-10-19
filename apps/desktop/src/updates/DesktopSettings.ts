@@ -77,7 +77,7 @@ export const make = (userDataDir: string) => {
         Effect.mapError(
           () =>
             new SettingsWriteFailed({
-              message: "prkit couldn't save the update track. Try again.",
+              message: "prkit couldn't save the update track.",
             }),
         ),
       ),

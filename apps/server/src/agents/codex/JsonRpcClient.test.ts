@@ -90,10 +90,10 @@ describe("Codex requests", () => {
           "thread/start": "not signed in",
         });
         expect(yield* refusal(codex.request("account/login/start", {}, Schema.Json, SIGN_IN))).toBe(
-          "Codex couldn't start the sign-in (failed to start login server: Port 127.0.0.1:1457 is already in use). Try again.",
+          "Codex couldn't start the sign-in (failed to start login server: Port 127.0.0.1:1457 is already in use).",
         );
         expect(yield* refusal(codex.request("account/logout", null, Schema.Json, SIGN_OUT))).toBe(
-          "Codex couldn't sign out prkit's login (no keyring entry for this home). Try again.",
+          "Codex couldn't sign out prkit's login (no keyring entry for this home).",
         );
         expect(yield* refusal(codex.request("thread/start", {}, Schema.Json))).toBe(
           "Codex rejected a request (not signed in). Check your Codex login and retry.",
@@ -106,10 +106,10 @@ describe("Codex requests", () => {
       Effect.gen(function* () {
         const codex = yield* standIn({});
         expect(yield* silence(codex.request("account/login/start", {}, Schema.Json, SIGN_IN))).toBe(
-          "Codex took too long to start the sign-in. Try again.",
+          "Codex took too long to start the sign-in.",
         );
         expect(yield* silence(codex.request("account/logout", null, Schema.Json, SIGN_OUT))).toBe(
-          "Codex took too long to sign out prkit's login. Try again.",
+          "Codex took too long to sign out prkit's login.",
         );
         expect(yield* silence(codex.request("thread/start", {}, Schema.Json))).toBe(
           "Codex took too long to answer thread/start. Retry the guide.",

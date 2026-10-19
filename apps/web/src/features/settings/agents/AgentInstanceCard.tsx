@@ -8,10 +8,10 @@ import { ProviderIcon } from "~/components/review/agent/ProviderIcon";
 import { Button } from "~/components/ui/button";
 import { Switch } from "~/components/ui/switch";
 
+import { FailedSave } from "../FailedSave";
 import { AgentInstanceEditor } from "./AgentInstanceEditor";
 import { AgentSignInHelp } from "./AgentSignInHelp";
 import { agentStatus, type AgentStatusTone } from "./agentStatus";
-import { configOf } from "./instanceConfig";
 import { RemoveAgentDialog } from "./RemoveAgentDialog";
 import { ResetAgentDialog } from "./ResetAgentDialog";
 import { useAgentInstanceActions } from "./useAgentInstanceActions";
@@ -92,6 +92,7 @@ export function AgentInstanceCard({
           </div>
         )}
         {editing && <AgentInstanceEditor entry={entry} onDone={() => setEditing(false)} />}
+        <FailedSave save={actions.toggle} />
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <Button
@@ -105,9 +106,11 @@ export function AgentInstanceCard({
         </Button>
         <Switch
           aria-label={`${entry.label} on`}
-          checked={entry.enabled}
+          checked={busy ? (actions.toggle.variables?.enabled ?? entry.enabled) : entry.enabled}
           disabled={busy}
-          onCheckedChange={(enabled) => actions.toggle.mutate({ ...configOf(entry), enabled })}
+          onCheckedChange={(enabled) =>
+            actions.toggle.mutate({ instance: entry.instance, enabled })
+          }
         />
       </div>
       {entry.isDefault ? (

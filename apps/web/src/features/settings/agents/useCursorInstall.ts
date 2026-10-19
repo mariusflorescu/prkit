@@ -50,7 +50,7 @@ export function useCursorInstall() {
       : latest?.status === "error"
         ? {
             _tag: "failed",
-            message: latest.error?.message ?? "Installing Cursor support stopped. Try again.",
+            message: latest.error?.message ?? "Installing Cursor support stopped.",
           }
         : { _tag: "idle" };
   return { state, start: () => install.mutate() };

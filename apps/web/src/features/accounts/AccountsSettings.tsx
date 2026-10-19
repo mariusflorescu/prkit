@@ -5,6 +5,7 @@ import { ListError } from "~/components/ListError";
 import { ListSkeleton } from "~/components/ListSkeleton";
 import { Button } from "~/components/ui/button";
 import { toastManager } from "~/components/ui/toast";
+import { FailedSave } from "~/features/settings/FailedSave";
 import { SettingsAlert } from "~/features/settings/SettingsAlert";
 import { SettingsSection } from "~/features/settings/SettingsSection";
 import { refreshAccounts, removeConfigDir } from "~/rpc/client";
@@ -36,7 +37,6 @@ export function AccountsSettings() {
       });
     },
   });
-  const mutationError = refresh.error ?? remove.error;
   return (
     <SettingsSection
       title="GitHub accounts"
@@ -53,15 +53,8 @@ export function AccountsSettings() {
         </Button>
       }
     >
-      {mutationError && (
-        <SettingsAlert
-          message={mutationError.message}
-          retry={() => {
-            refresh.reset();
-            remove.reset();
-            refresh.mutate();
-          }}
-        />
+      {refresh.error !== null && (
+        <SettingsAlert message={refresh.error.message} retry={() => refresh.mutate()} />
       )}
       {accounts.isPending ? (
         <ListSkeleton label="Loading GitHub accounts" rows={2} kind="accounts" />
@@ -134,6 +127,7 @@ export function AccountsSettings() {
                 </Button>
               </div>
             ))}
+          <FailedSave save={remove} />
         </>
       )}
       <div className="mt-8 border-t border-border/60 pt-6">

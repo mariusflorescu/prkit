@@ -1,6 +1,6 @@
 import { ListError } from "~/components/ListError";
 
-import { SettingsAlert } from "../SettingsAlert";
+import { FailedSave } from "../FailedSave";
 import { SettingsSection } from "../SettingsSection";
 import { THEME_OPTIONS } from "./themeOptions";
 import { ThemeCard } from "./ThemeCard";
@@ -9,22 +9,12 @@ import { useAppearance } from "./useAppearance";
 
 /** Settings > Appearance: System, Light or Dark, applied the moment a card is picked. */
 export function AppearanceSettings() {
-  const { appearance, update } = useAppearance();
+  const { appearance, update, saving } = useAppearance();
   return (
     <SettingsSection
       title="Appearance"
       description="Theme. System follows your device's light or dark appearance."
     >
-      {update.error !== null && (
-        <SettingsAlert
-          message={update.error.message}
-          retry={() => {
-            const last = update.variables;
-            update.reset();
-            if (last !== undefined) update.mutate(last);
-          }}
-        />
-      )}
       {appearance.isPending ? (
         <ThemeCardsSkeleton />
       ) : appearance.isError ? (
@@ -34,18 +24,22 @@ export function AppearanceSettings() {
           retry={() => void appearance.refetch()}
         />
       ) : (
-        <div role="radiogroup" aria-label="Theme" className="mt-4 grid grid-cols-3 gap-3">
-          {THEME_OPTIONS.map((option) => (
-            <ThemeCard
-              key={option.value}
-              value={option.value}
-              label={option.label}
-              tones={option.tones}
-              selected={appearance.data.theme === option.value}
-              onSelect={(theme) => update.mutate(theme)}
-            />
-          ))}
-        </div>
+        <>
+          <div role="radiogroup" aria-label="Theme" className="mt-4 grid grid-cols-3 gap-3">
+            {THEME_OPTIONS.map((option) => (
+              <ThemeCard
+                key={option.value}
+                value={option.value}
+                label={option.label}
+                tones={option.tones}
+                selected={appearance.data.theme === option.value}
+                saving={saving}
+                onSelect={(theme) => update.mutate(theme)}
+              />
+            ))}
+          </div>
+          <FailedSave save={update} />
+        </>
       )}
     </SettingsSection>
   );

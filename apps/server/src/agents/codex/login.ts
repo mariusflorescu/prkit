@@ -123,11 +123,11 @@ export const SIGN_IN: RequestWording = {
   refused: (reason) =>
     new AgentError({
       reason: "auth",
-      message: `Codex couldn't start the sign-in (${reason}). Try again.`,
+      message: `Codex couldn't start the sign-in (${reason}).`,
     }),
   tooSlow: new AgentError({
     reason: "auth",
-    message: "Codex took too long to start the sign-in. Try again.",
+    message: "Codex took too long to start the sign-in.",
   }),
 };
 
@@ -136,10 +136,10 @@ export const SIGN_OUT: RequestWording = {
   refused: (reason) =>
     new AgentError({
       reason: "auth",
-      message: `Codex couldn't sign out prkit's login (${reason}). Try again.`,
+      message: `Codex couldn't sign out prkit's login (${reason}).`,
     }),
   tooSlow: new AgentError({
     reason: "auth",
-    message: "Codex took too long to sign out prkit's login. Try again.",
+    message: "Codex took too long to sign out prkit's login.",
   }),
 };

@@ -128,7 +128,7 @@ export function DiffBody({
       const message =
         error instanceof Error
           ? `Could not load unchanged lines. ${error.message}`
-          : "Could not load unchanged lines. Try again.";
+          : "Could not load unchanged lines.";
       setContents({ kind: "failed", message });
       throw new Error(message, { cause: error });
     }

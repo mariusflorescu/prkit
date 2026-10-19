@@ -8,7 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
-import { SettingsAlert } from "~/features/settings/SettingsAlert";
+import { FailedSave } from "~/features/settings/FailedSave";
 
 import { updateErrorMessage, useSetUpdateChannel } from "./updateQueries";
 
@@ -30,7 +30,7 @@ export function UpdateTrackSelect({ state }: { state: DesktopUpdateState }) {
           Track
         </span>
         <Select<UpdateChannel>
-          value={state.channel}
+          value={setChannel.isPending ? (setChannel.variables ?? state.channel) : state.channel}
           items={TRACKS}
           disabled={busy}
           onValueChange={(next) => {
@@ -52,16 +52,7 @@ export function UpdateTrackSelect({ state }: { state: DesktopUpdateState }) {
       <p className="text-xs text-muted-foreground">
         Nightly gets each day's build first, before it ships to Stable, and may have rough edges.
       </p>
-      {setChannel.error !== null && (
-        <SettingsAlert
-          message={updateErrorMessage(setChannel.error)}
-          retry={() => {
-            const last = setChannel.variables;
-            setChannel.reset();
-            if (last !== undefined) setChannel.mutate(last);
-          }}
-        />
-      )}
+      <FailedSave save={setChannel} describe={updateErrorMessage} />
     </div>
   );
 }

@@ -1967,7 +1967,7 @@ export const make = Effect.gen(function* () {
       );
       const review = yield* findSubject(subject);
       if (review === null)
-        return yield* new ReviewError({ message: "prkit couldn't save the review. Try again." });
+        return yield* new ReviewError({ message: "prkit couldn't save the review." });
       if (created) {
         yield* Effect.logInfo("Review created").pipe(
           Effect.annotateLogs({
@@ -1988,11 +1988,9 @@ export const make = Effect.gen(function* () {
 
   const dbFailures = {
     SqlError: () =>
-      Effect.fail(
-        new ReviewError({ message: "prkit couldn't read or save the review. Try again." }),
-      ),
+      Effect.fail(new ReviewError({ message: "prkit couldn't read or save the review." })),
     SchemaError: () =>
-      Effect.fail(new ReviewError({ message: "prkit read a damaged review record. Try again." })),
+      Effect.fail(new ReviewError({ message: "prkit read a damaged review record." })),
   };
 
   const get = (key: PullRequestKey) => snapshotOf(key).pipe(Effect.catchTags(dbFailures));

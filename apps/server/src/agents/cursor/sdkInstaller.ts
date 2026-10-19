@@ -84,10 +84,10 @@ const installPackage = (entry: SdkPackage, temp: string) =>
         return yield* child.exitCode;
       }),
     );
-    if (code !== 0) return yield* failure(`prkit couldn't unpack ${entry.name}. Try again.`);
+    if (code !== 0) return yield* failure(`prkit couldn't unpack ${entry.name}.`);
   }).pipe(
     Effect.catchTag("PlatformError", () =>
-      Effect.fail(failure(`prkit couldn't write ${entry.name} to its folder. Try again.`)),
+      Effect.fail(failure(`prkit couldn't write ${entry.name} to its folder.`)),
     ),
   );
 
@@ -174,14 +174,14 @@ export const install = (options: {
           ),
         );
         if (!(yield* fs.exists(entry)))
-          return yield* failure("prkit couldn't finish installing Cursor's SDK. Try again.");
+          return yield* failure("prkit couldn't finish installing Cursor's SDK.");
         if (!moved) yield* fs.remove(temp, { recursive: true, force: true });
         yield* removeStale;
         yield* Effect.logInfo("Installed Cursor's SDK").pipe(Effect.annotateLogs({ root }));
         return { name: null, done: total, total };
       }).pipe(
         Effect.catchTag("PlatformError", () =>
-          Effect.fail(failure("prkit couldn't finish installing Cursor's SDK. Try again.")),
+          Effect.fail(failure("prkit couldn't finish installing Cursor's SDK.")),
         ),
       );
       return steps.pipe(
@@ -194,7 +194,7 @@ export const install = (options: {
       );
     }).pipe(
       Effect.catchTag("PlatformError", () =>
-        Effect.fail(failure("prkit couldn't prepare its folder for Cursor's SDK. Try again.")),
+        Effect.fail(failure("prkit couldn't prepare its folder for Cursor's SDK.")),
       ),
     ),
   );

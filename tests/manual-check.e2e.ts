@@ -257,10 +257,7 @@ test(
       await app.open(guideUrl(run.url));
       const unavailable = plan.getByRole("status");
       await expect(unavailable).toHaveText(/^Your ticks didn't load/, { timeout: 30_000 });
-      await expect(unavailable).toHaveAttribute(
-        "title",
-        "prkit couldn't read your ticks. Try again.",
-      );
+      await expect(unavailable).toHaveAttribute("title", "prkit couldn't read your ticks.");
       await expect(plan.getByRole("checkbox")).toHaveCount(0);
       await expect(rows).toHaveCount(3);
       await plan.scrollIntoView();

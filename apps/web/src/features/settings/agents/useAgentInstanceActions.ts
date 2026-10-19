@@ -11,15 +11,16 @@ import {
 } from "~/rpc/client";
 import { agentCatalogQuery } from "~/rpc/queries";
 
+import { configOf } from "./instanceConfig";
+
 /**
  * Every change to one agent instance from Settings > Agents. Each stores the catalog the server
- * answers with and says how it went in a toast; `check` reads only this instance's login again.
+ * answers with and says it worked in a toast; a failed change shows its error where it was made.
+ * `check` reads only this instance's login again, and says in a toast when it can't.
  */
 export function useAgentInstanceActions() {
   const client = useQueryClient();
   const store = (catalog: AgentCatalog) => client.setQueryData(agentCatalogQuery.queryKey, catalog);
-  const failed = (title: string) => (error: Error) =>
-    toastManager.add({ title, description: error.message, type: "error" });
 
   const create = useMutation({
     mutationFn: createAgentInstance,
@@ -31,7 +32,6 @@ export function useAgentInstanceActions() {
         type: "success",
       });
     },
-    onError: failed("Couldn't add the agent"),
   });
   const update = useMutation({
     mutationFn: updateAgentInstance,
@@ -39,18 +39,26 @@ export function useAgentInstanceActions() {
       store(catalog);
       toastManager.add({ title: `Saved ${config.label}`, type: "success" });
     },
-    onError: failed("Couldn't save the agent"),
   });
+  // Only on or off: the rest comes from what prkit holds when it runs, so a Retry after an edit
+  // keeps the edit.
   const toggle = useMutation({
-    mutationFn: (config: AgentInstanceConfig) => updateAgentInstance(config),
-    onSuccess: (catalog, config) => {
+    mutationFn: ({ instance, enabled }: { instance: AgentInstanceId; enabled: boolean }) => {
+      const entry = client
+        .getQueryData(agentCatalogQuery.queryKey)
+        ?.providers.find((candidate) => candidate.instance === instance);
+      if (entry === undefined) throw new Error("prkit no longer has this agent.");
+      return updateAgentInstance({ ...configOf(entry), enabled });
+    },
+    onSuccess: (catalog, { instance, enabled }) => {
       store(catalog);
+      const label =
+        catalog.providers.find((candidate) => candidate.instance === instance)?.label ?? instance;
       toastManager.add({
-        title: config.enabled ? `Turned on ${config.label}` : `Turned off ${config.label}`,
+        title: enabled ? `Turned on ${label}` : `Turned off ${label}`,
         type: "success",
       });
     },
-    onError: failed("Couldn't change the agent"),
   });
   const remove = useMutation({
     mutationFn: (config: AgentInstanceConfig) => removeAgentInstance(config.id),
@@ -58,7 +66,6 @@ export function useAgentInstanceActions() {
       store(catalog);
       toastManager.add({ title: `Removed ${config.label}`, type: "success" });
     },
-    onError: failed("Couldn't remove the agent"),
   });
   const reset = useMutation({
     mutationFn: (config: AgentInstanceConfig) => resetAgentInstance(config.id),
@@ -66,12 +73,16 @@ export function useAgentInstanceActions() {
       store(catalog);
       toastManager.add({ title: `Reset ${config.label} to its defaults`, type: "success" });
     },
-    onError: failed("Couldn't reset the agent"),
   });
   const check = useMutation({
     mutationFn: (instance: AgentInstanceId) => getAgentCatalog(true, instance),
     onSuccess: store,
-    onError: failed("Couldn't check the agent"),
+    onError: (error) =>
+      toastManager.add({
+        title: "Couldn't check the agent",
+        description: error.message,
+        type: "error",
+      }),
   });
   return { create, update, toggle, remove, reset, check };
 }
