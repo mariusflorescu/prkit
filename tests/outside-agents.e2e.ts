@@ -13,6 +13,7 @@ import { setUpFakeClaude } from "./fakeClaude.ts";
 import { startFakeGitHub, startFakeInstance, stopFakeInstance } from "./fakeGitHub.ts";
 import { draftOn, type Fixtures, openSendToAgent } from "./fixActions.ts";
 import { readRows } from "./fixturePr.ts";
+import { emulateOsColorScheme, screenshotLightAndDark } from "./osColorScheme.ts";
 import { outsideGit } from "./outsideGit.ts";
 import { StatusResult } from "../apps/server/src/outside/schemas.ts";
 import { AgentsResult, FixTurnResult } from "../apps/server/src/outside/paritySchemas.ts";
@@ -109,6 +110,11 @@ const PR_9 = "https://github.com/budget/fixtures/pull/9";
 const Discovery = Schema.fromJsonString(
   Schema.Struct({ _tag: Schema.Literal("on"), port: Schema.Number, token: Schema.String }),
 );
+
+const discovery = (home: string) =>
+  Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({ _tag: Schema.String })))(
+    NodeFS.readFileSync(NodePath.join(home, "outside-agents.json"), "utf8"),
+  )._tag;
 
 /** Every call and answer of a journey, kept as evidence under `.e2e/evidence/u69/`. */
 const transcript = (name: string) => {
@@ -871,6 +877,71 @@ describe("outside agents", { tags: ["outside-agents"] }, () => {
         fake.stop();
         expect(writes).toEqual([]);
         expect(pushes).toEqual([]);
+      }
+    },
+  );
+
+  test(
+    "a save that fails leaves the switch and the level on what prkit holds, says why, and Retry saves it",
+    { timeout: 120_000 },
+    async ({ app, screen, browser }) => {
+      const name = "outside-agents-failed-save";
+      const fake = await startFakeGitHub(name);
+      const failure =
+        "prkit couldn't write its file for outside agents, so nothing changed. Try again.";
+      const toggle = screen.getByRole("switch", "Let my coding agents use prkit");
+      const tops = () =>
+        browser.evaluate(() =>
+          [...document.querySelectorAll('[role="switch"], input[type="radio"]')].map(
+            (control) => control.getBoundingClientRect().top,
+          ),
+        );
+      try {
+        const run = startFakeInstance(name, fake);
+        await emulateOsColorScheme(browser, "light");
+        await browser.setViewport({ width: 1280, height: 720 });
+        await app.open(run.openUrl);
+        await openOutsideSettings({ app, screen, browser });
+        const before = await tops();
+        // prkit stages its file for outside agents in its home, so a home it can't write to fails the save.
+        NodeFS.chmodSync(run.home, 0o555);
+        try {
+          await toggle.tap();
+          await expect(screen.getByText(failure, { exact: true })).toBeVisible({ timeout: 15_000 });
+          await expect(toggle).toHaveAttribute("aria-checked", "false");
+          expect(await tops(), "nothing moves when the error shows").toEqual(before);
+          await screenshotLightAndDark(app, browser, "outside-agents-failed-save");
+
+          await browser.setViewport({ width: 860, height: 720 });
+          const narrow = await tops();
+          await screen.getByRole("radio", "Read and start work").tap();
+          await expect(screen.getByRole("radio", "Read only")).toBeEnabled({ timeout: 15_000 });
+          await expect(screen.getByRole("radio", "Read only")).toBeChecked();
+          await expect(screen.getByText(failure, { exact: true })).toBeVisible();
+          expect(await tops(), "nothing moves in a narrow window either").toEqual(narrow);
+          await screenshotLightAndDark(app, browser, "outside-agents-failed-save-narrow");
+          await browser.setViewport({ width: 1280, height: 720 });
+          expect(discovery(run.home), "clients still read prkit as off").toBe("off");
+        } finally {
+          NodeFS.chmodSync(run.home, 0o755);
+        }
+
+        await screen.getByRole("button", "Retry", { exact: true }).tap();
+        await expect(screen.getByText("Outside agents are off", { exact: true })).toBeVisible();
+        await expect(screen.getByRole("radio", "Read and start work")).toBeChecked();
+        await expect(screen.getByText(failure, { exact: true })).toHaveCount(0);
+        await toggle.tap();
+        await expect(
+          screen.getByText("Outside agents can read and start work", { exact: true }),
+        ).toBeVisible();
+        expect(discovery(run.home)).toBe("on");
+        await browser.reload();
+        await expect(toggle).toHaveAttribute("aria-checked", "true", { timeout: 20_000 });
+        await expect(screen.getByRole("radio", "Read and start work")).toBeChecked();
+        await app.screenshot("outside-agents-failed-save-retried");
+      } finally {
+        stopFakeInstance(name, { keepHome: false });
+        fake.stop();
       }
     },
   );
