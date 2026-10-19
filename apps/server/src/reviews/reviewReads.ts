@@ -169,9 +169,11 @@ export const makeReviewReads = ({
   changes,
   notices,
   dbFailures,
+  hold,
 }: ReviewStore) => {
   const guide = (key: ReviewKey, revision: number | undefined) =>
     Effect.gen(function* () {
+      yield* hold("guide-read");
       const rows = yield* (
         revision === undefined
           ? sql`

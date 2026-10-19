@@ -7,7 +7,7 @@
  *   node scripts/verify-app.ts start  [--name verify] [--port 0] [--rm] [--detach] [--watch-interval <ms>]
  *                                     [--dev-review-requested <pr key>] [--e2e]
  *                                     [--github-api <url> --gh-home <dir>] [--claude <file>]
- *                                     [--codex <file>]
+ *                                     [--codex <file>] [--platform <linux|win32>]
  *   node scripts/verify-app.ts doctor [--name <name>]
  *   node scripts/verify-app.ts stop   [--name verify] [--keep-home]
  *
@@ -29,7 +29,9 @@
  * npm's (the server's PRKIT_CURSOR_SDK_MANIFEST, read only with `--e2e`), as
  * `tests/fakeCursor.ts` lays them out. `--cursor-sdk <dir>` loads Cursor's SDK from that package
  * folder instead of an installed one (the server's PRKIT_CURSOR_SDK_PATH, also read only with
- * `--e2e`), such as the real development dependency for a live run.
+ * `--e2e`), such as the real development dependency for a live run. `--platform` makes the
+ * server's `process.platform` read that platform, so a journey on a Mac sees what prkit does
+ * elsewhere.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
@@ -145,6 +147,7 @@ interface StartOptions {
   readonly codex: string | undefined;
   readonly cursorManifest: string | undefined;
   readonly cursorSdk: string | undefined;
+  readonly platform: string | undefined;
 }
 
 const start = async (options: StartOptions) => {
@@ -171,6 +174,12 @@ const start = async (options: StartOptions) => {
   const server = NodeChildProcess.spawn(
     process.execPath,
     [
+      ...(options.platform === undefined
+        ? []
+        : [
+            "--import",
+            `data:text/javascript,${encodeURIComponent(`Object.defineProperty(process, "platform", { value: ${JSON.stringify(options.platform)} });`)}`,
+          ]),
       serverBin,
       "--port",
       String(port),
@@ -298,6 +307,7 @@ const startDetached = async (options: StartOptions) => {
     ...(options.codex === undefined ? [] : ["--codex", options.codex]),
     ...(options.cursorManifest === undefined ? [] : ["--cursor-manifest", options.cursorManifest]),
     ...(options.cursorSdk === undefined ? [] : ["--cursor-sdk", options.cursorSdk]),
+    ...(options.platform === undefined ? [] : ["--platform", options.platform]),
   ];
   const child = NodeChildProcess.spawn(process.execPath, args, {
     cwd: repoRoot,
@@ -410,6 +420,7 @@ const { positionals, values } = NodeUtil.parseArgs({
     codex: { type: "string" },
     "cursor-manifest": { type: "string" },
     "cursor-sdk": { type: "string" },
+    platform: { type: "string" },
   },
 });
 const command = positionals[0];
@@ -424,6 +435,8 @@ if (watchInterval !== null && (!Number.isInteger(watchInterval) || watchInterval
 if ((values["github-api"] === undefined) !== (values["gh-home"] === undefined))
   fail("--github-api and --gh-home go together");
 if (values["cursor-sdk"] !== undefined && !values.e2e) fail("--cursor-sdk needs --e2e");
+if (values.platform !== undefined && !["linux", "win32"].includes(values.platform))
+  fail("--platform must be linux or win32");
 
 switch (command) {
   case "start":
@@ -445,6 +458,7 @@ switch (command) {
           : NodePath.resolve(values["cursor-manifest"]),
       cursorSdk:
         values["cursor-sdk"] === undefined ? undefined : NodePath.resolve(values["cursor-sdk"]),
+      platform: values.platform,
     });
     break;
   case "doctor":

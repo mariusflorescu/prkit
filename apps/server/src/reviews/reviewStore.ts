@@ -42,6 +42,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { GitHubAccounts } from "../accounts/GitHubAccounts.ts";
 import { Agents } from "../agents/Agents.ts";
 import * as ServerConfig from "../config.ts";
+import { makeE2eHold } from "../e2eHold.ts";
 import { GitHubApi } from "../github/GitHubApi.ts";
 import { makeKeyedGate } from "../github/keyedGate.ts";
 import { boundPort } from "../listenAddress.ts";
@@ -338,6 +339,8 @@ export const makeReviewStore = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
 
   const path = yield* Path.Path;
+
+  const hold = yield* makeE2eHold;
 
   const crypto = yield* Crypto.Crypto;
 
@@ -680,6 +683,7 @@ export const makeReviewStore = Effect.gen(function* () {
     sql,
     fs,
     path,
+    hold,
     repo,
     agents,
     tokens,
