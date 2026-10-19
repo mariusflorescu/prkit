@@ -63,7 +63,7 @@ export function ResetAgentDialog({
                 reset.mutate(configOf(entry), { onSuccess: () => onOpenChange(false) })
               }
             >
-              {reset.isPending ? "Resetting…" : reset.error !== null ? "Try again" : "Reset"}
+              {reset.isPending ? "Resetting…" : "Reset"}
             </Button>
           </div>
           {reset.error !== null && !reset.isPending && (

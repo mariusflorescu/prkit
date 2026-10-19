@@ -152,7 +152,13 @@ export function AddAgentDialog({
             </fieldset>
             <div className="mt-5 flex items-center justify-end gap-2">
               {created === null && (
-                <Button type="button" size="sm" variant="ghost-muted" onClick={close}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost-muted"
+                  disabled={create.isPending}
+                  onClick={close}
+                >
                   Cancel
                 </Button>
               )}

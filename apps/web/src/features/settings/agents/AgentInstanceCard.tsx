@@ -12,7 +12,6 @@ import { FailedSave } from "../FailedSave";
 import { AgentInstanceEditor } from "./AgentInstanceEditor";
 import { AgentSignInHelp } from "./AgentSignInHelp";
 import { agentStatus, type AgentStatusTone } from "./agentStatus";
-import { configOf } from "./instanceConfig";
 import { RemoveAgentDialog } from "./RemoveAgentDialog";
 import { ResetAgentDialog } from "./ResetAgentDialog";
 import { useAgentInstanceActions } from "./useAgentInstanceActions";
@@ -109,7 +108,9 @@ export function AgentInstanceCard({
           aria-label={`${entry.label} on`}
           checked={busy ? (actions.toggle.variables?.enabled ?? entry.enabled) : entry.enabled}
           disabled={busy}
-          onCheckedChange={(enabled) => actions.toggle.mutate({ ...configOf(entry), enabled })}
+          onCheckedChange={(enabled) =>
+            actions.toggle.mutate({ instance: entry.instance, enabled })
+          }
         />
       </div>
       {entry.isDefault ? (

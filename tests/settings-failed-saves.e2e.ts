@@ -438,7 +438,10 @@ describe("settings failed saves", { tags: ["settings-failed-saves"] }, () => {
           browser.evaluate(() =>
             [...document.querySelectorAll('[role="alertdialog"] button')]
               .filter((button) => button.closest('[role="alert"]') === null)
-              .map((button) => Math.round(button.getBoundingClientRect().top)),
+              .map((button) => {
+                const box = button.getBoundingClientRect();
+                return [Math.round(box.left), Math.round(box.top)];
+              }),
           );
         // Measured once the dialog's opening scale has settled.
         await browser.evaluate(async () => {
@@ -490,6 +493,37 @@ describe("settings failed saves", { tags: ["settings-failed-saves"] }, () => {
         expect(readRows(run.home, "SELECT label FROM agent_instances WHERE id = 'codex'")).toEqual([
           { label: "Codex work" },
         ]);
+
+        // A switch's Retry after an Edit saved meanwhile turns it off and keeps the Edit.
+        const renamed = agents.getByRole("switch", "Codex work on");
+        const refuseSwitch = refuseWrites(run.home, "agent_instances");
+        try {
+          await renamed.tap();
+          await expect(agents.getByRole("alert").filter({ hasText: agentMessage })).toBeVisible({
+            timeout: 20_000,
+          });
+        } finally {
+          refuseSwitch();
+        }
+        const work = agents.getByRole("list", "Agents").getByRole("listitem", "Codex work");
+        await work.getByRole("button", "Edit").tap();
+        const workEditor = work.getByRole("form", "Edit Codex work");
+        await workEditor.getByRole("textbox", "Label").fill("Codex day");
+        await workEditor.getByRole("button", "Save").tap();
+        await expect(screen.getByText("Saved Codex day", { exact: true })).toBeVisible({
+          timeout: 20_000,
+        });
+        await agents
+          .getByRole("alert")
+          .filter({ hasText: agentMessage })
+          .getByRole("button", "Retry")
+          .tap();
+        await expect(screen.getByText("Turned off Codex day", { exact: true })).toBeVisible({
+          timeout: 20_000,
+        });
+        expect(
+          readRows(run.home, "SELECT label, enabled FROM agent_instances WHERE id = 'codex'"),
+        ).toEqual([{ label: "Codex day", enabled: 0 }]);
       } finally {
         stop(name, fake);
       }

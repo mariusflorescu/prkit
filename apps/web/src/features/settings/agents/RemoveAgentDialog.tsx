@@ -79,7 +79,7 @@ export function RemoveAgentDialog({
                 remove.mutate(configOf(entry), { onSuccess: () => onOpenChange(false) })
               }
             >
-              {remove.isPending ? "Removing…" : remove.error !== null ? "Try again" : "Remove"}
+              {remove.isPending ? "Removing…" : "Remove"}
             </Button>
           </div>
           {remove.error !== null && !remove.isPending && (

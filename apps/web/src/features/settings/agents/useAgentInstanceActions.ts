@@ -11,6 +11,8 @@ import {
 } from "~/rpc/client";
 import { agentCatalogQuery } from "~/rpc/queries";
 
+import { configOf } from "./instanceConfig";
+
 /**
  * Every change to one agent instance from Settings > Agents. Each stores the catalog the server
  * answers with and says it worked in a toast; a failed change shows its error where it was made.
@@ -38,12 +40,22 @@ export function useAgentInstanceActions() {
       toastManager.add({ title: `Saved ${config.label}`, type: "success" });
     },
   });
+  // Only on or off: the rest comes from what prkit holds when it runs, so a Retry after an edit
+  // keeps the edit.
   const toggle = useMutation({
-    mutationFn: (config: AgentInstanceConfig) => updateAgentInstance(config),
-    onSuccess: (catalog, config) => {
+    mutationFn: ({ instance, enabled }: { instance: AgentInstanceId; enabled: boolean }) => {
+      const entry = client
+        .getQueryData(agentCatalogQuery.queryKey)
+        ?.providers.find((candidate) => candidate.instance === instance);
+      if (entry === undefined) throw new Error("prkit no longer has this agent.");
+      return updateAgentInstance({ ...configOf(entry), enabled });
+    },
+    onSuccess: (catalog, { instance, enabled }) => {
       store(catalog);
+      const label =
+        catalog.providers.find((candidate) => candidate.instance === instance)?.label ?? instance;
       toastManager.add({
-        title: config.enabled ? `Turned on ${config.label}` : `Turned off ${config.label}`,
+        title: enabled ? `Turned on ${label}` : `Turned off ${label}`,
         type: "success",
       });
     },
