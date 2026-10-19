@@ -1,8 +1,8 @@
 import {
   type FixerTurnId,
+  explicitModelOptions,
   findAgentModel,
   type PullRequestKey,
-  resolveModelOptions,
   type TurnScripts,
 } from "@prkit/contracts";
 import * as Effect from "effect/Effect";
@@ -96,13 +96,7 @@ export const makeAgentRuns = (state: FixerState, leftovers: TurnLeftovers) =>
           const current = (yield* fixerById(fixer.id)) ?? fixer;
           const model = findAgentModel(catalog, current.instance_id, current.model);
           // Every setting goes in explicitly, so a resumed session doesn't keep an older choice.
-          const options =
-            model === undefined
-              ? current.model_options
-              : resolveModelOptions(model.options, current.model_options).map((option) => ({
-                  id: option.descriptor.id,
-                  value: option.value,
-                }));
+          const options = explicitModelOptions(model, current.model_options);
           // Removed with the turn's context when its run ends, or on the next start after a
           // crash. The context comes first, so a start after a crash finds the temp folder.
           const context = path.join(contextDir, turnId);

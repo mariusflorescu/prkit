@@ -12,6 +12,8 @@ const Run = Schema.fromJsonString(
     session: Schema.String,
     resumed: Schema.Boolean,
     forked: Schema.Boolean,
+    model: Schema.NullOr(Schema.String),
+    effort: Schema.NullOr(Schema.String),
   }),
 );
 
@@ -147,7 +149,7 @@ export const setUpFakeClaude = (name: string) => {
           };
         });
     },
-    /** Every turn so far: the config folder and directory it ran in, its session, and whether it resumed or forked. */
+    /** Every turn so far: the config folder and directory it ran in, its session, whether it resumed or forked, and the model and effort it started with (null when not given). */
     runs: () => {
       const file = NodePath.join(dir, "runs.log");
       if (!NodeFS.existsSync(file)) return [];

@@ -19,7 +19,7 @@ import {
   startFakeInstance,
   stopFakeInstance,
 } from "./fakeGitHub.ts";
-import { AGENT_RUNS, AGENT_SKIP, readRows } from "./fixturePr.ts";
+import { AGENT_RUNS, AGENT_SKIP, GUIDE_WAIT, readRows } from "./fixturePr.ts";
 import { emulateOsColorScheme, screenshotLightAndDark } from "./osColorScheme.ts";
 import { setUpRealClaude } from "./realClaude.ts";
 
@@ -375,7 +375,7 @@ test(
 describe("the author's pre-flight from a real Claude", { tags: ["agent"] }, () => {
   test(
     "on the author's own PR it catches the change the description leaves out and the claim nothing does",
-    { timeout: 900_000 },
+    { timeout: GUIDE_WAIT + 5 * 60_000 },
     async ({ app, screen, browser }) => {
       test.skip(!AGENT_RUNS, AGENT_SKIP);
       const name = "author-preflight-claude";
@@ -384,7 +384,7 @@ describe("the author's pre-flight from a real Claude", { tags: ["agent"] }, () =
       try {
         await emulateOsColorScheme(browser, "light");
         await browser.setViewport({ width: 1280, height: 900 });
-        await generate({ app, screen }, run, 600_000);
+        await generate({ app, screen }, run, GUIDE_WAIT);
         const preflight = storedGuide(run.home).preflight;
         if (preflight === null) throw new Error("The guide has no pre-flight.");
         console.log(JSON.stringify(preflight, null, 2));
@@ -409,14 +409,14 @@ describe("the author's pre-flight from a real Claude", { tags: ["agent"] }, () =
 
   test(
     "on someone else's PR it writes no pre-flight",
-    { timeout: 900_000 },
+    { timeout: GUIDE_WAIT + 5 * 60_000 },
     async ({ app, screen }) => {
       test.skip(!AGENT_RUNS, AGENT_SKIP);
       const name = "author-preflight-claude-other";
       const claude = setUpRealClaude(name);
       const { fake, run } = await bringUp(name, claude.file, "outsider", DESCRIPTION);
       try {
-        await generate({ app, screen }, run, 600_000);
+        await generate({ app, screen }, run, GUIDE_WAIT);
         expect(storedGuide(run.home).preflight).toBeNull();
         await expect(screen.getByRole("heading", "Overview")).toBeVisible();
         await expect(screen.getByRole("region", SECTION)).toBeHidden();

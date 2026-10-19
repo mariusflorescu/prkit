@@ -16,6 +16,7 @@ import {
   everythingSkippedMessage,
   type DraftGuideResult,
   effectiveSelection,
+  explicitModelOptions,
   findAgentEntry,
   findAgentModel,
   type GuidanceEdit,
@@ -40,7 +41,6 @@ import {
   pullRequestKey,
   type PullRequestStack,
   type ResolvedGuideConfig,
-  resolveModelOptions,
   type Review,
   type ReviewActivity,
   type ReviewCore,
@@ -1657,16 +1657,12 @@ export const make = Effect.gen(function* () {
       const current = yield* findReviewById(review.id);
       const catalog = yield* agents.catalog();
       const model = findAgentModel(catalog, review.instance, current?.model ?? null);
-      const stored = current?.modelOptions ?? [];
       // Every setting the model takes goes in explicitly, so a resumed session
       // doesn't keep a choice from an earlier attempt.
-      const options =
-        model === undefined
-          ? stored
-          : resolveModelOptions(model.options, stored).map((option) => ({
-              id: option.descriptor.id,
-              value: option.value,
-            }));
+      const options = explicitModelOptions(model, current?.modelOptions ?? []);
+      yield* sql`
+        UPDATE review_attempts SET model_options = ${encodeOptions(options)}
+        WHERE id = ${attemptId} AND finished_at IS NULL`;
       const prompt = buildPrompt({
         subject: plan.prompt,
         mergeBaseSha: ready.mergeBaseSha,
@@ -2671,15 +2667,20 @@ export const make = Effect.gen(function* () {
     );
 
   /**
-   * The median click-to-guide time of past full guides by the same agent instance on
-   * diffs of a similar size (half to double the changed lines). Null with fewer
-   * than two such guides: no estimate prkit can't back up.
+   * The median click-to-guide time of past full guides by the same agent instance and
+   * model, at the same settings, on diffs of a similar size (half to double the changed
+   * lines). Null with fewer than two such guides: no estimate prkit can't back up. Guides
+   * from before attempts recorded their settings never count.
    */
-  const typicalDuration = (instance: AgentInstanceId, lines: number) =>
+  const typicalDuration = (agent: AgentSelection, lines: number) =>
     Effect.gen(function* () {
+      const model = findAgentModel(yield* agents.catalog(), agent.instance, agent.model);
+      if (model === undefined) return null;
+      const options = encodeOptions(explicitModelOptions(model, agent.options));
       const rows = yield* sql`
         SELECT (julianday(finished_at) - julianday(started_at)) * 86400.0 AS seconds FROM review_attempts
-        WHERE outcome = 'accepted' AND instance_id = ${instance}
+        WHERE outcome = 'accepted' AND instance_id = ${agent.instance} AND model = ${agent.model}
+          AND model_options = ${options}
           AND trigger IN ('first', 'retry', 'rewritten', 'retargeted')
           AND changed_lines BETWEEN ${Math.max(0, Math.floor(lines / 2) - 20)} AND ${lines * 2 + 20}
         ORDER BY rowid DESC LIMIT 15`.pipe(Effect.flatMap(decodeDurations));

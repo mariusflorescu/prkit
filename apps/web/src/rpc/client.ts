@@ -363,10 +363,10 @@ export const getDraft = (key: ReviewKey, attemptId: AttemptId): Promise<DraftGui
 export const getAttemptDiff = (key: ReviewKey, attemptId: AttemptId): Promise<DiffSnapshot> =>
   call((client) => client[WS_METHODS.reviewsDiff]({ key, attemptId }));
 export const getTypicalDuration = (
-  instance: AgentInstanceId,
+  agent: AgentSelection,
   lines: number,
 ): Promise<TypicalDuration | null> =>
-  call((client) => client[WS_METHODS.reviewsTypicalDuration]({ instance, lines }));
+  call((client) => client[WS_METHODS.reviewsTypicalDuration]({ agent, lines }));
 /** `refresh` reads logins again: every instance's, or only `instance`'s. */
 export const getAgentCatalog = (
   refresh = false,

@@ -25,7 +25,7 @@ import {
 } from "./askJourney.ts";
 import { startInstance, stopFakeInstance } from "./fakeGitHub.ts";
 import { AGENT_WAIT, CODEX_RUNS, CODEX_SKIP } from "./fixActions.ts";
-import { AGENT_RUNS, AGENT_SKIP, readRows } from "./fixturePr.ts";
+import { AGENT_RUNS, AGENT_SKIP, GUIDE_WAIT, readRows } from "./fixturePr.ts";
 import { cliIn, dismissToasts, outsideAccess, scratchRoot } from "./localGuideSession.ts";
 import { localRepoFixture } from "./localRepoFixture.ts";
 import { emulateOsColorScheme } from "./osColorScheme.ts";
@@ -165,9 +165,11 @@ const journey = (agent: Agent) => async (page: Page) => {
       ]).stdout,
     );
     const key = started.status.key;
-    let waited = decodeWait(cli(repo.repo, ["local", "wait", "--timeout", "600", "--json"]).stdout);
-    if (!waited.finished)
-      waited = decodeWait(cli(repo.repo, ["local", "wait", "--timeout", "600", "--json"]).stdout);
+    const waitStep = () =>
+      decodeWait(cli(repo.repo, ["local", "wait", "--timeout", "600", "--json"]).stdout);
+    let waited = waitStep();
+    for (let spent = 600_000; !waited.finished && spent < GUIDE_WAIT; spent += 600_000)
+      waited = waitStep();
     expect(waited.status).toMatchObject({ state: "ready", latestRevision: 1 });
     const review = reviewRow(run.home, key);
     expect(review.provider).toBe(agent.name);
@@ -368,7 +370,7 @@ const journey = (agent: Agent) => async (page: Page) => {
 describe("Ask about local changes with the user's Claude", { tags: ["agent"] }, () => {
   test(
     "questions about all the changes, a chapter and lines answer from the guide's session, stop, never touch the user's repository, pin, and come back after a relaunch",
-    { timeout: 2_400_000 },
+    { timeout: GUIDE_WAIT + 30 * 60_000 },
     async ({ app, screen, browser }) => {
       test.skip(!AGENT_RUNS, AGENT_SKIP);
       await journey({
@@ -384,7 +386,7 @@ describe("Ask about local changes with the user's Claude", { tags: ["agent"] }, 
 describe("Ask about local changes with Codex", { tags: ["codex"] }, () => {
   test(
     "questions about all the changes, a chapter and lines answer from the guide's session, stop, never touch the user's repository, pin, and come back after a relaunch",
-    { timeout: 2_400_000 },
+    { timeout: GUIDE_WAIT + 30 * 60_000 },
     async ({ app, screen, browser }) => {
       test.skip(!CODEX_RUNS, CODEX_SKIP);
       await journey({

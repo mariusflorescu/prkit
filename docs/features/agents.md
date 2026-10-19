@@ -19,6 +19,14 @@ Cursor's SDK isn't open source, so prkit doesn't ship it. "Install Cursor suppor
 
 A default instance without a folder of its own keeps the one the server was started with (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), as before instances existed.
 
+## Models
+
+Each kind gets its model list from a different place. Claude Code has no list to ask, so prkit ships its own and blocks a model when the installed Claude Code is too old for it. Codex lists the models its login offers (`model/list`), with the reasoning efforts and service tiers each one takes. Cursor's models come from its SDK.
+
+With nothing saved, a guide starts on the first ready instance's default model, at that model's default settings. prkit sets those to Claude Opus 5.5 at Extra High for Claude. Opus 5.5 needs Claude Code 2.1.280 or newer: on an older one it is blocked ("Run claude update") and the first usable model runs at its own default. For Codex it sets GPT-6.1-Sol at Extra High, when the login lists that model with Extra High. A login that lacks either keeps Codex's own default model and settings.
+
+A saved default in Settings > Agents, a PR's own agent and anything the user picked all win over this. A model whose effort was never picked follows the model's default, so a change to a default shows up in guides that never chose one.
+
 ## Conversations
 
 A conversation group is the kind plus where its sessions live: Claude's resolved config folder, Codex's prkit home, Cursor's instance home. Cursor resumes with `Agent.resume` from that home's agent store. Moving a guide or a fix session to an instance in the same group keeps the conversation; another group starts a new one. So two Claude instances on one folder share conversations, and every Codex instance has its own.

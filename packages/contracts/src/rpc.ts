@@ -527,7 +527,7 @@ export const WsRpcGroup = RpcGroup.make(
     error: Schema.Union([ReviewError, GuideNotFoundError]),
   }),
   Rpc.make(WS_METHODS.reviewsTypicalDuration, {
-    payload: Schema.Struct({ instance: AgentInstanceId, lines: Schema.Int }),
+    payload: Schema.Struct({ agent: AgentSelection, lines: Schema.Int }),
     success: Schema.NullOr(TypicalDuration),
     error: ReviewError,
   }),

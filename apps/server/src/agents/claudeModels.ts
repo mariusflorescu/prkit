@@ -21,24 +21,31 @@ interface ClaudeModel {
   readonly effortMap: Readonly<Record<string, string | null>>;
 }
 
-const effort = (defaultEffort: string): ModelOptionDescriptor => ({
-  id: "effort",
-  label: "Reasoning",
-  type: "select",
-  options: [
-    { id: "low", label: "Low", ...(defaultEffort === "low" ? { isDefault: true } : {}) },
-    { id: "medium", label: "Medium", ...(defaultEffort === "medium" ? { isDefault: true } : {}) },
-    { id: "high", label: "High", ...(defaultEffort === "high" ? { isDefault: true } : {}) },
-    { id: "xhigh", label: "Extra High" },
-    { id: "max", label: "Max" },
-    {
-      id: "ultrathink",
-      label: "Ultrathink",
-      description: "Asks for the deepest thinking in the prompt",
-    },
-  ],
-  promptInjectedValues: ["ultrathink"],
-});
+const effort = (defaultEffort: string): ModelOptionDescriptor => {
+  const level = (id: string, label: string) => ({
+    id,
+    label,
+    ...(id === defaultEffort ? { isDefault: true } : {}),
+  });
+  return {
+    id: "effort",
+    label: "Reasoning",
+    type: "select",
+    options: [
+      level("low", "Low"),
+      level("medium", "Medium"),
+      level("high", "High"),
+      level("xhigh", "Extra High"),
+      level("max", "Max"),
+      {
+        id: "ultrathink",
+        label: "Ultrathink",
+        description: "Asks for the deepest thinking in the prompt",
+      },
+    ],
+    promptInjectedValues: ["ultrathink"],
+  };
+};
 const FAST_MODE: ModelOptionDescriptor = { id: "fastMode", label: "Fast Mode", type: "boolean" };
 
 const MODELS: ReadonlyArray<ClaudeModel> = [
@@ -46,7 +53,7 @@ const MODELS: ReadonlyArray<ClaudeModel> = [
     slug: "claude-fable-5-1",
     name: "Claude Fable 5.1",
     minVersion: "2.1.257",
-    isDefault: true,
+    isDefault: false,
     options: [effort("medium")],
     effortMap: { ultrathink: null },
   },
@@ -54,8 +61,8 @@ const MODELS: ReadonlyArray<ClaudeModel> = [
     slug: "claude-opus-5-5",
     name: "Claude Opus 5.5",
     minVersion: "2.1.280",
-    isDefault: false,
-    options: [effort("medium"), FAST_MODE],
+    isDefault: true,
+    options: [effort("xhigh"), FAST_MODE],
     effortMap: { ultrathink: null },
   },
   {

@@ -20,7 +20,7 @@ import {
   startFakeInstance,
   stopFakeInstance,
 } from "./fakeGitHub.ts";
-import { AGENT_RUNS, AGENT_SKIP, readRows } from "./fixturePr.ts";
+import { AGENT_RUNS, AGENT_SKIP, GUIDE_WAIT, readRows } from "./fixturePr.ts";
 import { setUpRealClaude } from "./realClaude.ts";
 import { cliIn, outsideAccess, scratchRoot, switchOn } from "./localGuideSession.ts";
 import { localRepoFixture } from "./localRepoFixture.ts";
@@ -288,7 +288,7 @@ test(
 describe("a guide of local changes with the user's Claude", { tags: ["agent"] }, () => {
   test(
     "Claude writes a guide of a realistic local change before a pull request exists",
-    { timeout: 720_000 },
+    { timeout: GUIDE_WAIT + 2 * 60_000 },
     async ({ app, screen, browser }) => {
       test.skip(!AGENT_RUNS, AGENT_SKIP);
       const name = "local-guides-agent";
@@ -353,13 +353,11 @@ describe("a guide of local changes with the user's Claude", { tags: ["agent"] },
           "--json",
         ]);
         expect(started.code).toBe(0);
-        let waited = decodeWait(
-          cli(shop.repo, ["local", "wait", "--timeout", "600", "--json"]).stdout,
-        );
-        if (!waited.finished)
-          waited = decodeWait(
-            cli(shop.repo, ["local", "wait", "--timeout", "600", "--json"]).stdout,
-          );
+        const waitStep = () =>
+          decodeWait(cli(shop.repo, ["local", "wait", "--timeout", "600", "--json"]).stdout);
+        let waited = waitStep();
+        for (let spent = 600_000; !waited.finished && spent < GUIDE_WAIT; spent += 600_000)
+          waited = waitStep();
         expect(waited.status).toMatchObject({ state: "ready", latestRevision: 1 });
         const read = decodeRead(cli(shop.repo, ["local", "read", "--json"]).stdout);
         const covered = new Set(

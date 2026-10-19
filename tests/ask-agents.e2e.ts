@@ -26,6 +26,7 @@ import {
   AGENT_SKIP,
   FIXTURE_FILES,
   FIXTURE_REPO,
+  GUIDE_WAIT,
   NEEDS_FIXTURE,
   prPath,
   readRows,
@@ -98,7 +99,7 @@ const journey = (agent: Agent) => async (page: Page) => {
     await agent.pick(page);
     await screen.getByRole("button", "Generate guide").tap({ timeout: 30_000 });
     await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r1 · ", {
-      timeout: 600_000,
+      timeout: GUIDE_WAIT,
     });
     await expect(screen.getByRole("heading", "Overview")).toBeVisible();
     for (const path of FIXTURE_FILES)
@@ -344,7 +345,7 @@ const journey = (agent: Agent) => async (page: Page) => {
 describe("Ask with the user's Claude", { tags: ["agent"], skip: NEEDS_FIXTURE }, () => {
   test(
     "questions about the whole PR, a chapter and lines answer from the guide's session, stop, stay read-only, pin, and come back after a relaunch",
-    { timeout: 2_400_000 },
+    { timeout: GUIDE_WAIT + 30 * 60_000 },
     async ({ app, screen, browser }) => {
       test.skip(!AGENT_RUNS, AGENT_SKIP);
       await journey({
@@ -360,7 +361,7 @@ describe("Ask with the user's Claude", { tags: ["agent"], skip: NEEDS_FIXTURE },
 describe("Ask with Codex", { tags: ["codex"], skip: NEEDS_FIXTURE }, () => {
   test(
     "questions about the whole PR, a chapter and lines answer from the guide's session, stop, stay read-only, pin, and come back after a relaunch",
-    { timeout: 2_400_000 },
+    { timeout: GUIDE_WAIT + 30 * 60_000 },
     async ({ app, screen, browser }) => {
       test.skip(!CODEX_RUNS, CODEX_SKIP);
       await journey({

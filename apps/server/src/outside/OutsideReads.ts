@@ -26,6 +26,7 @@ import { ManualCheckTicks } from "../manualCheck/ManualCheckTicks.ts";
 import { ReviewedFiles } from "../reviewedFiles/ReviewedFiles.ts";
 import { Reviews } from "../reviews/Reviews.ts";
 import { OutsideAgents } from "./OutsideAgents.ts";
+import { checkedAgent } from "./agentSelection.ts";
 import { asFailure, fail } from "./errors.ts";
 import { resultJson } from "./responses.ts";
 import { makePager, textParts, type PageInput } from "./paging.ts";
@@ -418,10 +419,14 @@ export const makeOutsideReads = (
       }).pipe(Effect.mapError(asFailure));
 
     const duration = (input: typeof Inputs.DurationInput.Type) =>
-      reviews.typicalDuration(input.instance, input.lines).pipe(
-        Effect.map((duration) => ({ duration })),
-        Effect.mapError(asFailure),
-      );
+      Effect.gen(function* () {
+        const agent = yield* checkedAgent(agents, {
+          instance: input.instance,
+          model: input.model,
+          options: input.options ?? [],
+        });
+        return { duration: yield* reviews.typicalDuration(agent, input.lines) };
+      }).pipe(Effect.mapError(asFailure));
 
     const guideSettingsFor = (input: TargetInput) =>
       Effect.gen(function* () {

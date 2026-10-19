@@ -82,6 +82,25 @@ const choice = (
   ...(isDefault ? { isDefault: true } : {}),
 });
 
+/** What guides run on with nothing saved, when the login lists it at that effort. */
+const PREFERRED = { model: "gpt-6.1-sol", reasoningEffort: "xhigh" } as const;
+
+const withPreferred = (listed: ReadonlyArray<Protocol.CodexModel>) => {
+  const preferred = listed.find((entry) => entry.model === PREFERRED.model);
+  if (
+    preferred === undefined ||
+    !preferred.supportedReasoningEfforts.some(
+      (effort) => effort.reasoningEffort === PREFERRED.reasoningEffort,
+    )
+  )
+    return listed;
+  return listed.map((entry) =>
+    entry === preferred
+      ? { ...entry, isDefault: true, defaultReasoningEffort: PREFERRED.reasoningEffort }
+      : { ...entry, isDefault: false },
+  );
+};
+
 /** A `model/list` entry as a catalog model: reasoning effort and service tier, as Codex reports them. */
 const toModel = (model: Protocol.CodexModel): AgentModel => {
   const efforts = model.supportedReasoningEfforts.filter(
@@ -478,7 +497,7 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
       : Effect.scoped(
           Effect.gen(function* () {
             const { client } = yield* open();
-            const found: Array<AgentModel> = [];
+            const found: Array<Protocol.CodexModel> = [];
             let cursor: string | null = null;
             do {
               const page: typeof Protocol.ModelListResponse.Type = yield* client.request(
@@ -486,10 +505,10 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
                 cursor === null ? {} : { cursor },
                 Protocol.ModelListResponse,
               );
-              found.push(...page.data.filter((model) => model.hidden !== true).map(toModel));
+              found.push(...page.data.filter((model) => model.hidden !== true));
               cursor = page.nextCursor ?? null;
             } while (cursor !== null);
-            return found;
+            return withPreferred(found).map(toModel);
           }),
         ).pipe(
           Effect.tapError((error) =>

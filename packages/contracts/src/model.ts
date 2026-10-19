@@ -1,3 +1,4 @@
+import * as Order from "effect/Order";
 import * as Schema from "effect/Schema";
 
 export const ModelOptionChoice = Schema.Struct({
@@ -63,6 +64,23 @@ export const resolveModelOptions = (
       typeof chosen === "string" && descriptor.options.some((option) => option.id === chosen);
     return { type: "select", descriptor, value: valid ? chosen : defaultChoice(descriptor) };
   });
+
+const bySettingId = Order.mapInput(Order.String, (selection: ModelOptionSelection) => selection.id);
+
+/**
+ * The settings a turn runs with: every setting the model takes, explicit, so a resumed session
+ * doesn't keep an earlier choice. Sorted by id, so the stored text of two equal settings is equal.
+ * A model missing from the catalog passes the stored selections through.
+ */
+export const explicitModelOptions = (
+  model: { readonly options: ReadonlyArray<ModelOptionDescriptor> } | undefined,
+  selections: ReadonlyArray<ModelOptionSelection>,
+): ReadonlyArray<ModelOptionSelection> =>
+  model === undefined
+    ? selections
+    : resolveModelOptions(model.options, selections)
+        .map((option) => ({ id: option.descriptor.id, value: option.value }))
+        .toSorted(bySettingId);
 
 /** The selections that still apply to a model, for keeping choices across a model switch. */
 export const keepModelOptions = (

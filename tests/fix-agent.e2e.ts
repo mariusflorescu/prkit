@@ -50,6 +50,7 @@ import {
   AGENT_SKIP,
   FIXTURE_LOGIN,
   FIXTURE_REPO,
+  GUIDE_WAIT,
   NEEDS_FIXTURE,
   readRows,
 } from "./fixturePr.ts";
@@ -651,7 +652,7 @@ describe("the fix agent with Claude", { tags: ["agent"], skip: NEEDS_FIXTURE }, 
 
   test(
     "Claude fixes two drafts and a GitHub thread and runs the tests; Push lands the commit, answers the thread, and the guide moves to revision 2; Discard leaves nothing",
-    { timeout: 1_800_000 },
+    { timeout: 2 * GUIDE_WAIT + 14 * 60_000 },
     async (fixtures) => {
       test.skip(!AGENT_RUNS, AGENT_SKIP);
       const { app, screen } = fixtures;
@@ -666,7 +667,7 @@ describe("the fix agent with Claude", { tags: ["agent"], skip: NEEDS_FIXTURE }, 
         await openPull(fixtures, fixture, "guide");
         await screen.getByRole("button", "Generate guide").tap({ timeout: 60_000 });
         await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r1 · ", {
-          timeout: AGENT_WAIT,
+          timeout: GUIDE_WAIT,
         });
 
         await screen.getByRole("navigation", "Pull request tabs").getByRole("link", "Files").tap();
@@ -770,7 +771,7 @@ describe("the fix agent with Claude", { tags: ["agent"], skip: NEEDS_FIXTURE }, 
         // The review watcher (5 seconds in e2e) picks up the pushed head on its own.
         await screen.getByRole("navigation", "Pull request tabs").getByRole("link", "Guide").tap();
         await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r2 · ", {
-          timeout: AGENT_WAIT,
+          timeout: GUIDE_WAIT,
         });
         expect(
           readRows(

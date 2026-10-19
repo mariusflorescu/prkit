@@ -234,7 +234,9 @@ export function GuideSetup({
             pending={pending}
             onRetry={() => void submit()}
             onCheckAgain={() => checkAgain.mutate()}
-            fallback={<TypicalDuration detail={detail} instance={selection?.instance ?? null} />}
+            fallback={
+              <TypicalDuration detail={detail} selection={selection} catalog={catalog.data} />
+            }
           />
         </div>
         <GenerateGuideButton

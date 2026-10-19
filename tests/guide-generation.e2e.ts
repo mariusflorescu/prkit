@@ -21,6 +21,7 @@ import {
   FIXTURE_FILES,
   FIXTURE_NAME,
   FIXTURE_REPO,
+  GUIDE_WAIT,
   NEEDS_FIXTURE,
   openFixtureGuide,
   prPath,
@@ -258,7 +259,7 @@ test(
 describe("guide generation with Codex", { tags: ["codex"], skip: NEEDS_FIXTURE }, () => {
   test(
     "Codex narrates, checks off files, streams a draft and writes the guide",
-    { timeout: 660_000 },
+    { timeout: GUIDE_WAIT + 60_000 },
     async ({ app, screen, browser }) => {
       test.skip(
         !CODEX_RUNS,
@@ -279,7 +280,7 @@ describe("guide generation with Codex", { tags: ["codex"], skip: NEEDS_FIXTURE }
       await expect(screen.getByRole("status", "What the agent is doing")).toBeVisible();
       await app.screenshot("codex-reading");
       await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r1 · ", {
-        timeout: 600_000,
+        timeout: GUIDE_WAIT,
       });
       await expect(screen.getByRole("heading", "Overview")).toBeVisible();
       for (const path of FIXTURE_FILES)
@@ -386,7 +387,7 @@ describe("guide generation with Codex", { tags: ["codex"], skip: NEEDS_FIXTURE }
 describe("guide generation with the user's agent", { tags: ["agent"], skip: NEEDS_FIXTURE }, () => {
   test(
     "Generate narrates, checks off files, shows the draft early and writes the guide",
-    { timeout: 660_000 },
+    { timeout: GUIDE_WAIT + 60_000 },
     async ({ app, screen, browser }) => {
       test.skip(!AGENT_RUNS, AGENT_SKIP);
       const run = runForUrl(app.baseUrl);
@@ -408,11 +409,11 @@ describe("guide generation with the user's agent", { tags: ["agent"], skip: NEED
       // Read while it writes: the overview shows while the progress line is still up.
       await expect(
         browser.locator("[data-progress-label] ~ *, [data-guide-summary]").first(),
-      ).toBeVisible({ timeout: 300_000 });
+      ).toBeVisible({ timeout: GUIDE_WAIT });
       await app.screenshot("guide-draft");
 
       await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r1 · ", {
-        timeout: 600_000,
+        timeout: GUIDE_WAIT,
       });
       await expect(screen.getByRole("heading", "Overview")).toBeVisible();
       await expect(browser.locator('[data-review-status="watching"]')).toBeVisible();

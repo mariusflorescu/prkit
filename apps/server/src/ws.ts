@@ -180,8 +180,8 @@ const layerHandlers = WsRpcGroup.toLayer(
       [WS_METHODS.reviewsWatch]: ({ key }) => reviews.watch(key),
       [WS_METHODS.reviewsFeed]: () => reviews.feed(),
       [WS_METHODS.reviewsDiff]: ({ key, attemptId }) => reviews.diff(key, attemptId),
-      [WS_METHODS.reviewsTypicalDuration]: ({ instance, lines }) =>
-        reviews.typicalDuration(instance, lines),
+      [WS_METHODS.reviewsTypicalDuration]: ({ agent, lines }) =>
+        reviews.typicalDuration(agent, lines),
       [WS_METHODS.guidesGet]: ({ key, revision }) => reviews.guide(key, revision),
       // Guides of local changes.
       [WS_METHODS.localReviewsList]: () => reviews.local.list(),

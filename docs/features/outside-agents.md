@@ -47,7 +47,7 @@ The inventory covers every WebSocket RPC and the app's local presentation action
 | Stop guide and watcher | reviews.stop | `stop_guide` | Work |
 | Current guide/progress and review feed | reviews.get, reviews.feed | `read_guide`, `read_guide_progress`, `list_reviews` | Read |
 | Guide revision switcher and saved diff | guides.get, reviews.diff, guides.draft | `list_guide_revisions`, `read_guide_revision`, `read_review_diff`; `read_guide_progress` includes the draft | Read |
-| Typical guide duration | reviews.typicalDuration | `read_guide_duration` | Read |
+| Typical guide duration | reviews.typicalDuration | `read_guide_duration` with instance, model, options and lines | Read |
 | Questions about a guide and their answers | the questions asks.watch opens with | `read_pull_request_questions`: revision, cursor, limit | Read |
 | Ask about a guide, and retry an answer | asks.ask, asks.retry | `ask_about_pull_request`: revision (the latest by default), scope (whole PR, chapter or lines), question and `clientRequestId`; a retry is asking again | Work |
 | Stop an answer | asks.stop | `stop_question`, which keeps the answer so far | Work |

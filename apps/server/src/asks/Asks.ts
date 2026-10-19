@@ -12,13 +12,13 @@ import {
   askedRows,
   AskScope,
   type AskWatchEvent,
+  explicitModelOptions,
   findAgentModel,
   type LocalReviewKey,
   NormalizedGuide,
   type Question,
   QuestionId,
   type QuestionState,
-  resolveModelOptions,
   ReviewId,
 } from "@prkit/contracts";
 import * as Context from "effect/Context";
@@ -563,13 +563,7 @@ export const make = Effect.gen(function* () {
       });
       // Every setting the model takes goes in explicitly, as a guide's turn does.
       const model = findAgentModel(yield* agents.catalog(), provider.instance, context.agent.model);
-      const options =
-        model === undefined
-          ? context.agent.options
-          : resolveModelOptions(model.options, context.agent.options).map((option) => ({
-              id: option.descriptor.id,
-              value: option.value,
-            }));
+      const options = explicitModelOptions(model, context.agent.options);
       const input: TurnSetup = {
         turn: { id: question.id, ended: () => Effect.void },
         cwd: place.checkout.worktree,
