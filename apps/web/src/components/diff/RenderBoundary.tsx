@@ -2,14 +2,23 @@ import { Component, type ReactNode } from "react";
 
 import { Button } from "~/components/ui/button";
 
-export class RenderBoundary extends Component<
-  { children: ReactNode; title: string },
-  { failed: boolean }
-> {
-  override state = { failed: false };
+type Props = {
+  children: ReactNode;
+  title: string;
+  /** A new value tries a failed render again without remounting one that rendered. */
+  resetKey?: string | undefined;
+};
+type State = { failed: boolean; resetKey: string | undefined };
+
+export class RenderBoundary extends Component<Props, State> {
+  override state: State = { failed: false, resetKey: this.props.resetKey };
 
   static getDerivedStateFromError() {
     return { failed: true };
+  }
+
+  static getDerivedStateFromProps(props: Props, state: State) {
+    return props.resetKey === state.resetKey ? null : { failed: false, resetKey: props.resetKey };
   }
 
   override render() {

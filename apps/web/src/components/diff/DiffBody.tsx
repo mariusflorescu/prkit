@@ -82,6 +82,7 @@ export function DiffBody({
   trailingLines,
   prUrl,
   fromGuide = false,
+  version,
 }: {
   file: DiffFile;
   annotations: ReadonlyArray<DiffAnnotation>;
@@ -91,12 +92,14 @@ export function DiffBody({
   prUrl?: string | undefined;
   /** Labels the line notes as the guide's, on a diff that isn't the guide's. */
   fromGuide?: boolean | undefined;
+  /** The file's version on its card: a new one is other code, even under the same patch. */
+  version?: string | undefined;
 }) {
   const { diffStyle, wrap } = useDiffPrefs();
   const moves = useFileMoves(file.path);
   const scopes = useFileScopes(file.path);
   const reveal = useFileReveal(file.path);
-  const built = useMemo(() => buildFileDiff(file), [file]);
+  const built = useMemo(() => buildFileDiff(file, version), [file, version]);
   // A push hands this body the new head's file without remounting it, so what the
   // last expansion said stays with the file it was about.
   const [loaded, setLoaded] = useState<{ file: DiffFile; contents: ContentsState }>({
@@ -144,6 +147,12 @@ export function DiffBody({
   const kind = interaction?.kind;
   const [keyRange, setKeyRange] = useState<LineRange | null>(null);
   const [lineKeys] = useState(() => makeLineKeys(setKeyRange));
+  const shape = built.kind === "diff" ? built.fileDiff.cacheKey : built.message;
+  const [drawn, setDrawn] = useState(shape);
+  if (shape !== drawn) {
+    setDrawn(shape);
+    lineKeys.forget();
+  }
   const host = useRef<HTMLElement | null>(null);
   const options = useMemo<FileDiffOptions<Pin, undefined>>(() => {
     const trailing =

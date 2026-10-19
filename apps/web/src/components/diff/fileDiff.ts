@@ -5,7 +5,8 @@ type RenderableDiff =
   | { kind: "diff"; fileDiff: FileDiffMetadata }
   | { kind: "message"; message: string; raw?: string };
 
-export function buildFileDiff(file: DiffFile): RenderableDiff {
+/** `version` tells Pierre a file it already drew is another one, such as after a base move. */
+export function buildFileDiff(file: DiffFile, version = ""): RenderableDiff {
   if (file.patch._tag === "binary")
     return { kind: "message", message: "Binary file. No text diff is available." };
   if (file.patch._tag === "too-large")
@@ -27,7 +28,7 @@ export function buildFileDiff(file: DiffFile): RenderableDiff {
     const fileDiff = processFile(file.patch.patch, {
       isGitDiff: true,
       throwOnError: true,
-      cacheKey: `${file.path}:${file.patch.patch.length}:${hash >>> 0}`,
+      cacheKey: `${file.path}:${version}:${file.patch.patch.length}:${hash >>> 0}`,
     });
     if (fileDiff?.hunks.length) return { kind: "diff", fileDiff };
   } catch {

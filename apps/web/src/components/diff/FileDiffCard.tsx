@@ -1,6 +1,6 @@
 import type { DiffFile } from "@prkit/contracts";
 import { ChevronDown, ChevronRight, FileCode2 } from "lucide-react";
-import { useId, useRef, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
 import { DiffStat } from "./DiffStat";
@@ -31,6 +31,11 @@ export type FileDiffCardProps = {
   reviewed?: ReviewedControl | undefined;
   /** Changes when the card should open again as it first would, such as a chapter unticked. */
   reopened?: number | undefined;
+  /**
+   * The file's version, such as one a push changed. A new one sets the card open or closed as a
+   * new card would, in place, so its diff and what is written on it never blink.
+   */
+  version?: string | undefined;
   /** Labels the file note and line notes as the guide's, on a diff that isn't the guide's. */
   fromGuide?: boolean | undefined;
 };
@@ -47,12 +52,17 @@ export function FileDiffCard({
   trailingLines,
   reviewed,
   reopened = 0,
+  version,
   fromGuide = false,
 }: FileDiffCardProps) {
   const reveal = useFileReveal(file.path);
-  const [open, setOpen] = useState(
-    (!defaultCollapsed && reviewed?.state !== "reviewed") || reveal !== null,
-  );
+  const first = (!defaultCollapsed && reviewed?.state !== "reviewed") || reveal !== null;
+  const [open, setOpen] = useState(first);
+  const [seenVersion, setSeenVersion] = useState(version);
+  if (version !== seenVersion) {
+    setSeenVersion(version);
+    setOpen(first);
+  }
   const [revealed, setRevealed] = useState(reveal);
   if (reveal !== revealed) {
     setRevealed(reveal);
@@ -64,6 +74,11 @@ export function FileDiffCard({
     setSeenReopened(reopened);
     if (!defaultCollapsed) setOpen(true);
   }
+  // A tick saved after a push was for the version it was ticked on, so it folds nothing now.
+  const shownVersion = useRef(version);
+  useLayoutEffect(() => {
+    shownVersion.current = version;
+  });
   const ref = useRef<HTMLElement>(null);
   const bodyId = useId();
   const comments = commentsOf(interaction);
@@ -117,8 +132,10 @@ export function FileDiffCard({
               name={file.path}
               state={reviewed.state}
               onChange={async (next) => {
+                const tickedOn = shownVersion.current;
                 const saved = await reviewed.onChange(next);
                 if (!saved) return false;
+                if (shownVersion.current !== tickedOn) return true;
                 // Only the user's own tick folds the file; marks arriving from elsewhere leave it.
                 flushSync(() => setOpen(!next));
                 if (next && ref.current) alignIfAbove(ref.current);
@@ -138,11 +155,12 @@ export function FileDiffCard({
             </div>
           )}
           <RenderBoundary
-            key={file.patch._tag === "text" ? file.patch.patch : file.patch._tag}
+            resetKey={file.patch._tag === "text" ? file.patch.patch : file.patch._tag}
             title={`The diff for ${file.path}`}
           >
             <LazyDiffBody
               file={file}
+              version={version}
               annotations={annotations}
               interaction={interaction}
               loadContents={loadContents}

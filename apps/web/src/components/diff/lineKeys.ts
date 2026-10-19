@@ -199,6 +199,10 @@ export const makeLineKeys = (
       host?.shadowRoot?.removeEventListener("click", onClick);
       host = null;
     },
+    /** The diff now shows other code, so a range Shift was extending no longer names it. */
+    forget: () => {
+      if (anchor !== null || range !== null) setRange(null);
+    },
     /** The composer closed: focus goes back to the line it opened from, unless it moved on. */
     restore: () => {
       const root = host?.shadowRoot;
