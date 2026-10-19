@@ -17,9 +17,11 @@ const PAGE_ACTIONS = [
 const headerActions = (browser: Browser, header: "expanded" | "compact") =>
   browser.evaluate(
     (selector: string) =>
-      [...document.querySelectorAll(`${selector} [aria-label="Pull request actions"] button`)].map(
-        (button) => (button.getAttribute("aria-label") ?? button.textContent ?? "").trim(),
-      ),
+      [
+        ...document.querySelectorAll<HTMLElement>(
+          `${selector} [aria-label="Pull request actions"] button`,
+        ),
+      ].map((button) => (button.getAttribute("aria-label") ?? button.innerText).trim()),
     header === "expanded" ? "[data-pr-expanded-header]" : "[data-pr-compact-header]",
   );
 

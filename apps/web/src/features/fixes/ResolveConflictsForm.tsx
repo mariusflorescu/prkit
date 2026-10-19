@@ -4,6 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useForm, useWatch } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { resolveConflicts } from "~/rpc/client";
 
 import { runsOnCursor } from "./cursorFixes";
@@ -128,7 +129,10 @@ export function ResolveConflictsForm({
           size="sm"
           disabled={start.isPending || agent.selection === null || agent.problem !== null}
         >
-          {start.isPending ? "Starting…" : "Resolve with the agent"}
+          <ButtonLabel
+            shown={start.isPending ? "starting" : "resolve"}
+            labels={{ resolve: "Resolve with the agent", starting: "Starting…" }}
+          />
         </Button>
       </div>
     </form>

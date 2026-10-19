@@ -2,6 +2,7 @@ import type { AgentInstanceId } from "@prkit/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { signOutAgent } from "~/rpc/client";
 import { agentCatalogQuery } from "~/rpc/queries";
 
@@ -20,11 +21,14 @@ export function ProviderSignOut({ instance }: { instance: AgentInstanceId }) {
         disabled={signOut.isPending}
         onClick={() => signOut.mutate()}
       >
-        {signOut.isPending
-          ? "Signing out…"
-          : signOut.error === null
-            ? "Sign out prkit's login"
-            : "Try again"}
+        <ButtonLabel
+          shown={signOut.isPending ? "signingOut" : signOut.error === null ? "signOut" : "retry"}
+          labels={{
+            signOut: "Sign out prkit's login",
+            signingOut: "Signing out…",
+            retry: "Try again",
+          }}
+        />
       </Button>
       {signOut.error !== null && (
         <span role="alert" className="text-xs text-error-foreground">

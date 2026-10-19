@@ -238,12 +238,11 @@ export function GuideSetup({
         </div>
         <GenerateGuideButton
           label={
-            pending
-              ? "Starting…"
-              : stacked
-                ? `Generate ${starting.length} guide${starting.length === 1 ? "" : "s"}`
-                : submitLabel
+            stacked
+              ? `Generate ${starting.length} guide${starting.length === 1 ? "" : "s"}`
+              : submitLabel
           }
+          pending={pending}
           disabled={!ready}
           shortcut={!stacked}
           describedBy={problem !== null ? "generate-blocked" : undefined}

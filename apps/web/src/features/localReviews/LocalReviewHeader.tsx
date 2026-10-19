@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { FolderGit2Icon } from "lucide-react";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { relativeTime } from "~/features/pullRequest/pullRequestPresentation";
 import { localReviewProblemQuery } from "~/rpc/queries";
 
@@ -40,7 +41,10 @@ export function LocalReviewHeader({ review, run }: { review: LocalReview; run: L
               disabled={stop.isPending}
               onClick={() => stop.mutate()}
             >
-              {stop.isPending ? "Stopping…" : "Stop"}
+              <ButtonLabel
+                shown={stop.isPending ? "stopping" : "stop"}
+                labels={{ stop: "Stop", stopping: "Stopping…" }}
+              />
             </Button>
           ) : (
             <LocalRunAgain review={review} generate={generate} />

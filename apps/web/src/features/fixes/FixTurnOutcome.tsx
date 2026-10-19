@@ -1,6 +1,7 @@
 import type { FixerTurn, PullRequestDetail } from "@prkit/contracts";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 
 import { short } from "./fixPresentation";
 import { useTurnCommand } from "./useTurnCommand";
@@ -52,7 +53,10 @@ export function FixTurnOutcome({ detail, turn }: { detail: PullRequestDetail; tu
           disabled={command.isPending}
           onClick={() => command.mutate("retry")}
         >
-          {command.isPending ? "Retrying…" : "Retry"}
+          <ButtonLabel
+            shown={command.isPending ? "retrying" : "retry"}
+            labels={{ retry: "Retry", retrying: "Retrying…" }}
+          />
         </Button>
       )}
       {revertable && (

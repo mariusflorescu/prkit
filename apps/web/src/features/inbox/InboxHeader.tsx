@@ -2,6 +2,7 @@ import { RefreshCwIcon } from "lucide-react";
 import type { Ref } from "react";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { WorkspacePageHeader } from "~/components/WorkspacePageHeader";
 
 import { InboxUpdated } from "./InboxUpdated";
@@ -26,8 +27,11 @@ export function InboxHeader({
         <div className="ml-auto flex items-center gap-3" inert={collapsed} aria-hidden={collapsed}>
           <InboxUpdated fetchedAt={fetchedAt} />
           <Button size="sm" variant="ghost-muted" disabled={refreshing} onClick={onRefresh}>
-            <RefreshCwIcon className="size-3.5" />
-            {refreshing ? "Refreshing..." : "Refresh"}
+            <ButtonLabel
+              icon={<RefreshCwIcon className="size-3.5" />}
+              shown={refreshing ? "refreshing" : "refresh"}
+              labels={{ refresh: "Refresh", refreshing: "Refreshing..." }}
+            />
           </Button>
         </div>
       </WorkspacePageHeader>

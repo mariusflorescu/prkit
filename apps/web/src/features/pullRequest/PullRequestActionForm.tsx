@@ -9,6 +9,7 @@ import { useEffect } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import {
   Select,
   SelectItem,
@@ -51,6 +52,14 @@ export function PullRequestActionForm({
     form.setValue("body", detail.actions.mergeMessages[method].body);
   }, [method, detail.actions.mergeMessages, form]);
   const reason = pullRequestActionReason(detail, kind);
+  const confirmLabel =
+    kind === "merge"
+      ? "Confirm merge"
+      : kind === "close"
+        ? "Confirm close"
+        : kind === "revert"
+          ? "Create revert pull request"
+          : pullRequestActionLabels[kind];
   const methodChoices = mergeMethods
     .filter(({ method: option }) => kind !== "update-branch" || option !== "squash")
     .map(({ method: option, label }) => {
@@ -226,17 +235,10 @@ export function PullRequestActionForm({
           variant={kind === "close" ? "destructive" : "default"}
           disabled={actions.pending || reason !== null}
         >
-          {actions.pending
-            ? "Working..."
-            : actions.error
-              ? "Retry"
-              : kind === "merge"
-                ? "Confirm merge"
-                : kind === "close"
-                  ? "Confirm close"
-                  : kind === "revert"
-                    ? "Create revert pull request"
-                    : pullRequestActionLabels[kind]}
+          <ButtonLabel
+            shown={actions.pending ? "working" : actions.error ? "retry" : "confirm"}
+            labels={{ confirm: confirmLabel, working: "Working...", retry: "Retry" }}
+          />
         </Button>
       </div>
     </form>

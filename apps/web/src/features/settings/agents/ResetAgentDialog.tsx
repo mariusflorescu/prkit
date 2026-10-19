@@ -2,6 +2,7 @@ import { AlertDialog } from "@base-ui/react/alert-dialog";
 import type { AgentCatalogEntry } from "@prkit/contracts";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 
 import { configOf } from "./instanceConfig";
 import { useAgentInstanceActions } from "./useAgentInstanceActions";
@@ -63,7 +64,10 @@ export function ResetAgentDialog({
                 reset.mutate(configOf(entry), { onSuccess: () => onOpenChange(false) })
               }
             >
-              {reset.isPending ? "Resetting…" : "Reset"}
+              <ButtonLabel
+                shown={reset.isPending ? "resetting" : "reset"}
+                labels={{ reset: "Reset", resetting: "Resetting…" }}
+              />
             </Button>
           </div>
           {reset.error !== null && !reset.isPending && (

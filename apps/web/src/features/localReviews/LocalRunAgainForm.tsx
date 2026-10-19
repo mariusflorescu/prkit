@@ -105,7 +105,8 @@ export function LocalRunAgainForm({
           />
         </div>
         <GenerateGuideButton
-          label={generate.isPending ? "Starting…" : "Run again"}
+          label="Run again"
+          pending={generate.isPending}
           disabled={selection === null || problem !== null || generate.isPending}
           shortcut={false}
           describedBy={problem !== null ? "generate-blocked" : undefined}

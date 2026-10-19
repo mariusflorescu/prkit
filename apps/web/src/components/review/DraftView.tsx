@@ -36,17 +36,18 @@ export function DraftView({
   });
   const diff = useQuery(attemptDiffQuery(reviewKey, attemptId));
   if (draft.isPending || diff.isPending) return <GuideSkeleton label="Loading the draft" />;
-  if (draft.isError || diff.isError)
-    return (
-      <ReviewAlert
-        title="Couldn't load the draft"
-        message={(draft.error ?? diff.error)?.message ?? "Try again."}
-        retry={() => {
-          void draft.refetch();
-          void diff.refetch();
-        }}
-      />
-    );
+  const failed = (error: Error) => (
+    <ReviewAlert
+      title="Couldn't load the draft"
+      message={error.message}
+      retry={() => {
+        void draft.refetch();
+        void diff.refetch();
+      }}
+    />
+  );
+  if (draft.isError) return failed(draft.error);
+  if (diff.isError) return failed(diff.error);
   const pending = new Set(
     draft.data.normalized.chapters
       .filter((chapter) => chapter.files.length === 0)

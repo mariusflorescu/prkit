@@ -65,6 +65,7 @@ const holdAndFail = async (
   }: { row: Row; idle: string; pending: string; again?: string; failed: string; frame: string },
 ) => {
   const scope = browser.locator(row.scope);
+  await scope.getByRole("button", idle).scrollIntoView();
   await settled(browser);
   const before = await rowOf(browser, row);
   await app.screenshot(`${frame}-before`);
@@ -99,22 +100,31 @@ const holdAndFail = async (
   await expect(scope.getByRole("button", again)).toBeEnabled();
 };
 
-/** The same held save in light, then in dark, from the failed state the first one leaves. */
+/**
+ * The same held save in light at the window's width, then in dark at 760 px, where rows wrap,
+ * from the failed state the first one leaves.
+ */
 const inLightAndDark = async (
   fixtures: Fixtures,
   home: string,
   options: Parameters<typeof holdAndFail>[2],
 ) => {
   await holdAndFail(fixtures, home, { ...options, frame: `${options.frame}-light` });
+  const viewport = await fixtures.browser.evaluate(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }));
+  await fixtures.browser.setViewport({ width: 760, height: viewport.height });
   await setOsColorScheme(fixtures.browser, "dark");
   await expect.poll(() => readPageTheme(fixtures.browser)).toMatchObject({ dark: true });
   await holdAndFail(fixtures, home, {
     ...options,
     idle: options.again ?? options.idle,
-    frame: `${options.frame}-dark`,
+    frame: `${options.frame}-narrow-dark`,
   });
   await setOsColorScheme(fixtures.browser, "light");
   await expect.poll(() => readPageTheme(fixtures.browser)).toMatchObject({ dark: false });
+  await fixtures.browser.setViewport(viewport);
 };
 
 describe("steady buttons", { tags: ["steady-buttons"] }, () => {

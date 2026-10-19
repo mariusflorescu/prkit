@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { cn } from "~/lib/utils";
 
 import { AddAgentKindStep } from "./AddAgentKindStep";
@@ -179,15 +180,26 @@ export function AddAgentDialog({
                 disabled={create.isPending}
                 aria-busy={create.isPending}
               >
-                {created !== null
-                  ? "Done"
-                  : !last
-                    ? "Next"
-                    : create.isPending
-                      ? "Adding…"
-                      : values.setup !== "manual"
-                        ? "Add and sign in"
-                        : "Add agent"}
+                <ButtonLabel
+                  shown={
+                    created !== null
+                      ? "done"
+                      : !last
+                        ? "next"
+                        : create.isPending
+                          ? "adding"
+                          : values.setup !== "manual"
+                            ? "signin"
+                            : "add"
+                  }
+                  labels={{
+                    done: "Done",
+                    next: "Next",
+                    adding: "Adding…",
+                    signin: "Add and sign in",
+                    add: "Add agent",
+                  }}
+                />
               </Button>
             </div>
             {create.error !== null && !create.isPending && (

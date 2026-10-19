@@ -1,6 +1,7 @@
 import { useId } from "react";
 
 import { Button } from "~/components/ui/button";
+import { ButtonLabel } from "~/components/ui/button-label";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { noNotesHere } from "./placeGuideNotes";
 import type { FilesGuideNotesState } from "./useFilesGuideNotes";
@@ -130,11 +131,10 @@ export function FilesGuideNotesStatus({ state }: { state: FilesGuideNotesState }
               disabled={status.busy}
               onClick={status.action.run}
             >
-              {status.action._tag === "retry"
-                ? "Retry"
-                : status.busy
-                  ? "Loading..."
-                  : "Show its notes"}
+              <ButtonLabel
+                shown={status.action._tag === "retry" ? "retry" : status.busy ? "loading" : "show"}
+                labels={{ retry: "Retry", loading: "Loading...", show: "Show its notes" }}
+              />
             </Button>
           )}
         </>
