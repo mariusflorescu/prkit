@@ -299,7 +299,12 @@ export type GuideStatus = typeof GuideStatus.Type;
 /** The steps of a guide's `manualCheck` the owner ticked, by number. Local to prkit. */
 export const ManualCheckTicked = Schema.Array(Schema.Int).annotate({
   description:
-    "The 1-based numbers of the manualCheck steps the owner ticked in prkit. Empty when there are no steps.",
+    "The 1-based numbers of the manualCheck steps the owner ticked in prkit and that still count as checked. Empty when there are none.",
+});
+/** The steps ticked against code that has since changed, so they show unticked. Local to prkit. */
+export const ManualCheckChanged = Schema.Array(Schema.Int).annotate({
+  description:
+    "The 1-based numbers of the manualCheck steps the owner ticked in prkit before the code of the step's chapter changed. They count as not ticked, and the owner needs to check them again. Empty when none.",
 });
 export const GuideResult = Schema.Struct({
   status: GuideStatus,
@@ -310,6 +315,7 @@ export const GuideResult = Schema.Struct({
       createdAt: Schema.String,
       content: NormalizedGuide,
       manualCheckTicked: ManualCheckTicked,
+      manualCheckChanged: ManualCheckChanged,
     }),
   ),
 });

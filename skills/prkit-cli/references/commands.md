@@ -159,7 +159,7 @@ Only comments add, fix send, fix change, questions ask and local questions ask t
 | `prkit guide tick <pr> --revision 2 --steps 1 --steps 3`   | Ticks those steps of revision 2's manual check plan.    |
 | `prkit guide tick <pr> --revision 2 --steps 1 --no-ticked` | Unticks them. Repeating either command changes nothing. |
 
-A guide's `manualCheck` is the agent's suggestion of how to see the change working by hand. `prkit guide read <pr> --json` returns it with `manualCheckTicked`, the numbers of the steps the user ticked. Tick steps only when the user asks, or after you ran a step yourself and saw what it expects.
+A guide's `manualCheck` is the agent's suggestion of how to see the change working by hand. `prkit guide read <pr> --json` returns it with `manualCheckTicked`, the numbers of the steps the user ticked, and `manualCheckChanged`, the numbers of steps they ticked before the code of the step's chapter changed, which count as not ticked and need another look. A tick made through `prkit guide tick` records the chapter's code like theirs does. Tick steps only when the user asks, or after you ran a step yourself and saw what it expects.
 
 Read `prkit pr reviewed <pr> --json` first for the paths and its `headSha`. If the PR moved since that read, nothing is marked and the command fails with `conflict`. Read it again. Mark files only when the user asks: it records their judgment, in prkit, and an open window shows it at once.
 

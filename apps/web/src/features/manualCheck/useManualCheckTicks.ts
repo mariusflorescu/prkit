@@ -1,10 +1,13 @@
 import {
+  indexTicks,
+  manualCheckCode,
   type ManualCheckDecision,
   type ManualCheckStep,
+  manualCheckStepState,
   manualCheckStepVersion,
   type ManualCheckTicks,
-  tickedSteps,
   type ReviewSubject,
+  type StepFile,
 } from "@prkit/contracts";
 import { notifyManager, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
@@ -34,26 +37,29 @@ export function useManualCheckTicks(subject: ReviewSubject): ManualCheckBinding 
         description: error.message,
       }),
   });
-  const ticked = useMemo(
-    () => (query.data === undefined ? null : tickedSteps(query.data)),
+  const index = useMemo(
+    () => (query.data === undefined ? null : indexTicks(query.data)),
     [query.data],
   );
-  const isTicked = useCallback(
-    (step: ManualCheckStep) => ticked?.has(manualCheckStepVersion(step)) ?? false,
-    [ticked],
+  const stateOf = useCallback(
+    (step: ManualCheckStep, files: ReadonlyArray<StepFile>) =>
+      index === null
+        ? "unticked"
+        : manualCheckStepState(manualCheckStepVersion(step), files, index),
+    [index],
   );
   const { mutateAsync } = save;
   const set = useCallback(
-    (steps: ReadonlyArray<ManualCheckStep>, tick: boolean) => {
-      const [first, ...rest] = steps.map(manualCheckStepVersion);
-      if (first === undefined) return Promise.resolve(false);
+    (step: ManualCheckStep, files: ReadonlyArray<StepFile>, tick: boolean) =>
       // The query hands new data to components in a later notify batch. Waiting for it means
       // the box is drawn from the saved ticks by the time the caller hears it worked.
-      return mutateAsync({ steps: [first, ...rest], ticked: tick }).then(
+      mutateAsync({
+        steps: [{ step: manualCheckStepVersion(step), code: manualCheckCode(files) }],
+        ticked: tick,
+      }).then(
         () => new Promise<boolean>((resolve) => notifyManager.schedule(() => resolve(true))),
         () => false,
-      );
-    },
+      ),
     [mutateAsync],
   );
   const { refetch } = query;
@@ -62,8 +68,8 @@ export function useManualCheckTicks(subject: ReviewSubject): ManualCheckBinding 
   const loaded = query.data !== undefined;
   const { error } = query;
   return useMemo(() => {
-    if (loaded) return { status: "ready", isTicked, set };
+    if (loaded) return { status: "ready", stateOf, set };
     if (error !== null) return { status: "error", message: error.message, retry };
     return { status: "pending" };
-  }, [loaded, error, retry, isTicked, set]);
+  }, [loaded, error, retry, stateOf, set]);
 }

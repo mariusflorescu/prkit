@@ -449,10 +449,10 @@ export const make = Effect.gen(function* () {
                 headSha: revision.headSha,
                 createdAt: revision.createdAt,
                 content: revision.normalized,
-                manualCheckTicked: yield* manualCheckTicks.ticked(
+                ...(yield* manualCheckTicks.numbers(
                   { _tag: "pull-request", key: target.key, accountId: target.accountId },
-                  revision.normalized,
-                ),
+                  revision,
+                )),
               },
       };
       return result;

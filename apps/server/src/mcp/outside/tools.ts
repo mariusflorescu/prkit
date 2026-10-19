@@ -839,7 +839,7 @@ export const makeOutsideToolkit = (canStartWork: () => boolean) => {
 
   const TickManualCheck = work(
     Tool.make("tick_manual_check_steps", {
-      description: `Ticks steps of a guide's manualCheck (how to see the change working by hand), or unticks them with ticked: false, as the owner's checkbox does in prkit. Name the revision you read and the steps by their 1-based number. A tick follows its step into later revisions while the step reads the same. It sets, never toggles, so repeating a call changes nothing. The ticks stay in prkit and never reach GitHub.${TARGET_HINT}`,
+      description: `Ticks steps of a guide's manualCheck (how to see the change working by hand), or unticks them with ticked: false, as the owner's checkbox does in prkit. Name the revision you read and the steps by their 1-based number. A tick follows its step into later revisions while the step reads the same, and stays only while the code of the step's chapter reads the same: after a real edit to it, read_guide lists the step in manualCheckChanged and not in manualCheckTicked. A tick made here records the chapter's code like the owner's checkbox does. It sets, never toggles, so repeating a call changes nothing. The ticks stay in prkit and never reach GitHub.${TARGET_HINT}`,
       parameters: Parity.TickManualCheckInput,
       success: limited(Parity.TickManualCheckResult),
       failure: OutsideToolFailure,

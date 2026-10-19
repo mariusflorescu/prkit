@@ -79,6 +79,7 @@ export function GuideOverview({
       </div>
       <ManualCheckSection
         guide={guide}
+        files={files}
         ticks={manualCheckTicks}
         onChapter={onChapter}
         prUrl={prUrl}

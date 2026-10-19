@@ -1,5 +1,5 @@
-import type { NormalizedGuide } from "@prkit/contracts";
-import { useId } from "react";
+import { type DiffFile, type NormalizedGuide, stepFiles } from "@prkit/contracts";
+import { useId, useMemo } from "react";
 
 import { InlineMarkdown } from "~/components/diff/InlineMarkdown";
 import { Button } from "~/components/ui/button";
@@ -15,11 +15,14 @@ import "./manualCheck.css";
  */
 export function ManualCheckSection({
   guide,
+  files,
   ticks,
   onChapter,
   prUrl,
 }: {
   guide: NormalizedGuide;
+  /** The revision's snapshot files by path, which the code of each step's chapter comes from. */
+  files: ReadonlyMap<string, DiffFile>;
   /** Without it the steps have no boxes and there is no progress. */
   ticks?: ManualCheckBinding | undefined;
   onChapter: (id: string) => void;
@@ -27,6 +30,14 @@ export function ManualCheckSection({
 }) {
   const titleId = useId();
   const { manualCheck } = guide;
+  // Hashing a chapter's patches is the costly part, so it follows the revision, not the ticks.
+  const code = useMemo(
+    () =>
+      manualCheck?._tag === "steps"
+        ? manualCheck.steps.map((step) => stepFiles(step, guide.chapters, files))
+        : [],
+    [manualCheck, guide.chapters, files],
+  );
   if (manualCheck === null) return null;
   if (manualCheck._tag === "nothing")
     return (
@@ -46,14 +57,22 @@ export function ManualCheckSection({
       { id: chapter.id, title: chapter.title, index },
     ]),
   );
-  const checked =
-    ticks?.status === "ready" ? steps.filter((step) => ticks.isTicked(step)).length : 0;
+  const states =
+    ticks?.status === "ready"
+      ? steps.map((step, index) => ticks.stateOf(step, code[index] ?? []))
+      : [];
+  const checked = states.filter((state) => state === "ticked").length;
+  const changed = states.filter((state) => state === "changed").length;
   return (
     <section data-guide-manual-check="" aria-labelledby={titleId}>
       <div data-manual-check-head="">
         <h2 id={titleId}>How to check it</h2>
         {ticks?.status === "ready" && (
-          <span data-manual-check-quiet="" data-manual-check-progress="">
+          <span
+            data-manual-check-quiet=""
+            data-manual-check-progress=""
+            title={changed > 0 ? `${changed} changed since you checked` : undefined}
+          >
             {checked === steps.length && steps.length > 1
               ? `All ${steps.length} checked`
               : `${checked} of ${steps.length} checked`}
@@ -89,6 +108,7 @@ export function ManualCheckSection({
             step={step}
             number={index + 1}
             ticks={ticks}
+            files={code[index] ?? []}
             chapter={step.chapter === null ? null : (numbered.get(step.chapter) ?? null)}
             onChapter={onChapter}
             prUrl={prUrl}
