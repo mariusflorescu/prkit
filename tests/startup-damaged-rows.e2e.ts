@@ -182,8 +182,9 @@ test(
       await expect(screen.getByRole("link", /#3 Budget fixture 3/).first()).toBeVisible({
         timeout: 30_000,
       });
-      const tabsBefore = readRows(run.home, "SELECT key FROM open_pull_requests ORDER BY key");
-      expect(tabsBefore).toEqual([2, 3, 6, 9].map((number) => ({ key: keyOf(number) })));
+      await expect
+        .poll(() => readRows(run.home, "SELECT key FROM open_pull_requests ORDER BY key"))
+        .toEqual([2, 3, 6, 9].map((number) => ({ key: keyOf(number) })));
 
       // While prkit is closed, one row of each kind is damaged. The held agent then finishes on
       // its own, with no prkit to report to.
@@ -210,9 +211,21 @@ test(
         keyOf(6),
       );
       damage(run.home, "UPDATE reviews SET status = 'garbage' WHERE pr_key = ?", localKey);
-      damage(run.home, "UPDATE fixer_turns SET status = ? WHERE id = ?", NEWER_FAILURE, turnId);
+      // The running fixes are left unfinished, as a crash mid-turn leaves them: a stop can
+      // otherwise record their end before the server exits.
+      damage(
+        run.home,
+        "UPDATE fixer_turns SET status = ?, finished_at = NULL WHERE id = ?",
+        NEWER_FAILURE,
+        turnId,
+      );
       damage(run.home, "UPDATE fixer_turns SET status = 'garbage' WHERE id = ?", endedTurn);
-      damage(run.home, "UPDATE fixer_turns SET work = 'not json' WHERE id = ?", mergedTurn);
+      damage(
+        run.home,
+        `UPDATE fixer_turns SET status = '{"_tag":"running"}', finished_at = NULL, work = 'not json'
+         WHERE id = ?`,
+        mergedTurn,
+      );
       await fake.merge(2);
       damage(
         run.home,
