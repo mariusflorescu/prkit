@@ -230,6 +230,24 @@ test(
       expect(converted.files).toEqual(gitView(autocrlf.git));
       expect(converted.patchOf("notes.txt")).toContain("-one\r\n-two\r\n+one\n+two\n");
 
+      // git reads the attributes from the index when `.gitattributes` is gone from disk, and keeps
+      // CRLF in a file staged with CRLF before them.
+      const indexOnly = repository(root, "index-only", {
+        "README.md": "Index only\n",
+        "notes.txt": "one\r\ntwo\r\n",
+      });
+      indexOnly.write("new.txt", "three\r\n");
+      indexOnly.git(["add", "new.txt"]);
+      indexOnly.write(".gitattributes", "*.txt text=auto\n");
+      indexOnly.git(["add", ".gitattributes"]);
+      indexOnly.git(["add", "--renormalize", "notes.txt"]);
+      NodeFS.rmSync(NodePath.join(indexOnly.repo, ".gitattributes"));
+      const fromIndex = guide(indexOnly.repo);
+      expect(gitView(indexOnly.git)).toEqual(["added new.txt", "modified notes.txt"]);
+      expect(fromIndex.files).toEqual(gitView(indexOnly.git));
+      expect(fromIndex.patchOf("notes.txt")).toContain("-one\r\n-two\r\n+one\n+two\n");
+      expect(fromIndex.patchOf("new.txt")).toContain("+three\r\n");
+
       // With `core.fileMode` off, git takes the executable bit from the index, not the disk.
       const modes = repository(root, "modes", { "README.md": "Modes\n", "run.sh": "echo run\n" });
       modes.git(["config", "core.fileMode", "false"]);

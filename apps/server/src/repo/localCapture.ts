@@ -563,25 +563,26 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
     });
 
   /**
-   * The ids `git add` gives `files`: line endings, `ident` and the like converted by the user's
-   * attributes, by git's own rules. git reads the user's work tree into an index of prkit's:
-   * HEAD's, with `staged`, the user's own entries where they differ. git reads an attributes
-   * file missing from the work tree from the index, and whether it converts a file's line
-   * endings depends on the entry the file already has. It writes objects only to the copy,
-   * whose config names no filter command to run.
+   * `files` as `git add` reads them, against the user's own index rebuilt in the copy: their
+   * entries, stages included, without stat data, so git reads every file again. git takes an
+   * attributes file missing from the work tree from that index, and converts a file's line
+   * endings by the entry it already has. `unread` are the files with an attribute prkit can't
+   * follow; `added` the ids git gives the rest. Objects go only to the copy, whose config names
+   * no filter command to run.
    */
-  const addedShas = (input: {
+  const asAdded = (input: {
     readonly user: UserRepository;
     readonly copy: string;
     readonly scratch: string;
     readonly identity: LocalIdentity;
-    readonly headTree: string;
+    readonly entries: ReadonlyArray<IndexEntry>;
+    readonly tracked: ReturnType<typeof parseTree>;
     readonly files: ReadonlyArray<string>;
-    readonly staged: ReadonlyArray<IndexEntry>;
     readonly settings: ReadonlyArray<string>;
   }) =>
     Effect.gen(function* () {
-      if (input.files.length === 0) return new Map<string, string>();
+      if (input.files.length === 0)
+        return { unread: new Set<string>(), added: new Map<string, string>() };
       const { copy, identity } = input;
       const failure = "prkit couldn't read some of your files.";
       // The repository's own attributes file, mirrored where git looks for it in the copy.
@@ -591,26 +592,44 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
         yield* fs.makeDirectory(path.dirname(mirror), { recursive: true });
         yield* fs.copyFile(info, mirror);
       } else yield* fs.remove(mirror, { force: true });
+      const staged = input.entries.filter(
+        (entry) =>
+          (entry.mode === "100644" || entry.mode === "100755") &&
+          entry.sha !== input.tracked.get(entry.path)?.sha,
+      );
+      if (staged.length > 0)
+        yield* copyObjects(
+          input.user,
+          copy,
+          staged.map((entry) => entry.sha),
+        );
       const env = {
         GIT_INDEX_FILE: path.join(input.scratch, "add-index"),
         GIT_LITERAL_PATHSPECS: "1",
       };
-      yield* git(["read-tree", input.headTree], { target: bare(copy), env, failure });
-      if (input.staged.length > 0) {
-        yield* copyObjects(
-          input.user,
-          copy,
-          input.staged.map((entry) => entry.sha),
-        );
+      const target: GitTarget = {
+        _tag: "worktree",
+        checkout: { repo: copy, worktree: identity.path, gitDir: copy },
+      };
+      if (input.entries.length > 0)
         yield* git(["update-index", "-z", "--index-info"], {
           target: bare(copy),
           env,
-          input: input.staged
-            .map((entry) => `${entry.mode} ${entry.sha}\t${entry.path}\0`)
+          input: input.entries
+            .map((entry) => `${entry.mode} ${entry.sha} ${entry.stage}\t${entry.path}\0`)
             .join(""),
           failure,
         });
-      }
+      const unread = attributedPaths(
+        yield* git([...input.settings, "check-attr", "-z", "--stdin", ...UNREAD], {
+          target,
+          env,
+          input: input.files.map((file) => `${file}\0`).join(""),
+          failure,
+        }),
+      );
+      const readable = input.files.filter((file) => !unread.has(file));
+      if (readable.length === 0) return { unread, added: new Map<string, string>() };
       yield* git(
         [
           ...input.settings,
@@ -625,27 +644,22 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
           "--pathspec-from-file=-",
           "--pathspec-file-nul",
         ],
-        {
-          target: {
-            _tag: "worktree",
-            checkout: { repo: copy, worktree: identity.path, gitDir: copy },
-          },
-          env,
-          input: input.files.map((file) => `${file}\0`).join(""),
-          failure,
-        },
+        { target, env, input: readable.map((file) => `${file}\0`).join(""), failure },
       );
-      const added = new Map(
+      const index = new Map(
         parseIndex(
           yield* git(["ls-files", "-s", "-v", "-z"], { target: bare(copy), env, failure }),
         ).map((entry) => [entry.path, entry.sha]),
       );
-      return new Map(
-        input.files.flatMap((file) => {
-          const sha = added.get(file);
-          return sha === undefined ? [] : [[file, sha] as const];
-        }),
-      );
+      return {
+        unread,
+        added: new Map(
+          readable.flatMap((file) => {
+            const sha = index.get(file);
+            return sha === undefined ? [] : [[file, sha] as const];
+          }),
+        ),
+      };
     });
 
   /**
@@ -703,10 +717,10 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
       const ownAttributes = yield* run(["config", "--type=path", "--get", "core.attributesFile"], {
         target: user,
       });
-      const globalAttributes =
-        ownAttributes.code === 0 ? null : yield* globalSetting("core.attributesFile", "attributes");
       const attributesFile =
-        ownAttributes.code === 0 ? ownAttributes.stdout.trim() : globalAttributes;
+        ownAttributes.code === 0
+          ? ownAttributes.stdout.trim()
+          : yield* globalSetting("core.attributesFile", "attributes");
       const ownAutocrlf = yield* run(["config", "--get", "core.autocrlf"], { target: user });
       const autocrlf =
         ownAutocrlf.code === 0
@@ -817,40 +831,15 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
       const contents = changes.filter(
         (change) => change.mode === "100644" || change.mode === "100755",
       );
-      const unread =
-        contents.length === 0
-          ? new Set<string>()
-          : attributedPaths(
-              yield* git(
-                [
-                  ...(globalAttributes === null
-                    ? []
-                    : ["-c", `core.attributesFile=${globalAttributes}`]),
-                  "check-attr",
-                  "-z",
-                  "--stdin",
-                  ...UNREAD,
-                ],
-                {
-                  target: user,
-                  input: contents.map((change) => `${change.path}\0`).join(""),
-                  failure,
-                },
-              ),
-            );
       // The rest as `git add` stores them: line endings, `ident` and the like by git's own rules.
-      const added = yield* addedShas({
+      const { unread, added } = yield* asAdded({
         user,
         copy,
         scratch,
         identity,
-        headTree: input.headTree,
-        files: contents.filter((change) => !unread.has(change.path)).map((change) => change.path),
-        staged: [...indexed.values()].filter(
-          (entry) =>
-            (entry.mode === "100644" || entry.mode === "100755") &&
-            entry.sha !== tracked.get(entry.path)?.sha,
-        ),
+        entries,
+        tracked,
+        files: contents.map((change) => change.path),
         settings: [
           ...(attributesFile === null ? [] : ["-c", `core.attributesFile=${attributesFile}`]),
           ...(autocrlf === null ? [] : ["-c", `core.autocrlf=${autocrlf}`]),
