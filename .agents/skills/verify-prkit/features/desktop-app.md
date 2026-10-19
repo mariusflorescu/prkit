@@ -8,6 +8,7 @@ The installable macOS app: `prkit.app` (or `prkit Nightly.app`) from `pnpm dist:
 - `desktop-channels` names, icons and update feed for stable and nightly.
 - `desktop-packaged-run` the packaged app starts its server from `app.asar`, in the home folder, with gh, git, claude and codex found from a Dock launch.
 - `desktop-one-per-home` a second app or dev run on the same home is refused with a message, and no second server listens.
+- `desktop-title-bar` at every page zoom the View menu offers (25% to 500%), the traffic lights sit centred in the title bar, clear of the prkit mark and the page, and a zoom kept from the last launch holds from the first frame.
 
 ## How to get to it (user POV)
 
@@ -22,5 +23,6 @@ Preconditions: macOS, `pnpm install`. Each build takes about a minute and needs 
 - **No feed.** Without either repository variable the build prints one `No update feed` line and the app has no `app-update.yml`.
 - **Signing.** `--signed` with nothing set exits 1 and names all seven variables. A signed build is checked by the release workflow: `codesign --verify --deep --strict`, `spctl -a -t exec -vv` and `xcrun stapler validate` on the app, and `xcrun stapler validate` on the DMG.
 - **Packaged run.** `hdiutil attach -nobrowse -readonly -mountpoint <dir> <dmg>`, `ditto` the app out, `hdiutil detach`, then `pnpm smoke:desktop --app <path to .app>`. It runs under `.prkit/smoke-app-home`, saves `.e2e/evidence/desktop-smoke-app.png`, and adds: `runs the packaged app`, `no MODULE_NOT_FOUND within 8s`, `<tool> resolves from the rebuilt PATH` for each tool, and `the packaged server runs in the home folder`.
+- **Title bar at every zoom.** `pnpm smoke:desktop` (or `--app` for a packaged build) presses the View menu's Zoom Out and Zoom In through their whole range and prints `at every zoom the View menu offers (25, ..., 500%), the traffic lights sit centred in the title bar, clear of the brand mark and the page`. Frames don't show the traffic lights (they are native), so a check reads their position from `getWindowButtonPosition()` and the page's zoom as `devicePixelRatio` over the display's `scaleFactor`. Above 273% zoom at 900pt wide (471% at 1440pt), the Update button no longer fits and sits past the right edge.
 - **One per home.** Start `node scripts/dev-runner.ts dev` (home `.prkit/`), then the packaged executable with `PRKIT_HOME=<checkout>/.prkit` and `--user-data-dir=<checkout>/.prkit/<dir>`: it prints `[desktop] could not start: Another prkit is already running with the data folder …` and shows it in a dialog, and its only server child is gone (`ps` shows it `<defunct>` or absent). The other way round, the dev runner prints `another prkit is already using …` and exits. Stop each process by the PID you started.
 - **By hand.** Finder shows the two icons; drag-to-Applications from the DMG window; a second double-click focuses the running window.

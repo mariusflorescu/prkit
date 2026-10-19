@@ -107,8 +107,10 @@ NodeFS.rmSync(smokeHome, { recursive: true, force: true });
 
 // childEnv drops ELECTRON_RUN_AS_NODE (an agent shell may carry it) and any PRKIT_* from the caller.
 // PATH is what launchd gives an app started from the Dock, so main has to rebuild it from the
-// login shell for the server to find gh, git, claude and codex. A packaged app keeps its
-// Chromium profile in the smoke home too, away from an installed prkit's.
+// login shell for the server to find gh, git, claude and codex. The Chromium profile stays in the
+// smoke home too, away from an installed prkit's: a packaged app takes `--user-data-dir`, and a
+// dev run, which ignores it for the `prkit Dev` profile every dev run shares, gets its own macOS
+// home folder.
 const launchedAt = Date.now();
 const app = await electron.launch({
   ...(appBundle === undefined
@@ -117,7 +119,12 @@ const app = await electron.launch({
         executablePath: bundleExecutable(appBundle),
         args: [`--user-data-dir=${NodePath.join(smokeHome, "electron")}`],
       }),
-  env: { ...childEnv(process.env), PATH: "/usr/bin:/bin:/usr/sbin:/sbin", PRKIT_HOME: smokeHome },
+  env: {
+    ...childEnv(process.env),
+    PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
+    PRKIT_HOME: smokeHome,
+    ...(appBundle === undefined ? { CFFIXED_USER_HOME: NodePath.join(smokeHome, "user") } : {}),
+  },
   timeout: 30_000,
 });
 let output = "";
@@ -135,6 +142,9 @@ try {
       throw new Error(`expected the app to run from ${appBundle}, it runs from ${appPath}`);
     step(`runs the packaged app: ${NodePath.relative(appBundle, appPath)}`);
   }
+  const userData = await app.evaluate(({ app: electronApp }) => electronApp.getPath("userData"));
+  if (!userData.startsWith(smokeHome))
+    throw new Error(`the Chromium profile is ${userData}, outside the smoke home`);
 
   await window
     .getByRole("navigation")
@@ -236,6 +246,116 @@ try {
       ?.slice(1);
     if (cwd !== NodeOS.homedir()) throw new Error(`the server runs in ${cwd}, not the home folder`);
     step("the packaged server runs in the home folder");
+  }
+
+  // View > Zoom In and Zoom Out scale the page and the title bar with it, while macOS draws the
+  // traffic lights at one size. At every step the menu offers, the lights sit centred in the
+  // title bar, left of the brand mark and above the page.
+  if (process.platform === "darwin") {
+    const pixelRatio = () => window.evaluate(() => devicePixelRatio);
+    const titleBarProblems = async () => {
+      const native = await app.evaluate(({ BrowserWindow, screen }) => {
+        const target = BrowserWindow.getAllWindows()[0];
+        return target === undefined
+          ? null
+          : {
+              lights: target.getWindowButtonPosition(),
+              scale: screen.getDisplayMatching(target.getBounds()).scaleFactor,
+            };
+      });
+      const page = await window.evaluate(() => {
+        const box = (selector: string) => {
+          const rect = document.querySelector(selector)?.getBoundingClientRect();
+          return rect === undefined
+            ? null
+            : { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+        };
+        return {
+          ratio: devicePixelRatio,
+          bar: box("[data-workspace-tabbar]"),
+          brand: box('[data-workspace-tabbar] svg[aria-label="prkit"]'),
+          panel: box("[data-workspace-panel]"),
+        };
+      });
+      if (native === null || native.lights === null || !page.bar || !page.brand || !page.panel)
+        return {
+          percent: 0,
+          problems: ["the window, its traffic lights or the title bar is missing"],
+        };
+      const factor = page.ratio / native.scale;
+      const points = (value: number) => Math.round(value * factor * 10) / 10;
+      // macOS draws three 14pt buttons, 20pt apart, from the position the window reports.
+      const lights = {
+        right: native.lights.x + 54,
+        top: native.lights.y,
+        bottom: native.lights.y + 14,
+      };
+      const bar = { top: points(page.bar.top), bottom: points(page.bar.bottom) };
+      const problems = [
+        ...(lights.right + 8 > points(page.brand.left)
+          ? [
+              `the lights end at ${lights.right}pt, the brand mark starts at ${points(page.brand.left)}pt`,
+            ]
+          : []),
+        ...(lights.bottom > points(page.panel.top)
+          ? [`the lights end at ${lights.bottom}pt, the page starts at ${points(page.panel.top)}pt`]
+          : []),
+        ...(Math.abs(lights.top + lights.bottom - bar.top - bar.bottom) / 2 > 1
+          ? [
+              `the lights span ${lights.top}-${lights.bottom}pt in a title bar of ${bar.top}-${bar.bottom}pt`,
+            ]
+          : []),
+      ];
+      return { percent: Math.round(factor * 100), problems };
+    };
+    // Main places the lights once the page reports its new zoom, a moment after the page scales.
+    const settled = async () => {
+      let state = await titleBarProblems();
+      for (let tries = 0; tries < 20 && state.problems.length > 0; tries++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        state = await titleBarProblems();
+      }
+      return state;
+    };
+    /** Presses a zoom item; false when the page didn't scale within two seconds. */
+    const zoomed = async (role: "zoomin" | "zoomout" | "resetzoom") => {
+      const before = await pixelRatio();
+      const pressed = await app.evaluate(({ BrowserWindow, Menu }, wanted) => {
+        const walk = (menu: Electron.Menu | null | undefined): Array<Electron.MenuItem> =>
+          menu?.items.flatMap((item) => [item, ...walk(item.submenu)]) ?? [];
+        const item = walk(Menu.getApplicationMenu()).find(
+          (entry) => entry.role?.toLowerCase() === wanted,
+        );
+        const target = BrowserWindow.getAllWindows()[0];
+        if (item === undefined || target === undefined) return false;
+        item.click(undefined, target, target.webContents);
+        return true;
+      }, role);
+      if (!pressed) throw new Error(`the View menu has no ${role} item`);
+      for (let tries = 0; tries < 20; tries++) {
+        if ((await pixelRatio()) !== before) return true;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      return false;
+    };
+    const check = async () => {
+      const state = await settled();
+      if (state.problems.length > 0)
+        throw new Error(`at ${state.percent}% zoom: ${state.problems.join("; ")}`);
+      return state.percent;
+    };
+    // The menu's range ends at Chromium's 25% and 500%, where a press no longer scales the page.
+    const checked = [await check()];
+    for (const direction of ["zoomout", "zoomin"] as const) {
+      for (let steps = 0; steps < 40 && (await zoomed(direction)); steps++)
+        checked.push(await check());
+      if (!(await zoomed("resetzoom"))) throw new Error(`Actual Size did not undo ${direction}`);
+    }
+    if (Math.min(...checked) !== 25 || Math.max(...checked) !== 500)
+      throw new Error(`the View menu's zoom stopped short: ${checked.join(", ")}%`);
+    step(
+      `at every zoom the View menu offers (${checked.sort((a, b) => a - b).join(", ")}%), the traffic lights sit centred in the title bar, clear of the brand mark and the page`,
+    );
   }
 
   await window.screenshot({ path: screenshotPath });

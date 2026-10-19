@@ -44,7 +44,7 @@
   top: 0;
   left: calc(4px - var(--guide-gutter));
   width: calc(var(--guide-gutter) - 8px);
-  max-height: var(--rail-room, calc(100dvh - var(--workspace-topbar-height) - 76px));
+  max-height: var(--rail-room, calc(100dvh - var(--title-bar-height) - 76px));
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;

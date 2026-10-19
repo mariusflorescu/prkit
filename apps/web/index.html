@@ -25,9 +25,10 @@
     </script>
     <style>
       /* The frame and the inset panel as AppShell lays them out (index.css --frame, --panel,
-         --panel-shadow, the 52px title bar, --panel-inset and --panel-radius), so the app
+         --panel-shadow, --title-bar-height, --panel-inset and --panel-radius), so the app
          replaces only the mark. Values, not index.css's tokens: under `vite dev` index.css
-         loads from the app's script, after this paints. */
+         loads from the app's script, after this paints. The desktop preload sets --page-zoom
+         before the first paint. */
       html,
       body,
       #root {
@@ -53,7 +54,7 @@
         display: flex;
         box-sizing: border-box;
         height: 100%;
-        padding: 52px 6px 6px;
+        padding: max(52px, calc(28px / var(--page-zoom, 1))) 6px 6px;
         /* The window drags by the title bar, as it does by the app's. */
         -webkit-app-region: drag;
         /* index.css --surface-grain, which the body paints over the frame. */
@@ -73,17 +74,18 @@
       }
 
       /* TitleBarBackdrop's corner wash: its two layers and smoothstep stops, and the
-         --titlebar-* colors and strengths. */
+         --titlebar-* colors and strengths. Layers in percent of its 360 by 52 box, so a taller
+         bar stretches them as it stretches the SVG. */
       #boot-shell::before {
         content: "";
         position: absolute;
         top: 0;
         left: 0;
         width: 360px;
-        height: 52px;
+        height: max(52px, calc(28px / var(--page-zoom, 1)));
         background:
-          radial-gradient(130px 40px at 30px 4px, var(--boot-core-stops)),
-          radial-gradient(320px 58px at 36px 6px, var(--boot-wash-stops));
+          radial-gradient(36.11% 76.92% at 8.33% 7.69%, var(--boot-core-stops)),
+          radial-gradient(88.89% 111.54% at 10% 11.54%, var(--boot-wash-stops));
         mask-image: linear-gradient(to bottom, black 40%, transparent);
         --boot-core-stops:
           rgb(var(--boot-core) / calc(var(--boot-core-strength) * 1)) 0%,
