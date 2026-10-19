@@ -71,6 +71,7 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
       snapshotOf,
       transition,
       turnsOf,
+      unreadableTurns,
     } = state;
     const { advance, stopFiber } = queue;
 
@@ -189,9 +190,11 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
             reason: "ended",
             message: ENDED[reason],
           });
-        yield* repo
-          .removeFixer(fixer.id, refFromKey(fixer.pr_key))
-          .pipe(Effect.catchTag("RepoError", (error) => Effect.logWarning(error.message)));
+        yield* (yield* unreadableTurns(fixer.id)).length > 0
+          ? Effect.logWarning("Kept the fix checkout: a turn prkit can't read may still be in it")
+          : repo
+              .removeFixer(fixer.id, refFromKey(fixer.pr_key))
+              .pipe(Effect.catchTag("RepoError", (error) => Effect.logWarning(error.message)));
         yield* Effect.logInfo("Fix session ended").pipe(
           Effect.annotateLogs({ fixerId: fixer.id, reason }),
         );
@@ -221,10 +224,10 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
       // A turn whose state prkit can't read (a newer prkit's, or damaged) stays as it was:
       // guessing could lose its commit or redo a push. One that isn't JSON is quoted, so the
       // state filters on the table still read past it.
-      const [, unreadableTurns] = yield* sql`SELECT id, status FROM fixer_turns`.pipe(
+      const [, unreadableStates] = yield* sql`SELECT id, status FROM fixer_turns`.pipe(
         Effect.flatMap(decodeTurnStates),
       );
-      for (const turn of unreadableTurns) {
+      for (const turn of unreadableStates) {
         yield* sql`UPDATE fixer_turns SET status = json_quote(status)
           WHERE id = ${turn.id} AND NOT json_valid(status)`;
         yield* Effect.logWarning("Left a fix turn whose state prkit can't read as it was").pipe(
@@ -314,12 +317,14 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
         }
       }
       const live = new Set(fixers.filter((fixer) => fixer.ended === null).map((fixer) => fixer.id));
-      // A fixer whose record can't be read may still be working: its checkout stays.
+      // A fixer whose record can't be read, or with a turn whose state can't be read, may still
+      // be working: its checkout stays.
       const kept = new Set(unreadableFixers.map((fixer) => fixer.id));
       let removed = 0;
       for (const name of yield* repo.listFixers()) {
         const fixerId = FixerId.make(name);
         if (live.has(fixerId) || kept.has(name)) continue;
+        if ((yield* unreadableTurns(fixerId)).length > 0) continue;
         // The cache to prune comes from prkit's own record of the fixer, never the checkout.
         const row = known.get(fixerId);
         const ref = row === undefined ? null : refFromKey(row.pr_key);

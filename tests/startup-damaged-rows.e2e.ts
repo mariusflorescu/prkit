@@ -69,12 +69,20 @@ const ask = async ({ screen }: Page, question: string) => {
   });
 };
 
-/** Sends one comment on #6's change to the fix agent. */
-const sendFix = async ({ app, screen, browser }: Page, url: string, comment: string) => {
-  await app.open(pull(url, 6, "files"));
-  const file = screen.getByRole("region", "src/change-0.ts");
-  await expect(file.getByRole("button", "Comment on line 1")).toBeVisible({ timeout: 30_000 });
-  await file.getByRole("button", "Comment on line 1").focus();
+/** Sends one comment on a pull request's change to the fix agent. */
+const sendFix = async (
+  { app, screen, browser }: Page,
+  url: string,
+  number: number,
+  comment: string,
+) => {
+  await app.open(pull(url, number, "files"));
+  const line = screen
+    .getByRole("region", "src/change-0.ts")
+    .getByRole("button", /^Comment on line \d+$/)
+    .first();
+  await expect(line).toBeVisible({ timeout: 30_000 });
+  await line.focus();
   await browser.keyboard.press("Enter");
   await browser.keyboard.type(comment);
   await browser.keyboard.press("Meta+Enter");
@@ -89,12 +97,16 @@ const sendFix = async ({ app, screen, browser }: Page, url: string, comment: str
   await expect(send).toHaveCount(0, { timeout: 30_000 });
 };
 
-const turnsOf6 = (home: string) =>
+const turnsOf = (home: string, number: number) =>
   readRows(
     home,
-    `SELECT t.id, json_extract(t.status, '$._tag') AS state FROM fixer_turns t
-     JOIN fixers f ON f.id = t.fixer_id WHERE f.pr_key = '${keyOf(6)}' ORDER BY t.created_at, t.rowid`,
+    `SELECT t.id, f.id AS fixerId, json_extract(t.status, '$._tag') AS state FROM fixer_turns t
+     JOIN fixers f ON f.id = t.fixer_id WHERE f.pr_key = '${keyOf(number)}' ORDER BY t.created_at, t.rowid`,
   );
+const turnsOf6 = (home: string) =>
+  turnsOf(home, 6).map((turn) => ({ id: turn.id, state: turn.state }));
+/** A failure a newer prkit might write: a state this one knows, with a reason it doesn't. */
+const NEWER_FAILURE = '{"_tag":"failed","reason":"newer-reason","message":"From a newer prkit."}';
 
 const failure = (screen: Page["screen"]) => screen.getByRole("alert").filter({ hasText: TITLE });
 
@@ -111,14 +123,14 @@ test(
     const log: Array<string> = [];
     const launch = () => git.start(() => startFakeInstance(name, fake, ["--claude", claude.file]));
     try {
-      for (const number of [1, 4, 6, 9]) await fake.gitHead(number, git.head(number));
+      for (const number of [1, 2, 4, 6, 9]) await fake.gitHead(number, git.head(number));
       let run = launch();
       await emulateOsColorScheme(browser, "light");
       await switchOn(page, run.openUrl);
 
       // A local review written from a terminal, guides for #4 and #6, two answered questions
-      // on #6, a fix the agent is still writing on #6 with another queued behind it, and tabs
-      // for #3 and #9.
+      // on #6, fixes the agent is still writing on #6 (with another queued behind it) and on #2,
+      // and tabs for #3 and #9.
       const fixture = localRepoFixture(root);
       fixture.write("docs/handbook.md", handbook({ 15: "Limits are set per team." }));
       const local = cliIn(NodePath.join(run.home, "bin/prkit"), fake.home, log);
@@ -139,14 +151,18 @@ test(
       await ask(page, FIRST);
       await ask(page, SECOND);
       claude.hold();
-      await sendFix(page, run.url, "Name the change.");
+      await sendFix(page, run.url, 6, "Name the change.");
       await expect
         .poll(() => turnsOf6(run.home).map((turn) => turn.state), { timeout: 60_000 })
         .toEqual(["running"]);
-      await sendFix(page, run.url, "Say why it starts here.");
+      await sendFix(page, run.url, 6, "Say why it starts here.");
       await expect
         .poll(() => turnsOf6(run.home).map((turn) => turn.state), { timeout: 30_000 })
         .toEqual(["running", "queued"]);
+      await sendFix(page, run.url, 2, "Name the second change.");
+      await expect
+        .poll(() => turnsOf(run.home, 2).map((turn) => turn.state), { timeout: 60_000 })
+        .toEqual(["running"]);
       await app.open(pull(run.url, 9, "conversation"));
       await expect(screen.getByRole("link", /#9 Keyboard fixture 9/).first()).toBeVisible({
         timeout: 30_000,
@@ -156,7 +172,7 @@ test(
         timeout: 30_000,
       });
       const tabsBefore = readRows(run.home, "SELECT key FROM open_pull_requests ORDER BY key");
-      expect(tabsBefore).toEqual([{ key: keyOf(3) }, { key: keyOf(6) }, { key: keyOf(9) }]);
+      expect(tabsBefore).toEqual([2, 3, 6, 9].map((number) => ({ key: keyOf(number) })));
 
       // While prkit is closed, one row of each kind is damaged. The held agent then finishes on
       // its own, with no prkit to report to.
@@ -165,6 +181,10 @@ test(
       const [running, queued] = turnsOf6(run.home);
       const turnId = String(running?.id);
       const queuedId = String(queued?.id);
+      const [merged] = turnsOf(run.home, 2);
+      const mergedTurn = String(merged?.id);
+      const checkout = NodePath.join(run.home, "fixes", String(merged?.fixerId));
+      expect(NodeFS.existsSync(checkout)).toBe(true);
       const [first] = readRows(
         run.home,
         `SELECT q.id FROM ask_questions q WHERE q.text = '${FIRST}'`,
@@ -177,7 +197,9 @@ test(
         keyOf(6),
       );
       damage(run.home, "UPDATE reviews SET status = 'garbage' WHERE pr_key = ?", localKey);
-      damage(run.home, "UPDATE fixer_turns SET status = 'garbage' WHERE id = ?", turnId);
+      damage(run.home, "UPDATE fixer_turns SET status = ? WHERE id = ?", NEWER_FAILURE, turnId);
+      damage(run.home, "UPDATE fixer_turns SET status = 'garbage' WHERE id = ?", mergedTurn);
+      await fake.merge(2);
       damage(
         run.home,
         "UPDATE ask_questions SET scope = 'not json' WHERE id = ?",
@@ -226,9 +248,18 @@ test(
         { timeout: 30_000 },
       );
       expect(turnsOf6(run.home)).toEqual([
-        { id: turnId, state: null },
+        { id: turnId, state: "failed" },
         { id: queuedId, state: "queued" },
       ]);
+
+      // #2 merged while prkit was closed: its session ends, but the checkout its unreadable
+      // fix may still be writing in stays.
+      await expect
+        .poll(() => readRows(run.home, `SELECT ended FROM fixers WHERE pr_key = '${keyOf(2)}'`), {
+          timeout: 60_000,
+        })
+        .toEqual([{ ended: "merged" }]);
+      expect(NodeFS.existsSync(checkout)).toBe(true);
 
       // The damaged tab steps aside; the others are still open.
       const tabs = screen.getByRole("navigation", "Workspace tabs");
@@ -261,8 +292,11 @@ test(
       expect(String(reviewOf(run.home, keyOf(6))?.status)).toContain('"damaged"');
       expect(attemptsOf(run.home, keyOf(6))).toBe(attemptsOf6);
       expect(readRows(run.home, `SELECT status FROM fixer_turns WHERE id = '${turnId}'`)).toEqual([
-        { status: '"garbage"' },
+        { status: NEWER_FAILURE },
       ]);
+      expect(
+        readRows(run.home, `SELECT status FROM fixer_turns WHERE id = '${mergedTurn}'`),
+      ).toEqual([{ status: '"garbage"' }]);
       expect(turnsOf6(run.home)[1]).toEqual({ id: queuedId, state: "queued" });
       expect(
         readRows(run.home, `SELECT scope FROM ask_questions WHERE id = '${String(first?.id)}'`),
@@ -287,6 +321,7 @@ test(
       expect(attemptsOf(run.home, keyOf(6))).toBe(attemptsOf6);
 
       expect(turnsOf6(run.home)[1]).toEqual({ id: queuedId, state: "queued" });
+      expect(NodeFS.existsSync(checkout)).toBe(true);
 
       // Opening #3 again replaces its damaged tab.
       await app.open(pull(run.url, 3, "conversation"));

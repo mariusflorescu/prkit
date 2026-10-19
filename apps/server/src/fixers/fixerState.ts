@@ -27,6 +27,7 @@ import * as ServerConfig from "../config.ts";
 import {
   decodeActivity,
   decodeFixers,
+  decodeTurnStates,
   decodeTurns,
   encodeStatus,
   type FixerRow,
@@ -274,6 +275,13 @@ export const makeFixerState = Effect.gen(function* () {
       )).map(toActivity);
     });
 
+  /** Unfinished turns whose state prkit can't read: their agent may still be in the checkout. */
+  const unreadableTurns = (fixerId: FixerId) =>
+    sql`SELECT id, status FROM fixer_turns WHERE fixer_id = ${fixerId} AND finished_at IS NULL`.pipe(
+      Effect.flatMap(decodeTurnStates),
+      Effect.map(([, unreadable]) => unreadable),
+    );
+
   /** Every active fixer, with its PR's account, for the watcher. */
   const watched = sql`SELECT * FROM fixers WHERE ended IS NULL`.pipe(
     Effect.flatMap(readableFixers),
@@ -303,6 +311,7 @@ export const makeFixerState = Effect.gen(function* () {
     dbFailures,
     commandTurn,
     turnActivity,
+    unreadableTurns,
     watched,
   };
 });

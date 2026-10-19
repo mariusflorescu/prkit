@@ -52,7 +52,7 @@ Every child process (agents, `gh`, `git`) gets an environment built from an allo
 - `repos/<host>/<owner>/<repo>.git` - one bare, blobless repository cache per repo.
 - `local/<16 hex>.git` - one bare copy per local review, named after its key, holding only the objects prkit copied or hashed for that review's snapshots. Kept until the review is removed; startup removes a copy whose review is gone.
 - `worktrees/<reviewId>` - one detached checkout per pull request review that is not done, and per local review while one of its attempts runs.
-- `fixes/<fixerId>` - one checkout per fix session that has not ended, apart from the review worktrees (see The fix agent).
+- `fixes/<fixerId>` - one checkout per fix session that has not ended, or that ended while a turn prkit can't read was unfinished, apart from the review worktrees (see The fix agent).
 - `fix-context/<turnId>/` - what a running fix turn reads besides its checkout (the latest guide's overview for a conflict). Removed when the turn ends, with the turn's temp folder, which lives outside `PRKIT_HOME` in `/Users/Shared/prkit-<id>` (see Agents).
 - `diffs/<attemptId>/` - what one running attempt hands its agent to read: the numbered diff, the PR's context file (checks, review threads and linked issues), and on an update the diff since the last revision and that revision's guide. Removed when the attempt ends; startup removes any left by a crash.
 - `asks/checkouts/<reviewId>-r<n>` and `asks/context/<reviewId>-r<n>/` - a read-only checkout of a guide revision's head, and what a question about it reads besides (the numbered diff and the guide). Made for each question and removed when its answer ends; startup removes what a killed server left (see Asking about a guide).
