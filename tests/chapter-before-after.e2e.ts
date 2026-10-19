@@ -6,11 +6,14 @@ import { expect } from "e2e";
 import * as Schema from "effect/Schema";
 
 import { NormalizedGuide } from "../packages/contracts/src/guide.ts";
+import { pseudocodeRows } from "../packages/contracts/src/guidePseudocode.ts";
 import { repoRoot } from "../scripts/verify-run.ts";
 import { cliFixture } from "./cliFixture.ts";
+import { setUpFakeClaude } from "./fakeClaude.ts";
 import { startFakeGitHub, startFakeInstance, stopFakeInstance } from "./fakeGitHub.ts";
 import { AGENT_RUNS, AGENT_SKIP, readRows } from "./fixturePr.ts";
 import { emulateOsColorScheme, screenshotLightAndDark } from "./osColorScheme.ts";
+import { outsideGit } from "./outsideGit.ts";
 import { setUpRealClaude } from "./realClaude.ts";
 
 const PR = 9;
@@ -102,6 +105,80 @@ const FILES = {
 
 const guideUrl = (url: string) =>
   `${url}/pr/github.com/budget/fixtures/${PR}?account=${encodeURIComponent("github.com/budget-test")}&tab=guide`;
+
+const LIMITS_PAIR = {
+  before: "limits\n  url: up to 1024 characters\n  title: up to 120",
+  after: "limits\n  url: up to 2048 characters\n  slug: up to 64\n  title: up to 120",
+};
+const LIMITS_BODY = [
+  "`limits.url` doubles to 2048, and slugs get a limit of their own.",
+  "Titles keep the limit they had.",
+];
+
+test(
+  "a pair and a body that arrive as JSON strings read as a pair and as paragraphs",
+  { timeout: 300_000 },
+  async ({ app, screen, browser }) => {
+    const name = "chapter-before-after-encoded";
+    const fake = await startFakeGitHub(name);
+    const claude = setUpFakeClaude(name);
+    const git = outsideGit(name);
+    try {
+      await fake.gitHead(PR, git.head(PR));
+      claude.chapters([
+        {
+          title: "Links and slugs get their limits",
+          kind: "core",
+          files: ["src/limits.ts"],
+          body: JSON.stringify(LIMITS_BODY),
+          pseudocode: JSON.stringify(LIMITS_PAIR),
+        },
+      ]);
+      const run = git.start(() => startFakeInstance(name, fake, ["--claude", claude.file]));
+      await emulateOsColorScheme(browser, "light");
+      await browser.setViewport({ width: 1280, height: 860 });
+      await app.open(run.openUrl);
+      await app.open(guideUrl(run.url));
+      await screen.getByRole("button", "Generate guide").tap({ timeout: 30_000 });
+      await expect(screen.getByRole("combobox", "Guide revision")).toContainText("r1 · ", {
+        timeout: 90_000,
+      });
+
+      const [stored] = readRows(
+        run.home,
+        `SELECT rr.guide FROM review_revisions rr JOIN reviews r ON r.id = rr.review_id WHERE r.pr_key = '${KEY}' AND rr.revision = 1`,
+      );
+      if (typeof stored?.guide !== "string") throw new Error("Revision 1 stored no guide.");
+      const chapter = decodeGuide(stored.guide).chapters.find(
+        (candidate) => candidate.title === "Links and slugs get their limits",
+      );
+      const within = (selector: string) =>
+        browser.locator(`[data-chapter-id="${chapter?.id ?? ""}"] ${selector}`);
+      await within("[data-chapter-narration]").scrollIntoView();
+      await screenshotLightAndDark(app, browser, "chapter-before-after-encoded");
+      expect({ body: chapter?.body, pseudocode: chapter?.pseudocode }).toEqual({
+        body: LIMITS_BODY,
+        pseudocode: LIMITS_PAIR,
+      });
+
+      await expect(within("[data-pseudocode-pair]")).toHaveCount(1);
+      await expect(within("[data-guide-pseudocode]")).toHaveCount(0);
+      const rows = pseudocodeRows(LIMITS_PAIR);
+      await expect(
+        within('[data-pseudocode-side="before"] [data-pseudocode-line][data-status="removed"]'),
+      ).toHaveCount(rows.filter((row) => row.before?.status === "removed").length);
+      await expect(
+        within('[data-pseudocode-side="after"] [data-pseudocode-line][data-status="added"]'),
+      ).toHaveCount(rows.filter((row) => row.after?.status === "added").length);
+      await expect(within("[data-chapter-narration] p")).toHaveCount(LIMITS_BODY.length);
+      await expect(within("[data-chapter-narration]")).not.toContainText('["');
+      await expect(within("[data-chapter-narration]")).not.toContainText('{"before"');
+    } finally {
+      stopFakeInstance(name, { keepHome: false });
+      fake.stop();
+    }
+  },
+);
 
 describe(
   "a real Claude guide writes a chapter before/after only where logic changed shape",

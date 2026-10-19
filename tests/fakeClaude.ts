@@ -33,6 +33,9 @@ export type FakeChapter = {
   files: ReadonlyArray<string>;
   /** The chapter's level; the stand-in rates the others alike. */
   risk?: "low" | "medium" | "high";
+  /** Sent as given, so a journey can send them JSON-encoded the way some agents' tool calls do. */
+  body?: string | ReadonlyArray<string>;
+  pseudocode?: string | { readonly before: string; readonly after: string };
 };
 
 const Prompt = Schema.fromJsonString(

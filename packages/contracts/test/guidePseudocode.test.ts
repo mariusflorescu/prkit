@@ -65,6 +65,31 @@ describe("a chapter's pseudocode", () => {
     expect(result.normalized?.chapters[0]?.pseudocode).toBe(text);
   });
 
+  it("reads a pair and paragraphs sent JSON-encoded as what they encode, and leaves look-alikes alone", () => {
+    const encoded = check({
+      ...guideWith({
+        pseudocode: JSON.stringify(pair),
+        body: JSON.stringify(["`verifyToken` checks the clock.", "An old link gets a 410."]),
+      }),
+      summary: JSON.stringify(["Reset links expire.", "After an hour."]),
+      background: "[]",
+    });
+    expect(encoded.errors).toEqual([]);
+    expect(encoded.normalized?.summary).toEqual(["Reset links expire.", "After an hour."]);
+    expect(encoded.normalized?.background).toEqual([]);
+    expect(encoded.normalized?.chapters[0]?.pseudocode).toEqual(pair);
+    expect(encoded.normalized?.chapters[0]?.body).toEqual([
+      "`verifyToken` checks the clock.",
+      "An old link gets a 410.",
+    ]);
+
+    const link = "[verifyToken](https://example.com) turns an expired token away.";
+    const lookalike = check(guideWith({ pseudocode: '{"before": 1}', body: link }));
+    expect(lookalike.errors).toEqual([]);
+    expect(lookalike.normalized?.chapters[0]?.pseudocode).toBe('{"before": 1}');
+    expect(lookalike.normalized?.chapters[0]?.body).toEqual([link]);
+  });
+
   it("accepts a pair with no shared line, and warns that every line will show as changed", () => {
     const result = check(
       guideWith({ pseudocode: { before: "look up the row", after: "check the clock" } }),

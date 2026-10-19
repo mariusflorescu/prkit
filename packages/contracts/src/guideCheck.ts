@@ -1,3 +1,6 @@
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+
 import type { DiffLineRef } from "./guide.ts";
 import type { DiffSnapshot } from "./diffSnapshot.ts";
 import type { RiskSignal, SkippedFile } from "./guideConfig.ts";
@@ -36,8 +39,16 @@ export const slugify = (text: string) =>
     .replace(/^-+|-+$/g, "") || "chapter";
 export const chapterKey = (chapter: { readonly id?: string; readonly title: string }) =>
   slugify(chapter.id || chapter.title);
+// Some agents' tool calls send a list of paragraphs JSON-encoded, which the schema reads as one string.
+const decodeEncodedList = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Array(Schema.String)),
+);
 export const asList = (value: string | ReadonlyArray<string> | undefined): ReadonlyArray<string> =>
-  value === undefined ? [] : typeof value === "string" ? [value] : value;
+  value === undefined
+    ? []
+    : typeof value === "string"
+      ? Option.getOrElse(decodeEncodedList(value), () => [value])
+      : value;
 const whitespace =
   "\\t-\\r\\x1c-\\x20\\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000";
 const trimWhitespace = new RegExp(`^[${whitespace}]+|[${whitespace}]+$`, "gu");
