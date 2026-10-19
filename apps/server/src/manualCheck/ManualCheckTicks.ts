@@ -74,6 +74,10 @@ export const make = Effect.gen(function* () {
   const ticks = (subject: ReviewSubject) =>
     readTicks(subject).pipe(storage(subject, "prkit couldn't read your ticks. Try again."));
 
+  /** Tells every window to read this subject's ticks again; call it after the write is saved. */
+  const announceChanged = (subject: ReviewSubject) =>
+    PubSub.publish(announced, { _tag: "changed", subject });
+
   /**
    * Records what the reader decided about these step versions. A decision a version already
    * holds changes nothing, its order included, so repeating one is safe.
@@ -106,7 +110,7 @@ export const make = Effect.gen(function* () {
             return changed;
           }),
         );
-        if (changed) yield* PubSub.publish(announced, { _tag: "changed", subject });
+        if (changed) yield* announceChanged(subject);
         return yield* readTicks(subject);
       }).pipe(storage(subject, "prkit couldn't save your tick. Try again.")),
     );
@@ -167,7 +171,7 @@ export const make = Effect.gen(function* () {
       return { revision, ticked: tickedNumbers(guide.normalized, after) };
     });
 
-  return { ticks, decide, changes, ticked, tickSteps };
+  return { ticks, decide, announceChanged, changes, ticked, tickSteps };
 });
 
 export const layer = Layer.effect(ManualCheckTicks, make);

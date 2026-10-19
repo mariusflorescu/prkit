@@ -33,6 +33,7 @@ import * as GuideSettingsStore from "./reviews/GuideSettingsStore.ts";
 import * as Reviews from "./reviews/Reviews.ts";
 import * as ReviewComments from "./reviewComments/ReviewComments.ts";
 import * as ManualCheckTicks from "./manualCheck/ManualCheckTicks.ts";
+import * as ReadingState from "./readingState/ReadingState.ts";
 import * as ReviewedFiles from "./reviewedFiles/ReviewedFiles.ts";
 import * as Fixers from "./fixers/Fixers.ts";
 import * as FixerSettingsStore from "./fixers/FixerSettingsStore.ts";
@@ -109,8 +110,12 @@ const layerGitHub = GitHubApi.layer.pipe(
 );
 const layerPullRequests = PullRequests.layer.pipe(Layer.provideMerge(layerGitHub));
 // Reviews: the lifecycle, its git cache, agents, and the per-attempt MCP tokens. The
-// watcher builds after Reviews, so it starts once startup reconciliation is done.
+// watcher builds after Reviews, so it starts once startup reconciliation is done. It also
+// settles what the reader marked, so the services that store those marks build below it and
+// the transports share its instances.
 const layerReviews = Layer.mergeAll(ReviewWatcher.layer, AutoGuides.layer).pipe(
+  Layer.provideMerge(ReadingState.layer),
+  Layer.provideMerge(Layer.mergeAll(ReviewedFiles.layer, ManualCheckTicks.layer)),
   Layer.provideMerge(Reviews.layer),
   Layer.provideMerge(
     Layer.mergeAll(
@@ -145,15 +150,7 @@ const layerServer = layerReadyLine.pipe(
   Layer.provideMerge(OutsideWork.layer),
   Layer.provideMerge(CliInstall.layer),
   Layer.provideMerge(OutsideAgents.layer),
-  Layer.provideMerge(
-    Layer.mergeAll(
-      ReviewComments.layer,
-      ReviewedFiles.layer,
-      ManualCheckTicks.layer,
-      AppearanceStore.layer,
-      Asks.layer,
-    ),
-  ),
+  Layer.provideMerge(Layer.mergeAll(ReviewComments.layer, AppearanceStore.layer, Asks.layer)),
   Layer.provideMerge(layerFixers),
   Layer.provide(SqlitePersistence.layer),
   Layer.provideMerge(layerHttpServer),
