@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import { nodesOf } from "../github/connection.ts";
 import {
   GitHubApi,
   GitHubRequestError,
@@ -22,8 +23,8 @@ const fields = {
   actor: Schema.NullOr(Actor),
 };
 /**
- * A reviewer or assignee. GitHub answers with a union (user, bot, mannequin, team,
- * organization); its fields are optional here so a member GitHub adds later reads as
+ * A reviewer or assignee. GitHub answers with a union (user, bot, mannequin, team, enterprise
+ * team, organization); its fields are optional here so a member GitHub adds later reads as
  * nobody instead of failing the whole timeline.
  */
 const Someone = Schema.Struct({
@@ -114,7 +115,7 @@ const Response = Schema.Struct({
         Schema.Struct({
           timelineItems: Schema.Struct({
             /** Decoded one at a time, so one item prkit can't read doesn't hide the rest. */
-            nodes: Schema.Array(Schema.Json),
+            nodes: nodesOf(Schema.Json),
             pageInfo: Schema.Struct({
               hasNextPage: Schema.Boolean,
               endCursor: Schema.NullOr(Schema.String),
@@ -327,7 +328,6 @@ export const makeTimelineRead = Effect.gen(function* () {
             message: "This pull request is no longer accessible.",
           });
         for (const node of page.nodes) {
-          if (node === null) continue;
           const decoded = decodeNode(node);
           if (Option.isSome(decoded)) events.push(toEvent(decoded.value, prUrl));
           else

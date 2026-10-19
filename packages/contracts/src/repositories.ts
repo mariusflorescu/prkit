@@ -2,7 +2,7 @@ import * as Schema from "effect/Schema";
 
 import { Freshness, GitHubProblem } from "./github.ts";
 import { AccountId } from "./ids.ts";
-import { PullRequestSummary } from "./inbox.ts";
+import { InboxLeftOut, PullRequestSummary } from "./inbox.ts";
 
 /** A repository by its name on one host, and every account that can see it. */
 export const Repository = Schema.Struct({
@@ -41,6 +41,8 @@ export type RepositoryListRead = typeof RepositoryListRead.Type;
 /** A repository's open pull requests, newest first, read through one account. */
 export const RepositoryPullRequests = Schema.Struct({
   entries: Schema.Array(PullRequestSummary),
+  /** Pull requests GitHub listed that prkit couldn't read, or that GitHub refused. */
+  leftOut: Schema.Array(InboxLeftOut),
   /** How many are open; more than `entries` when there are more than prkit reads. */
   total: Schema.Int,
   freshness: Freshness,

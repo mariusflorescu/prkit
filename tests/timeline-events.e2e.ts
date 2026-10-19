@@ -93,7 +93,7 @@ test("Conversation shows label, reviewer, title, assignee, base and reference ev
       "budget-test marked this pull request as draft",
       "budget-test marked this pull request as ready for review",
       "budget-test force-pushed the branch from c0ffee1 to decafba",
-      "ghost added stale label",
+      "deleted user added stale label",
     ]);
     const commits = browser.locator(
       'section[aria-label="Activity"] li[data-timeline-kind="commit"]',

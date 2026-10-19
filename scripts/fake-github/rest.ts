@@ -12,6 +12,7 @@ import {
   headRef,
   iso,
   LOGIN,
+  oddShapes,
   OWNER,
   type Pull,
   position,
@@ -47,6 +48,17 @@ const LIMITS_FILE = {
   ].join("\n"),
 };
 const REPOSITORY = { id: 4242, name: REPO, full_name: `${OWNER}/${REPO}`, owner: { login: OWNER } };
+/** GitHub's REST user for an odd author: its ghost user for a deleted one, `<login>[bot]` for a bot. */
+const restUser = (pull: Pull) => {
+  const author = oddShapes.get(pull.number)?.author;
+  if (author === undefined) return { login: pull.author, avatar_url: "", type: "User" };
+  if (author.type === "deleted") return { login: "ghost", avatar_url: "", type: "User" };
+  return {
+    login: author.type === "Bot" ? `${author.login}[bot]` : author.login,
+    avatar_url: "",
+    type: author.type === "Bot" ? "Bot" : "User",
+  };
+};
 const restPull = (pull: Pull) => ({
   title: pull.title,
   body: pull.body ?? `Body of fixture ${pull.number}`,
@@ -55,14 +67,30 @@ const restPull = (pull: Pull) => ({
   merged: pull.state === "MERGED",
   merged_at: pull.mergedAt === null ? null : iso(pull.mergedAt),
   mergeable: pull.checking ? null : !pull.conflicting,
-  user: { login: pull.author, avatar_url: "" },
+  user: restUser(pull),
   author_association: pull.association,
-  head: { ref: headRef(pull), sha: head(pull), repo: { full_name: pull.headRepo } },
+  head: {
+    ref: headRef(pull),
+    sha: head(pull),
+    repo: oddShapes.get(pull.number)?.deletedFork === true ? null : { full_name: pull.headRepo },
+  },
   base: { ref: "main", sha: BASE, repo: REPOSITORY },
-  requested_reviewers: [],
-  requested_teams: [],
-  labels:
-    pull.number === 8
+  // Only odd pull requests list who is asked, so the older journeys' headers stay as they were.
+  requested_reviewers: oddShapes.has(pull.number)
+    ? pull.requested.flatMap((reviewer) =>
+        reviewer.kind === "user" ? [{ login: reviewer.login, avatar_url: "" }] : [],
+      )
+    : [],
+  requested_teams: oddShapes.has(pull.number)
+    ? pull.requested.flatMap((reviewer) =>
+        reviewer.kind === "team"
+          ? [{ slug: reviewer.slug.split("/").pop() ?? reviewer.slug, name: reviewer.slug }]
+          : [],
+      )
+    : [],
+  labels: oddShapes.has(pull.number)
+    ? (oddShapes.get(pull.number)?.labels ?? [])
+    : pull.number === 8
       ? [
           { name: "bug", color: "d73a4a" },
           { name: "docs", color: "0075ca" },

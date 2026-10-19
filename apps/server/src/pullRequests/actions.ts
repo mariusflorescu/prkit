@@ -15,7 +15,8 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 
-import { GitHubApi, GitHubRequestError } from "../github/GitHubApi.ts";
+import { nodesOf } from "../github/connection.ts";
+import { GitHubApi, GitHubRequestError, unreachable } from "../github/GitHubApi.ts";
 import { makeKeyedGate } from "../github/keyedGate.ts";
 import { repositoryIdentity } from "./actionReads.ts";
 
@@ -30,12 +31,12 @@ const SIMPLE = {
 } as const;
 const WorkflowRun = Schema.Struct({
   id: Schema.Int,
-  status: Schema.String,
+  status: Schema.NullOr(Schema.String),
   conclusion: Schema.NullOr(Schema.String),
   head_sha: Schema.String,
-  head_branch: Schema.String,
+  head_branch: Schema.NullOr(Schema.String),
   head_repository: Schema.NullOr(Schema.Struct({ full_name: Schema.String })),
-  pull_requests: Schema.Array(Schema.Struct({ number: Schema.Int })),
+  pull_requests: Schema.NullOr(Schema.Array(Schema.Struct({ number: Schema.Int }))),
 });
 const RawReviewer = Schema.Struct({
   login: Schema.String,
@@ -47,9 +48,11 @@ const PageInfo = Schema.Struct({
   endCursor: Schema.NullOr(Schema.String),
 });
 const UserPage = Schema.Struct({
-  repository: Schema.Struct({
-    assignableUsers: Schema.Struct({ nodes: Schema.Array(RawReviewer), pageInfo: PageInfo }),
-  }),
+  repository: Schema.NullOr(
+    Schema.Struct({
+      assignableUsers: Schema.Struct({ nodes: nodesOf(RawReviewer), pageInfo: PageInfo }),
+    }),
+  ),
 });
 const Label = PullRequestCandidates.fields.labels.value;
 
@@ -298,13 +301,23 @@ export const makeActions = (reads: {
                 accountId,
                 `mutation($id: ID!) { revertPullRequest(input: { pullRequestId: $id }) { revertPullRequest { url } } }`,
                 Schema.Struct({
-                  revertPullRequest: Schema.Struct({
-                    revertPullRequest: Schema.Struct({ url: Schema.String }),
-                  }),
+                  revertPullRequest: Schema.NullOr(
+                    Schema.Struct({
+                      revertPullRequest: Schema.NullOr(Schema.Struct({ url: Schema.String })),
+                    }),
+                  ),
                 }),
                 { id: nodeId },
               );
-              url = reverted.revertPullRequest.revertPullRequest.url;
+              const revert = reverted.revertPullRequest?.revertPullRequest;
+              if (revert == null)
+                return yield* fail(
+                  key,
+                  accountId,
+                  "conflict",
+                  "GitHub didn't say which pull request reverts this one. Check on GitHub before reverting again.",
+                );
+              url = revert.url;
               break;
             }
             case "edit":
@@ -355,31 +368,44 @@ export const makeActions = (reads: {
                 accountId,
                 `query PrkitBranchPullRequests($owner: String!, $name: String!, $branch: String!) { repository(owner: $owner, name: $name) { pullRequests(headRefName: $branch, states: OPEN, first: 100) { nodes { number headRefOid headRepository { nameWithOwner } } pageInfo { hasNextPage } } } }`,
                 Schema.Struct({
-                  repository: Schema.Struct({
-                    pullRequests: Schema.Struct({
-                      nodes: Schema.Array(
-                        Schema.Struct({
-                          number: Schema.Int,
-                          headRefOid: Schema.String,
-                          headRepository: Schema.NullOr(
-                            Schema.Struct({ nameWithOwner: Schema.String }),
+                  repository: Schema.NullOr(
+                    Schema.Struct({
+                      pullRequests: Schema.Struct({
+                        nodes: Schema.NullOr(
+                          Schema.Array(
+                            Schema.NullOr(
+                              Schema.Struct({
+                                number: Schema.Int,
+                                headRefOid: Schema.String,
+                                headRepository: Schema.NullOr(
+                                  Schema.Struct({ nameWithOwner: Schema.String }),
+                                ),
+                              }),
+                            ),
                           ),
-                        }),
-                      ),
-                      pageInfo: Schema.Struct({ hasNextPage: Schema.Boolean }),
+                        ),
+                        pageInfo: Schema.Struct({ hasNextPage: Schema.Boolean }),
+                      }),
                     }),
-                  }),
+                  ),
                 }),
                 { owner: ref.owner, name: ref.repo, branch: pull.head.ref },
               );
+              if (matchingHeads.repository === null)
+                return yield* unreachable(accountId, `${ref.owner}/${ref.repo}`);
               const heads = matchingHeads.repository.pullRequests;
-              const exact = heads.nodes.filter(
-                (head) =>
-                  head.headRefOid === command.expectedHeadSha &&
-                  head.headRepository?.nameWithOwner.toLowerCase() === headRepo.toLowerCase(),
+              // A pull request GitHub didn't resolve could own the head too, so it proves nothing.
+              const nodes = heads.nodes ?? [null];
+              const exact = nodes.flatMap((head) =>
+                head !== null &&
+                head.headRefOid === command.expectedHeadSha &&
+                head.headRepository?.nameWithOwner.toLowerCase() === headRepo.toLowerCase()
+                  ? [head]
+                  : [],
               );
               if (
                 heads.pageInfo.hasNextPage ||
+                nodes.includes(null) ||
                 exact.length !== 1 ||
                 exact[0]?.number !== ref.number
               )
@@ -403,7 +429,8 @@ export const makeActions = (reads: {
                       run.head_sha === command.expectedHeadSha &&
                       run.head_branch === pull.head.ref &&
                       run.head_repository?.full_name === headRepo &&
-                      (run.pull_requests.length === 0 ||
+                      (run.pull_requests === null ||
+                        run.pull_requests.length === 0 ||
                         run.pull_requests.some((pr) => pr.number === ref.number)),
                   ),
                 );
@@ -501,9 +528,12 @@ export const makeActions = (reads: {
             UserPage,
             { owner: ref.owner, name: ref.repo, cursor },
           );
-          reviewers.push(...page.repository.assignableUsers.nodes);
-          if (!page.repository.assignableUsers.pageInfo.hasNextPage) break;
-          cursor = page.repository.assignableUsers.pageInfo.endCursor;
+          if (page.repository === null)
+            return yield* unreachable(accountId, `${ref.owner}/${ref.repo}`);
+          const users = page.repository.assignableUsers;
+          reviewers.push(...users.nodes);
+          if (!users.pageInfo.hasNextPage) break;
+          cursor = users.pageInfo.endCursor;
           if (pageNumber === 30 || cursor === null || cursors.has(cursor))
             return yield* incomplete();
           cursors.add(cursor);

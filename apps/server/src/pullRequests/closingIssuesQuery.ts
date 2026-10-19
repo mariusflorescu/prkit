@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 
+import { nodesOf } from "../github/connection.ts";
 import type { GraphQLError } from "../github/GitHubApi.ts";
 
 /** An issue a pull request says it closes, by a keyword in its description or a link made on GitHub. */
@@ -39,10 +40,10 @@ export const ClosingIssuesResponse = Schema.Struct({
     Schema.Struct({
       pullRequest: Schema.NullOr(
         Schema.Struct({
-          closingIssuesReferences: Schema.Struct({
-            totalCount: Schema.Int,
-            nodes: Schema.Array(
-              Schema.NullOr(
+          closingIssuesReferences: Schema.NullOr(
+            Schema.Struct({
+              totalCount: Schema.Int,
+              nodes: nodesOf(
                 Schema.Struct({
                   number: Schema.Int,
                   title: Schema.String,
@@ -52,8 +53,8 @@ export const ClosingIssuesResponse = Schema.Struct({
                   repository: Schema.Struct({ nameWithOwner: Schema.String }),
                 }),
               ),
-            ),
-          }),
+            }),
+          ),
         }),
       ),
     }),
@@ -72,23 +73,19 @@ export const withheld = (error: GraphQLError) =>
 export const closingIssuesOf = (
   response: typeof ClosingIssuesResponse.Type,
 ): ClosingIssues | null => {
-  const references = response.repository?.pullRequest?.closingIssuesReferences;
-  if (references == null) return null;
+  const pullRequest = response.repository?.pullRequest;
+  if (pullRequest == null) return null;
+  const references = pullRequest.closingIssuesReferences;
+  if (references === null) return { total: 0, items: [] };
   return {
     total: references.totalCount,
-    items: references.nodes.flatMap((node) =>
-      node === null
-        ? []
-        : [
-            {
-              repository: node.repository.nameWithOwner,
-              number: node.number,
-              title: node.title,
-              url: node.url,
-              state: node.state === "OPEN" ? ("open" as const) : ("closed" as const),
-              body: node.body,
-            },
-          ],
-    ),
+    items: references.nodes.map((node) => ({
+      repository: node.repository.nameWithOwner,
+      number: node.number,
+      title: node.title,
+      url: node.url,
+      state: node.state === "OPEN" ? ("open" as const) : ("closed" as const),
+      body: node.body,
+    })),
   };
 };

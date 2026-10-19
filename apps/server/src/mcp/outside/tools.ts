@@ -93,7 +93,7 @@ const PrkitStatus = read(
 const ListInbox = read(
   Tool.make("list_inbox", {
     description:
-      "The pull requests that need the owner, per GitHub account, in sections: review requested, authored, involved. Each has its url, state, checks, review decision, stack position, guide state, size (bucket, changed lines, files and a reading time in minutes) and, for a review request, how long it has waited on the owner. sort orders each section, updated when omitted. Answers from prkit's cache and says when each account was read; refresh reads GitHub now and spends budget.",
+      "The pull requests that need the owner, per GitHub account, in sections: review requested, authored, involved. Each has its url, state, checks, review decision, stack position, guide state, size (bucket, changed lines, files and a reading time in minutes) and, for a review request, how long it has waited on the owner. sort orders each section, updated when omitted. Answers from prkit's cache and says when each account was read; refresh reads GitHub now and spends budget. githubLeftOut names PRs GitHub found that prkit couldn't read or GitHub refused, by url when known; they are missing from the sections, so say so.",
     parameters: InboxInput,
     success: limited(InboxListResult),
     failure: OutsideToolFailure,
@@ -186,7 +186,7 @@ const ListRepositories = read(
 const ListRepositoryPullRequests = read(
   Tool.make("list_repository_pull_requests", {
     description:
-      "One repository’s open PRs through the named account. Separate from the open app tabs. refresh reads GitHub again.",
+      "One repository’s open PRs through the named account. Separate from the open app tabs. refresh reads GitHub again. githubLeftOut names PRs prkit couldn't read or GitHub refused, by url when known.",
     parameters: Parity.RepositoryInput,
     success: limited(Parity.RepositoryPullRequestsResult),
     failure: OutsideToolFailure,

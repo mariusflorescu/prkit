@@ -48,14 +48,16 @@ const Pull = Schema.Struct({
   title: Schema.String,
   body: Schema.NullOr(Schema.String),
   state: Schema.Literals(["open", "closed"]),
-  draft: Schema.Boolean,
+  draft: Schema.optionalKey(Schema.Boolean),
   merged: Schema.Boolean,
   mergeable: Schema.NullOr(Schema.Boolean),
   user: Schema.NullOr(User),
   head: Branch,
   base: Branch,
-  requested_reviewers: Schema.Array(User),
-  requested_teams: Schema.Array(Schema.Struct({ slug: Schema.String, name: Schema.String })),
+  requested_reviewers: Schema.optionalKey(Schema.Array(User)),
+  requested_teams: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ slug: Schema.String, name: Schema.String })),
+  ),
   labels: InboxEntry.fields.labels,
   additions: Schema.Int,
   deletions: Schema.Int,
@@ -72,6 +74,8 @@ const Comment = Schema.Struct({
   created_at: Schema.String,
   html_url: Schema.String,
 });
+/** GitHub may leave an issue comment's body out; a review comment always has one. */
+const IssueComment = Schema.Struct({ ...Comment.fields, body: Schema.optionalKey(Schema.String) });
 const Review = Schema.Struct({
   id: Schema.Int,
   user: Schema.NullOr(User),
@@ -112,7 +116,7 @@ const RawFile = Schema.Struct({
   additions: Schema.Int,
   deletions: Schema.Int,
   patch: Schema.optionalKey(Schema.String),
-  sha: Schema.optionalKey(Schema.String),
+  sha: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 const toAuthor = (user: typeof User.Type | null) =>
   user === null ? null : { login: user.login, avatarUrl: user.avatar_url };
@@ -400,7 +404,7 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
       const pull = yield* api.rest(accountId, pullPath, Pull);
       const [comments, inlineComments, reviews, statuses, checkRuns, decision] = yield* Effect.all(
         [
-          pages(accountId, `${root}/issues/${ref.number}/comments`, Comment),
+          pages(accountId, `${root}/issues/${ref.number}/comments`, IssueComment),
           pages(accountId, `${pullPath}/comments`, Comment),
           pages(accountId, `${pullPath}/reviews`, Review),
           pages(accountId, `${root}/commits/${pull.head.sha}/statuses`, Status),
@@ -447,7 +451,7 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
         { concurrency: 4 },
       );
       const reviewers = new Map<string, PullRequestDetail["reviewers"][number]>(
-        pull.requested_reviewers.map((user) => [
+        (pull.requested_reviewers ?? []).map((user) => [
           user.login,
           { login: user.login, avatarUrl: user.avatar_url, requested: true, state: null },
         ]),
@@ -473,7 +477,7 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
         state: pull.merged ? "merged" : pull.state,
         createdAt: pull.created_at,
         updatedAt: pull.updated_at,
-        isDraft: pull.draft,
+        isDraft: pull.draft ?? false,
         author: toAuthor(pull.user),
         headBranch: pull.head.ref,
         baseBranch: pull.base.ref,
@@ -485,7 +489,7 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
         actions: decision.actions,
         reviewers: [
           ...reviewers.values(),
-          ...pull.requested_teams.map((team) => ({
+          ...(pull.requested_teams ?? []).map((team) => ({
             login: team.name,
             avatarUrl: null,
             requested: true,
@@ -504,7 +508,7 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
             kind,
             author: toAuthor(comment.user),
             at: comment.created_at,
-            body: comment.body,
+            body: comment.body ?? "",
             state: null,
             url: comment.html_url,
           })),
@@ -585,7 +589,7 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
             : file.additions + file.deletions === 0
               ? { _tag: "binary" as const }
               : { _tag: "too-large" as const, lines: file.additions + file.deletions },
-      ...(file.status === "removed" || file.sha === undefined || file.sha === ""
+      ...(file.status === "removed" || file.sha == null || file.sha === ""
         ? {}
         : { blob: BlobId.make(file.sha) }),
     })),

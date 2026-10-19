@@ -13,12 +13,17 @@ import {
 
 import { RepositoryPullRequestList } from "./RepositoryPullRequestList";
 
-/** The Inbox filtered to a repository where nothing needs you: offers its open pull requests. */
+/**
+ * The Inbox filtered to a repository where nothing needs you: offers its open pull requests.
+ * When the Inbox left out a pull request that may be there, it says only that nothing is shown.
+ */
 export function InboxRepositoryEmpty({
   repository,
+  incomplete,
   clear,
 }: {
   repository: RepositoryFilter;
+  incomplete: boolean;
   clear: () => void;
 }) {
   const [showOpen, setShowOpen] = useState(false);
@@ -31,10 +36,12 @@ export function InboxRepositoryEmpty({
           <FolderGit2Icon />
         </EmptyMedia>
         <EmptyTitle role="heading" aria-level={2}>
-          Nothing in {name} needs you
+          {incomplete ? `Nothing in ${name} to show` : `Nothing in ${name} needs you`}
         </EmptyTitle>
         <EmptyDescription>
-          No open pull request there asks for your review, is yours, or involves you.
+          {incomplete
+            ? "prkit couldn't show some pull requests, so one there may still need you."
+            : "No open pull request there asks for your review, is yours, or involves you."}
         </EmptyDescription>
       </EmptyHeader>
       <div className="flex flex-wrap justify-center gap-2">

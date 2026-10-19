@@ -3,6 +3,7 @@ import { ArrowLeftIcon, ExternalLinkIcon, FileDiffIcon } from "lucide-react";
 import type { Ref, ReactNode } from "react";
 
 import { UserAvatar } from "~/components/UserAvatar";
+import { personName } from "~/features/github/personName";
 import { pullRequestState } from "~/lib/pullRequestState";
 
 import { relativeTime } from "./pullRequestPresentation";
@@ -69,11 +70,8 @@ export function PullRequestHeader({
       <div data-pr-expanded-meta="" className="flex h-16 flex-col justify-center gap-2">
         <div className="flex min-h-5 items-center gap-2 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5 text-foreground">
-            <UserAvatar
-              login={detail.author?.login ?? "ghost"}
-              url={detail.author?.avatarUrl ?? null}
-            />
-            {detail.author?.login ?? "ghost"}
+            <UserAvatar login={personName(detail.author)} url={detail.author?.avatarUrl ?? null} />
+            {personName(detail.author)}
           </span>
           <span aria-hidden>·</span>
           <time dateTime={detail.updatedAt} title={new Date(detail.updatedAt).toLocaleString()}>

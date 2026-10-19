@@ -10,6 +10,7 @@ import { Link } from "@tanstack/react-router";
 import { useStartGuide } from "~/components/review";
 import { UserAvatar } from "~/components/UserAvatar";
 import { Button } from "~/components/ui/button";
+import { personName } from "~/features/github/personName";
 import { useWorkspace } from "~/features/workspace/workspaceContext";
 import { pullRequestState } from "~/lib/pullRequestState";
 import { cn } from "~/lib/utils";
@@ -113,11 +114,8 @@ export function InboxRow({
               )}
             </span>
             <span className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden text-2xs text-muted-foreground">
-              <UserAvatar
-                login={entry.author?.login ?? "ghost"}
-                url={entry.author?.avatarUrl ?? null}
-              />
-              <span className="shrink-0">{entry.author?.login ?? "ghost"}</span>
+              <UserAvatar login={personName(entry.author)} url={entry.author?.avatarUrl ?? null} />
+              <span className="shrink-0">{personName(entry.author)}</span>
               <span className="min-w-0 truncate">
                 {entry.ref.owner}/{entry.ref.repo}
               </span>

@@ -2,6 +2,7 @@ import {
   type Account,
   type AccountId,
   type GitHubProblem,
+  InboxLeftOut,
   PullRequestSummary,
   type Repository,
   RepositoryError,
@@ -14,10 +15,11 @@ import * as Schema from "effect/Schema";
 
 import { GitHubAccounts } from "../accounts/GitHubAccounts.ts";
 import { isoAt } from "../github/budget.ts";
-import { GitHubApi, GitHubRequestError } from "../github/GitHubApi.ts";
+import { nodesOf } from "../github/connection.ts";
+import { GitHubApi, GitHubRequestError, queryFailure, unreachable } from "../github/GitHubApi.ts";
 import { FRESH_MS } from "./detailReads.ts";
 import { summaryOf } from "./inboxEntries.ts";
-import { PullRequestNode, pullRequestRowFragment } from "./inboxQuery.ts";
+import { isNodeError, pullRequestRowFragment, readNodes } from "./inboxQuery.ts";
 import { type Cached, makeReadCache, readProblem } from "./readCache.ts";
 
 /** Pages of 100 read per account at most, so an account in a huge organization can't drain its budget. */
@@ -44,15 +46,13 @@ const RepositoriesPage = Schema.Struct({
         hasNextPage: Schema.Boolean,
         endCursor: Schema.NullOr(Schema.String),
       }),
-      nodes: Schema.Array(
-        Schema.NullOr(
-          Schema.Struct({
-            name: Schema.String,
-            isPrivate: Schema.Boolean,
-            isArchived: Schema.Boolean,
-            owner: Schema.Struct({ login: Schema.String }),
-          }),
-        ),
+      nodes: nodesOf(
+        Schema.Struct({
+          name: Schema.String,
+          isPrivate: Schema.Boolean,
+          isArchived: Schema.Boolean,
+          owner: Schema.Struct({ login: Schema.String }),
+        }),
       ),
     }),
   }),
@@ -74,11 +74,13 @@ const RepositoryPullsResponse = Schema.Struct({
     Schema.Struct({
       pullRequests: Schema.Struct({
         totalCount: Schema.Int,
-        nodes: Schema.Array(Schema.NullOr(PullRequestNode)),
+        nodes: Schema.NullOr(Schema.Array(Schema.Json)),
       }),
     }),
   ),
 });
+
+const PULLS_AT = ["repository", "pullRequests", "nodes"];
 
 /** One account's repositories; `total` is GitHub's count when the page ceiling cut the list. */
 const AccountRepositories = Schema.Struct({
@@ -90,6 +92,7 @@ const AccountRepositories = Schema.Struct({
 type AccountRepositories = typeof AccountRepositories.Type;
 const RepositoryPulls = Schema.Struct({
   entries: Schema.Array(PullRequestSummary),
+  leftOut: Schema.Array(InboxLeftOut).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   total: Schema.Int,
 });
 
@@ -141,7 +144,7 @@ export const makeRepositoryReads = Effect.fnUntraced(function* (options: {
         const connection = response.viewer.repositories;
         total = connection.totalCount;
         for (const node of connection.nodes)
-          if (node !== null && !node.isArchived)
+          if (!node.isArchived)
             repositories.push({
               owner: node.owner.login,
               name: node.name,
@@ -233,25 +236,32 @@ export const makeRepositoryReads = Effect.fnUntraced(function* (options: {
     );
 
   const fetchPulls = (account: Account, owner: string, name: string) =>
-    api.graphql(account.id, repositoryPullsQuery, RepositoryPullsResponse, { owner, name }).pipe(
-      Effect.flatMap((response) =>
-        response.repository === null
-          ? Effect.fail(
-              new GitHubRequestError({
-                accountId: account.id,
-                reason: "not-found",
-                status: null,
-                message: `${owner}/${name} wasn't found, or ${account.id} has no access to it.`,
-              }),
-            )
-          : Effect.succeed({
-              entries: response.repository.pullRequests.nodes.flatMap((node) =>
-                node === null ? [] : [summaryOf(account, node)],
-              ),
-              total: response.repository.pullRequests.totalCount,
-            }),
-      ),
-    );
+    api
+      .graphqlResult(account.id, repositoryPullsQuery, { owner, name }, RepositoryPullsResponse)
+      .pipe(
+        Effect.flatMap(({ data, errors }) =>
+          Effect.gen(function* () {
+            if (data === null || errors.some((error) => !isNodeError(error, PULLS_AT)))
+              return yield* queryFailure(account.id, errors);
+            if (data.repository === null) return yield* unreachable(account.id, `${owner}/${name}`);
+            const read = readNodes(
+              account,
+              PULLS_AT,
+              data.repository.pullRequests.nodes ?? [],
+              errors,
+            );
+            for (const problem of read.problems)
+              yield* Effect.logWarning("Left out a pull request prkit can't read").pipe(
+                Effect.annotateLogs({ accountId: account.id, ...problem }),
+              );
+            return {
+              entries: read.rows.map((node) => summaryOf(account, node)),
+              leftOut: read.leftOut,
+              total: data.repository.pullRequests.totalCount,
+            };
+          }),
+        ),
+      );
 
   /** A repository's open pull requests, read through `accountId` and cached ten minutes. */
   const pulls = (

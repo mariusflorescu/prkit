@@ -9,12 +9,13 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import { nodesOf } from "../github/connection.ts";
 import { GitHubApi, type GraphQLError, queryFailure } from "../github/GitHubApi.ts";
 import type { CachedInboxEntry } from "./inboxEntries.ts";
 import { GITHUB_PAGE_LIMIT } from "./inboxQuery.ts";
 import { withDeadline } from "./readDeadline.ts";
 
-const reviewer = `__typename ... on User { login } ... on Team { combinedSlug }`;
+const reviewer = `__typename ... on Actor { login } ... on Team { combinedSlug }`;
 const waitsQuery = `query PrkitReviewWaits($ids: [ID!]!) {
   nodes(ids: $ids) {
     ... on PullRequest {
@@ -38,8 +39,8 @@ const waitsQuery = `query PrkitReviewWaits($ids: [ID!]!) {
 const WaitsResponse = Schema.Struct({ nodes: Schema.Array(Schema.Json) });
 
 /**
- * GitHub's reviewer is a union that may grow (bots, mannequins, enterprise teams); a member
- * prkit doesn't select anything from has neither field and reads as nobody.
+ * GitHub's reviewer is a union that may grow; a member prkit doesn't select anything from has
+ * neither field and reads as nobody.
  */
 const ReviewerNode = Schema.Struct({
   login: Schema.optionalKey(Schema.String),
@@ -47,15 +48,15 @@ const ReviewerNode = Schema.Struct({
 });
 const WaitNode = Schema.Struct({
   id: Schema.String,
-  reviewRequests: Schema.Struct({
-    pageInfo: Schema.Struct({ hasNextPage: Schema.Boolean }),
-    nodes: Schema.Array(
-      Schema.NullOr(Schema.Struct({ requestedReviewer: Schema.NullOr(ReviewerNode) })),
-    ),
-  }),
+  reviewRequests: Schema.NullOr(
+    Schema.Struct({
+      pageInfo: Schema.Struct({ hasNextPage: Schema.Boolean }),
+      nodes: nodesOf(Schema.Struct({ requestedReviewer: Schema.NullOr(ReviewerNode) })),
+    }),
+  ),
   timelineItems: Schema.Struct({
     pageInfo: Schema.Struct({ hasPreviousPage: Schema.Boolean }),
-    nodes: Schema.Array(
+    nodes: nodesOf(
       Schema.Union([
         Schema.Struct({
           __typename: Schema.Literal("ReviewRequestedEvent"),
@@ -108,11 +109,11 @@ export type WaitsByNode = typeof WaitsByNode.Type;
 
 const factsOf = (node: typeof WaitNode.Type): ReadFacts => ({
   _tag: "read",
-  pending: node.reviewRequests.nodes.flatMap((request) => {
-    const found = request === null ? null : reviewerOf(request.requestedReviewer);
+  pending: (node.reviewRequests?.nodes ?? []).flatMap((request) => {
+    const found = reviewerOf(request.requestedReviewer);
     return found === null ? [] : [found];
   }),
-  pendingTruncated: node.reviewRequests.pageInfo.hasNextPage,
+  pendingTruncated: node.reviewRequests?.pageInfo.hasNextPage ?? false,
   events: node.timelineItems.nodes
     .map((event) =>
       event.__typename === "ReadyForReviewEvent"

@@ -1,6 +1,7 @@
 import {
   type Account,
   InboxEntry,
+  type InboxLeftOut,
   type InboxResult,
   PullRequestSummary,
   inboxReasonPriority,
@@ -9,7 +10,8 @@ import {
 } from "@prkit/contracts";
 import * as Schema from "effect/Schema";
 
-import type { InboxResponse, PullRequestNode } from "./inboxQuery.ts";
+import type { GraphQLError } from "../github/GitHubApi.ts";
+import { type InboxResponse, type PullRequestNode, readNodes } from "./inboxQuery.ts";
 import { membershipOf } from "./stackQuery.ts";
 
 export const CachedInboxEntry = Schema.Struct({
@@ -59,17 +61,30 @@ export const summaryOf = (account: Account, node: PullRequestNode): PullRequestS
           : rollup === "FAILURE" || rollup === "ERROR"
             ? "failing"
             : "pending",
-    labels: node.labels.nodes.filter((label) => label !== null),
+    labels: node.labels?.nodes ?? [],
     stack: membershipOf(node),
   };
 };
 
-export const accountEntries = (account: Account, response: InboxResponse) => {
+/** The searches' own aliases, where an error names one pull request rather than the whole read. */
+export const SEARCH_NODES = SEARCHES.map(([alias]) => [alias, "nodes"] as const);
+
+/**
+ * An account's inbox from its three searches. A pull request prkit can't read, or that GitHub
+ * refused, is left out on its own; `problems` says where each one broke, for the log.
+ */
+export const accountEntries = (
+  account: Account,
+  response: InboxResponse,
+  errors: ReadonlyArray<GraphQLError>,
+) => {
   const entries = new Map<string, CachedInboxEntry>();
   const truncated: Array<InboxResult["truncated"][number]> = [];
+  const leftOut = new Map<string, InboxLeftOut>();
+  const problems: Array<{ readonly path: string; readonly problem: string }> = [];
   for (const [alias, reason] of SEARCHES) {
     const search = response[alias];
-    const nodes = search.nodes.filter((node) => node !== null);
+    const nodes = search.nodes ?? [];
     if (search.issueCount > nodes.length)
       truncated.push({
         accountId: account.id,
@@ -77,7 +92,16 @@ export const accountEntries = (account: Account, response: InboxResponse) => {
         shown: nodes.length,
         total: search.issueCount,
       });
-    for (const node of nodes) {
+    const read = readNodes(account, [alias, "nodes"], nodes, errors);
+    for (const item of read.leftOut)
+      leftOut.set(
+        item.pullRequest === null
+          ? `message:${item.message ?? ""}`
+          : pullRequestKey(item.pullRequest.ref),
+        item,
+      );
+    problems.push(...read.problems);
+    for (const node of read.rows) {
       // GitHub's search index trails a merge or close by a few seconds, so `is:open`
       // can still find a PR whose node already says it is merged.
       if (node.state !== "OPEN") continue;
@@ -95,7 +119,7 @@ export const accountEntries = (account: Account, response: InboxResponse) => {
       });
     }
   }
-  return { entries: [...entries.values()], truncated };
+  return { entries: [...entries.values()], truncated, leftOut: [...leftOut.values()], problems };
 };
 
 const strongestReason = (reasons: InboxEntry["reasons"]) =>

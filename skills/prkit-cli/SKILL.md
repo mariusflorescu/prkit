@@ -30,7 +30,7 @@ If your sandbox blocks loopback network, the command can't reach the app and exi
 
 Use `--json` whenever you'll read the result yourself: it is the structured answer from prkit's MCP tool, unchanged. Use plain output when you're showing something to the user as is; it explains how to continue a page.
 
-Paged reads take `--limit` (1 to 100) and `--cursor`. Keep the same command, target and filters, pass `nextCursor` verbatim, and continue until it is null. File patches can span pages: join text fragments for the same path in `offset` order until `complete` is true. File contents and fix patches are text items joined by `offset`. A true `githubTruncated` or `threadsTruncated` means GitHub omitted data; say so, even after the last local page.
+Paged reads take `--limit` (1 to 100) and `--cursor`. Keep the same command, target and filters, pass `nextCursor` verbatim, and continue until it is null. File patches can span pages: join text fragments for the same path in `offset` order until `complete` is true. File contents and fix patches are text items joined by `offset`. A true `githubTruncated` or `threadsTruncated` means GitHub omitted data; say so, even after the last local page. A non-empty `githubLeftOut` names pull requests prkit couldn't read or GitHub refused; they are missing from the list, so say so and give their urls.
 
 A large answer can instead be `_tag: "response-fragment"`. Keep the logical page's `--cursor` unchanged, follow `nextResponseCursor` with `--response-cursor`, join each `text` by `offset`, then parse the complete JSON. Only then follow its normal `nextCursor`. Don't treat one fragment as the full answer.
 

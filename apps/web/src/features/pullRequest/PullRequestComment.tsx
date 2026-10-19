@@ -1,5 +1,6 @@
 import { ExternalLinkIcon } from "lucide-react";
 
+import { personName } from "~/features/github/personName";
 import { cn } from "~/lib/utils";
 import type { ConversationComment } from "./conversationModel";
 import { PullRequestMarkdown } from "./PullRequestMarkdown";
@@ -10,11 +11,11 @@ export function PullRequestComment({ item }: { item: ConversationComment }) {
   return (
     <article
       data-timeline-kind={item.kind}
-      aria-label={`${item.kind === "review" ? "Review" : "Comment"} by ${item.author?.login ?? "ghost"}`}
+      aria-label={`${item.kind === "review" ? "Review" : "Comment"} by ${personName(item.author)}`}
       className="min-w-0 overflow-hidden rounded-lg border border-border/60 bg-background"
     >
       <div className="flex min-h-9 flex-wrap items-center gap-2 bg-muted/25 px-3 py-2 text-xs">
-        <span className="font-semibold">{item.author?.login ?? "ghost"}</span>
+        <span className="font-semibold">{personName(item.author)}</span>
         {item.kind === "review" && (
           <span
             className={cn(

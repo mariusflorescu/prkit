@@ -2,11 +2,12 @@ import type { ReviewThreadComment } from "@prkit/contracts";
 import { ExternalLinkIcon } from "lucide-react";
 
 import { UserAvatar } from "~/components/UserAvatar";
+import { personName } from "~/features/github/personName";
 import { PullRequestMarkdown } from "~/features/pullRequest/PullRequestMarkdown";
 import { relativeTime } from "~/features/pullRequest/pullRequestPresentation";
 
 export function ThreadComment({ comment }: { comment: ReviewThreadComment }) {
-  const login = comment.author?.login ?? "ghost";
+  const login = personName(comment.author);
   return (
     <div data-thread-comment="" className="min-w-0">
       <div className="flex items-center gap-2 text-xs">

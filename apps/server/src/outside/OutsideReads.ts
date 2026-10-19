@@ -166,6 +166,7 @@ export const makeOutsideReads = (
             `repository-prs:${account.id}:${input.owner}/${input.repo}:${list.entries.map((entry) => `${entry.ref.number}:${entry.updatedAt}`).join(",")}`,
           )),
           githubTotal: list.total,
+          githubLeftOut: list.leftOut,
           freshness: list.freshness,
         };
       }).pipe(Effect.mapError(asFailure));

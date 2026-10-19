@@ -288,3 +288,46 @@ describe("GitHubApi logs", () => {
     ]);
   });
 });
+
+describe("GitHubApi partial answers", () => {
+  it("fails in GitHub's words when GitHub's errors explain the hole prkit can't read", async () => {
+    const failure = (errors: ReadonlyArray<object>) =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const api = yield* GitHubApi;
+          return yield* api.graphql(
+            OCTOCAT,
+            "query PrkitLabels { pullRequest { labels { totalCount } } }",
+            Schema.Struct({
+              pullRequest: Schema.Struct({ labels: Schema.Struct({ totalCount: Schema.Int }) }),
+            }),
+          );
+        }).pipe(
+          Effect.flip,
+          Effect.map((error) => error.message),
+          Effect.provide(
+            layer.pipe(
+              Layer.provide([
+                accounts,
+                github([
+                  {
+                    status: 200,
+                    body: JSON.stringify({
+                      data: { prkitRateLimit: { cost: 1 }, pullRequest: { labels: null } },
+                      errors,
+                    }),
+                  },
+                ]),
+              ]),
+            ),
+          ),
+        ),
+      );
+    expect(
+      await failure([
+        { type: "FORBIDDEN", path: ["pullRequest", "labels"], message: "Labels are hidden." },
+      ]),
+    ).toBe("GitHub couldn't complete the query. Labels are hidden.");
+    expect(await failure([])).toBe("GitHub returned an unreadable response. Try refreshing.");
+  });
+});

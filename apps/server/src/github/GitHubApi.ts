@@ -104,6 +104,15 @@ export const queryFailure = (accountId: AccountId, errors: ReadonlyArray<GraphQL
     message: `GitHub couldn't complete the query. ${errors.length > 0 ? errors.map((error) => error.message).join(" ") : "Try refreshing."}`,
   });
 
+/** GitHub answered null for a repository or pull request: it's gone, or out of this account's reach. */
+export const unreachable = (accountId: AccountId, what: string) =>
+  new GitHubRequestError({
+    accountId,
+    reason: "not-found",
+    status: null,
+    message: `${what} wasn't found, or ${accountId} has no access to it.`,
+  });
+
 const RejectedBody = Schema.fromJsonString(
   Schema.Struct({
     message: Schema.optionalKey(Schema.String),
@@ -191,7 +200,7 @@ export const operationOf = (query: string) => {
 
 const issues = SchemaIssue.makeFormatterStandardSchemaV1();
 /** Where the first decode failure is and what was expected, without any value from the response. */
-const decodeProblem = (error: Schema.SchemaError) => {
+export const decodeProblem = (error: Schema.SchemaError) => {
   const [first] = issues(error.issue).issues;
   return {
     path: (first?.path ?? [])
@@ -500,6 +509,8 @@ export const make = Effect.gen(function* () {
                 }),
               );
             }
+            // GitHub nulls what its errors broke, so a partial answer fails in GitHub's words.
+            if (errors.length > 0) return { data: null, errors };
             return yield* new GitHubRequestError({
               accountId: id,
               reason: "network",

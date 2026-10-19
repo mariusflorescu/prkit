@@ -2,7 +2,8 @@ import type { AccountId, FileSide, PullRequestRef, ReviewThread } from "@prkit/c
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-import { GitHubApi } from "../github/GitHubApi.ts";
+import { nodesOf } from "../github/connection.ts";
+import { GitHubApi, unreachable } from "../github/GitHubApi.ts";
 
 const PAGES = 10;
 const THREADS_QUERY = `query PrkitReviewThreads($owner: String!, $name: String!, $number: Int!, $cursor: String) {
@@ -52,7 +53,7 @@ const Thread = Schema.Struct({
   viewerCanUnresolve: Schema.Boolean,
   comments: Schema.Struct({
     totalCount: Schema.Int,
-    nodes: Schema.Array(
+    nodes: nodesOf(
       Schema.Struct({
         id: Schema.String,
         body: Schema.String,
@@ -66,11 +67,13 @@ const Thread = Schema.Struct({
             avatarUrl: Schema.String,
           }),
         ),
-        reactionGroups: Schema.Array(
-          Schema.Struct({
-            content: Schema.String,
-            reactors: Schema.Struct({ totalCount: Schema.Int }),
-          }),
+        reactionGroups: Schema.NullOr(
+          Schema.Array(
+            Schema.Struct({
+              content: Schema.String,
+              reactors: Schema.Struct({ totalCount: Schema.Int }),
+            }),
+          ),
         ),
       }),
     ),
@@ -87,7 +90,7 @@ const Page = Schema.Struct({
               hasNextPage: Schema.Boolean,
               endCursor: Schema.NullOr(Schema.String),
             }),
-            nodes: Schema.Array(Schema.NullOr(Thread)),
+            nodes: nodesOf(Thread),
           }),
         }),
       ),
@@ -143,7 +146,7 @@ const toThread = (thread: typeof Thread.Type): ReviewThread => ({
     body: comment.body,
     createdAt: comment.createdAt,
     url: comment.url,
-    reactions: comment.reactionGroups.flatMap((group) => {
+    reactions: (comment.reactionGroups ?? []).flatMap((group) => {
       const emoji = EMOJI[group.content];
       return emoji === undefined || group.reactors.totalCount === 0
         ? []
@@ -175,10 +178,11 @@ export const makeReviewThreads = Effect.gen(function* () {
           variables,
         );
         const pullRequest = response.repository?.pullRequest;
-        if (!pullRequest) break;
+        if (pullRequest == null)
+          return yield* unreachable(accountId, `${ref.owner}/${ref.repo}#${ref.number}`);
         if (page === 0) headSha = pullRequest.headRefOid;
         const connection = pullRequest.reviewThreads;
-        for (const node of connection.nodes) if (node !== null) threads.push(toThread(node));
+        for (const node of connection.nodes) threads.push(toThread(node));
         cursor = connection.pageInfo.hasNextPage ? connection.pageInfo.endCursor : null;
         if (cursor === null) break;
       }

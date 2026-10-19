@@ -5,6 +5,7 @@ import {
   type GitHubEvent,
   type GitHubProblem,
   InboxError,
+  InboxLeftOut,
   type InboxRead,
   InboxResult,
   type PullRequestKey,
@@ -25,12 +26,12 @@ import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import { GitHubAccounts } from "../accounts/GitHubAccounts.ts";
 import { isoAt } from "../github/budget.ts";
-import { GitHubApi } from "../github/GitHubApi.ts";
+import { GitHubApi, queryFailure } from "../github/GitHubApi.ts";
 import { makeActions } from "./actions.ts";
 import { FRESH_MS, makeDetailReads } from "./detailReads.ts";
 import { PullRequestFingerprint, stackShape, statusOf } from "./fingerprint.ts";
-import { accountEntries, CachedInboxEntry, mergeAccounts } from "./inboxEntries.ts";
-import { InboxResponse, inboxQuery } from "./inboxQuery.ts";
+import { accountEntries, CachedInboxEntry, mergeAccounts, SEARCH_NODES } from "./inboxEntries.ts";
+import { InboxResponse, inboxQuery, isNodeError } from "./inboxQuery.ts";
 import {
   type CacheKey,
   makeObservedReadCache,
@@ -47,6 +48,7 @@ import { makeReviewWaits, WaitsByNode, withWaits } from "./reviewWaits.ts";
 const AccountInbox = Schema.Struct({
   entries: Schema.Array(CachedInboxEntry),
   truncated: InboxResult.fields.truncated,
+  leftOut: Schema.Array(InboxLeftOut).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   waits: WaitsByNode,
 });
 type AccountInbox = typeof AccountInbox.Type;
@@ -136,10 +138,26 @@ export const make = Effect.gen(function* () {
   /** The inbox, then the waits of its review requests: one value, so a rule never sees facts from another moment. */
   const fetchAccount = (account: Account) =>
     Effect.gen(function* () {
-      const found = yield* api.graphql(account.id, inboxQuery, InboxResponse).pipe(
-        Effect.map((response) => accountEntries(account, response)),
-        withDeadline(account.id, INBOX_DEADLINE),
-      );
+      const { problems, ...found } = yield* api
+        .graphqlResult(account.id, inboxQuery, {}, InboxResponse)
+        .pipe(
+          Effect.flatMap(({ data, errors }) =>
+            data === null ||
+            errors.some((error) => !SEARCH_NODES.some((at) => isNodeError(error, at)))
+              ? Effect.fail(queryFailure(account.id, errors))
+              : Effect.succeed(accountEntries(account, data, errors)),
+          ),
+          withDeadline(account.id, INBOX_DEADLINE),
+        );
+      for (const problem of problems)
+        yield* Effect.logWarning("Left out a pull request prkit can't read").pipe(
+          Effect.annotateLogs({ accountId: account.id, ...problem }),
+        );
+      for (const item of found.leftOut)
+        if (item.message !== null)
+          yield* Effect.logWarning("GitHub refused a pull request in the inbox").pipe(
+            Effect.annotateLogs({ accountId: account.id, message: item.message }),
+          );
       const previous = (yield* inboxCache.peek(inboxKey(account)))?.value.waits ?? {};
       const waits = yield* reviewWaits.read(account, found.entries, previous);
       return { _tag: "read", value: { ...found, waits } } satisfies ReadOutcome<AccountInbox>;
@@ -160,6 +178,7 @@ export const make = Effect.gen(function* () {
     inbox: {
       entries: withWaits(accountId, kept?.value.entries ?? [], kept?.value.waits ?? {}),
       truncated: kept?.value.truncated ?? [],
+      leftOut: kept?.value.leftOut ?? [],
     },
     fetchedAt: kept === undefined ? null : isoAt(kept.fetchedAt),
     problem,
@@ -187,17 +206,21 @@ export const make = Effect.gen(function* () {
   const result = (
     rows: ReadonlyArray<ReturnType<typeof row>>,
     configDirProblems: ReadonlyArray<ConfigDirProblem>,
-  ): InboxResult => ({
-    entries: mergeAccounts(rows.flatMap((item) => item.inbox.entries)),
-    accounts: rows.map((item) => ({
-      accountId: item.accountId,
-      count: item.inbox.entries.length,
-      fetchedAt: item.fetchedAt,
-      problem: item.problem,
-    })),
-    truncated: rows.flatMap((item) => item.inbox.truncated),
-    configDirProblems,
-  });
+  ): InboxResult => {
+    const entries = mergeAccounts(rows.flatMap((item) => item.inbox.entries));
+    return {
+      entries,
+      leftOut: rows.flatMap((item) => item.inbox.leftOut),
+      accounts: rows.map((item) => ({
+        accountId: item.accountId,
+        count: item.inbox.entries.length,
+        fetchedAt: item.fetchedAt,
+        problem: item.problem,
+      })),
+      truncated: rows.flatMap((item) => item.inbox.truncated),
+      configDirProblems,
+    };
+  };
   const readAll = (read: InboxRead) =>
     Effect.gen(function* () {
       const discovered = yield* accounts.list();

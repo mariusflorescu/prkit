@@ -1,4 +1,10 @@
-import { type AccountId, type GitHubProblem, primaryInboxReason } from "@prkit/contracts";
+import {
+  type AccountId,
+  type GitHubProblem,
+  leftOutInView,
+  mayBeIn,
+  primaryInboxReason,
+} from "@prkit/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 
@@ -101,10 +107,13 @@ export function InboxPage() {
   // from earlier has no rows until it is read, so nothing showing may only mean not read yet.
   const unread =
     visible.length === 0 && inView.some((row) => row.fetchedAt === null && row.problem === null);
+  const leftOut = inbox.data === undefined ? [] : leftOutInView(inbox.data, account);
   // A notice above says why rows may be missing, so no empty state claims nothing needs you.
   const noticeInsteadOfEmpty =
     inView.some((row) => row.problem !== null && row.count === 0) ||
-    (!filtered && (inbox.data?.configDirProblems.length ?? 0) > 0);
+    (!filtered && (inbox.data?.configDirProblems.length ?? 0) > 0) ||
+    // An account's notice names what that account left out; a search or repository may not hold it.
+    (search.trim() === "" && repository === null && leftOut.length > 0);
   const oldest =
     inView
       .flatMap((row) => (row.fetchedAt === null ? [] : [row.fetchedAt]))
@@ -155,6 +164,7 @@ export function InboxPage() {
                     <InboxRepositoryEmpty
                       key={repositoryKey(repository)}
                       repository={repository}
+                      incomplete={leftOut.some((item) => mayBeIn(item, repository))}
                       clear={clear}
                     />
                   ) : (
