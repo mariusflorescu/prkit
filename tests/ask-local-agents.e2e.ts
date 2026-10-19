@@ -6,6 +6,7 @@ import { type Browser, describe, test } from "@e2e-dev/web";
 import { expect, type Screen, type TestFixtures } from "e2e";
 import * as Schema from "effect/Schema";
 
+import { AgentsResult } from "../apps/server/src/outside/paritySchemas.ts";
 import { GenerateLocalGuideResult, LocalWaitResult } from "../apps/server/src/outside/schemas.ts";
 import { type RunFile, repoRoot } from "../scripts/verify-run.ts";
 import {
@@ -31,6 +32,7 @@ import { emulateOsColorScheme } from "./osColorScheme.ts";
 
 const decodeGenerate = Schema.decodeSync(Schema.fromJsonString(GenerateLocalGuideResult));
 const decodeWait = Schema.decodeSync(Schema.fromJsonString(LocalWaitResult));
+const decodeAgents = Schema.decodeSync(Schema.fromJsonString(AgentsResult));
 
 const WHOLE =
   "What do these changes do? Point me at the most important changed lines as path:line.";
@@ -48,8 +50,8 @@ type Page = { app: TestFixtures["app"]; screen: Screen; browser: Browser };
 type Agent = {
   name: "claude" | "codex";
   label: string;
-  /** What `prkit local guide` adds to pick this agent. */
-  pick: ReadonlyArray<string>;
+  /** The instance `prkit local guide` picks, with its default model; null for prkit's default agent. */
+  instance: string | null;
   refusal: { log: string; decision: string };
 };
 
@@ -141,13 +143,25 @@ const journey = (agent: Agent) => async (page: Page) => {
     const gitBefore = repo.fingerprint();
     const treeBefore = repo.workTree();
 
+    const pick: Array<string> = [];
+    if (agent.instance !== null) {
+      const listed = decodeAgents(
+        cli(repo.repo, ["agents", "--agent", agent.instance, "--json"]).stdout,
+      ).items.find((entry) => entry.instance === agent.instance);
+      const model =
+        listed?.models.find((entry) => entry.isDefault && entry.blocked === null) ??
+        listed?.models.find((entry) => entry.blocked === null);
+      if (model === undefined) throw new Error(`${agent.label} offers no model it can use.`);
+      pick.push("--agent", agent.instance, "--model", model.slug);
+      note("model", model.slug);
+    }
     const started = decodeGenerate(
       cli(repo.repo, [
         "local",
         "guide",
         "--description",
         "Count item quantities in the cart total and accept a percentage discount code.",
-        ...agent.pick,
+        ...pick,
         "--json",
       ]).stdout,
     );
@@ -361,7 +375,7 @@ describe("Ask about local changes with the user's Claude", { tags: ["agent"] }, 
       await journey({
         name: "claude",
         label: "Claude",
-        pick: [],
+        instance: null,
         refusal: { log: "canUseTool", decision: "deny" },
       })({ app, screen, browser });
     },
@@ -377,7 +391,7 @@ describe("Ask about local changes with Codex", { tags: ["codex"] }, () => {
       await journey({
         name: "codex",
         label: "Codex",
-        pick: ["--instance", "codex"],
+        instance: "codex",
         refusal: { log: "Codex approval", decision: "decline" },
       })({ app, screen, browser });
     },
