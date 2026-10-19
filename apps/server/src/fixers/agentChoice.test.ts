@@ -41,6 +41,7 @@ const Config = Layer.effect(
       authToken: Redacted.make("test"),
       watchIntervalMs: 60_000,
       devReviewRequested: [],
+      e2e: false,
       version: "0.0.0",
       startedAt: "2026-10-11T00:00:00.000Z",
     });
