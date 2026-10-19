@@ -1,6 +1,6 @@
 import type { DesktopUpdateState, ThemePreference, UpdateChannel } from "@prkit/contracts";
 import { DesktopUpdateIpc } from "@prkit/contracts/desktopUpdateIpc";
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webFrame } from "electron";
 
 type GuideTarget =
   | {
@@ -54,3 +54,24 @@ contextBridge.exposeInMainWorld("prkitDesktop", {
     },
   },
 });
+
+// View > Zoom In and Zoom Out scale the page, and its title bar with it, while macOS draws the
+// traffic lights at one size. The page sizes the bar from --page-zoom (apps/web/src/index.css)
+// and main centres the lights in it. The preload runs before <html> exists, so the first report
+// waits for it, still before the first paint; every later zoom change resizes the page.
+if (process.platform === "darwin") {
+  let pageZoom: number | undefined;
+  const followPageZoom = () => {
+    const zoom = webFrame.getZoomFactor();
+    if (zoom === pageZoom) return;
+    pageZoom = zoom;
+    document.documentElement.style.setProperty("--page-zoom", String(zoom));
+    ipcRenderer.send("prkit:page-zoom", zoom);
+  };
+  new MutationObserver((_records, observer) => {
+    if (document.documentElement === null) return;
+    observer.disconnect();
+    followPageZoom();
+  }).observe(document, { childList: true });
+  window.addEventListener("resize", followPageZoom);
+}

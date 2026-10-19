@@ -41,6 +41,10 @@
   );
   --sidebar-row-content-inset: 0.625rem;
   --workspace-topbar-height: 52px;
+  /* The title bar's row. The desktop app puts the page's zoom in --page-zoom: zoomed far out,
+     the bar keeps 28pt on screen, room for the macOS traffic lights that main centres in it
+     (apps/desktop/src/mainWindow.ts). */
+  --title-bar-height: max(var(--workspace-topbar-height), calc(28px / var(--page-zoom, 1)));
   /* The workspace panel sits this far inside the frame on the left, right and bottom. Its
      corners are concentric with the window's: macOS 26 rounds a window without a toolbar,
      like prkit's, at 16px, and 16 minus the inset is 10. */
@@ -63,8 +67,9 @@
   }
 }
 
+/* 88pt on screen at any page zoom: the traffic lights keep their size when the page scales. */
 .electron-mac {
-  --workspace-traffic-light-inset: 5.5rem;
+  --workspace-traffic-light-inset: calc(5.5rem / var(--page-zoom, 1));
 }
 
 /* The font tokens are declared outside the inline theme so utilities reference

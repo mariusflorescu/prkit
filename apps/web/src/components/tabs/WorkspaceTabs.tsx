@@ -92,7 +92,7 @@ export function WorkspaceTabs() {
     <header
       data-workspace-tabbar=""
       className={cn(
-        "relative isolate flex h-(--workspace-topbar-height) shrink-0 items-center gap-1 pr-3 pl-[max(0.75rem,var(--workspace-traffic-light-inset))]",
+        "relative isolate flex h-(--title-bar-height) shrink-0 items-center gap-1 pr-3 pl-[max(0.75rem,var(--workspace-traffic-light-inset))]",
         desktopBridge && "drag-region",
       )}
     >

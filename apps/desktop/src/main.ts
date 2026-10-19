@@ -81,15 +81,18 @@ const decodeTheme = Schema.decodeUnknownOption(ThemePreference);
 // Held until clicked or closed, so the click handler outlives a garbage collection.
 const shown = new Set<Notification>();
 
-/** Brings a window forward, a new one if all were closed; `fresh` when it was just created. */
+/**
+ * Brings a window forward, a new one if all were closed; `fresh` when it was just created. A new
+ * window shows itself once its page has painted, with the traffic lights placed for its zoom.
+ */
 const bringForward = () => {
   const existing = BrowserWindow.getAllWindows()[0];
-  const window = existing ?? (windowOptions ? createMainWindow(windowOptions) : undefined);
-  if (window === undefined) return undefined;
-  if (window.isMinimized()) window.restore();
-  window.show();
-  window.focus();
-  return { window, fresh: existing === undefined };
+  if (existing === undefined)
+    return windowOptions ? { window: createMainWindow(windowOptions), fresh: true } : undefined;
+  if (existing.isMinimized()) existing.restore();
+  existing.show();
+  existing.focus();
+  return { window: existing, fresh: false };
 };
 
 /** Brings a window forward and opens a PR's Guide (or Fixes) tab, or a local review, in it. */

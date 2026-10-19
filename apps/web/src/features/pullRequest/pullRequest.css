@@ -95,16 +95,14 @@
 [data-pr-content] [data-chapter-rail] {
   --rail-top: calc(var(--pr-pinned-height) + 16px);
   --rail-room: calc(
-    100dvh - var(--workspace-topbar-height) - var(--panel-inset) - var(--pr-pinned-height) -
+    100dvh - var(--title-bar-height) - var(--panel-inset) - var(--pr-pinned-height) -
       var(--pr-covered-bottom, 0px) - 32px
   );
 }
 [data-pr-files-tree] {
   position: sticky;
   top: var(--pr-pinned-height);
-  max-height: calc(
-    100dvh - var(--workspace-topbar-height) - var(--panel-inset) - var(--pr-pinned-height)
-  );
+  max-height: calc(100dvh - var(--title-bar-height) - var(--panel-inset) - var(--pr-pinned-height));
 }
 [data-pr-action-input] {
   display: block;
