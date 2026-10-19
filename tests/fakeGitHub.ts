@@ -7,6 +7,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import type { ContextSeed } from "../scripts/fake-github/context.ts";
+import type { OddShape } from "../scripts/fake-github/model.ts";
 import { instancePaths, liveProcesses, readRun, repoRoot } from "../scripts/verify-run.ts";
 
 const Ready = Schema.fromJsonString(
@@ -167,6 +168,14 @@ export const startFakeGitHub = async (
       post(`request-review?pr=${pr}&${reviewerQuery(who)}&minutes=${minutesAgo}`),
     unrequest: (pr: number, who: Reviewer) => post(`unrequest?pr=${pr}&${reviewerQuery(who)}`),
     unreadable: (pr: number) => post(`unreadable?pr=${pr}`),
+    /** Adds PR `pr` (10 or more) to the involved search with an unusual shape GitHub can send. */
+    odd: async (pr: number, shape: OddShape) => {
+      const response = await fetch(`${url}/__fake/odd?pr=${pr}`, {
+        method: "POST",
+        body: JSON.stringify(shape),
+      });
+      if (!response.ok) throw new Error(`The fake refused the odd shape: ${await response.text()}`);
+    },
     /**
      * `message` is what GitHub says about the refusal; without one the answer is `{}`. With
      * `login`, only that login's requests fail, each `ms` later.

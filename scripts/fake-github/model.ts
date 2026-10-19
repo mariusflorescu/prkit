@@ -67,6 +67,35 @@ export const pullDefaults = (): Pick<
   body: null,
 });
 export const unreadable = new Set<number>();
+/**
+ * What makes a pull request unusual in GitHub's answers. A `deleted` author answers
+ * `author: null` in GraphQL and GitHub's ghost user in REST; `labels: null` is the null
+ * connection GitHub's schema allows; `malformed` breaks GitHub's own schema (a null title);
+ * `refused` is a null search node with a FORBIDDEN error naming it.
+ */
+export const OddShape = Schema.Struct({
+  author: Schema.optionalKey(
+    Schema.Union([
+      Schema.Struct({ type: Schema.Literal("deleted") }),
+      Schema.Struct({
+        type: Schema.Literals(["Bot", "Mannequin", "EnterpriseUserAccount"]),
+        login: Schema.String,
+      }),
+    ]),
+  ),
+  deletedFork: Schema.optionalKey(Schema.Boolean),
+  labels: Schema.optionalKey(
+    Schema.NullOr(Schema.Array(Schema.Struct({ name: Schema.String, color: Schema.String }))),
+  ),
+  archived: Schema.optionalKey(Schema.Boolean),
+  malformed: Schema.optionalKey(Schema.Boolean),
+  refused: Schema.optionalKey(Schema.Boolean),
+});
+export type OddShape = typeof OddShape.Type;
+/** Pull requests `odd` added, each in the inbox's involved search, by number. */
+export const oddShapes = new Map<number, OddShape>();
+export const REFUSED_MESSAGE =
+  "Resource protected by organization SAML enforcement. You must grant your Personal Access token access to this organization.";
 export const pulls = new Map<number, Pull>();
 export const servedFiles = new Map<
   number,
@@ -179,6 +208,30 @@ pulls.set(9, {
   runs: [],
   ...pullDefaults(),
 });
+/** A new pull request by `outsider`, for `odd`. */
+export const addPull = (number: number, shape: OddShape) =>
+  pulls.set(number, {
+    number,
+    title: `Odd fixture ${number}`,
+    author: "outsider",
+    association: "CONTRIBUTOR",
+    headRepo: shape.deletedFork === true ? `outsider/${REPO}` : `${OWNER}/${REPO}`,
+    updatedAt: start + number * 60_000,
+    heads: [{ sha: sha(`${number}-0`), at: start, message: `Start fixture ${number}` }],
+    comments: [],
+    checks: "completed",
+    state: "OPEN",
+    draft: false,
+    behindBy: 0,
+    mergedAt: null,
+    conflicting: false,
+    checking: false,
+    required: false,
+    autoMerge: null,
+    reviews: [],
+    runs: [],
+    ...pullDefaults(),
+  });
 const person = (login: string) => ({ __typename: "User", login, avatarUrl: "" });
 const pullReference = (repository: string, number: number, title: string) => ({
   __typename: "PullRequest",

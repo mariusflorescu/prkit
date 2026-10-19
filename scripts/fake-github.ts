@@ -68,6 +68,11 @@
  *                                       request event that long ago (default 0); asking twice adds the event only
  *   POST unrequest?pr=<n>&login=<l>|team=<slug>   takes the request back, as a submitted review does; events stay
  *   POST unreadable?pr=<n>              the waits read answers a null node and a FORBIDDEN error for it from now on
+ *   POST odd?pr=<n>                     adds PR n (10 or more) by `outsider` to the involved search, with the
+ *                                       unusual shape the JSON body names (see `OddShape` in fake-github/model.ts):
+ *                                       an author GitHub types as deleted, a bot, a mannequin or an enterprise
+ *                                       account, a deleted fork, labels (or a null label connection), an archived
+ *                                       repository, a node that breaks GitHub's own schema, or one GitHub refuses
  *   POST fail?kind=<kind>&status=<s>&times=<n>&message=<m>&login=<l>&ms=<d>
  *                                       the next n requests counted as `kind` (say `graphql:review-waits`)
  *                                       get that status (default 502) and `{}`, or `{"message": m}` with a
@@ -103,6 +108,7 @@ import * as Schema from "effect/Schema";
 import { decodeSeed, seeds } from "./fake-github/context.ts";
 import { graphql } from "./fake-github/graphql.ts";
 import {
+  addPull,
   archived,
   encodeJson,
   fileChanges,
@@ -113,6 +119,8 @@ import {
   merge,
   mergeState,
   nodeId,
+  OddShape,
+  oddShapes,
   pulls,
   resetStats,
   type Reviewer,
@@ -147,6 +155,7 @@ const decodeFiles = Schema.decodeUnknownSync(
 const decodeTexts = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.Record(Schema.String, Schema.String)),
 );
+const decodeOdd = Schema.decodeUnknownSync(Schema.fromJsonString(OddShape));
 const decodeDescribe = Schema.decodeUnknownSync(
   Schema.fromJsonString(
     Schema.Struct({
@@ -425,6 +434,15 @@ const control = (url: URL, method: string, text: string, response: NodeHttp.Serv
     const reviewer = reviewerOf(url);
     if (reviewer !== undefined) {
       pull.requested = pull.requested.filter((pending) => !sameReviewer(pending, reviewer));
+      return answer({ ok: true });
+    }
+  }
+  if (name === "odd" && method === "POST") {
+    const number = Number(url.searchParams.get("pr"));
+    if (Number.isInteger(number) && number >= 10 && !pulls.has(number)) {
+      const shape = decodeOdd(text);
+      oddShapes.set(number, shape);
+      addPull(number, shape);
       return answer({ ok: true });
     }
   }

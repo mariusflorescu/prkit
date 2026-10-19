@@ -14,6 +14,7 @@ import {
   LOGIN,
   mergeState,
   nodeId,
+  oddShapes,
   OWNER,
   type Pull,
   pulls,
@@ -21,6 +22,7 @@ import {
   servedTexts,
   REPO,
   type Reviewer,
+  REFUSED_MESSAGE,
   rollup,
   sha,
   STACK,
@@ -41,11 +43,22 @@ const GraphQLRequest = Schema.fromJsonString(
 );
 const decodeRequest = Schema.decodeUnknownOption(GraphQLRequest);
 
+/** Who opened it as a search answers: an odd author as GitHub types it, else the account. */
+const authorNode = (pull: Pull) => {
+  const author = oddShapes.get(pull.number)?.author;
+  if (author === undefined)
+    return { login: oddShapes.has(pull.number) ? pull.author : LOGIN, avatarUrl: "" };
+  return author.type === "deleted" ? null : { login: author.login, avatarUrl: "" };
+};
+const labelsNode = (pull: Pull) => {
+  const labels = oddShapes.get(pull.number)?.labels;
+  return labels === undefined ? { nodes: [] } : labels === null ? null : { nodes: labels };
+};
 const searchNode = (pull: Pull) => ({
   ...stackFields(pull),
   id: nodeId(pull),
   number: pull.number,
-  title: pull.title,
+  title: oddShapes.get(pull.number)?.malformed === true ? null : pull.title,
   url: `https://github.com/${OWNER}/${REPO}/pull/${pull.number}`,
   state: pull.state,
   isDraft: pull.draft,
@@ -57,11 +70,18 @@ const searchNode = (pull: Pull) => ({
   deletions: pull.size.deletions,
   changedFiles: pull.size.files,
   reviewDecision: null,
-  author: { login: LOGIN, avatarUrl: "" },
+  author: authorNode(pull),
   repository: { name: REPO, owner: { login: OWNER } },
-  labels: { nodes: [] },
+  labels: labelsNode(pull),
   commits: { nodes: [{ commit: { statusCheckRollup: { state: rollup(pull) } } }] },
 });
+/** A pull request GitHub refuses comes back as a null node, with an error naming its place. */
+const listNode = (pull: Pull) =>
+  oddShapes.get(pull.number)?.refused === true ? null : searchNode(pull);
+const refusals = (at: ReadonlyArray<string>, nodes: ReadonlyArray<object | null>) =>
+  nodes.flatMap((node, index) =>
+    node === null ? [{ type: "FORBIDDEN", path: [...at, index], message: REFUSED_MESSAGE }] : [],
+  );
 const fingerprint = (pull: Pull) => ({
   ...stackFields(pull),
   title: pull.title,
@@ -83,10 +103,10 @@ const search = (numbers: ReadonlyArray<number>) => {
   const nodes = numbers.flatMap((number) => {
     const pull = pulls.get(number);
     if (pull === undefined) return [];
-    if (pull.state === "OPEN") return [searchNode(pull)];
+    if (pull.state === "OPEN") return [listNode(pull)];
     if (pull.mergedAt === null || Date.now() - pull.mergedAt >= SEARCH_LAG_MS) return [];
     stats.mergedInSearch++;
-    return [searchNode(pull)];
+    return [listNode(pull)];
   });
   return { issueCount: nodes.length, nodes };
 };
@@ -96,7 +116,7 @@ const actionRead = (pull: Pull) => ({
     squashMergeAllowed: true,
     rebaseMergeAllowed: true,
     autoMergeAllowed: true,
-    isArchived: false,
+    isArchived: oddShapes.get(pull.number)?.archived === true,
     viewerPermission: "WRITE",
     viewerDefaultMergeMethod: "MERGE",
     pullRequest: {
@@ -152,7 +172,7 @@ const ITEM_TYPES: Record<string, string> = {
 const FIELD_TYPES: Record<string, ReadonlyArray<string>> = {
   nodes: Object.values(ITEM_TYPES),
   assignee: ["Bot", "Mannequin", "Organization", "User"],
-  requestedReviewer: ["Bot", "Mannequin", "Team", "User"],
+  requestedReviewer: ["Bot", "EnterpriseTeam", "Mannequin", "Team", "User"],
   source: ["Issue", "PullRequest"],
   canonical: ["Issue", "PullRequest"],
 };
@@ -273,8 +293,7 @@ const timeline = (pull: Pull, query: string) => {
           errors: withheld.map((index) => ({
             type: "FORBIDDEN",
             path: ["repository", "pullRequest", "timelineItems", "nodes", index, "source"],
-            message:
-              "Resource protected by organization SAML enforcement. You must grant your Personal Access token access to this organization.",
+            message: REFUSED_MESSAGE,
           })),
         }),
   };
@@ -354,7 +373,7 @@ const reviewWaits = (ids: ReadonlyArray<string>) => {
         message:
           pull === undefined
             ? `Could not resolve to a node with the global id of '${id}'`
-            : "Resource protected by organization SAML enforcement. You must grant your Personal Access token access to this organization.",
+            : REFUSED_MESSAGE,
       });
       return null;
     }
@@ -477,11 +496,14 @@ export const graphql = (
                   headRefName: `feature-${pull.number}`,
                   isCrossRepository: pull.headRepo !== `${OWNER}/${REPO}`,
                   maintainerCanModify: true,
-                  headRepository: {
-                    nameWithOwner: pull.headRepo,
-                    isArchived: false,
-                    viewerPermission: "WRITE",
-                  },
+                  headRepository:
+                    oddShapes.get(pull.number)?.deletedFork === true
+                      ? null
+                      : {
+                          nameWithOwner: pull.headRepo,
+                          isArchived: false,
+                          viewerPermission: "WRITE",
+                        },
                 },
         },
       },
@@ -539,16 +561,20 @@ export const graphql = (
     const name = String(variables["name"] ?? "");
     const nodes =
       name === REPO
-        ? [...pulls.values()].filter((pull) => pull.number <= 6).map(searchNode)
+        ? [...pulls.values()]
+            .filter((pull) => pull.number <= 6 || oddShapes.has(pull.number))
+            .map(listNode)
         : name === "tools"
           ? [toolsNode()]
           : null;
+    const errors = refusals(["repository", "pullRequests", "nodes"], nodes ?? []);
     return {
       kind: "graphql:repository-pulls",
       cost: 1,
       data: {
         repository: nodes === null ? null : { pullRequests: { totalCount: nodes.length, nodes } },
       },
+      ...(errors.length === 0 ? {} : { errors }),
     };
   }
   if (query.includes("PrkitStack"))
@@ -557,18 +583,23 @@ export const graphql = (
     return reviewWaits(Option.getOrElse(decodeIds(variables["ids"]), () => []));
   if (query.includes("PrkitInbox")) {
     const sees = (number: number) => inboxOnly.get(login)?.has(number) ?? true;
+    const data = {
+      reviewRequested: search(
+        [1, 2, 3, 4, 5, 6, 9].filter(
+          (number) => sees(number) && (pulls.get(number)?.requested.length ?? 0) > 0,
+        ),
+      ),
+      authored: search([4, 5, 6].filter(sees)),
+      involved: search([...oddShapes.keys()].filter(sees)),
+    };
+    const errors = Object.entries(data).flatMap(([alias, found]) =>
+      refusals([alias, "nodes"], found.nodes),
+    );
     return {
       kind: "graphql:inbox",
       cost: 6,
-      data: {
-        reviewRequested: search(
-          [1, 2, 3, 4, 5, 6, 9].filter(
-            (number) => sees(number) && (pulls.get(number)?.requested.length ?? 0) > 0,
-          ),
-        ),
-        authored: search([4, 5, 6].filter(sees)),
-        involved: search([]),
-      },
+      data,
+      ...(errors.length === 0 ? {} : { errors }),
     };
   }
   if (query.includes("PrkitTexts")) {
