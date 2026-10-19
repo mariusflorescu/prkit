@@ -33,7 +33,7 @@
  * in no inbox search, and an archived `budget/attic` that lists leave out.
  *
  * `--home` gets `.config/gh/hosts.yml` and a `gh` that prints a fake token for the login
- * in `$GH_CONFIG_DIR/hosts.yml`; pass it to `verify-app start --github-api <url> --gh-home <dir>`.
+ * in `$GH_CONFIG_DIR/hosts.yml` and that directory's name; pass it to `verify-app start --github-api <url> --gh-home <dir>`.
  * `--second-account` adds `.config/gh-second` for `budget-second`, which sees the same pull
  * requests. `/user` answers for any `budget-` login and refuses any other token like GitHub
  * refuses an expired one (401). The ready line on stdout is
@@ -41,7 +41,8 @@
  * same url and this pid. Control, all under `/__fake/`:
  *
  *   GET  stats                          counts by kind, GraphQL points, requests while limited, and
- *                                       the latest requests with the login their token is for
+ *                                       the latest requests with the login and gh config directory
+ *                                       their token is for
  *   POST reset-stats
  *   POST comment?pr=<n>                 a new issue comment (bumps updatedAt)
  *   POST push?pr=<n>                    a new head commit (bumps updatedAt)
@@ -119,6 +120,7 @@ import {
   servedTexts,
   sha,
   stats,
+  tokenOwner,
   unreadable,
   writes,
 } from "./fake-github/model.ts";
@@ -167,17 +169,17 @@ const failures = new Map<string, { status: number; times: number; message: strin
 const remaining = (resource: Resource) =>
   Date.now() < quotas[resource].limitedUntil ? 0 : Math.max(0, LIMIT - quotas[resource].used);
 
-/** The login a request's fake token was printed for, empty without one. */
 const tokenLogin = (request: NodeHttp.IncomingMessage) =>
-  (request.headers.authorization ?? "").replace(/^(Bearer|token) fake-token-for-/, "");
+  tokenOwner(request.headers.authorization ?? "").login;
 
-const count = (kind: string, status: number, cost: number, login = "") => {
+const count = (kind: string, status: number, cost: number, token = "") => {
+  const { login, dir } = tokenOwner(token);
   stats.requests++;
   if (kind.startsWith("graphql")) stats.points += cost;
   else stats.rest += cost;
   if (status === 403 || kind.endsWith(":limited")) stats.refused++;
   stats.byKind[kind] = (stats.byKind[kind] ?? 0) + 1;
-  stats.log.push({ at: iso(Date.now()), kind, status, cost, login });
+  stats.log.push({ at: iso(Date.now()), kind, status, cost, login, dir });
   if (stats.log.length > 2000) stats.log.shift();
 };
 
@@ -512,7 +514,7 @@ const server = NodeHttp.createServer((request, response) => {
       const answer = graphql(body, tokenLogin(request));
       if (failedByControl(response, "graphql", answer.kind)) return;
       quotas.graphql.used += answer.cost;
-      count(answer.kind, 200, answer.cost, tokenLogin(request));
+      count(answer.kind, 200, answer.cost, request.headers.authorization);
       const withCost =
         body.includes("prkitRateLimit") && typeof answer.data === "object" && answer.data !== null
           ? { ...answer.data, prkitRateLimit: { cost: answer.cost } }
@@ -553,7 +555,7 @@ const server = NodeHttp.createServer((request, response) => {
     if ("commit" in answer) answer.commit();
     const cost = answer.status === 304 ? 0 : 1;
     quotas.core.used += cost;
-    count(answer.kind, answer.status, cost, tokenLogin(request));
+    count(answer.kind, answer.status, cost, request.headers.authorization);
     send(
       response,
       "core",
@@ -575,7 +577,7 @@ ghConfig("gh", LOGIN);
 if (values["second-account"]) ghConfig("gh-second", SECOND_LOGIN);
 NodeFS.writeFileSync(
   NodePath.join(home, "gh"),
-  `#!/bin/sh\necho "fake-token-for-$(sed -n 's/^  user: //p' "$GH_CONFIG_DIR/hosts.yml" | head -n 1)"\n`,
+  `#!/bin/sh\necho "fake-token-for-$(sed -n 's/^  user: //p' "$GH_CONFIG_DIR/hosts.yml" | head -n 1)@$(basename "$GH_CONFIG_DIR")"\n`,
   { mode: 0o755 },
 );
 server.listen(Number(values.port), "127.0.0.1", () => {

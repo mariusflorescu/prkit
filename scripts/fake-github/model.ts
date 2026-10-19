@@ -326,7 +326,14 @@ type Stats = {
   /** Merged PRs an inbox search still found, as GitHub's index does just after a merge. */
   mergedInSearch: number;
   byKind: Record<string, number>;
-  log: Array<{ at: string; kind: string; status: number; cost: number; login: string }>;
+  log: Array<{
+    at: string;
+    kind: string;
+    status: number;
+    cost: number;
+    login: string;
+    dir: string;
+  }>;
 };
 const emptyStats = (): Stats => ({
   since: iso(Date.now()),
@@ -339,6 +346,13 @@ const emptyStats = (): Stats => ({
   log: [],
 });
 export let stats = emptyStats();
+/** Who a fake token was printed for: `fake-token-for-<login>@<gh config directory's name>`. */
+export const tokenOwner = (authorization: string) => {
+  const [login = "", dir = ""] = authorization
+    .replace(/^(Bearer|token) fake-token-for-/, "")
+    .split("@");
+  return { login, dir };
+};
 export const resetStats = () => {
   stats = emptyStats();
 };
