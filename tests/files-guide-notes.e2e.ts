@@ -120,8 +120,8 @@ test(
       const fileNote = browser.locator(`[data-path="${LIMITS}"] [data-file-diff-note]`);
       const labelled = (label: string) =>
         browser.locator(`[data-guide-note][aria-label="${label}"]`);
-      const notesLine = (text: string) =>
-        browser.locator("[data-pr-files] [role='status']").filter({ hasText: text });
+      const hiddenOne = tabs.getByRole("button", "1 guide note hidden");
+      const notesStatus = browser.locator("nav [data-guide-notes-status]");
       const hide = tabs.getByRole("button", "Hide guide notes");
       const show = tabs.getByRole("button", "Show guide notes");
       await expect(slug).toBeVisible({ timeout: 30_000 });
@@ -131,9 +131,10 @@ test(
       await expect(fileNote).toContainText("Guide");
       await expect(fileNote).toContainText(FILE_NOTE);
       await expect(hide).toHaveAttribute("aria-pressed", "true");
-      await expect(
-        screen.getByText("1 guide note is hidden: GitHub's diff doesn't show its line now."),
-      ).toBeVisible();
+      await expect(hiddenOne).toBeVisible();
+      await expect(notesStatus).toContainText(
+        "1 guide note is hidden: GitHub's diff doesn't show its line now.",
+      );
       await expect(file).toContainText("3 questions");
       await expect(file).toContainText("1 risk");
       await slug.scrollIntoView();
@@ -162,9 +163,7 @@ test(
       await expect(show).toHaveAttribute("aria-pressed", "false");
       await expect(browser.locator("[data-pr-files] [data-guide-note]")).toHaveCount(0);
       await expect(fileNote).toHaveCount(0);
-      await expect(
-        screen.getByText("1 guide note is hidden: GitHub's diff doesn't show its line now."),
-      ).toBeHidden();
+      await expect(hiddenOne).toHaveCount(0);
       await app.screenshot("files-notes-hidden");
       await browser.evaluate(() => {
         localStorage.clear();
@@ -197,11 +196,11 @@ test(
       await expect(url.getByRole("button", "Add as comment, risk on old line 2")).toBeVisible();
       await expect(check).toHaveCount(0);
       await expect(fileNote).toHaveCount(0);
-      const older = notesLine("Guide notes come from r1, written for an older commit.");
-      await expect(older).toContainText(
-        "Guide notes come from r1, written for an older commit. They show only where the code still reads the same. 3 no longer match and are hidden.",
+      await expect(tabs.getByRole("button", "Guide notes from an older commit")).toBeVisible();
+      await expect(notesStatus).toContainText(
+        "Guide notes come from r1, written for an older commit. They show only where the code still reads the same. 3 no longer match and are hidden. prkit is updating the guide.",
+        { timeout: 30_000 },
       );
-      await expect(older).toContainText("prkit is updating the guide.", { timeout: 30_000 });
       await expect(slug.getByRole("button", "Add as comment, question on line 7")).toHaveCount(0);
       await expect(slug.getByRole("status")).toHaveText("In your review.");
       await browser.evaluate(() => {
@@ -218,11 +217,12 @@ test(
       const words = "Does short need its own test, or does the check above cover it?";
       await braceField.fill(words);
       await hide.tap();
-      await expect(notesLine("Guide notes hide once your comment is done.")).toBeVisible();
+      const hiding = tabs.getByText("Guide notes hide after your comment");
+      await expect(hiding).toBeVisible();
       await expect(brace).toBeVisible();
       await expect(braceField).toHaveValue(words);
       await show.tap();
-      await expect(notesLine("Guide notes hide once your comment is done.")).toHaveCount(0);
+      await expect(hiding).toHaveCount(0);
       await expect(braceField).toHaveValue(words);
       await braceField.press("Meta+Enter");
       await expect(brace.getByRole("status")).toHaveText("In your review.");
@@ -233,23 +233,22 @@ test(
       });
       claude.release();
       await expect.poll(() => revisionCount(run.home), { timeout: 120_000 }).toBe(2);
-      const newer = notesLine("A newer guide is ready.");
+      const newer = tabs.getByRole("button", "Show its notes");
       await expect(newer).toBeVisible({ timeout: 30_000 });
+      await expect(notesStatus).toContainText("A newer guide is ready.");
       await expect(check).toHaveCount(0);
       await browser.evaluate(() => {
         document.querySelector("[data-pr-scroll]")?.scrollTo({ top: 0, behavior: "instant" });
         return true;
       });
       await screenshotLightAndDark(app, browser, "files-notes-newer");
-      await newer.getByRole("button", "Show its notes").tap();
+      await newer.tap();
       await expect(check.getByRole("button", "Add as comment, question on line 14")).toBeVisible({
         timeout: 30_000,
       });
       await expect(fileNote).toContainText(FILE_NOTE);
       await expect(brace.getByRole("status")).toHaveText("In your review.");
-      await expect(
-        screen.getByText("1 guide note is hidden: GitHub's diff doesn't show its line now."),
-      ).toBeVisible();
+      await expect(hiddenOne).toBeVisible();
       expect(await fake.writes()).toEqual([]);
       expect(git.pushes()).toEqual([]);
     } finally {

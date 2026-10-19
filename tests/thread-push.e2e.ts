@@ -231,18 +231,19 @@ test(
       const [threadTop = 0, noteTop = 0] = tops(before);
 
       // A push that leaves the file alone: nothing in the file changes in any frame, and the list
-      // moves once, as the line about the guide notes' older commit arrives above it.
+      // stays where it is while the tab row says the guide notes come from an older commit.
       const untouched = await push({
         "src/change-0.ts": 'export const change0 = "Second fixture 9";\n',
       });
       expect(untouched).toEqual([before]);
-      expect(await listTops(browser)).toHaveLength(2);
+      expect(await listTops(browser)).toHaveLength(1);
       await shots(app, browser, "untouched", before);
 
       // Lines added above: the thread and the note move with their code once, in the frame the
       // new diff draws, and GitHub's answer moves nothing.
       await fake.context(9, onCheck(14));
       const moved = await push({ [LIMITS]: MOVED });
+      expect(await listTops(browser)).toHaveLength(1);
       expect(moved).toHaveLength(2);
       expect(moved[0]).toBe(before);
       const after = moved[1] ?? "";
@@ -265,6 +266,7 @@ test(
       });
       const closed = after.replace(" open @", " resolved @");
       expect(resolved).toEqual([after, closed]);
+      expect(await listTops(browser)).toHaveLength(1);
       await shots(app, browser, "resolved", closed);
 
       // Its line deleted: it goes to the outdated threads once, and the note stays.
@@ -272,6 +274,7 @@ test(
       const deleted = await push({ [LIMITS]: GONE });
       const outdated = `group Outdated (1 thread) | ${after.split(" | ")[1] ?? ""}`;
       expect(deleted).toEqual([closed, outdated]);
+      expect(await listTops(browser)).toHaveLength(1);
       await shots(app, browser, "deleted", outdated);
     } finally {
       stopFakeInstance(name, { keepHome: false });
