@@ -1,40 +1,23 @@
 import {
   type AccountId,
-  AccountId as AccountIdSchema,
-  AgentInstanceId,
   type AgentSelection,
-  AgentProviderKind,
   AttemptConfig,
-  type AttemptFile,
   AttemptId,
   AttemptTrigger,
-  checkContextOf,
-  coverageProblems,
   DiffSnapshot,
   type DoneReason,
-  DraftGuide,
   everythingSkippedMessage,
-  type DraftGuideResult,
   effectiveSelection,
   explicitModelOptions,
   findAgentEntry,
   findAgentModel,
   type GuidanceEdit,
-  type Guide,
-  GuideNotFoundError,
-  type GuidePatch,
   type GuideRepository,
-  type GuideRevision,
   isAccountLogin,
   isLocalReviewKey,
   LocalReviewKey,
   LocalSource,
-  mergeDraft,
-  ModelOptionSelection,
   NormalizedGuide,
-  normalizeDraft,
-  normalizeGuide,
-  patchGuide,
   projectSnapshot,
   PullRequestKey,
   type PullRequestRef,
@@ -42,81 +25,47 @@ import {
   type PullRequestStack,
   type ResolvedGuideConfig,
   type Review,
-  type ReviewActivity,
   type ReviewCore,
-  ReviewActivityKind,
   ReviewError,
-  type ReviewFeedEntry,
-  type ReviewFeedEvent,
   ReviewId,
   ReviewKey,
-  ReviewPhase,
-  type ReviewSnapshot,
   ReviewStateError,
   ReviewStatus,
   type ReviewWatchEvent,
   refFromKey,
-  reviewedSnapshot,
-  RiskLevel,
   riskSignals,
   SKIPPED_CHAPTER_ID,
   selectionProblem,
   type StackGuidesResult,
-  type TypicalDuration,
-  withoutUnwrittenChapters,
-  withSkippedChapter,
 } from "@prkit/contracts";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
-import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as Struct from "effect/Struct";
-import { HttpServer } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
-import * as SqlClient from "effect/sql/SqlClient";
 
-import { GitHubAccounts } from "../accounts/GitHubAccounts.ts";
 import { type AgentProvider, GUIDE_TOOLS } from "../agents/AgentProvider.ts";
 import { turnTmpDir } from "../agents/commandReach.ts";
 import type { FileRead } from "../agents/commandReads.ts";
 import { processStartTime, reapAgentGroup } from "../agents/agentProcess.ts";
-import { Agents } from "../agents/Agents.ts";
-import * as ServerConfig from "../config.ts";
 import { GitHubApi, GitHubPriority } from "../github/GitHubApi.ts";
-import { makeKeyedGate } from "../github/keyedGate.ts";
-import { boundPort } from "../listenAddress.ts";
-import { McpTokens } from "../mcp/McpTokens.ts";
 import { decodeEach, decodeReadable } from "../persistence/damagedRows.ts";
-import { PullRequests } from "../pullRequests/PullRequests.ts";
 import { LocalCapture } from "../repo/localCapture.ts";
-import {
-  type CacheRef,
-  type Checkout,
-  type Prepared,
-  RepoCache,
-  RepoError,
-  type Since,
-} from "../repo/RepoCache.ts";
+import { type CacheRef, type Checkout, type Prepared, type Since } from "../repo/RepoCache.ts";
 import { ContextPriority, unattended } from "./ContextPriority.ts";
 import { contextJson, contextNotes } from "./contextFile.ts";
-import { GuideConfigStore } from "./GuideConfigStore.ts";
 import { makeGuideStream } from "./guideStream.ts";
-import { GuideSettingsStore } from "./GuideSettingsStore.ts";
 import { decide, type Observation, observe, STARTABLE } from "./lifecycle.ts";
 import { makeLocalReviews } from "./localReviews.ts";
 import {
   buildPrompt,
-  type DiffSection,
   NUDGE_PROMPT,
   numberedDiff,
   type PromptInput,
@@ -125,114 +74,50 @@ import {
 import { reviewTarget } from "./reviewTarget.ts";
 import { stopUnreadableReviews } from "./unreadableReviews.ts";
 import { StartedBy } from "../outside/StartedBy.ts";
+import {
+  AttemptFailure,
+  cacheOf,
+  encodeOptions,
+  encodeStatus,
+  type LocalStoredReview,
+  makeReviewStore,
+  type NewSubject,
+  type PendingRead,
+  plural,
+  type PullRequestReview,
+  PullRequestRow,
+  type ReadContext,
+  type ReadyNotice,
+  ReviewRow,
+  type StoredAgent,
+  type StoredReview,
+  toPullRequestReview,
+  toStored,
+} from "./reviewStore.ts";
+import { makeGuideTools } from "./guideTools.ts";
+import { makeReviewReads } from "./reviewReads.ts";
 
-export const SubmitGuideReceipt = Schema.Struct({
-  message: Schema.String,
-  chapters: Schema.Int,
-  files: Schema.Int,
-  warnings: Schema.Array(Schema.String),
-});
-export type SubmitGuideReceipt = typeof SubmitGuideReceipt.Type;
+export {
+  AttemptRow,
+  type Change,
+  type LocalStoredReview,
+  type NewSubject,
+  type ReadyNotice,
+  ReviewRow,
+  type StoredAgent,
+  type StoredReview,
+} from "./reviewStore.ts";
+export {
+  SubmitGuideReceipt,
+  SubmitGuideRejected,
+  ToolReceipt,
+  ToolRejected,
+} from "./guideTools.ts";
+export { type RevisionContext } from "./reviewReads.ts";
 
-/** `submit_guide` failed; the message goes back to the agent as the tool result. */
-export class SubmitGuideRejected extends Schema.TaggedError<SubmitGuideRejected>()(
-  "SubmitGuideRejected",
-  { message: Schema.String },
-) {}
-
-/** A second call in a turn that already handed prkit its guide, such as a parallel tool call. */
-const ALREADY_STORED =
-  "prkit already has this attempt's guide, so it won't use this one. End your turn now.";
-const NO_LONGER_CURRENT =
-  "This attempt is no longer current, so prkit won't use this guide. End your turn now.";
-
-/** What `report_progress`, `note_file` and `submit_draft` answer the agent. */
-export const ToolReceipt = Schema.Struct({ message: Schema.String });
-export type ToolReceipt = typeof ToolReceipt.Type;
-
-/** One of the progress tools refused the call; the message goes back to the agent. */
-export class ToolRejected extends Schema.TaggedError<ToolRejected>()("ToolRejected", {
-  message: Schema.String,
-}) {}
-
-/** Ends an attempt as `failed(reason)`. */
-class AttemptFailure extends Schema.TaggedError<AttemptFailure>()("AttemptFailure", {
-  reason: Schema.Literals([
-    "account",
-    "github",
-    "repository",
-    "agent-auth",
-    "agent",
-    "no-guide",
-    "interrupted",
-    "settings",
-  ]),
-  message: Schema.String,
-}) {}
 const fail = (reason: AttemptFailure["reason"], message: string) =>
   Effect.fail(new AttemptFailure({ reason, message }));
 
-const ReviewFields = {
-  id: ReviewId,
-  provider: AgentProviderKind,
-  instance_id: AgentInstanceId,
-  model: Schema.NullOr(Schema.String),
-  model_options: Schema.fromJsonString(Schema.Array(ModelOptionSelection)),
-  session_id: Schema.NullOr(Schema.String),
-  status: Schema.fromJsonString(ReviewStatus),
-  current_attempt_id: Schema.NullOr(AttemptId),
-  latest_revision: Schema.NullOr(Schema.Int),
-  watch_problem: Schema.NullOr(Schema.String),
-  created_at: Schema.String,
-  updated_at: Schema.String,
-};
-const PullRequestRow = Schema.Struct({
-  ...ReviewFields,
-  pr_key: PullRequestKey,
-  account_id: AccountIdSchema,
-  local: Schema.Null,
-});
-const LocalRow = Schema.Struct({
-  ...ReviewFields,
-  pr_key: LocalReviewKey,
-  account_id: Schema.Null,
-  local: Schema.fromJsonString(LocalSource),
-});
-/** A pull request's review with its account, or a review of local changes, with none. */
-export const ReviewRow = Schema.Union([PullRequestRow, LocalRow]);
-const OutlineChapters = Schema.Array(
-  Schema.Struct({ id: Schema.String, title: Schema.String, written: Schema.Boolean }),
-);
-export const AttemptRow = Schema.Struct({
-  id: AttemptId,
-  revision: Schema.Int,
-  trigger: AttemptTrigger,
-  phase: ReviewPhase,
-  head_sha: Schema.NullOr(Schema.String),
-  commits: Schema.NullOr(Schema.Int),
-  started_at: Schema.String,
-  finished_at: Schema.NullOr(Schema.String),
-  narration: Schema.NullOr(Schema.String),
-  started_by: Schema.NullOr(Schema.String),
-  draft_outline: Schema.NullOr(Schema.fromJsonString(OutlineChapters)),
-  draft_version: Schema.Int,
-});
-const FileRow = Schema.Struct({
-  path: Schema.String,
-  previous_path: Schema.NullOr(Schema.String),
-  status: Schema.Literals(["added", "modified", "removed", "renamed"]),
-  additions: Schema.Int,
-  deletions: Schema.Int,
-  read_at: Schema.NullOr(Schema.String),
-  note: Schema.NullOr(Schema.String),
-});
-const RevisionRow = Schema.Struct({
-  revision: Schema.Int,
-  attempt_id: AttemptId,
-  trigger: AttemptTrigger,
-  head_sha: Schema.String,
-  created_at: Schema.String,
-});
 const PreviousRow = Schema.Struct({
   revision: Schema.Int,
   head_sha: Schema.String,
@@ -240,63 +125,6 @@ const PreviousRow = Schema.Struct({
   base_ref: Schema.NullOr(Schema.String),
   guide: Schema.fromJsonString(NormalizedGuide),
   config_hash: Schema.String,
-});
-const ActivityRow = Schema.Struct({
-  id: Schema.Int,
-  attempt_id: AttemptId,
-  at: Schema.String,
-  kind: ReviewActivityKind,
-  text: Schema.String,
-  detail: Schema.NullOr(Schema.String),
-});
-const SubmitRow = Schema.Struct({
-  review_id: ReviewId,
-  pr_key: ReviewKey,
-  current_attempt_id: Schema.NullOr(AttemptId),
-  finished_at: Schema.NullOr(Schema.String),
-  snapshot: Schema.NullOr(Schema.fromJsonString(DiffSnapshot)),
-  draft: Schema.NullOr(Schema.fromJsonString(DraftGuide)),
-  config: Schema.NullOr(Schema.fromJsonString(AttemptConfig)),
-});
-/** The attempt's guide once one passed, as stored. */
-const CheckRow = Schema.Struct({ ...SubmitRow.fields, guide: Schema.NullOr(Schema.String) });
-const DraftRow = Schema.Struct({
-  snapshot: Schema.NullOr(Schema.fromJsonString(DiffSnapshot)),
-  draft: Schema.NullOr(Schema.fromJsonString(DraftGuide)),
-  config: Schema.NullOr(Schema.fromJsonString(AttemptConfig)),
-  draft_version: Schema.Int,
-});
-const FeedRow = Schema.Struct({
-  pr_key: PullRequestKey,
-  account_id: AccountIdSchema,
-  status: Schema.fromJsonString(ReviewStatus),
-  latest_revision: Schema.NullOr(Schema.Int),
-  /** Null with no revision and for revisions written before risk. */
-  risk: Schema.NullOr(RiskLevel),
-});
-const DurationRow = Schema.Struct({ seconds: Schema.Number });
-const GuideRow = Schema.Struct({
-  revision: Schema.Int,
-  head_sha: Schema.String,
-  created_at: Schema.String,
-  guide: Schema.fromJsonString(NormalizedGuide),
-  snapshot: Schema.fromJsonString(DiffSnapshot),
-  config: Schema.fromJsonString(AttemptConfig),
-});
-const RevisionContextRow = Schema.Struct({
-  pr_key: ReviewKey,
-  local: Schema.NullOr(Schema.fromJsonString(LocalSource)),
-  provider: AgentProviderKind,
-  instance_id: AgentInstanceId,
-  model: Schema.NullOr(Schema.String),
-  model_options: Schema.fromJsonString(Schema.Array(ModelOptionSelection)),
-  writer_provider: AgentProviderKind,
-  writer_instance: AgentInstanceId,
-  head_sha: Schema.String,
-  guide: Schema.fromJsonString(NormalizedGuide),
-  snapshot: Schema.fromJsonString(DiffSnapshot),
-  config: Schema.fromJsonString(AttemptConfig),
-  session_id: Schema.NullOr(Schema.String),
 });
 const IdRow = Schema.Struct({ id: Schema.String });
 const StaleRow = Schema.Struct({
@@ -306,159 +134,29 @@ const StaleRow = Schema.Struct({
   agent_started: Schema.NullOr(Schema.String),
 });
 
-const decodeReviews = Schema.decodeUnknownEffect(Schema.Array(ReviewRow));
 /** Lists read every row they can and leave a damaged one out (logged), so it fails alone. */
 const readableReviews = decodeReadable("reviews", ReviewRow);
 const decodeEachReview = decodeEach("reviews", ReviewRow);
 const readablePullRequests = decodeReadable("reviews", PullRequestRow);
-const readableLocals = decodeReadable("reviews", LocalRow);
-const readableFeed = decodeReadable("reviews", FeedRow);
-const decodePullRequests = Schema.decodeUnknownEffect(Schema.Array(PullRequestRow));
-const decodeLocals = Schema.decodeUnknownEffect(Schema.Array(LocalRow));
-const decodeAttempts = Schema.decodeUnknownEffect(Schema.Array(AttemptRow));
-const decodeRevisions = Schema.decodeUnknownEffect(Schema.Array(RevisionRow));
 const decodePrevious = Schema.decodeUnknownEffect(Schema.Array(PreviousRow));
-const decodeActivity = Schema.decodeUnknownEffect(Schema.Array(ActivityRow));
-const decodeFiles = Schema.decodeUnknownEffect(Schema.Array(FileRow));
-const decodeSubmit = Schema.decodeUnknownEffect(Schema.Array(SubmitRow));
-const decodeCheck = Schema.decodeUnknownEffect(Schema.Array(CheckRow));
-const decodeDraft = Schema.decodeUnknownEffect(Schema.Array(DraftRow));
-const decodeDraftOnly = Schema.decodeUnknownEffect(
-  Schema.Array(Schema.Struct({ draft: Schema.NullOr(Schema.fromJsonString(DraftGuide)) })),
-);
-const decodeHeads = Schema.decodeUnknownEffect(
-  Schema.Array(Schema.Struct({ head_sha: Schema.NullOr(Schema.String) })),
-);
-const decodeDurations = Schema.decodeUnknownEffect(Schema.Array(DurationRow));
 const decodeCount = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ count: Schema.Int })));
-const decodeGuides = Schema.decodeUnknownEffect(Schema.Array(GuideRow));
-const decodeRevisionContext = Schema.decodeUnknownEffect(Schema.Array(RevisionContextRow));
-const isLocalKey = Schema.is(LocalReviewKey);
 const decodeIds = Schema.decodeUnknownEffect(Schema.Array(IdRow));
 const decodeStale = Schema.decodeUnknownEffect(Schema.Array(StaleRow));
 const decodeStarted = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ latest_revision: Schema.NullOr(Schema.Int) })),
 );
-const decodeInserted = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ id: Schema.Int })));
-const decodeBatch = Schema.decodeUnknownEffect(
-  Schema.Array(Schema.Struct({ batch_id: Schema.NullOr(Schema.String) })),
-);
-const decodeOutcomes = Schema.decodeUnknownEffect(
-  Schema.Array(
-    Schema.Struct({
-      finished_at: Schema.NullOr(Schema.String),
-      outcome: Schema.NullOr(Schema.String),
-    }),
-  ),
-);
-const decodeCaptures = Schema.decodeUnknownEffect(
-  Schema.Array(Schema.Struct({ capture: Schema.NullOr(Schema.fromJsonString(LocalCapture)) })),
-);
 const decodeLocalKeys = decodeEach("reviews", Schema.Struct({ pr_key: LocalReviewKey }));
-const decodeClaimed = Schema.decodeUnknownEffect(
-  Schema.Array(Schema.Struct({ origin_key: PullRequestKey, account_id: AccountIdSchema })),
-);
-const encodeStatus = Schema.encodeSync(Schema.fromJsonString(ReviewStatus));
-const encodeGuide = Schema.encodeSync(Schema.fromJsonString(NormalizedGuide));
 /** The previous guide as the agent reads it: indented, so no line is too long to read. */
 const encodeReadableGuide = Schema.encodeSync(
   Schema.fromJsonString(NormalizedGuide.mapFields(Struct.omit(["signals"])), { space: 2 }),
 );
 const encodeSnapshot = Schema.encodeSync(Schema.fromJsonString(DiffSnapshot));
 const encodeConfig = Schema.encodeSync(Schema.fromJsonString(AttemptConfig));
-const encodeDraft = Schema.encodeSync(Schema.fromJsonString(DraftGuide));
-const encodeOutline = Schema.encodeSync(Schema.fromJsonString(OutlineChapters));
-const encodeOptions = Schema.encodeSync(Schema.fromJsonString(Schema.Array(ModelOptionSelection)));
 const encodeLocal = Schema.encodeSync(Schema.fromJsonString(LocalSource));
-const encodeCapture = Schema.encodeSync(Schema.fromJsonString(LocalCapture));
 
-/** A pull request's review. */
-interface PullRequestReview extends Review {
-  readonly kind: "pull-request";
-}
-/** A review of local changes. It has no account to read anything through. */
-export interface LocalStoredReview extends ReviewCore {
-  readonly kind: "local";
-  readonly key: LocalReviewKey;
-  readonly local: LocalSource;
-}
-export type StoredReview = PullRequestReview | LocalStoredReview;
 /** What the watcher reads and applies its reads to: pull requests only. */
 export type WatchedReview = PullRequestReview;
 
-const coreOf = (row: typeof ReviewRow.Type): ReviewCore => ({
-  id: row.id,
-  provider: row.provider,
-  instance: row.instance_id,
-  model: row.model,
-  modelOptions: row.model_options,
-  sessionId: row.session_id,
-  status: row.status,
-  latestRevision: row.latest_revision,
-  watchProblem: row.watch_problem,
-  createdAt: row.created_at,
-  updatedAt: row.updated_at,
-});
-const toPullRequestReview = (row: typeof PullRequestRow.Type): PullRequestReview => ({
-  kind: "pull-request",
-  ...coreOf(row),
-  key: row.pr_key,
-  accountId: row.account_id,
-});
-const toLocalReview = (row: typeof LocalRow.Type): LocalStoredReview => ({
-  kind: "local",
-  ...coreOf(row),
-  key: row.pr_key,
-  local: row.local,
-});
-const toStored = (row: typeof ReviewRow.Type): StoredReview =>
-  row.local === null ? toPullRequestReview(row) : toLocalReview(row);
-/** The review as the pull request APIs answer it. */
-const toReview = (review: PullRequestReview): Review => ({
-  id: review.id,
-  key: review.key,
-  accountId: review.accountId,
-  provider: review.provider,
-  instance: review.instance,
-  model: review.model,
-  modelOptions: review.modelOptions,
-  sessionId: review.sessionId,
-  status: review.status,
-  latestRevision: review.latestRevision,
-  watchProblem: review.watchProblem,
-  createdAt: review.createdAt,
-  updatedAt: review.updatedAt,
-});
-/** Where a review's objects live; null for a pull request whose key can't be read. */
-const cacheOf = (review: StoredReview): CacheRef | null => {
-  if (review.kind === "local") return { _tag: "local", key: review.key };
-  const ref = refFromKey(review.key);
-  return ref === null ? null : { _tag: "pull-request", ref };
-};
-const toActivity = (row: typeof ActivityRow.Type): ReviewActivity => ({
-  id: row.id,
-  attemptId: row.attempt_id,
-  at: row.at,
-  kind: row.kind,
-  text: row.text,
-  detail: row.detail,
-});
-const toFeedEntry = (row: typeof FeedRow.Type): ReviewFeedEntry => ({
-  key: row.pr_key,
-  accountId: row.account_id,
-  status: row.status._tag,
-  latestRevision: row.latest_revision,
-  risk: row.risk,
-});
-
-/** A review's agent: what the user picked, or `model` null for the agent's own default. */
-export interface StoredAgent {
-  readonly instance: AgentInstanceId;
-  /** The instance's kind, so a review still names its agent after the instance is removed. */
-  readonly provider: AgentProviderKind;
-  readonly model: string | null;
-  readonly options: AgentSelection["options"];
-}
 const storedAgentOf = (review: ReviewCore): StoredAgent => ({
   instance: review.instance,
   provider: review.provider,
@@ -467,22 +165,6 @@ const storedAgentOf = (review: ReviewCore): StoredAgent => ({
 });
 /** Who started a review: the user, or auto mode for a review request. */
 export type Origin = "user" | "auto" | "outside";
-/** What a new review is about: a pull request, through an account, or local changes. */
-export type NewSubject =
-  | { readonly kind: "pull-request"; readonly key: PullRequestKey; readonly accountId: AccountId }
-  | {
-      readonly kind: "local";
-      readonly key: LocalReviewKey;
-      readonly local: LocalSource;
-      /** What the first attempt reviews. */
-      readonly capture: LocalCapture;
-    };
-
-/** One line, trimmed and cut to `max` characters, for what the agent reports. */
-const clip = (text: string, max: number) => {
-  const line = text.replaceAll(/\s+/g, " ").trim();
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
-};
 
 const short = (sha: string) => sha.slice(0, 7);
 /** The guide is current for this head and base; the base is null only for revisions from before stacks. */
@@ -495,7 +177,6 @@ const ENDED: Record<DoneReason, string> = {
   closed: "The pull request was closed",
   stopped: "Stopped by the user",
 };
-const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 /** What an attempt tells the user and the agent about the revision it follows. */
 const following = (
@@ -562,40 +243,6 @@ const sinceDiff = (snapshot: DiffSnapshot) =>
         )
         .join("");
 
-/** Change notices for `watch`: which review changed and the activity lines it gained. */
-export interface Change {
-  readonly key: ReviewKey;
-  readonly activity: ReadonlyArray<ReviewActivity>;
-}
-
-/** A guide the user asked for (or auto mode started) was accepted, or a stack's batch finished. */
-export type ReadyNotice =
-  | {
-      readonly _tag: "ready";
-      readonly review: StoredReview;
-      readonly title: string;
-      readonly revision: number;
-      readonly chapters: number;
-    }
-  | Extract<ReviewFeedEvent, { _tag: "stack-ready" }>;
-
-/** A notice as the pull request feed sends it; a local review's ready isn't one of its events. */
-const feedNotice = (notice: ReadyNotice): ReadonlyArray<ReviewFeedEvent> =>
-  notice._tag === "stack-ready"
-    ? [notice]
-    : notice.review.kind === "pull-request"
-      ? [
-          {
-            _tag: "ready",
-            key: notice.review.key,
-            accountId: notice.review.accountId,
-            title: notice.title,
-            revision: notice.revision,
-            chapters: notice.chapters,
-          },
-        ]
-      : [];
-
 /** What an attempt's subject hands the rest of the attempt: the code, settings and prompt. */
 interface AttemptPlan {
   readonly code: Prepared;
@@ -619,23 +266,6 @@ type PullRequestFront =
   | { readonly _tag: "plan"; readonly plan: AttemptPlan }
   | { readonly _tag: "ended"; readonly key: PullRequestKey; readonly state: "merged" | "closed" };
 
-/** Where an attempt's reads point, so a tool's paths can be matched to changed files. */
-interface ReadContext {
-  readonly worktree: string;
-  readonly diffFile: string;
-  readonly sections: ReadonlyArray<DiffSection>;
-  readonly paths: ReadonlySet<string>;
-  /** Line ranges of the numbered diff the agent has seen so far, merged. */
-  covered: ReadonlyArray<readonly [number, number]>;
-}
-
-/** A tool call still running: the files it is reading and the diff lines it prints. */
-interface PendingRead {
-  readonly direct: ReadonlyArray<string>;
-  readonly sections: ReadonlyArray<string>;
-  readonly ranges: ReadonlyArray<readonly [number, number]>;
-}
-
 /** Adds a range to sorted, merged ranges. */
 const mergeRange = (
   ranges: ReadonlyArray<readonly [number, number]>,
@@ -651,242 +281,73 @@ const mergeRange = (
       return merged;
     }, []);
 
-/** What a question about one accepted revision needs to know (`asks/Asks.ts`), read in one call. */
-export interface RevisionContext {
-  readonly reviewId: ReviewId;
-  readonly key: ReviewKey;
-  /**
-   * What the prompt calls the change: "acme/widgets#12" for a pull request, "the local changes
-   * in widgets on `main`" for a local review.
-   */
-  readonly label: string;
-  readonly revision: number;
-  readonly headSha: string;
-  readonly guide: NormalizedGuide;
-  /** The diff the guide explains: the attempt's snapshot without the files its settings skipped. */
-  readonly snapshot: DiffSnapshot;
-  /** The agent that wrote this revision. */
-  readonly writer: {
-    readonly instance: AgentInstanceId;
-    readonly kind: AgentProviderKind;
-    /**
-     * Its conversation exactly as it stood when this revision was accepted, with the folder it
-     * was made in. Null once no attempt after it can be ruled out of having added to it: one
-     * ran an agent, or one hasn't finished.
-     */
-    readonly session: { readonly id: string; readonly cwd: string } | null;
-  };
-  /** The review's agent now, which answers with the review's model choice. */
-  readonly agent: {
-    readonly instance: AgentInstanceId;
-    readonly kind: AgentProviderKind;
-    readonly model: string | null;
-    readonly options: ReadonlyArray<ModelOptionSelection>;
-  };
-  /** Checks the revision's code out at `dir`, a folder whose name no other checkout of the repository has. */
-  readonly checkout: (dir: string) => Effect.Effect<Checkout, RepoError>;
-}
-
 export class Reviews extends Context.Service<Reviews, Effect.Success<typeof make>>()(
   "@prkit/server/reviews/Reviews",
 ) {}
 
 export const make = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
-  const config = yield* ServerConfig.ServerConfig;
-  const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const crypto = yield* Crypto.Crypto;
-  const repo = yield* RepoCache;
-  const agents = yield* Agents;
-  const tokens = yield* McpTokens;
-  const accounts = yield* GitHubAccounts;
-  const api = yield* GitHubApi;
-  const guideSettings = yield* GuideSettingsStore;
-  const guideConfig = yield* GuideConfigStore;
-  const pullRequests = yield* PullRequests;
-  const server = yield* HttpServer.HttpServer;
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const scope = yield* Effect.scope;
-
-  const mcpUrl = `http://${config.host}:${Option.getOrElse(boundPort(server.address), () => config.port)}/mcp`;
-  const instructions = yield* fs.readFileString(
-    path.join(path.dirname(yield* path.fromFileUrl(new URL(import.meta.url))), "instructions.md"),
-  );
-  const diffsDir = path.join(config.home, "diffs");
-  yield* fs.makeDirectory(diffsDir, { recursive: true });
-  /** Names this server run; startup only interrupts attempts other runs left unfinished. */
-  const runId = yield* crypto.randomUUIDv4;
-  /** Shared with fix turns; a slot covers preparing and writing. */
-  const slots = agents.slots;
-  const running = new Map<AttemptId, Fiber.Fiber<void>>();
-  const phases = new Map<AttemptId, ReviewPhase>();
-  const changes = yield* PubSub.unbounded<Change>();
-  const notices = yield* PubSub.unbounded<ReadyNotice>();
-  /** Each attempt's tool calls still running, by tool call id. */
-  const reading = new Map<AttemptId, Map<string, PendingRead>>();
-  /** Attempts whose streamed `submit_guide` is still adding chapters (`DraftOutline.growing`). */
-  const growing = new Set<AttemptId>();
-  const readContexts = new Map<AttemptId, ReadContext>();
-  /** Each running attempt's last `submit_guide` input that failed its checks, for `revise_guide`. */
-  const rejected = new Map<AttemptId, Guide>();
-  /** One guide check at a time per attempt, so a call in flight sees the guide another stored. */
-  const checking = makeKeyedGate<AttemptId>(1);
-
-  const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
-  // The OS random source failing is not something a review can recover from.
-  const newId = crypto.randomUUIDv4.pipe(Effect.orDie);
-  const publish = (key: ReviewKey, activity: ReadonlyArray<ReviewActivity> = []) =>
-    PubSub.publish(changes, { key, activity }).pipe(Effect.asVoid);
-
-  /** A pull request's review. A local review's key passed as a pull request's finds nothing. */
-  const findReview = (key: PullRequestKey) =>
-    sql`SELECT * FROM reviews WHERE pr_key = ${key} AND local IS NULL`.pipe(
-      Effect.flatMap(decodePullRequests),
-      Effect.map((rows) => (rows[0] === undefined ? null : toPullRequestReview(rows[0]))),
-    );
-  /** A local review. A pull request's key passed as a local review's finds nothing. */
-  const findLocal = (key: LocalReviewKey) =>
-    sql`SELECT * FROM reviews WHERE pr_key = ${key} AND local IS NOT NULL`.pipe(
-      Effect.flatMap(decodeLocals),
-      Effect.map((rows) => (rows[0] === undefined ? null : toLocalReview(rows[0]))),
-    );
-  /** The review a new subject would make, looked up among its own kind only. */
-  const findSubject = (subject: NewSubject) =>
-    subject.kind === "pull-request" ? findReview(subject.key) : findLocal(subject.key);
-  /** Every local review, the latest changed first. */
-  const locals = sql`SELECT * FROM reviews WHERE local IS NOT NULL ORDER BY updated_at DESC`.pipe(
-    Effect.flatMap(readableLocals),
-    Effect.map((rows) => rows.map(toLocalReview)),
-  );
-  /** The review a key names, among its own kind. */
-  const findStored = (key: ReviewKey) => (isLocalReviewKey(key) ? findLocal(key) : findReview(key));
-  const findReviewById = (id: ReviewId) =>
-    sql`SELECT * FROM reviews WHERE id = ${id}`.pipe(
-      Effect.flatMap(decodeReviews),
-      Effect.map((rows) => (rows[0] === undefined ? null : toStored(rows[0]))),
-    );
-
-  /** Status, latest attempt and every revision: everything but the activity feed. */
-  const summaryOf = (key: PullRequestKey) =>
-    Effect.gen(function* () {
-      const review = yield* findReview(key);
-      if (review === null) return { key, review: null, attempt: null, revisions: [] };
-      return { key, review: toReview(review), ...(yield* progressOf(review.id)) };
-    });
-
-  /** A review's latest attempt, as its progress is shown, and every revision. */
-  const progressOf = (reviewId: ReviewId) =>
-    Effect.gen(function* () {
-      const attempts = yield* sql`
-        SELECT id, revision, trigger, phase, head_sha, commits, started_at, finished_at, narration,
-          started_by, draft_outline, draft_version FROM review_attempts
-        WHERE review_id = ${reviewId} ORDER BY rowid DESC LIMIT 1`.pipe(
-        Effect.flatMap(decodeAttempts),
-      );
-      const revisions = yield* sql`
-        SELECT r.revision, r.attempt_id, a.trigger, r.head_sha, r.created_at FROM review_revisions r
-        JOIN review_attempts a ON a.id = r.attempt_id
-        WHERE r.review_id = ${reviewId} ORDER BY r.revision`.pipe(Effect.flatMap(decodeRevisions));
-      const attempt = attempts[0];
-      const files =
-        attempt === undefined
-          ? []
-          : yield* sql`
-            SELECT path, previous_path, status, additions, deletions, read_at, note
-            FROM review_attempt_files WHERE attempt_id = ${attempt.id} ORDER BY position`.pipe(
-              Effect.flatMap(decodeFiles),
-            );
-      const inFlight = new Set<string>();
-      for (const pending of attempt === undefined ? [] : (reading.get(attempt.id)?.values() ?? []))
-        for (const file of [...pending.direct, ...pending.sections]) inFlight.add(file);
-      return {
-        attempt:
-          attempt === undefined
-            ? null
-            : {
-                id: attempt.id,
-                revision: attempt.revision,
-                trigger: attempt.trigger,
-                headSha: attempt.head_sha,
-                commits: attempt.commits,
-                phase: attempt.phase,
-                startedAt: attempt.started_at,
-                finishedAt: attempt.finished_at,
-                narration: attempt.narration,
-                startedBy: attempt.started_by,
-                files: files.map((file): AttemptFile => ({
-                  path: file.path,
-                  previousPath: file.previous_path,
-                  status: file.status,
-                  additions: file.additions,
-                  deletions: file.deletions,
-                  read:
-                    file.read_at !== null ? "read" : inFlight.has(file.path) ? "reading" : "unread",
-                  note: file.note,
-                })),
-                draft:
-                  attempt.draft_outline === null
-                    ? null
-                    : {
-                        version: attempt.draft_version,
-                        chapters: attempt.draft_outline,
-                        growing: growing.has(attempt.id),
-                      },
-              },
-        revisions: revisions.map((row) => ({
-          revision: row.revision,
-          attemptId: row.attempt_id,
-          trigger: row.trigger,
-          headSha: row.head_sha,
-          createdAt: row.created_at,
-        })),
-      };
-    });
-
-  const snapshotOf = (key: PullRequestKey) =>
-    Effect.gen(function* () {
-      const summary = yield* summaryOf(key);
-      if (summary.review === null || summary.attempt === null) return { ...summary, activity: [] };
-      const activity = yield* activityOf(summary.attempt.id);
-      return { ...summary, activity } satisfies ReviewSnapshot;
-    });
-
-  /** An attempt's last 200 activity lines, oldest first. */
-  const activityOf = (attemptId: AttemptId) =>
-    sql`
-      SELECT id, attempt_id, at, kind, text, detail FROM (
-        SELECT * FROM review_activity WHERE attempt_id = ${attemptId} ORDER BY id DESC LIMIT 200
-      ) ORDER BY id`.pipe(
-      Effect.flatMap(decodeActivity),
-      Effect.map((rows) => rows.map(toActivity)),
-    );
-
-  /** What a local attempt reviews; null for a pull request's. */
-  const captureOf = (attemptId: AttemptId) =>
-    sql`SELECT capture FROM review_attempts WHERE id = ${attemptId}`.pipe(
-      Effect.flatMap(decodeCaptures),
-      Effect.map((rows) => rows[0]?.capture ?? null),
-    );
-
-  const appendActivity = (
-    key: ReviewKey,
-    reviewId: ReviewId,
-    attemptId: AttemptId,
-    kind: ReviewActivity["kind"],
-    text: string,
-    detail: string | null = null,
-  ) =>
-    Effect.gen(function* () {
-      const at = yield* now;
-      const rows = yield* sql`
-        INSERT INTO review_activity (review_id, attempt_id, at, kind, text, detail)
-        VALUES (${reviewId}, ${attemptId}, ${at}, ${kind}, ${text}, ${detail}) RETURNING id`.pipe(
-        Effect.flatMap(decodeInserted),
-      );
-      const id = rows[0]?.id;
-      if (id !== undefined) yield* publish(key, [{ id, attemptId, at, kind, text, detail }]);
-    });
+  const store = yield* makeReviewStore;
+  const {
+    sql,
+    fs,
+    path,
+    repo,
+    agents,
+    tokens,
+    accounts,
+    api,
+    guideSettings,
+    guideConfig,
+    pullRequests,
+    spawner,
+    scope,
+    mcpUrl,
+    instructions,
+    diffsDir,
+    runId,
+    slots,
+    running,
+    phases,
+    changes,
+    notices,
+    reading,
+    growing,
+    readContexts,
+    rejected,
+    now,
+    newId,
+    publish,
+    findReview,
+    findLocal,
+    findSubject,
+    locals,
+    findStored,
+    findReviewById,
+    summaryOf,
+    progressOf,
+    snapshotOf,
+    activityOf,
+    captureOf,
+    appendActivity,
+    setPhase,
+    setStatus,
+    insertAttempt,
+    noteStartedBy,
+    batchOf,
+    settleBatch,
+    dbFailures,
+  } = store;
+  const {
+    reportProgress,
+    noteFile,
+    submitDraft,
+    streamDraft,
+    draftChapters,
+    submitGuide,
+    reviseGuide,
+  } = makeGuideTools(store);
+  const { guide, revisionContext, draft, diff, texts, typicalDuration, index, feed } =
+    makeReviewReads(store);
 
   /**
    * What a tool call's reads point at: checkout files that are in the diff, and the
@@ -944,112 +405,6 @@ export const make = Effect.gen(function* () {
         UPDATE review_attempt_files SET read_at = ${at}
         WHERE attempt_id = ${attemptId} AND read_at IS NULL AND path IN ${sql.in(paths)}`;
     });
-
-  const setPhase = (key: ReviewKey, reviewId: ReviewId, attemptId: AttemptId, phase: ReviewPhase) =>
-    Effect.gen(function* () {
-      if (phases.get(attemptId) === phase) return;
-      phases.set(attemptId, phase);
-      yield* sql`UPDATE review_attempts SET phase = ${phase} WHERE id = ${attemptId} AND finished_at IS NULL`;
-      yield* appendActivity(key, reviewId, attemptId, "phase", phase);
-    });
-
-  /**
-   * Compare-and-set on the current attempt id: a late result from an older attempt
-   * changes nothing. Done is absorbing: only a new attempt leaves it.
-   */
-  const setStatus = (
-    reviewId: ReviewId,
-    expected: AttemptId | null,
-    status: ReviewStatus,
-    current: AttemptId | null,
-  ) =>
-    Effect.gen(function* () {
-      const at = yield* now;
-      const rows = yield* sql`
-        UPDATE reviews SET status = ${encodeStatus(status)}, current_attempt_id = ${current}, updated_at = ${at}
-        WHERE id = ${reviewId} AND current_attempt_id IS ${expected}
-          AND json_extract(status, '$._tag') != 'done' RETURNING id`;
-      return rows.length > 0;
-    });
-
-  const insertAttempt = (input: {
-    readonly id: AttemptId;
-    readonly reviewId: ReviewId;
-    readonly revision: number;
-    readonly trigger: AttemptTrigger;
-    readonly agent: StoredAgent;
-    readonly at: string;
-    /** The stack batch the attempt was started in, announced with the others. */
-    readonly batch: string | null;
-    /** What a local attempt reviews; null for a pull request's. */
-    readonly capture: LocalCapture | null;
-  }) =>
-    Effect.gen(function* () {
-      const startedBy = yield* StartedBy;
-      yield* sql`
-        INSERT INTO review_attempts (id, review_id, revision, trigger, run_id, phase, started_at, provider,
-          instance_id, model, batch_id, started_by, capture)
-        VALUES (${input.id}, ${input.reviewId}, ${input.revision}, ${input.trigger}, ${runId}, 'preparing-code',
-          ${input.at}, ${input.agent.provider}, ${input.agent.instance}, ${input.agent.model}, ${input.batch},
-          ${startedBy}, ${input.capture === null ? null : encodeCapture(input.capture)})`;
-    });
-
-  /** Says in the attempt's activity which outside agent started it, if one did. */
-  const noteStartedBy = (key: ReviewKey, reviewId: ReviewId, attemptId: AttemptId) =>
-    Effect.gen(function* () {
-      const startedBy = yield* StartedBy;
-      if (startedBy !== null)
-        yield* appendActivity(key, reviewId, attemptId, "note", `Started from ${startedBy}`);
-    });
-
-  const batchOf = (attemptId: AttemptId) =>
-    sql`SELECT batch_id FROM review_attempts WHERE id = ${attemptId}`.pipe(
-      Effect.flatMap(decodeBatch),
-      Effect.map((rows) => rows[0]?.batch_id ?? null),
-    );
-
-  /**
-   * Announces a stack's batch once none of its attempts is running: one notice for
-   * all of them, counted from each review's latest attempt in the batch. Claiming
-   * `announced_at` makes a second call, or one after a restart, do nothing.
-   */
-  const settleBatch = (attemptId: AttemptId) =>
-    Effect.gen(function* () {
-      const batch = yield* batchOf(attemptId);
-      if (batch === null) return;
-      const outcomes = yield* sql`
-        SELECT a.finished_at, a.outcome FROM review_attempts a
-        WHERE a.batch_id = ${batch} AND a.rowid = (
-          SELECT MAX(b.rowid) FROM review_attempts b
-          WHERE b.batch_id = a.batch_id AND b.review_id = a.review_id)`.pipe(
-        Effect.flatMap(decodeOutcomes),
-      );
-      if (outcomes.some((row) => row.finished_at === null)) return;
-      const at = yield* now;
-      const claimed = yield* sql`
-        UPDATE guide_batches SET announced_at = ${at}
-        WHERE id = ${batch} AND announced_at IS NULL RETURNING origin_key, account_id`.pipe(
-        Effect.flatMap(decodeClaimed),
-      );
-      const origin = claimed[0];
-      if (origin === undefined) return;
-      const ready = outcomes.filter((row) => row.outcome === "accepted").length;
-      yield* Effect.logInfo("Stack guides finished").pipe(
-        Effect.annotateLogs({ batch, ready, failed: outcomes.length - ready }),
-      );
-      yield* PubSub.publish(notices, {
-        _tag: "stack-ready",
-        key: origin.origin_key,
-        accountId: origin.account_id,
-        ready,
-        failed: outcomes.length - ready,
-      });
-    }).pipe(
-      Effect.catchTags({
-        SqlError: (error) => Effect.logWarning("Couldn't settle the stack's guides", error),
-        SchemaError: (error) => Effect.logWarning("Couldn't settle the stack's guides", error),
-      }),
-    );
 
   /** The layers of the PR's stack for the prompt. Without them the guide is still written. */
   const stackFor = (review: Review, attemptId: AttemptId, stack: number) =>
@@ -1982,13 +1337,6 @@ export const make = Effect.gen(function* () {
       return { review, created };
     }).pipe(Effect.uninterruptible);
 
-  const dbFailures = {
-    SqlError: () =>
-      Effect.fail(new ReviewError({ message: "prkit couldn't read or save the review." })),
-    SchemaError: () =>
-      Effect.fail(new ReviewError({ message: "prkit read a damaged review record." })),
-  };
-
   const get = (key: PullRequestKey) => snapshotOf(key).pipe(Effect.catchTags(dbFailures));
 
   /**
@@ -2361,530 +1709,6 @@ export const make = Effect.gen(function* () {
         return Stream.concat(Stream.succeed(opening), updates);
       }).pipe(Effect.catchTags(dbFailures)),
     );
-
-  const guide = (key: ReviewKey, revision: number | undefined) =>
-    Effect.gen(function* () {
-      const rows = yield* (
-        revision === undefined
-          ? sql`
-            SELECT r.revision, r.head_sha, r.created_at, r.guide, a.snapshot, a.config FROM review_revisions r
-            JOIN reviews v ON v.id = r.review_id JOIN review_attempts a ON a.id = r.attempt_id
-            WHERE v.pr_key = ${key} ORDER BY r.revision DESC LIMIT 1`
-          : sql`
-            SELECT r.revision, r.head_sha, r.created_at, r.guide, a.snapshot, a.config FROM review_revisions r
-            JOIN reviews v ON v.id = r.review_id JOIN review_attempts a ON a.id = r.attempt_id
-            WHERE v.pr_key = ${key} AND r.revision = ${revision}`
-      ).pipe(Effect.flatMap(decodeGuides));
-      const row = rows[0];
-      if (row === undefined)
-        return yield* new GuideNotFoundError({
-          key,
-          message:
-            revision === undefined
-              ? isLocalReviewKey(key)
-                ? "These local changes have no guide yet."
-                : "This pull request has no guide yet."
-              : `Guide revision ${revision} doesn't exist.`,
-        });
-      return {
-        revision: row.revision,
-        headSha: row.head_sha,
-        createdAt: row.created_at,
-        normalized: row.guide,
-        snapshot: row.snapshot,
-        config: row.config,
-      } satisfies GuideRevision;
-    }).pipe(Effect.catchTags(dbFailures));
-
-  /** One accepted revision as a question about it needs it, or null when the review has no such revision. */
-  const revisionContext = (reviewId: ReviewId, revision: number) =>
-    Effect.gen(function* () {
-      // rowid follows insertion, and a review's attempts run one at a time.
-      const rows = yield* sql`
-        SELECT v.pr_key, v.local, v.provider, v.instance_id, v.model, v.model_options,
-          a.provider AS writer_provider, a.instance_id AS writer_instance,
-          r.head_sha, r.guide, a.snapshot, a.config,
-          CASE WHEN NOT EXISTS (
-            SELECT 1 FROM review_attempts later
-            WHERE later.review_id = r.review_id AND later.rowid > a.rowid
-              AND (later.finished_at IS NULL OR later.agent_pid IS NOT NULL
-                OR later.phase NOT IN ('queued', 'preparing-code'))
-          ) THEN v.session_id END AS session_id
-        FROM review_revisions r JOIN reviews v ON v.id = r.review_id
-        JOIN review_attempts a ON a.id = r.attempt_id
-        WHERE r.review_id = ${reviewId} AND r.revision = ${revision}`.pipe(
-        Effect.flatMap(decodeRevisionContext),
-      );
-      const row = rows[0];
-      if (row === undefined) return null;
-      const key = row.pr_key;
-      const ref = isLocalKey(key) ? null : refFromKey(key);
-      const cache: CacheRef | null = isLocalKey(key)
-        ? { _tag: "local", key }
-        : ref === null
-          ? null
-          : { _tag: "pull-request", ref };
-      return {
-        reviewId,
-        key,
-        label:
-          row.local !== null
-            ? `the local changes in ${row.local.name} on ${row.local.branch === null ? "a detached HEAD" : `\`${row.local.branch}\``}`
-            : ref === null
-              ? key
-              : `${ref.owner}/${ref.repo}#${ref.number}`,
-        revision,
-        headSha: row.head_sha,
-        guide: row.guide,
-        snapshot: reviewedSnapshot(row.snapshot, row.config.skipped),
-        writer: {
-          instance: row.writer_instance,
-          kind: row.writer_provider,
-          session:
-            row.session_id === null
-              ? null
-              : { id: row.session_id, cwd: repo.worktreePath(reviewId) },
-        },
-        agent: {
-          instance: row.instance_id,
-          kind: row.provider,
-          model: row.model,
-          options: row.model_options,
-        },
-        checkout: (dir: string) =>
-          cache === null
-            ? Effect.fail(
-                new RepoError({
-                  reason: "repository",
-                  message: "This pull request's key can't be read.",
-                }),
-              )
-            : repo.ensureCheckout(cache, dir, row.head_sha),
-      } satisfies RevisionContext;
-    }).pipe(Effect.catchTags(dbFailures));
-
-  /** The attempt a progress tool call speaks for, if it is still the one running. */
-  const liveAttempt = (attemptId: AttemptId) =>
-    Effect.gen(function* () {
-      const rows = yield* sql`
-        SELECT a.review_id, r.pr_key, r.current_attempt_id, a.finished_at, a.snapshot, a.draft, a.config
-        FROM review_attempts a JOIN reviews r ON r.id = a.review_id WHERE a.id = ${attemptId}`.pipe(
-        Effect.flatMap(decodeSubmit),
-      );
-      const row = rows[0];
-      if (row === undefined || row.current_attempt_id !== attemptId || row.finished_at !== null)
-        return yield* new ToolRejected({
-          message:
-            "This attempt is no longer current, so prkit ignored the call. End your turn now.",
-        });
-      return row;
-    });
-
-  const toolFailures = {
-    SqlError: () =>
-      Effect.fail(new ToolRejected({ message: "prkit couldn't save that. Call the tool again." })),
-    SchemaError: () =>
-      Effect.fail(
-        new ToolRejected({ message: "prkit couldn't read this attempt. Call the tool again." }),
-      ),
-  };
-
-  /** `report_progress`: the one line the reviewer sees about what the agent is doing now. */
-  const reportProgress = (attemptId: AttemptId, message: string) =>
-    Effect.gen(function* () {
-      const row = yield* liveAttempt(attemptId);
-      const line = clip(message, 160);
-      if (line === "")
-        return yield* new ToolRejected({
-          message: "Send one short line about what you are doing.",
-        });
-      yield* sql`UPDATE review_attempts SET narration = ${line} WHERE id = ${attemptId} AND finished_at IS NULL`;
-      yield* publish(row.pr_key);
-      return { message: "The reviewer sees it. Keep going." } satisfies ToolReceipt;
-    }).pipe(Effect.catchTags(toolFailures));
-
-  /** `note_file`: one line about a changed file, shown next to it while the guide is written. */
-  const noteFile = (attemptId: AttemptId, filePath: string, note: string) =>
-    Effect.gen(function* () {
-      const row = yield* liveAttempt(attemptId);
-      const line = clip(note, 240);
-      if (line === "")
-        return yield* new ToolRejected({
-          message: "Send one plain line about what the file changes.",
-        });
-      const updated = yield* sql`
-        UPDATE review_attempt_files SET note = ${line}
-        WHERE attempt_id = ${attemptId} AND path = ${filePath} RETURNING path`;
-      if (updated.length === 0)
-        return yield* new ToolRejected({
-          message: `\`${filePath}\` isn't one of this diff's changed files. Use the path exactly as the diff lists it.`,
-        });
-      yield* publish(row.pr_key);
-      return { message: "Noted." } satisfies ToolReceipt;
-    }).pipe(Effect.catchTags(toolFailures));
-
-  /** Keeps a checked draft as the attempt's latest, for the reviewer to read now. */
-  const keepDraft = (attemptId: AttemptId, draft: DraftGuide, normalized: NormalizedGuide) =>
-    Effect.gen(function* () {
-      const outline = normalized.chapters.map((chapter) => ({
-        id: chapter.id,
-        title: chapter.title,
-        written: chapter.files.length > 0,
-      }));
-      yield* sql`
-        UPDATE review_attempts SET draft = ${encodeDraft(draft)}, draft_outline = ${encodeOutline(outline)},
-          draft_version = draft_version + 1
-        WHERE id = ${attemptId} AND finished_at IS NULL`;
-      return outline;
-    });
-
-  /**
-   * `submit_draft`: merges the call into the draft so far and keeps it when every
-   * reference resolves. A draft is for reading early; only `submit_guide` makes a revision.
-   */
-  const submitDraft = (attemptId: AttemptId, input: DraftGuide) =>
-    Effect.gen(function* () {
-      const row = yield* liveAttempt(attemptId);
-      if (row.snapshot === null || row.config === null)
-        return yield* new ToolRejected({ message: "The diff isn't ready yet. Try again shortly." });
-      const merged = mergeDraft(row.draft, input);
-      const result = normalizeDraft(
-        merged,
-        reviewedSnapshot(row.snapshot, row.config.skipped),
-        checkContextOf(row.config),
-      );
-      if (result.normalized === null)
-        return yield* new ToolRejected({
-          message: `The draft has ${plural(result.errors.length, "problem")}. Fix ${result.errors.length === 1 ? "it" : "them"} and send the draft again:\n- ${result.errors.join("\n- ")}`,
-        });
-      const outline = yield* keepDraft(attemptId, merged, result.normalized);
-      yield* setPhase(row.pr_key, row.review_id, attemptId, "writing-guide");
-      yield* publish(row.pr_key);
-      const written = outline.filter((chapter) => chapter.written).length;
-      return {
-        message: `Draft saved: the overview${outline.length === 0 ? "" : ` and ${written} of ${plural(outline.length, "chapter")} written`}. Send each chapter with submit_draft as you finish it, then the complete guide with submit_guide.`,
-      } satisfies ToolReceipt;
-    }).pipe(Effect.catchTags(toolFailures));
-
-  /**
-   * One finished piece of a `submit_guide` call the agent is still writing: a field
-   * or a chapter. It joins the draft the way a `submit_draft` call would, except that
-   * a reference to a chapter not written yet waits instead of failing. A piece that
-   * doesn't pass is left out, so the reviewer keeps the last good draft; the call's
-   * own check tells the agent what was wrong.
-   */
-  const streamDraft = (attemptId: AttemptId, piece: DraftGuide) =>
-    Effect.gen(function* () {
-      const row = yield* liveAttempt(attemptId);
-      if (row.snapshot === null || row.config === null) return;
-      const merged = mergeDraft(row.draft, piece);
-      const result = normalizeDraft(
-        withoutUnwrittenChapters(merged),
-        reviewedSnapshot(row.snapshot, row.config.skipped),
-        checkContextOf(row.config),
-      );
-      if (result.normalized === null)
-        return yield* Effect.logInfo("Left a streamed guide piece out of the draft").pipe(
-          Effect.annotateLogs({ problems: result.errors.join(" | ") }),
-        );
-      yield* keepDraft(attemptId, merged, result.normalized);
-      yield* publish(row.pr_key);
-    }).pipe(
-      Effect.catchTags({
-        ToolRejected: () => Effect.void,
-        SqlError: (error) => Effect.logWarning("Couldn't save the streamed draft", error),
-        SchemaError: (error) => Effect.logWarning("Couldn't read the attempt's draft", error),
-      }),
-    );
-
-  /** How many chapters the attempt's draft has, to tell a first `submit_guide` from a resubmission. */
-  const draftChapters = (attemptId: AttemptId) =>
-    sql`SELECT draft FROM review_attempts WHERE id = ${attemptId}`.pipe(
-      Effect.flatMap(decodeDraftOnly),
-      Effect.map((rows) => rows[0]?.draft?.chapters?.length ?? 0),
-      Effect.catchTags({
-        SqlError: () => Effect.succeed(0),
-        SchemaError: () => Effect.succeed(0),
-      }),
-    );
-
-  /** The latest draft of an attempt, normalized for rendering. */
-  const draft = (key: ReviewKey, attemptId: AttemptId) =>
-    Effect.gen(function* () {
-      const rows = yield* sql`
-        SELECT a.snapshot, a.draft, a.config, a.draft_version FROM review_attempts a
-        JOIN reviews r ON r.id = a.review_id
-        WHERE a.id = ${attemptId} AND r.pr_key = ${key}`.pipe(Effect.flatMap(decodeDraft));
-      const row = rows[0];
-      const normalized =
-        row?.draft == null || row.snapshot === null || row.config === null
-          ? null
-          : normalizeDraft(
-              withoutUnwrittenChapters(row.draft),
-              reviewedSnapshot(row.snapshot, row.config.skipped),
-              checkContextOf(row.config),
-            ).normalized;
-      if (row === undefined || normalized === null)
-        return yield* new GuideNotFoundError({
-          key,
-          message: "The agent hasn't shared a draft yet.",
-        });
-      return { attemptId, version: row.draft_version, normalized } satisfies DraftGuideResult;
-    }).pipe(Effect.catchTags(dbFailures));
-
-  /** The diff an attempt works on, once its head is fetched. */
-  const diff = (key: ReviewKey, attemptId: AttemptId) =>
-    Effect.gen(function* () {
-      const rows = yield* sql`
-        SELECT a.snapshot, a.draft, a.config, a.draft_version FROM review_attempts a
-        JOIN reviews r ON r.id = a.review_id
-        WHERE a.id = ${attemptId} AND r.pr_key = ${key}`.pipe(Effect.flatMap(decodeDraft));
-      const snapshot = rows[0]?.snapshot ?? null;
-      if (snapshot === null)
-        return yield* new GuideNotFoundError({ key, message: "The code isn't checked out yet." });
-      return snapshot;
-    }).pipe(Effect.catchTags(dbFailures));
-
-  /** The new side of paths at the commit an attempt read, from prkit's own copy of the repository. */
-  const texts = (key: PullRequestKey, attemptId: AttemptId, paths: ReadonlyArray<string>) =>
-    Effect.gen(function* () {
-      const rows = yield* sql`
-        SELECT a.head_sha FROM review_attempts a
-        JOIN reviews r ON r.id = a.review_id
-        WHERE a.id = ${attemptId} AND r.pr_key = ${key} AND r.local IS NULL`.pipe(
-        Effect.flatMap(decodeHeads),
-      );
-      const headSha = rows[0]?.head_sha ?? null;
-      const ref = refFromKey(key);
-      if (headSha === null || ref === null)
-        return yield* new GuideNotFoundError({ key, message: "The code isn't checked out yet." });
-      return yield* repo.readTexts(ref, headSha, paths);
-    }).pipe(
-      Effect.catchTags({
-        ...dbFailures,
-        RepoError: (error) => Effect.fail(new ReviewError({ message: error.message })),
-      }),
-    );
-
-  /**
-   * The median click-to-guide time of past full guides by the same agent instance and
-   * model, at the same settings, on diffs of a similar size (half to double the changed
-   * lines). Null with fewer than two such guides: no estimate prkit can't back up. Guides
-   * from before attempts recorded their settings never count.
-   */
-  const typicalDuration = (agent: AgentSelection, lines: number) =>
-    Effect.gen(function* () {
-      const model = findAgentModel(yield* agents.catalog(), agent.instance, agent.model);
-      if (model === undefined) return null;
-      const options = encodeOptions(explicitModelOptions(model, agent.options));
-      const rows = yield* sql`
-        SELECT (julianday(finished_at) - julianday(started_at)) * 86400.0 AS seconds FROM review_attempts
-        WHERE outcome = 'accepted' AND instance_id = ${agent.instance} AND model = ${agent.model}
-          AND model_options = ${options}
-          AND trigger IN ('first', 'retry', 'rewritten', 'retargeted')
-          AND changed_lines BETWEEN ${Math.max(0, Math.floor(lines / 2) - 20)} AND ${lines * 2 + 20}
-        ORDER BY rowid DESC LIMIT 15`.pipe(Effect.flatMap(decodeDurations));
-      if (rows.length < 2) return null;
-      const sorted = rows.map((row) => row.seconds).toSorted((left, right) => left - right);
-      const middle = Math.floor(sorted.length / 2);
-      const median =
-        sorted.length % 2 === 1
-          ? (sorted[middle] ?? 0)
-          : ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2;
-      return { seconds: Math.round(median), samples: rows.length } satisfies TypicalDuration;
-    }).pipe(Effect.catchTags(dbFailures));
-
-  const feedEntry = (key: ReviewKey) =>
-    sql`
-      SELECT r.id, r.pr_key, r.account_id, r.status, r.latest_revision, json_extract(v.guide, '$.risk.level') AS risk
-      FROM reviews r LEFT JOIN review_revisions v ON v.review_id = r.id AND v.revision = r.latest_revision
-      WHERE r.pr_key = ${key} AND r.local IS NULL`.pipe(
-      Effect.flatMap(readableFeed),
-      Effect.map((rows) => rows.map(toFeedEntry)),
-    );
-
-  const readIndex = sql`
-      SELECT r.id, r.pr_key, r.account_id, r.status, r.latest_revision, json_extract(v.guide, '$.risk.level') AS risk
-      FROM reviews r LEFT JOIN review_revisions v ON v.review_id = r.id AND v.revision = r.latest_revision
-      WHERE r.local IS NULL`.pipe(
-    Effect.flatMap(readableFeed),
-    Effect.map((rows) => rows.map(toFeedEntry)),
-  );
-  /** Every review of a pull request as the feed opens with it. */
-  const index = () => readIndex.pipe(Effect.catchTag("SqlError", dbFailures.SqlError));
-  /** The feed reads every guide at once, so its failures speak of all of them. */
-  const feedFailures = {
-    SqlError: () =>
-      Effect.fail(new ReviewError({ message: "prkit can't read your guides right now." })),
-  };
-
-  /**
-   * Every review's state for the whole app (inbox marks, tabs, notifications):
-   * all of them first, then each change of status or revision, and `ready` notices.
-   */
-  const feed = (): Stream.Stream<ReviewFeedEvent, ReviewError> =>
-    Stream.unwrap(
-      Effect.gen(function* () {
-        // Subscribe before reading, so nothing that lands in between is lost.
-        const changed = yield* PubSub.subscribe(changes);
-        const ready = yield* PubSub.subscribe(notices);
-        const all = yield* readIndex.pipe(Effect.catchTags(feedFailures));
-        const sent = new Map(all.map((entry) => [entry.key, JSON.stringify(entry)]));
-        const updates = Stream.fromSubscription(changed).pipe(
-          Stream.mapEffect((change) => feedEntry(change.key).pipe(Effect.catchTags(feedFailures))),
-          Stream.flatMap((entries) =>
-            Stream.fromIterable(
-              entries.flatMap((review): ReadonlyArray<ReviewFeedEvent> => {
-                const encoded = JSON.stringify(review);
-                if (sent.get(review.key) === encoded) return [];
-                sent.set(review.key, encoded);
-                return [{ _tag: "changed", review }];
-              }),
-            ),
-          ),
-        );
-        const opening: ReviewFeedEvent = { _tag: "index", reviews: all };
-        return Stream.concat(
-          Stream.succeed(opening),
-          Stream.merge(
-            updates,
-            Stream.fromSubscription(ready).pipe(
-              Stream.flatMap((notice) => Stream.fromIterable(feedNotice(notice))),
-            ),
-          ),
-        );
-      }),
-    );
-
-  /** Checks a guide against the attempt's snapshot: a valid one is stored, a rejected one kept for `revise_guide`. */
-  const checkGuide = (attemptId: AttemptId, input: Guide) =>
-    Effect.gen(function* () {
-      const rows = yield* sql`
-        SELECT a.review_id, r.pr_key, r.current_attempt_id, a.finished_at, a.snapshot, a.draft, a.config, a.guide
-        FROM review_attempts a JOIN reviews r ON r.id = a.review_id WHERE a.id = ${attemptId}`.pipe(
-        Effect.flatMap(decodeCheck),
-      );
-      const row = rows[0];
-      if (
-        row === undefined ||
-        row.current_attempt_id !== attemptId ||
-        row.finished_at !== null ||
-        row.snapshot === null ||
-        row.config === null
-      )
-        return yield* new SubmitGuideRejected({ message: NO_LONGER_CURRENT });
-      // The agent's guide covers the files it reviewed; prkit adds the skipped ones itself.
-      const config = row.config;
-      const result = normalizeGuide(
-        input,
-        reviewedSnapshot(row.snapshot, config.skipped),
-        checkContextOf(config),
-      );
-      const warnings =
-        result.warnings.length === 0
-          ? ""
-          : `\n\nWarnings (they don't block the guide):\n- ${result.warnings.join("\n- ")}`;
-      const receipt = (normalized: NormalizedGuide): SubmitGuideReceipt => ({
-        message: `prkit stored the guide.${warnings}\n\nEnd your turn now.`,
-        chapters: normalized.chapters.length,
-        files: normalized.chapters.reduce((count, chapter) => count + chapter.files.length, 0),
-        warnings: [...result.warnings],
-      });
-      if (row.guide !== null) {
-        // A call sent again because prkit failed after storing it gets its receipt again.
-        if (
-          result.normalized !== null &&
-          encodeGuide(withSkippedChapter(result.normalized, config.skipped)) === row.guide
-        )
-          return receipt(result.normalized);
-        return yield* new SubmitGuideRejected({ message: ALREADY_STORED });
-      }
-      yield* setPhase(row.pr_key, row.review_id, attemptId, "checking-guide");
-      yield* Effect.logInfo("submit_guide validated").pipe(
-        Effect.annotateLogs({
-          attemptId,
-          valid: result.normalized !== null,
-          errors: result.errors.length,
-          warnings: result.warnings.length,
-        }),
-      );
-      if (result.normalized === null) {
-        yield* Effect.logInfo("submit_guide rejected").pipe(
-          Effect.annotateLogs({ attemptId, problems: result.errors }),
-        );
-        yield* appendActivity(
-          row.pr_key,
-          row.review_id,
-          attemptId,
-          "error",
-          `The guide had ${plural(result.errors.length, "problem")}. The agent is fixing ${result.errors.length === 1 ? "it" : "them"}`,
-        );
-        yield* setPhase(row.pr_key, row.review_id, attemptId, "writing-guide");
-        rejected.set(attemptId, input);
-        return yield* new SubmitGuideRejected({
-          message: `The guide has ${plural(result.errors.length, "problem")}. Fix all of them: call revise_guide with only the chapters and fields you change, each chapter whole with its id:\n- ${result.errors.join("\n- ")}${warnings}`,
-        });
-      }
-      const normalized = result.normalized;
-      const complete = withSkippedChapter(normalized, config.skipped);
-      const gaps = coverageProblems(complete, row.snapshot);
-      if (gaps.length > 0) {
-        yield* Effect.logError("The accepted guide doesn't cover the full diff").pipe(
-          Effect.annotateLogs({ attemptId, gaps }),
-        );
-        return yield* new SubmitGuideRejected({
-          message: `prkit couldn't fit the guide to the full diff:\n- ${gaps.join("\n- ")}\nCall submit_guide again.`,
-        });
-      }
-      const saved = yield* sql`
-        UPDATE review_attempts SET guide = ${encodeGuide(complete)}
-        WHERE id = ${attemptId} AND finished_at IS NULL RETURNING id`;
-      if (saved.length === 0) return yield* new SubmitGuideRejected({ message: NO_LONGER_CURRENT });
-      rejected.delete(attemptId);
-      const shown = receipt(normalized);
-      yield* appendActivity(
-        row.pr_key,
-        row.review_id,
-        attemptId,
-        "note",
-        `The guide passed prkit's checks: ${plural(shown.chapters, "chapter")} cover ${plural(shown.files, "file")}`,
-      );
-      return shown;
-    });
-
-  const guideFailures = {
-    SqlError: () =>
-      Effect.fail(
-        new SubmitGuideRejected({
-          message: "prkit couldn't save the guide. Call submit_guide again.",
-        }),
-      ),
-    SchemaError: () =>
-      Effect.fail(
-        new SubmitGuideRejected({
-          message: "prkit couldn't read this attempt. Call submit_guide again.",
-        }),
-      ),
-  };
-
-  /** The `submit_guide` tool. */
-  const submitGuide = (attemptId: AttemptId, input: Guide) =>
-    checking(attemptId, checkGuide(attemptId, input)).pipe(Effect.catchTags(guideFailures));
-
-  /** The `revise_guide` tool: the attempt's last rejected guide with the call applied, checked again. */
-  const reviseGuide = (attemptId: AttemptId, patch: GuidePatch) =>
-    checking(
-      attemptId,
-      Effect.gen(function* () {
-        const last = rejected.get(attemptId);
-        if (last === undefined)
-          return yield* new SubmitGuideRejected({
-            message:
-              "prkit has no rejected guide from this attempt to revise. Call submit_guide with the whole guide.",
-          });
-        return yield* checkGuide(attemptId, patchGuide(last, patch));
-      }),
-    ).pipe(Effect.catchTags(guideFailures));
 
   /**
    * Startup (docs/internals/architecture.md "Restarts"): attempts an earlier run left
