@@ -72,6 +72,7 @@ jobs:
           RUN_NUMBER: ${{ github.run_number }}
           REPOSITORY: ${{ github.repository }}
           NOTES_FILE: ${{ runner.temp }}/release-notes.md
+          MANIFEST_NOTES_FILE: ${{ runner.temp }}/release-notes.json
         run: RUN_DATE="$(date -u +%Y%m%d)" .github/scripts/resolve-release.sh
 
       - name: Upload the release notes
@@ -79,7 +80,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-notes
-          path: ${{ runner.temp }}/release-notes.md
+          path: |
+            ${{ runner.temp }}/release-notes.md
+            ${{ runner.temp }}/release-notes.json
           if-no-files-found: error
           retention-days: 14
 
@@ -116,6 +119,12 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Download the release notes
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/notes
+
       - name: Package
         id: package
         env:
@@ -137,7 +146,8 @@ jobs:
             [[ -n "${!name}" ]] || missing+=("$name")
           done
 
-          args=(--arch arm64 --build-version "$VERSION" --skip-build)
+          args=(--arch arm64 --build-version "$VERSION" --skip-build
+            --release-notes "$RUNNER_TEMP/notes/release-notes.json")
           if [[ "$DRY_RUN" != "true" && ${#missing[@]} -eq 0 ]]; then
             key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
             printf '%s' "$APPLE_API_KEY" > "$key_path"
@@ -270,8 +280,8 @@ jobs:
             --latest="$MAKE_LATEST"
           echo "Published [$NAME]($GITHUB_SERVER_URL/$GH_REPO/releases/tag/$TAG)." >> "$GITHUB_STEP_SUMMARY"
 
-      # Never fewer than 10: the app reads its changelog from GitHub's releases feed, which lists
-      # the 10 newest releases.
+      # Never fewer than 10: a nightly's manifest carries the notes of the 9 nightlies before it,
+      # rebuilt from their tags (release-version.ts manifest-notes).
       - name: Keep the 14 newest nightlies
         if: needs.resolve.outputs.channel == 'nightly'
         run: |

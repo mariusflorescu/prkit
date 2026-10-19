@@ -3,11 +3,14 @@
  * update manifest electron-builder writes when an update feed is configured.
  *
  *   node scripts/build-desktop-artifact.ts [--arch arm64|x64] [--build-version <semver>]
- *        [--output-dir <dir>] [--skip-build] [--signed] [--mock-updates] [--keep-stage] [--verbose]
+ *        [--output-dir <dir>] [--skip-build] [--signed] [--mock-updates]
+ *        [--release-notes <file.json>] [--keep-stage] [--verbose]
  *
  * A version ending in `-nightly.<yyyymmdd>.<n>` builds "prkit Nightly". The version is
- * stamped into the staged package.json only. Progress goes to stderr; the last line on
- * stdout is one JSON object: {"version","channel","arch","signed","files"}.
+ * stamped into the staged package.json only. `--release-notes` takes what
+ * `release-version.ts manifest-notes` prints for this version and puts it in the update
+ * manifest. Progress goes to stderr; the last line on stdout is one JSON object:
+ * {"version","channel","arch","signed","files"}.
  * docs/operations/desktop-build.md lists the environment it reads.
  */
 import * as NodeChildProcess from "node:child_process";
@@ -32,6 +35,7 @@ import {
   resolveUpdateRepository,
   unexpectedExternals,
   updateManifestEntry,
+  withReleaseNotes,
 } from "./desktop-artifact/config.ts";
 import {
   keychainBuilderEnv,
@@ -51,6 +55,17 @@ const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const Version = Schema.Struct({ version: Schema.String });
 const decodeVersion = Schema.decodeUnknownSync(Schema.fromJsonString(Version));
 const readVersion = (file: string) => decodeVersion(NodeFS.readFileSync(file, "utf8")).version;
+const ReleaseNotes = Schema.NonEmptyArray(
+  Schema.Struct({ version: Schema.String, note: Schema.String }),
+);
+const decodeReleaseNotes = Schema.decodeUnknownSync(Schema.fromJsonString(ReleaseNotes));
+
+const readReleaseNotes = (file: string, version: string) => {
+  const notes = decodeReleaseNotes(NodeFS.readFileSync(file, "utf8"));
+  if (notes[0].version !== version)
+    throw new BuildFailed(`--release-notes starts at ${notes[0].version}, not at ${version}.`);
+  return notes;
+};
 
 const parseOptions = () => {
   const { values } = NodeUtil.parseArgs({
@@ -61,6 +76,7 @@ const parseOptions = () => {
       "skip-build": { type: "boolean", default: false },
       signed: { type: "boolean", default: false },
       "mock-updates": { type: "boolean", default: false },
+      "release-notes": { type: "string" },
       "keep-stage": { type: "boolean", default: false },
       verbose: { type: "boolean", default: false },
     },
@@ -79,6 +95,10 @@ const parseOptions = () => {
     skipBuild: values["skip-build"],
     signed: values.signed,
     mockUpdates: values["mock-updates"],
+    releaseNotes:
+      values["release-notes"] === undefined
+        ? undefined
+        : readReleaseNotes(NodePath.resolve(values["release-notes"]), version),
     keepStage: values["keep-stage"],
     verbose: values.verbose,
   };
@@ -217,6 +237,17 @@ const notarizeDmgs = async (distDir: string, manifestName: string, verbose: bool
   }
 };
 
+const addReleaseNotes = (
+  distDir: string,
+  manifestName: string,
+  notes: typeof ReleaseNotes.Type,
+) => {
+  const manifestPath = NodePath.join(distDir, manifestName);
+  const updated = withReleaseNotes(NodeFS.readFileSync(manifestPath, "utf8"), notes);
+  if (updated === undefined) throw new BuildFailed(`${manifestName} already has release notes.`);
+  NodeFS.writeFileSync(manifestPath, updated);
+};
+
 /** Where the release workflow finds the app: `<output>/mac-<arch>/<product>.app`. */
 const moveAppDir = (distDir: string, outputDir: string) => {
   for (const entry of NodeFS.readdirSync(distDir, { withFileTypes: true })) {
@@ -240,6 +271,14 @@ const main = async () => {
   const mockUpdatePort = options.mockUpdates ? resolveMockUpdatePort(process.env) : undefined;
   if (options.mockUpdates && mockUpdatePort === undefined)
     throw new BuildFailed("PRKIT_DESKTOP_MOCK_UPDATE_PORT must be a port number.");
+  if (
+    options.releaseNotes !== undefined &&
+    mockUpdatePort === undefined &&
+    repository._tag === "None"
+  )
+    throw new BuildFailed(
+      "--release-notes go in the update manifest, which needs PRKIT_DESKTOP_UPDATE_REPOSITORY or --mock-updates.",
+    );
   if (mockUpdatePort !== undefined)
     say(`Mock updates: the app reads its feed from http://127.0.0.1:${mockUpdatePort}.`);
   else if (repository._tag === "None")
@@ -307,6 +346,8 @@ const main = async () => {
     const distDir = NodePath.join(stageDir, "dist");
     if (options.signed)
       await notarizeDmgs(distDir, CHANNELS[channel].updateManifest, options.verbose);
+    if (options.releaseNotes !== undefined)
+      addReleaseNotes(distDir, CHANNELS[channel].updateManifest, options.releaseNotes);
     NodeFS.mkdirSync(options.outputDir, { recursive: true });
     const appDir = moveAppDir(distDir, options.outputDir);
     const files = NodeFS.readdirSync(distDir, { withFileTypes: true })

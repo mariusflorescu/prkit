@@ -9,6 +9,9 @@
 #   RUN_NUMBER    the workflow run number
 #   REPOSITORY    owner/name, for the PR links in the notes
 #   NOTES_FILE    where the release notes go
+#   MANIFEST_NOTES_FILE
+#                 where the update manifest's notes go: JSON for this release and the ones
+#                 before it on its track (release-version.ts manifest-notes)
 # Writes release, channel, version, tag, name, commit, prerelease, make_latest and dry_run to
 # $GITHUB_OUTPUT and a summary to $GITHUB_STEP_SUMMARY.
 #
@@ -18,7 +21,8 @@
 set -euo pipefail
 
 : "${CHANNEL:?}" "${DRY_RUN:?}" "${COMMIT:?}" "${REF:?}" "${RUN_DATE:?}" "${RUN_NUMBER:?}"
-: "${REPOSITORY:?}" "${NOTES_FILE:?}" "${GITHUB_OUTPUT:?}" "${GITHUB_STEP_SUMMARY:?}"
+: "${REPOSITORY:?}" "${NOTES_FILE:?}" "${MANIFEST_NOTES_FILE:?}" "${GITHUB_OUTPUT:?}"
+: "${GITHUB_STEP_SUMMARY:?}"
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
@@ -88,6 +92,8 @@ fi
 
 release_version notes --version "$version" ${from:+--from "$from"} --to "$commit" \
   --repository "$REPOSITORY" > "$NOTES_FILE"
+release_version manifest-notes --version "$version" ${from:+--from "$from"} --to "$commit" \
+  --repository "$REPOSITORY" > "$MANIFEST_NOTES_FILE"
 
 output release true
 output channel "$CHANNEL"

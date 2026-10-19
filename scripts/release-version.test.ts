@@ -3,6 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOs from "node:os";
 import * as NodePath from "node:path";
 
+import * as Schema from "effect/Schema";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 const script = NodePath.join(import.meta.dirname, "release-version.ts");
@@ -14,6 +15,10 @@ const resolveScript = NodePath.join(
   "resolve-release.sh",
 );
 const repos: Array<string> = [];
+
+const ManifestNotes = Schema.fromJsonString(
+  Schema.Array(Schema.Struct({ version: Schema.String, note: Schema.String })),
+);
 
 afterEach(() => {
   for (const dir of repos.splice(0)) NodeFS.rmSync(dir, { recursive: true, force: true });
@@ -59,8 +64,8 @@ const repository = () => {
       });
       return { status: result.status, stdout: result.stdout.trim(), stderr: result.stderr };
     },
-    /** The release workflow's decision for a scheduled nightly run on main HEAD. */
-    resolve: (date: string, runNumber: number) => {
+    /** The release workflow's decision for a run on main HEAD. */
+    resolve: (date: string, runNumber: number, channel = "nightly") => {
       const file = (name: string) => NodePath.join(dir, ".git", `resolve-${runNumber}-${name}`);
       const result = NodeChildProcess.spawnSync("bash", [resolveScript], {
         cwd: dir,
@@ -68,7 +73,7 @@ const repository = () => {
         env: {
           PATH: process.env.PATH ?? "",
           HOME: dir,
-          CHANNEL: "nightly",
+          CHANNEL: channel,
           DRY_RUN: "false",
           COMMIT: git("rev-parse", "HEAD").trim(),
           REF: "refs/heads/main",
@@ -76,6 +81,7 @@ const repository = () => {
           RUN_NUMBER: String(runNumber),
           REPOSITORY: "acme/widgets",
           NOTES_FILE: file("notes"),
+          MANIFEST_NOTES_FILE: file("manifest-notes"),
           GITHUB_OUTPUT: file("output"),
           GITHUB_STEP_SUMMARY: file("summary"),
         },
@@ -90,7 +96,12 @@ const repository = () => {
       const notes = NodeFS.existsSync(file("notes"))
         ? NodeFS.readFileSync(file("notes"), "utf8")
         : "";
-      return { output, notes };
+      const manifestNotes = NodeFS.existsSync(file("manifest-notes"))
+        ? Schema.decodeUnknownSync(ManifestNotes)(
+            NodeFS.readFileSync(file("manifest-notes"), "utf8"),
+          )
+        : [];
+      return { output, notes, manifestNotes };
     },
   };
   return repo.commit("Initial commit");
@@ -266,4 +277,57 @@ describe("resolve-release nightly", () => {
     expect(run.notes).toContain("Hang on quit");
     expect(run.notes).not.toContain("Crash on start");
   });
+});
+
+describe("resolve-release manifest notes", () => {
+  const versions = (notes: ReadonlyArray<{ readonly version: string }>) =>
+    notes.map((entry) => entry.version);
+
+  it("gives a stable every stable before it, however many nightlies came after the last one", () => {
+    const repo = repository()
+      .commit("feat: an inbox (#1)")
+      .tag("v0.1.0-nightly.20261001.1")
+      .tag("v0.1.0")
+      .commit("fix: crash on start (#2)")
+      .tag("v0.1.1-nightly.20261002.2")
+      .tag("v0.1.1");
+    for (let run = 3; run <= 14; run++)
+      repo.commit(`fix: hang number ${run} (#${run})`).tag(`v0.1.2-nightly.20261003.${run}`);
+    const { output, manifestNotes } = repo.resolve("20261003", 15, "stable");
+    expect(output).toMatchObject({ release: "true", version: "0.1.2" });
+    expect(versions(manifestNotes)).toEqual(["0.1.2", "0.1.1", "0.1.0"]);
+    const [newest, previous, first] = manifestNotes.map((entry) => entry.note);
+    expect(newest).toContain("Hang number 3");
+    expect(newest).toContain("Hang number 14");
+    expect(previous).toContain("Crash on start");
+    expect(previous).not.toMatch(/An inbox|Hang number/);
+    expect(first).toContain("An inbox");
+    expect(first).not.toContain("Crash on start");
+  }, 60_000);
+
+  it("gives a nightly the nightlies before it, each with its own changes, ten in all", () => {
+    const repo = repository().commit("feat: an inbox (#1)").tag("v0.1.0");
+    for (let run = 1; run <= 3; run++)
+      repo.commit(`fix: hang number ${run} (#${run})`).tag(`v0.1.1-nightly.20261009.${run}`);
+    const short = repo.commit("fix: hang number 4 (#4)").resolve("20261009", 4).manifestNotes;
+    expect(versions(short)).toEqual([
+      "0.1.1-nightly.20261009.4",
+      "0.1.1-nightly.20261009.3",
+      "0.1.1-nightly.20261009.2",
+    ]);
+    expect(short[1]?.note).toContain("Hang number 3");
+    expect(short[1]?.note).not.toContain("Hang number 2");
+
+    repo.tag("v0.1.1-nightly.20261009.4");
+    for (let run = 5; run <= 12; run++)
+      repo.commit(`fix: hang number ${run} (#${run})`).tag(`v0.1.1-nightly.20261010.${run}`);
+    const full = repo.commit("fix: hang number 13 (#13)").resolve("20261010", 13).manifestNotes;
+    expect(versions(full)).toEqual([
+      "0.1.1-nightly.20261010.13",
+      ...[12, 11, 10, 9, 8, 7, 6, 5].map((run) => `0.1.1-nightly.20261010.${run}`),
+      "0.1.1-nightly.20261009.4",
+    ]);
+    expect(full[0]?.note).toContain("Hang number 13");
+    expect(full[0]?.note).not.toContain("Hang number 12");
+  }, 60_000);
 });

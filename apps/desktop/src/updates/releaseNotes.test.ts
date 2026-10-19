@@ -43,9 +43,11 @@ const EXPECTED_GROUPS = [
   { title: "Fixes", items: [{ text: "Keep Restart to update in view", prUrl: `${PULL}/14` }] },
 ];
 
+const STABLE_UPDATE = { offered: "0.2.0", running: "0.1.0", channel: "stable" } as const;
+
 describe("normalizeReleaseNotes", () => {
   it("reads one markdown body from a generic feed as the offered version", () => {
-    expect(normalizeReleaseNotes(MARKDOWN, "0.2.0", "stable")).toEqual({
+    expect(normalizeReleaseNotes(MARKDOWN, STABLE_UPDATE)).toEqual({
       versions: [{ version: "0.2.0", groups: EXPECTED_GROUPS, summary: null, omittedItems: 0 }],
       omittedVersions: 0,
     });
@@ -60,8 +62,11 @@ describe("normalizeReleaseNotes", () => {
           note: `<h3>Performance</h3>\n<ul>\n<li>Open tabs faster (${issueLink(11)})</li>\n</ul>`,
         },
       ],
-      "0.2.0-nightly.20261016.2",
-      "nightly",
+      {
+        offered: "0.2.0-nightly.20261016.2",
+        running: "0.1.0-nightly.20261014.5",
+        channel: "nightly",
+      },
     );
     expect(notes.versions.map((version) => version.version)).toEqual([
       "0.2.0-nightly.20261016.2",
@@ -80,8 +85,7 @@ describe("normalizeReleaseNotes", () => {
         { version: "0.2.0", note: "" },
         { version: "0.1.9", note: null },
       ],
-      "0.2.1",
-      "stable",
+      { ...STABLE_UPDATE, offered: "0.2.1" },
     );
     expect(notes).toEqual({
       versions: [
@@ -94,7 +98,7 @@ describe("normalizeReleaseNotes", () => {
       ],
       omittedVersions: 0,
     });
-    expect(normalizeReleaseNotes(null, "0.2.1", "stable")).toEqual({
+    expect(normalizeReleaseNotes(null, { ...STABLE_UPDATE, offered: "0.2.1" })).toEqual({
       versions: [],
       omittedVersions: 0,
     });
@@ -108,7 +112,7 @@ describe("normalizeReleaseNotes", () => {
 <li><img src="x" onerror="alert(1)">Click <a href="javascript:alert(1)">here</a></li>
 </ul>
 <p><strong>Full Changelog</strong>: <a href="https://github.com/acme/widgets/compare/v0.1.0...v0.2.0">v0.1.0...v0.2.0</a></p>`;
-    const [version] = normalizeReleaseNotes(noisy, "0.2.0", "stable").versions;
+    const [version] = normalizeReleaseNotes(noisy, STABLE_UPDATE).versions;
     expect(version?.groups).toEqual([
       {
         title: "Changes",
@@ -119,6 +123,16 @@ describe("normalizeReleaseNotes", () => {
       },
     ]);
     expect(JSON.stringify(version)).not.toMatch(/<|javascript:|alert/);
+  });
+
+  it("keeps a markdown body's angle brackets as text", () => {
+    const [version] = normalizeReleaseNotes(
+      `### Fixes\n\n- Show \`<details>\` blocks & <kbd>Esc</kbd> in a guide ([#20](${PULL}/20))`,
+      STABLE_UPDATE,
+    ).versions;
+    expect(version?.groups[0]?.items).toEqual([
+      { text: "Show <details> blocks & <kbd>Esc</kbd> in a guide", prUrl: `${PULL}/20` },
+    ]);
   });
 
   it("caps versions, lines per version and line length", () => {
@@ -132,7 +146,7 @@ describe("normalizeReleaseNotes", () => {
       version: `0.${20 - index}.0`,
       note: index === 0 ? `### Features\n- ${longLine}` : body,
     }));
-    const notes = normalizeReleaseNotes(many, "0.20.0", "stable");
+    const notes = normalizeReleaseNotes(many, { ...STABLE_UPDATE, offered: "0.20.0" });
     expect(notes.versions).toHaveLength(MAX_VERSIONS);
     expect(notes.omittedVersions).toBe(2);
     const first = notes.versions[0]?.groups[0]?.items[0]?.text ?? "";
@@ -145,12 +159,19 @@ describe("normalizeReleaseNotes", () => {
   it("leaves out versions of the other track", () => {
     const notes = normalizeReleaseNotes(
       [
-        { version: "0.3.0-nightly.20261020.1", note: MARKDOWN },
         { version: "0.2.0", note: MARKDOWN },
+        { version: "0.2.0-nightly.20261020.1", note: MARKDOWN },
       ],
-      "0.2.0",
-      "stable",
+      STABLE_UPDATE,
     );
     expect(notes.versions.map((version) => version.version)).toEqual(["0.2.0"]);
+  });
+
+  it("keeps only the versions the update brings, from the manifest's list of the track", () => {
+    const notes = normalizeReleaseNotes(
+      ["0.4.0", "0.3.0", "0.2.0", "0.1.0"].map((version) => ({ version, note: MARKDOWN })),
+      { offered: "0.4.0", running: "0.2.0", channel: "stable" },
+    );
+    expect(notes.versions.map((version) => version.version)).toEqual(["0.4.0", "0.3.0"]);
   });
 });

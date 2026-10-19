@@ -1,6 +1,6 @@
 # Releasing prkit
 
-prkit ships as a signed and notarized macOS app (Apple Silicon) through GitHub Releases in this repository. The app updates itself from those releases and shows each release body as its changelog. Two workflows do the work:
+prkit ships as a signed and notarized macOS app (Apple Silicon) through GitHub Releases in this repository. The app updates itself from those releases and shows the release bodies as its changelog. Two workflows do the work:
 
 - `.github/workflows/ci.yml` runs on every pull request and on every push to `main`.
 - `.github/workflows/release.yml` publishes a nightly every 4 hours when `main` has something new, and a stable release when you ask for one.
@@ -18,7 +18,7 @@ A run that skips ends after its first job, **Resolve version**, about 30 seconds
 
 Otherwise the nightly gets the next stable version plus the date and run number, for example `0.2.0-nightly.20261014.37`. Each new run takes a higher run number, so two nightlies on one day still sort in order: `.37` before `.41`. The workflow builds, signs, notarizes, and verifies the app, then publishes the release **prkit Nightly 0.2.0-nightly.20261014.37**. It is a prerelease and never the latest release. Its notes cover the commits since the previous nightly, or since the last stable release when there is no previous nightly.
 
-The workflow then deletes every nightly release and tag older than the 14 newest, which is at least two days of nightlies at six a day. The app never needs an older one. An update needs only the newest release, and the app reads its changelog from GitHub's releases feed, which lists only the 10 newest releases. Keep at least 10, or the changelog loses versions.
+The workflow then deletes every nightly release and tag older than the 14 newest, which is at least two days of nightlies at six a day. The app never needs an older one. An update needs only the newest release, whose update manifest carries the changelog (see [Release notes in the app](#release-notes-in-the-app)). The changelog is rebuilt from the nightly tags, so keep at least 10.
 
 To run a nightly now, open **Actions > Release > Run workflow**, keep `main` and the `nightly` channel, and click **Run workflow**. A manual nightly skips for the same reasons as the scheduled one.
 
@@ -62,9 +62,18 @@ To see what the next release would be, run these in a full clone with tags:
 node scripts/release-version.ts next
 node scripts/release-version.ts nightly --date 20261014 --run 1
 node scripts/release-version.ts notes --version 0.2.0 --from v0.1.0
+node scripts/release-version.ts manifest-notes --version 0.2.0 --from v0.1.0
 ```
 
 `next` and `nightly` print nothing and exit 0 when there is nothing to release. Every subcommand exits 1, with the reason on stderr, on bad input.
+
+## Release notes in the app
+
+The app reads its changelog from the update manifest (`latest-mac.yml` or `nightly-mac.yml`), not from GitHub's releases feed. That feed lists only the 10 newest releases, so under two days of nightlies would push a stable release out of it, and a Stable user would get the update with no notes.
+
+The **Resolve version** job runs `release-version.ts manifest-notes`, which prints the manifest's `releaseNotes` as JSON, newest first: the new release's notes, then the releases before it on the same track, 10 in all at most. Each earlier release gets the notes it was published with, rebuilt by git-cliff from the tag before it on the track to its own tag. The first stable release starts at the first commit. The oldest nightly tag left is skipped, because the tag where its notes start may be deleted. The **Build** job passes the JSON to `pnpm dist:desktop:artifact --release-notes`, which writes it into the manifest. The release body on GitHub is the first entry's notes.
+
+The app keeps the versions the update brings: newer than the version it runs, up to the offered one, on its track. It shows the newest 6 and says when it left older ones out.
 
 ## Write the PR title as a conventional commit
 

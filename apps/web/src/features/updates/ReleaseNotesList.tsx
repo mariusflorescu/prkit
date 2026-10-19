@@ -72,8 +72,7 @@ export function ReleaseNotesList({
       ))}
       {(notes.omittedVersions > 0 || releasesUrl !== null) && (
         <p className="text-xs text-muted-foreground">
-          {notes.omittedVersions > 0 &&
-            `${plural(notes.omittedVersions, "older release")} not shown. `}
+          {notes.omittedVersions > 0 && "Older releases aren't shown. "}
           {releasesUrl !== null && (
             <a
               href={releasesUrl}
