@@ -20,8 +20,9 @@ export const forgetMovedAccounts = (client: QueryClient) => {
       .map(([id]) => id);
     readThrough = next;
     if (moved.length === 0) return;
+    // A key can hold the account inside an object (a diff's source), so look in the whole hash.
     void client.resetQueries({
-      predicate: (query) => moved.some((id) => query.queryKey.includes(id)),
+      predicate: (query) => moved.some((id) => query.queryHash.includes(JSON.stringify(id))),
     });
     void client.invalidateQueries({ queryKey: inboxQuery.queryKey });
     void client.invalidateQueries({ queryKey: repositoriesQuery.queryKey });

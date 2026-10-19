@@ -91,9 +91,11 @@
  *   GET  writes                         every mutation and REST write, with its input
  *   POST limit?resource=graphql|core&seconds=<s>   the limit is used up until then
  *   POST latency?ms=<n>[&resource=graphql|core]   every API answer, or that resource's, waits this long
- *   POST hold?resource=graphql|core[&dir=<d>]   that resource's answers wait from now on, until
- *                                       release; with dir, only answers to that gh config directory's
- *                                       token (its path under $HOME, as the stats log names it)
+ *   POST hold?resource=graphql|core[&dir=<d>][&part=body]   that resource's answers wait from now
+ *                                       on, until release; with dir, only answers to that gh config
+ *                                       directory's token (its path under $HOME, as the stats log names
+ *                                       it); with part=body, the status and headers go at once and only
+ *                                       the body waits
  *   POST release?resource=graphql|core  sends the answers held since hold, and holds no more
  *   POST archive?repo=<name>            archives a repository, so lists leave it out
  *   POST inbox-only?login=<l>&prs=<n,n> that login's inbox searches find only these pull requests
@@ -178,7 +180,11 @@ type Resource = keyof typeof quotas;
 const latency: Record<Resource, number> = { core: 0, graphql: 0 };
 const held: Record<
   Resource,
-  { readonly queue: Array<() => void>; readonly dir: string | null } | null
+  {
+    readonly queue: Array<() => void>;
+    readonly dir: string | null;
+    readonly body: boolean;
+  } | null
 > = { core: null, graphql: null };
 
 /** By kind, or by kind and login (`<kind>@<login>`) for one account's requests. */
@@ -215,22 +221,28 @@ const send = (
   const quota = quotas[resource];
   const reset =
     Date.now() < quota.limitedUntil ? Math.ceil(quota.limitedUntil / 1000) : quota.reset;
+  const head = () =>
+    response.writeHead(status, {
+      "content-type": "application/json",
+      "x-ratelimit-limit": String(LIMIT),
+      "x-ratelimit-remaining": String(remaining(resource)),
+      "x-ratelimit-used": String(quota.used),
+      "x-ratelimit-reset": String(reset),
+      "x-ratelimit-resource": resource,
+      ...headers,
+    });
   const write = () =>
     setTimeout(() => {
-      response.writeHead(status, {
-        "content-type": "application/json",
-        "x-ratelimit-limit": String(LIMIT),
-        "x-ratelimit-remaining": String(remaining(resource)),
-        "x-ratelimit-used": String(quota.used),
-        "x-ratelimit-reset": String(reset),
-        "x-ratelimit-resource": resource,
-        ...headers,
-      });
+      head();
       response.end(body);
     }, latency[resource]);
   const hold = held[resource];
   if (hold === null || (hold.dir !== null && hold.dir !== tokenOwner(token).dir)) write();
-  else hold.queue.push(write);
+  else if (hold.body) {
+    head();
+    response.flushHeaders();
+    hold.queue.push(() => response.end(body));
+  } else hold.queue.push(write);
 };
 
 const failedByControl = (
@@ -500,7 +512,14 @@ const control = (url: URL, method: string, text: string, response: NodeHttp.Serv
   if (name === "hold" || name === "release") {
     const resource = url.searchParams.get("resource") === "core" ? "core" : "graphql";
     const queue = held[resource]?.queue ?? [];
-    held[resource] = name === "hold" ? { queue, dir: url.searchParams.get("dir") } : null;
+    held[resource] =
+      name === "hold"
+        ? {
+            queue,
+            dir: url.searchParams.get("dir"),
+            body: url.searchParams.get("part") === "body",
+          }
+        : null;
     if (name === "release") for (const write of queue) write();
     return answer({ ok: true, resource, held: queue.length });
   }

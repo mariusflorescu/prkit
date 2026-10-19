@@ -289,11 +289,11 @@ export const make = Effect.gen(function* () {
         const priority = yield* GitHubPriority;
         const pinned = yield* GitHubBinding;
         const configDir = pinned?.accountId === id ? pinned.configDir : null;
-        const moved = (login: string) =>
+        const moved = (login: string, when: "before-send" | "on-answer") =>
           Effect.logWarning(
             "GitHub read set aside: its account moved to another gh directory",
           ).pipe(
-            Effect.annotateLogs({ accountId: id, operation, configDir }),
+            Effect.annotateLogs({ accountId: id, operation, configDir, when }),
             Effect.andThen(
               Effect.fail(
                 fail(
@@ -303,10 +303,20 @@ export const make = Effect.gen(function* () {
               ),
             ),
           );
+        /** Checked once the whole answer is in: an answer still arriving when the account moved counts as late. */
+        const movedAway =
+          configDir === null
+            ? Effect.succeed(false)
+            : accounts.known.pipe(
+                Effect.map(
+                  (known) =>
+                    known?.accounts.find((account) => account.id === id)?.configDir !== configDir,
+                ),
+              );
         let binding = yield* accounts.token(id);
         const login = binding.account.login;
         if (configDir !== null && binding.account.configDir !== configDir)
-          return yield* moved(login);
+          return yield* moved(login, "before-send");
         let reread = false;
         let rateRetries = 0;
         while (true) {
@@ -348,29 +358,22 @@ export const make = Effect.gen(function* () {
                 priority,
               }),
             );
-          if (
-            configDir !== null &&
-            (yield* accounts.known)?.accounts.find((account) => account.id === id)?.configDir !==
-              configDir
-          ) {
-            yield* response.text.pipe(Effect.ignore);
-            yield* logRequest(spent);
-            return yield* moved(login);
-          }
           if (response.status === 304 || (response.status >= 200 && response.status < 300)) {
             const value = yield* read(response).pipe(Effect.tapError(() => logRequest(spent)));
             yield* logRequest(
               points === undefined || response.status === 304 ? spent : points(value),
             );
+            if (yield* movedAway) return yield* moved(login, "on-answer");
             return value;
           }
           const rejectedBody = yield* response.text;
           yield* logRequest(spent);
+          if (yield* movedAway) return yield* moved(login, "on-answer");
           if (response.status === 401 && !reread) {
             binding = yield* accounts.token(id, true);
             reread = true;
             if (configDir !== null && binding.account.configDir !== configDir)
-              return yield* moved(login);
+              return yield* moved(login, "before-send");
             continue;
           }
           if (response.status === 403 || response.status === 429) {

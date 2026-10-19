@@ -369,11 +369,7 @@ export const make = Effect.gen(function* () {
               ...Object.keys(settings.users ?? {}),
               ...(settings.user ? [settings.user] : []),
             ]),
-          ].map((login) => ({
-            host,
-            login,
-            active: settings.user?.toLowerCase() === login.toLowerCase(),
-          })),
+          ].map((login) => ({ host, login, active: settings.user === login })),
         ),
       };
       return listing;

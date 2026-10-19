@@ -108,10 +108,17 @@ export const startFakeGitHub = async (
     /** Every answer, or only `resource`'s, waits `ms`. */
     latency: (ms: number, resource?: "graphql" | "core") =>
       post(`latency?ms=${ms}${resource === undefined ? "" : `&resource=${resource}`}`),
-    /** `resource`'s answers wait from now on, until `release` sends them; with `dir`, only answers to that directory's token. */
-    hold: (resource: "graphql" | "core", dir?: string) =>
+    /**
+     * `resource`'s answers wait from now on, until `release` sends them. With `dir`, only answers
+     * to that directory's token; with `body`, the status and headers go at once and the body waits.
+     */
+    hold: (resource: "graphql" | "core", only: { dir?: string; body?: boolean } = {}) =>
       post(
-        `hold?resource=${resource}${dir === undefined ? "" : `&dir=${encodeURIComponent(dir)}`}`,
+        `hold?${new URLSearchParams([
+          ["resource", resource],
+          ...(only.dir === undefined ? [] : [["dir", only.dir]]),
+          ...(only.body === true ? [["part", "body"]] : []),
+        ])}`,
       ),
     release: (resource: "graphql" | "core") => post(`release?resource=${resource}`),
     archive: (repo: string) => post(`archive?repo=${repo}`),

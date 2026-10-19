@@ -43,8 +43,13 @@ const readers = async (fake: FakeGitHub) =>
     ),
   ].sort();
 
-const open = async (name: string, fake: FakeGitHub, { app, screen, browser }: Fixtures) => {
-  const run = startFakeInstance(name, fake);
+const open = async (
+  name: string,
+  fake: FakeGitHub,
+  { app, screen, browser }: Fixtures,
+  extra: ReadonlyArray<string> = [],
+) => {
+  const run = startFakeInstance(name, fake, extra);
   await emulateOsColorScheme(browser, "light");
   await app.open(run.openUrl);
   await expect(screen.getByRole("link", /#3 Budget fixture 3/)).toBeVisible({ timeout: 20_000 });
@@ -149,7 +154,12 @@ test(
       .getByRole("navigation", "Workspace tabs")
       .getByRole("link", /budget\/fixtures #3/);
     try {
-      const prkit = await open(name, fake, { app, screen, browser });
+      // The watcher reads the open tab's fingerprint every 5 seconds, one request per read.
+      const prkit = await open(name, fake, { app, screen, browser }, [
+        "--e2e",
+        "--watch-interval",
+        "5000",
+      ]);
       await screen.getByRole("link", /#3 Budget fixture 3/).tap();
       await expect(screen.getByText("Description before the move")).toBeVisible({
         timeout: 20_000,
@@ -165,21 +175,27 @@ test(
       await tab.tap();
       await expect(screen.getByText("Read through gh-move")).toBeVisible({ timeout: 20_000 });
       await expect(screen.getByText("Description before the move")).toHaveCount(0);
-      expect(await readers(fake)).toEqual([`${FIRST}@.config/gh-move`]);
+      const detailReads = (await fake.stats()).log.filter((entry) => entry.kind === "rest:pull");
+      expect(detailReads.length).toBeGreaterThan(0);
+      expect(detailReads.every((entry) => entry.dir === ".config/gh-move")).toBe(true);
 
-      // Answers to ~/.config/gh-move's token wait while the login moves back to ~/.config/gh,
-      // which comes first.
+      // The bodies of answers to ~/.config/gh-move's token wait, their headers already in, while
+      // the login moves back to ~/.config/gh, which comes first.
       await fake.describe(3, { body: "Held description" });
       await fake.resetStats();
-      await fake.hold("core", ".config/gh-move");
+      await fake.hold("core", { dir: ".config/gh-move", body: true });
+      await fake.hold("graphql", { dir: ".config/gh-move", body: true });
       await screen.getByRole("button", "Refresh").first().tap();
-      await expect
-        .poll(async () =>
-          (await fake.stats()).log.some(
-            (entry) => entry.kind === "rest:pull" && entry.dir === ".config/gh-move",
-          ),
-        )
-        .toBe(true);
+      for (const kind of ["rest:pull", "graphql:fingerprint"])
+        await expect
+          .poll(
+            async () =>
+              (await fake.stats()).log.some(
+                (entry) => entry.kind === kind && entry.dir === ".config/gh-move",
+              ),
+            { timeout: 15_000 },
+          )
+          .toBe(true);
 
       await fake.describe(3, { body: "Fresh description" });
       NodeFS.writeFileSync(first, hostsFor(FIRST));
@@ -195,8 +211,10 @@ test(
       await tab.tap();
 
       // The window reads #3 again through ~/.config/gh, so only the server's log shows what it
-      // did with the held answers.
+      // did with the held answers. The watcher's fingerprint read is one request with nothing
+      // after it, so only the check made once its body is in can set it aside.
       await fake.release("core");
+      await fake.release("graphql");
       await expect(screen.getByText("Fresh description")).toBeVisible({ timeout: 20_000 });
       await expect
         .poll(
@@ -204,8 +222,12 @@ test(
             NodeFS.readFileSync(log, "utf8")
               .split("GitHub read set aside")
               .slice(1)
-              .filter((entry) => entry.includes(`configDir: '${fake.home}/.config/gh-move'`))
-              .length,
+              .filter(
+                (entry) =>
+                  entry.includes("operation: 'PrkitWatch'") &&
+                  entry.includes("when: 'on-answer'") &&
+                  entry.includes(`configDir: '${fake.home}/.config/gh-move'`),
+              ).length,
           { timeout: 15_000 },
         )
         .toBeGreaterThan(0);
@@ -227,6 +249,7 @@ test(
       ).toHaveLength(1);
     } finally {
       await fake.release("core");
+      await fake.release("graphql");
       stopFakeInstance(name, { keepHome: false });
       fake.stop();
     }
