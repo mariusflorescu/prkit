@@ -47,7 +47,7 @@ const upsert = (questions: ReadonlyArray<Question>, question: Question) =>
  */
 export const applyAskEvent = (state: AsksState, event: AskWatchEvent): AsksState => {
   if (event._tag === "snapshot")
-    return { _tag: "ready", questions: event.questions, problem: null };
+    return { _tag: "ready", questions: event.questions, damaged: event.damaged, problem: null };
   // A subscription always opens with its snapshot, so nothing else comes before one.
   if (state._tag !== "ready") return state;
   switch (event._tag) {

@@ -240,6 +240,8 @@ export const changeWorkspace = (command: WorkspaceCommand): Promise<Workspace> =
       return call((client) => client[WS_METHODS.workspaceOpenLocal]({ key: command.key }));
     case "close-local":
       return call((client) => client[WS_METHODS.workspaceCloseLocal]({ key: command.key }));
+    case "remove-damaged":
+      return call((client) => client[WS_METHODS.workspaceRemoveDamaged]({ keys: command.keys }));
   }
 };
 export const getPullRequestDetail = (
@@ -606,6 +608,11 @@ export const retryQuestion = (questionId: QuestionId): Promise<Question> =>
   call((client) => client[WS_METHODS.asksRetry]({ questionId }));
 export const pinAnswer = (questionId: QuestionId, pinned: boolean): Promise<Question> =>
   call((client) => client[WS_METHODS.asksPin]({ questionId, pinned }));
+export const removeDamagedQuestions = (
+  reviewId: ReviewId,
+  questionIds: ReadonlyArray<QuestionId>,
+): Promise<void> =>
+  call((client) => client[WS_METHODS.asksRemoveDamaged]({ reviewId, questionIds }));
 
 /**
  * Hears what changed on the server's GitHub caches until the returned function is

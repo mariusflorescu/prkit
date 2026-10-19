@@ -17,6 +17,7 @@ import { inboxQuery } from "~/rpc/queries";
 import { isSettingsPath } from "~/features/settings/settingsSections";
 import { useWorkspaceSession } from "~/features/workspace/sessionStore";
 import { useWorkspace } from "~/features/workspace/workspaceContext";
+import { DamagedTabsNotice } from "./DamagedTabsNotice";
 import { LocalReviewWorkspaceTab } from "./LocalReviewWorkspaceTab";
 import { PullRequestWorkspaceTab } from "./PullRequestWorkspaceTab";
 import { SettingsWorkspaceTab } from "./SettingsWorkspaceTab";
@@ -30,6 +31,7 @@ export function WorkspaceTabs() {
   const path = useRouterState({ select: (state) => state.location.pathname });
   const rows = workspace.data?.open ?? [];
   const locals = workspace.data?.local ?? [];
+  const damaged = workspace.data?.damaged ?? [];
   const shownLocal = useParams({ strict: false }).key;
   const keys = rows.map((row) => row.key);
   const onSettings = isSettingsPath(path);
@@ -117,7 +119,7 @@ export function WorkspaceTabs() {
               <InboxIcon aria-hidden="true" className="size-3" /> Inbox
             </Link>
           </ShortcutTooltip>
-          {(rows.length > 0 || locals.length > 0 || settingsOpen) && (
+          {(rows.length > 0 || locals.length > 0 || damaged.length > 0 || settingsOpen) && (
             <Separator orientation="vertical" className="mx-1 h-4" />
           )}
           <DndContext
@@ -149,6 +151,7 @@ export function WorkspaceTabs() {
           {locals.map((row) => (
             <LocalReviewWorkspaceTab key={row.key} row={row} active={shownLocal === row.key} />
           ))}
+          {damaged.length > 0 && <DamagedTabsNotice keys={damaged} />}
           {workspace.pending && (
             <span aria-busy="true" aria-label="Loading open pull requests" className="flex gap-1">
               <Skeleton className="h-6 w-12" />

@@ -25,7 +25,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 
-import { decodeReadable } from "../persistence/damagedRows.ts";
+import { decodeEach, logDamaged } from "../persistence/damagedRows.ts";
 
 /** Filters saved before the sort existed keep their search and selections, and sort by recent activity. */
 const StoredFilters = Schema.fromJsonString(
@@ -35,8 +35,8 @@ const StoredFilters = Schema.fromJsonString(
   }),
 );
 const UNSAVED: SavedInboxFilters = { ...NO_INBOX_FILTERS, savedAt: null };
-const readableOpen = decodeReadable("open_pull_requests", OpenPullRequest);
-const readableLocal = decodeReadable("open_local_reviews", OpenLocalReview);
+const decodeOpen = decodeEach("open_pull_requests", OpenPullRequest);
+const decodeLocal = decodeEach("open_local_reviews", OpenLocalReview);
 /** Saved filters that don't decode start the Inbox unfiltered rather than fail the open tabs' read. */
 const decodeFilters = (stored: string | null) =>
   stored === null
@@ -60,15 +60,17 @@ export const make = Effect.gen(function* () {
     sql
       .withTransaction(
         Effect.gen(function* () {
-          // A tab prkit can't read is left out (logged), and the others still open.
-          const open =
+          // A tab prkit can't read is left out (logged and named), and the others still open.
+          const [open, damagedOpen] =
             yield* sql`SELECT key, account_id AS accountId, position FROM open_pull_requests ORDER BY position`.pipe(
-              Effect.flatMap(readableOpen),
+              Effect.flatMap(decodeOpen),
             );
-          const local =
+          const [local, damagedLocal] =
             yield* sql`SELECT key, position FROM open_local_reviews ORDER BY position`.pipe(
-              Effect.flatMap(readableLocal),
+              Effect.flatMap(decodeLocal),
             );
+          const damaged = [...damagedOpen, ...damagedLocal];
+          yield* Effect.forEach(damaged, logDamaged, { discard: true });
           const rows =
             yield* sql`SELECT active_key AS activeKey, inbox_filters AS inboxFilters, version FROM workspace WHERE id = 1`.pipe(
               Effect.flatMap(
@@ -86,6 +88,7 @@ export const make = Effect.gen(function* () {
           return yield* Schema.decodeUnknownEffect(WorkspaceSchema)({
             open,
             local,
+            damaged: damaged.flatMap((row) => (row.id === null ? [] : [row.id])),
             // The active tab, unless it was left out.
             activeKey: open.find((row) => row.key === rows[0]?.activeKey)?.key ?? null,
             inboxFilters: decodeFilters(rows[0]?.inboxFilters ?? null),
@@ -150,6 +153,12 @@ export const make = Effect.gen(function* () {
             yield* sql`UPDATE workspace SET active_key = NULL WHERE id = 1`;
             for (const row of current.open)
               yield* sql`DELETE FROM open_pull_requests WHERE key = ${row.key}`;
+            // Remove deletes a stored tab only while prkit still can't read it.
+            if (input.kind === "remove-damaged")
+              for (const key of input.keys.filter((key) => current.damaged.includes(key))) {
+                yield* sql`DELETE FROM open_pull_requests WHERE key = ${key}`;
+                yield* sql`DELETE FROM open_local_reviews WHERE key = ${key}`;
+              }
             for (const row of next.open)
               yield* sql`INSERT INTO open_pull_requests (key, account_id, position) VALUES (${row.key}, ${row.accountId}, ${row.position})
                 ON CONFLICT (key) DO UPDATE SET account_id = excluded.account_id, position = excluded.position`;

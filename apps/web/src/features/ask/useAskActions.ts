@@ -2,7 +2,13 @@ import type { QuestionId, ReviewId } from "@prkit/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { toastManager } from "~/components/ui/toast";
-import { askQuestion, pinAnswer, retryQuestion, stopQuestion } from "~/rpc/client";
+import {
+  askQuestion,
+  pinAnswer,
+  removeDamagedQuestions,
+  retryQuestion,
+  stopQuestion,
+} from "~/rpc/client";
 import { asksQuery } from "~/rpc/queries";
 
 import { asksAdded } from "./askEvents";
@@ -11,8 +17,8 @@ const failed = (title: string) => (error: Error) =>
   toastManager.add({ type: "error", title, description: error.message });
 
 /**
- * Ask, stop, retry and pin. What they change arrives on the watch, which only a new question
- * gets ahead of, so its card shows at once.
+ * Ask, stop, retry, pin and remove the questions prkit couldn't read. What they change arrives
+ * on the watch, which only a new question gets ahead of, so its card shows at once.
  */
 export function useAskActions(reviewId: ReviewId) {
   const client = useQueryClient();
@@ -33,7 +39,11 @@ export function useAskActions(reviewId: ReviewId) {
     mutationFn: (input: { id: QuestionId; pinned: boolean }) => pinAnswer(input.id, input.pinned),
     onError: failed("Couldn't change the pin"),
   });
-  return { ask, stop, retry, pin };
+  const removeDamaged = useMutation({
+    mutationFn: (ids: ReadonlyArray<QuestionId>) => removeDamagedQuestions(reviewId, ids),
+    onError: failed("Couldn't remove it"),
+  });
+  return { ask, stop, retry, pin, removeDamaged };
 }
 
 export type AskActions = ReturnType<typeof useAskActions>;

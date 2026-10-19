@@ -45,7 +45,11 @@ const replay = (events: ReadonlyArray<AskWatchEvent>) =>
 describe("applyAskEvent", () => {
   it("shows text a snapshot already held once, however often the watch sends it again", () => {
     const state = replay([
-      { _tag: "snapshot", questions: [question([{ _tag: "text", text: "It stops " }], answering)] },
+      {
+        _tag: "snapshot",
+        questions: [question([{ _tag: "text", text: "It stops " }], answering)],
+        damaged: [],
+      },
       text(0, 0, "It stops "),
       text(0, 0, "It stops after three"),
       text(0, 9, "after three tries."),
@@ -59,7 +63,11 @@ describe("applyAskEvent", () => {
 
   it("starts the answer again when a retried question comes back empty", () => {
     const state = replay([
-      { _tag: "snapshot", questions: [question([{ _tag: "text", text: "Half an" }], answering)] },
+      {
+        _tag: "snapshot",
+        questions: [question([{ _tag: "text", text: "Half an" }], answering)],
+        damaged: [],
+      },
       { _tag: "question", question: question([], { _tag: "starting" }) },
       text(0, 0, "A new answer."),
     ]);
