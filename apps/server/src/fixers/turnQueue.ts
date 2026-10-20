@@ -18,6 +18,7 @@ import type { SqlError } from "effect/sql/SqlError";
 
 import { Agents } from "../agents/Agents.ts";
 import { turnTmpDir } from "../agents/commandReach.ts";
+import { makeE2eHold } from "../e2eHold.ts";
 import { McpTokens } from "../mcp/McpTokens.ts";
 import { StartedBy } from "../outside/StartedBy.ts";
 import {
@@ -61,6 +62,7 @@ export const makeTurnQueue = (
     const agents = yield* Agents;
     const tokens = yield* McpTokens;
     const scope = yield* Effect.scope;
+    const hold = yield* makeE2eHold;
     const {
       appendActivity,
       awaiting,
@@ -107,6 +109,7 @@ export const makeTurnQueue = (
           }),
         );
         if (next === null) return;
+        yield* hold("fix-turn-start");
         yield* launch(next.fixer, next.turnId, runTurn(next.turnId));
         yield* publish(next.fixer.pr_key);
       }).pipe(

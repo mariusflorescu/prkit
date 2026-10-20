@@ -12,6 +12,7 @@ import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { makeE2eHold } from "../e2eHold.ts";
 import { GitHubApi } from "../github/GitHubApi.ts";
 import { PullRequests } from "../pullRequests/PullRequests.ts";
 import { RepoCache } from "../repo/RepoCache.ts";
@@ -32,6 +33,7 @@ export const makePushes = (state: FixerState, queue: TurnQueue, sessions: Sessio
     const repo = yield* RepoCache;
     const api = yield* GitHubApi;
     const pullRequests = yield* PullRequests;
+    const hold = yield* makeE2eHold;
     const {
       appendActivity,
       commandTurn,
@@ -65,6 +67,7 @@ export const makePushes = (state: FixerState, queue: TurnQueue, sessions: Sessio
         if (!(yield* transition(turnId, ["ready"], { _tag: "pushing" })))
           return yield* snapshotOf(key);
         yield* publish(key);
+        yield* hold("fix-push");
         // Once the push leaves, its outcome is recorded even if the caller goes away.
         const result = yield* Effect.uninterruptible(
           repo
