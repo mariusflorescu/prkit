@@ -87,8 +87,10 @@ export const sendLineToAgent = async (
   await expect(line).toBeVisible({ timeout: 30_000 });
   await line.focus();
   await browser.keyboard.press("Enter");
-  await browser.keyboard.type(comment);
-  await browser.keyboard.press("Meta+Enter");
+  // The composer opens a moment after Enter; text typed before it has focus is lost.
+  const composer = screen.getByRole("textbox", /^Comment on line \d+$/);
+  await composer.fill(comment);
+  await composer.press("Meta+Enter");
   const send = await openSendToAgent({ app, screen, browser }, 1);
   if (beforeSend !== null) await beforeSend();
   await send.getByRole("button", "Send 1 comment to agent").tap();

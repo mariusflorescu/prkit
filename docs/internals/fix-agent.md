@@ -21,11 +21,13 @@ queued ──> preparing ──> running ──> ready ──> pushing ──> p
                             └─> unchanged (the agent changed nothing)
 ```
 
-Only one turn per PR is past `queued` and not yet ended. `ready` counts as holding the checkout: a second batch sent while fixes wait for Push queues behind them and starts after Push or Discard. So a fix and a conflict resolution never edit the checkout together, and every ready result is one commit (or one rebased head) on top of the branch as GitHub had it. Starting the next turn is one transaction that checks the queue and moves the oldest turn to `preparing`, so two callers never start two turns. Fix turns share the app's two agent slots with guide attempts.
+Only one turn per PR is past `queued` and not yet ended. `ready` counts as holding the checkout: a second batch sent while fixes wait for Push queues behind them and starts after Push or Discard. So a fix and a conflict resolution never edit the checkout together, and every ready result is one commit (or one rebased head) on top of the branch as GitHub had it. Starting the next turn is one transaction that checks the queue and moves the oldest turn to `preparing`, so two callers never start two turns, and Ask the agent to change moves a ready turn back to `running` the same way. Either happens only while the session is live and no end of it is still cleaning up. Once a start is stored, the turn's run starts even when the caller goes away, and it runs only if the turn is still stored as started when its run is registered: a drop that came between the two wins, and any later drop finds the run and stops it. Fix turns share the app's two agent slots with guide attempts.
 
 Every state change is a compare-and-set on the turn's current state. A late write from a turn that moved on, such as an agent finishing after the owner discarded it, changes nothing.
 
 Dropping a turn (Discard, Stop, or the watcher) stores its `discarded` state, its drafts back with the owner and its note in one transaction, and a session's end stores `ended` with every turn it drops in the same one, so a failed save leaves the session as it was and Stop works again. The dropped turn stays unfinished, holding the checkout, until its agent has stopped, the checkout is back at the head and its commit is let go. Once stored, that rest runs even when the window that asked closes; after a crash, startup finishes it.
+
+A turn is only ever queued in a live session. Sending, resolving conflicts, reverting or retrying brings back a session that ended; nothing else does, so a turn that only moves the session to another agent can't undo a Stop. While an end stops the session's agents, finishes its drops and removes its checkout, the session's queue starts nothing: a fix sent again meanwhile waits, and starts once the end is done, on a fresh checkout. After a crash no end is running, and startup finishes the cut-off one before the queue goes on; a checkout the end left half removed is rebuilt before any turn uses it.
 
 ## The checkout
 
@@ -127,7 +129,7 @@ Per repository (`fixer_repository_settings`, all off by default), besides check 
 
 ## Races
 
-- **The branch moved before Push.** prkit pushes nothing, discards the stale result, and queues a redo turn with the same request on the new head, in the same session. A conflict redo whose new head merges cleanly ends as resolved upstream.
+- **The branch moved before Push.** prkit pushes nothing, discards the stale result, and queues a redo turn with the same request on the new head, in the same session. A conflict redo whose new head merges cleanly ends as resolved upstream. A push the session's end let finish is never redone, even when the session was started again meanwhile: the end marks it (`pushing` with `spared`) in the transaction that stores the end, and the drafts go back to the owner. The drop, its drafts and the redo are one transaction, and the drop stays unfinished until its commit is let go, so startup finishes one a crash cut off.
 - **The owner resolved the conflict outside prkit.** Every minute the fix watcher reads, for every PR with a session, the same fingerprint the review watcher reads, as background work under the budget's reserve, and hands it to `PullRequests` too so the read caches stay current. `mergeStateStatus` `DIRTY` means a conflict. When the PR merges cleanly again at a head that is not the turn's own, a queued, running or ready resolution is discarded as "Resolved outside prkit". Nothing is pushed over it.
 - **The base moved again after a push.** The PR conflicts again, the header offers Resolve conflicts again, and automatic resolution counts against its daily limit.
 

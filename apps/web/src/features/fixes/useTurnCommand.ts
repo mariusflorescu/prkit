@@ -9,7 +9,7 @@ import { short } from "./fixPresentation";
 
 type Command = Parameters<typeof runTurnCommand>[0];
 
-/** What the owner sees after a push: it landed, or the branch moved and prkit redoes it. */
+/** What the owner sees after a push: it landed, or the branch moved and prkit pushed nothing. */
 const pushOutcome = (turn: FixerTurn | undefined) => {
   if (turn?.status._tag === "pushed" && turn.commit !== null)
     return { type: "success", title: `Pushed ${short(turn.commit.sha)}` } as const;

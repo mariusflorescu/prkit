@@ -136,7 +136,11 @@ export const FixerTurnStatus = Schema.Union([
   Schema.TaggedStruct("running", {}),
   /** A local commit waits for Push, Discard or a change request. */
   Schema.TaggedStruct("ready", {}),
-  Schema.TaggedStruct("pushing", {}),
+  /**
+   * `spared`: the session ended while the push was in flight. The push finishes, but is never
+   * redone, even once the session is open again.
+   */
+  Schema.TaggedStruct("pushing", { spared: Schema.optionalKey(Schema.Boolean) }),
   Schema.TaggedStruct("pushed", { at: Schema.String }),
   /** The agent finished without changing anything. */
   Schema.TaggedStruct("unchanged", {}),
