@@ -44,9 +44,10 @@ export const makePushes = (state: FixerState, queue: TurnQueue, sessions: Sessio
       returnDrafts,
       snapshotOf,
       transition,
+      turnById,
     } = state;
-    const { advance, enqueue } = queue;
-    const { rebindOrKeep } = sessions;
+    const { advance, queueTurn, afterQueued } = queue;
+    const { discard, finishDrop, rebindOrKeep } = sessions;
     const accessCache = new Map<string, { readonly at: number; readonly access: PushAccess }>();
 
     /** Pushes a ready turn's commit, only if the branch is still where the turn found it. */
@@ -64,80 +65,149 @@ export const makePushes = (state: FixerState, queue: TurnQueue, sessions: Sessio
         const sha = row.commit_sha;
         const headSha = row.head_sha;
         const rebase = row.work._tag === "conflicts" && row.work.strategy === "rebase";
-        if (!(yield* transition(turnId, ["ready"], { _tag: "pushing" })))
-          return yield* snapshotOf(key);
-        yield* publish(key);
-        yield* hold("fix-push");
-        // Once the push leaves, its outcome is recorded even if the caller goes away.
-        const result = yield* Effect.uninterruptible(
-          repo
-            .pushFix({
-              ref,
-              accountId: fixer.account_id,
-              headRepo: access.repository,
-              headRef: access.branch,
-              sha,
-              expected: headSha,
-              lease: rebase,
-            })
-            .pipe(Effect.result),
+        // Once the turn is pushing, the push runs and its outcome is recorded even if the caller
+        // goes away.
+        return yield* Effect.uninterruptible(
+          Effect.gen(function* () {
+            if (!(yield* transition(turnId, ["ready"], { _tag: "pushing" })))
+              return yield* snapshotOf(key);
+            yield* publish(key);
+            yield* runPush(
+              fixer,
+              row,
+              { ref, access, sha, expected: headSha, lease: rebase },
+              auto,
+            );
+            return yield* snapshotOf(key);
+          }),
         );
+      }).pipe(Effect.catchTags(dbFailures));
+
+    /** The push of a turn this call moved to pushing, and what its outcome leads to. */
+    const runPush = (
+      fixer: FixerRow,
+      row: TurnRow,
+      push: {
+        readonly ref: PullRequestRef;
+        readonly access: Extract<PushAccess, { _tag: "allowed" }>;
+        readonly sha: string;
+        readonly expected: string;
+        readonly lease: boolean;
+      },
+      auto: boolean,
+    ) =>
+      Effect.gen(function* () {
+        const { ref, access, sha } = push;
+        const key = fixer.pr_key;
+        const turnId = row.id;
+        yield* hold("fix-push");
+        const result = yield* repo
+          .pushFix({
+            ref,
+            accountId: fixer.account_id,
+            headRepo: access.repository,
+            headRef: access.branch,
+            sha,
+            expected: push.expected,
+            lease: push.lease,
+          })
+          .pipe(Effect.result);
         if (result._tag === "Failure") {
           yield* transition(turnId, ["pushing"], { _tag: "ready" });
           yield* appendActivity(key, turnId, "error", result.failure.message);
           return yield* new FixerError({ message: result.failure.message });
         }
+        if (result.success._tag === "moved")
+          return yield* droppedAsMoved(fixer, row, result.success.remote);
+        yield* pushed(fixer, row, { ref, sha, ...access }, auto);
+      });
+
+    /**
+     * The branch moved before the push: the stale result is dropped (its drafts, its note, and a
+     * redo with the same request on the new head in one transaction) and stays unfinished until
+     * its commit is let go, so a crash at any point leaves a drop startup finishes. Only a live
+     * session whose end didn't let this push finish gets the redo; otherwise the drafts go back
+     * to the owner.
+     */
+    const droppedAsMoved = (fixer: FixerRow, row: TurnRow, remote: string | null) =>
+      Effect.gen(function* () {
+        const moved = `The branch moved${remote === null ? "" : ` to ${short(remote)}`} before the push, so prkit pushed nothing`;
+        // The redo runs on the session's agent, or the fallback when that one is off now.
+        const bound = yield* rebindOrKeep(fixer);
+        const dropped = yield* sql.withTransaction(
+          Effect.gen(function* () {
+            const pushing = (yield* turnById(row.id))?.status;
+            if (pushing?._tag !== "pushing") return { _tag: "gone" } as const;
+            const redo =
+              pushing.spared === true
+                ? null
+                : yield* queueTurn(bound, row.work, "redo", {
+                    createdAt: row.created_at,
+                    startedBy: row.started_by,
+                    // The batch's drafts stay with the agent, now for the redo.
+                    prepare: (redoId) =>
+                      sql`UPDATE pending_comments SET fixer_turn_id = ${redoId} WHERE fixer_turn_id = ${row.id}`.pipe(
+                        Effect.asVoid,
+                      ),
+                  });
+            const message =
+              redo === null
+                ? `${moved}. The agent is stopped, so prkit isn't redoing it`
+                : `${moved} and is redoing it on the new head`;
+            yield* discard(
+              row,
+              { _tag: "discarded", reason: "moved", message },
+              ["pushing"],
+              false,
+            );
+            return { _tag: "dropped", redo } as const;
+          }),
+        );
+        if (dropped._tag === "gone") return;
+        yield* finishDrop(fixer, row);
+        yield* dropped.redo === null ? advance(fixer.id) : afterQueued(bound, dropped.redo);
+        yield* publish(fixer.pr_key);
+      });
+
+    const pushed = (
+      fixer: FixerRow,
+      row: TurnRow,
+      to: {
+        readonly ref: PullRequestRef;
+        readonly sha: string;
+        readonly branch: string;
+        readonly repository: string;
+      },
+      auto: boolean,
+    ) =>
+      Effect.gen(function* () {
+        const key = fixer.pr_key;
+        const turnId = row.id;
+        const { sha } = to;
         const at = yield* now;
-        if (result.success._tag === "moved") {
-          const remote = result.success.remote;
-          const message = `The branch moved${remote === null ? "" : ` to ${short(remote)}`} before the push, so prkit pushed nothing and is redoing it on the new head`;
-          if (
-            !(yield* transition(turnId, ["pushing"], {
-              _tag: "discarded",
-              reason: "moved",
-              message,
-            }))
-          )
-            return yield* snapshotOf(key);
-          yield* repo.holdCommit(ref, turnId, null).pipe(Effect.ignore);
-          yield* appendActivity(key, turnId, "note", message);
-          // The redo runs on the session's agent, or the fallback when that one is off now.
-          const bound = yield* rebindOrKeep(fixer);
-          yield* enqueue(bound, row.work, "redo", {
-            createdAt: row.created_at,
-            startedBy: row.started_by,
-            // The batch's drafts stay with the agent, now for the redo.
-            prepare: (redoId) =>
-              sql`UPDATE pending_comments SET fixer_turn_id = ${redoId} WHERE fixer_turn_id = ${turnId}`.pipe(
-                Effect.asVoid,
-              ),
-          });
-          return yield* snapshotOf(key);
-        }
         yield* transition(turnId, ["pushing"], { _tag: "pushed", at });
-        yield* repo.holdCommit(ref, turnId, null).pipe(Effect.ignore);
+        yield* repo.holdCommit(to.ref, turnId, null).pipe(Effect.ignore);
         yield* pullRequests.invalidate(key, fixer.account_id);
         accessCache.clear();
         yield* appendActivity(
           key,
           turnId,
           "note",
-          `Pushed ${short(sha)} to ${access.branch}${auto ? " automatically" : ""}`,
+          `Pushed ${short(sha)} to ${to.branch}${auto ? " automatically" : ""}`,
         );
         yield* Effect.logInfo("Fix pushed").pipe(
           Effect.annotateLogs({
             turnId,
             sha,
-            repository: access.repository,
-            branch: access.branch,
+            repository: to.repository,
+            branch: to.branch,
             auto,
           }),
         );
         yield* afterPush(fixer, row, sha);
-        if (auto) yield* notify(fixer, "Fixes pushed", `${short(sha)} is on ${access.branch}`);
+        if (auto) yield* notify(fixer, "Fixes pushed", `${short(sha)} is on ${to.branch}`);
         yield* advance(fixer.id);
-        return yield* snapshotOf(key);
-      }).pipe(Effect.catchTags(dbFailures));
+      });
 
     /** Drafts the fix covered are resolved by the agent; GitHub threads get an answer if asked. */
     const afterPush = (fixer: FixerRow, row: TurnRow, sha: string) =>

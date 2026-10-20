@@ -76,13 +76,14 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
       transition,
       unreadableTurns,
     } = state;
-    const { advance, stopFiber } = queue;
+    const { advance, stopFiber, whileEnding } = queue;
 
     /**
-     * The fixer for a PR, created or brought back with the agent given; an instance in another
-     * conversation group (another kind or config folder) starts a new conversation.
+     * The fixer for a PR on the agent given, created if there is none, and brought back if it
+     * ended when `reopen`; an instance in another conversation group (another kind or config
+     * folder) starts a new conversation.
      */
-    const ensureFixer = (
+    const saveFixer = (
       key: PullRequestKey,
       accountId: AccountId,
       agent: {
@@ -91,6 +92,7 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
         readonly model: string | null;
         readonly options: AgentSelection["options"];
       },
+      reopen: boolean,
     ) =>
       Effect.gen(function* () {
         const at = yield* now;
@@ -105,7 +107,8 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
             session_id = CASE WHEN fixers.instance_id IN ${sql.in(sameGroup)} THEN fixers.session_id ELSE NULL END,
             provider = excluded.provider, instance_id = excluded.instance_id, model = excluded.model,
             model_options = excluded.model_options,
-            ended = NULL, updated_at = excluded.updated_at`;
+            ended = CASE WHEN ${reopen ? 1 : 0} = 1 THEN NULL ELSE fixers.ended END,
+            updated_at = excluded.updated_at`;
         const fixer = yield* findFixer(key);
         if (fixer === null)
           return yield* new FixerError({
@@ -113,15 +116,24 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
           });
         return fixer;
       });
+    /** Sending, resolving conflicts, reverting or retrying starts the session, or brings it back after it ended. */
+    const ensureFixer = (
+      key: PullRequestKey,
+      accountId: AccountId,
+      agent: Parameters<typeof saveFixer>[2],
+    ) => saveFixer(key, accountId, agent, true);
 
-    /** The session on `agent`: unchanged when it is already the session's. */
+    /**
+     * The session on `agent`: unchanged when it is already the session's. It never brings back a
+     * session that ended, so a turn that only rebinds can't undo a Stop.
+     */
     const moveTo = (fixer: FixerRow, agent: Effect.Success<ReturnType<typeof chooseAgent>>) =>
       Effect.gen(function* () {
         if (agent.instance === fixer.instance_id) return fixer;
         yield* Effect.logInfo("Moved a fix session off an agent that is off").pipe(
           Effect.annotateLogs({ fixerId: fixer.id, from: fixer.instance_id, to: agent.instance }),
         );
-        return yield* ensureFixer(fixer.pr_key, fixer.account_id, agent);
+        return yield* saveFixer(fixer.pr_key, fixer.account_id, agent, false);
       });
     /**
      * The session as a turn nobody picked an agent for runs it (a redo, a retry, a change
@@ -209,15 +221,15 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
     /**
      * Ends the session: done(reason), queued and running turns dropped, a ready
      * commit discarded, drafts back with the owner, the checkout removed. Turns
-     * already pushing finish their push. The Stop command and the watcher both come here.
+     * already pushing finish their push, and never redo it. The Stop command and the
+     * watcher both come here.
      */
     const end = (key: PullRequestKey, reason: DoneReason) =>
-      // As in `dropTurn`: once the end is stored, the rest runs even when its caller goes away.
-      Effect.uninterruptible(
-        Effect.gen(function* () {
-          const fixer = yield* findFixer(key);
-          if (fixer === null || fixer.ended !== null) return;
-          const status = { _tag: "discarded", reason: "ended", message: ENDED[reason] } as const;
+      Effect.gen(function* () {
+        const fixer = yield* findFixer(key);
+        if (fixer === null || fixer.ended !== null) return;
+        const status = { _tag: "discarded", reason: "ended", message: ENDED[reason] } as const;
+        const body = Effect.gen(function* () {
           // The session ends with every turn it drops, or, when a save fails, not at all.
           const dropped = yield* sql.withTransaction(
             Effect.gen(function* () {
@@ -230,6 +242,9 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
                 WHERE fixer_id = ${fixer.id} AND json_extract(status, '$._tag') IN ${sql.in(DROPPABLE)}
                 ORDER BY created_at, rowid`.pipe(Effect.flatMap(readableTurns));
               for (const row of droppable) yield* discard(row, status, DROPPABLE, false);
+              // A push in flight finishes, but is never redone.
+              yield* sql`UPDATE fixer_turns SET status = json_set(status, '$.spared', json('true'))
+                WHERE fixer_id = ${fixer.id} AND json_extract(status, '$._tag') = 'pushing'`;
               return droppable;
             }),
           );
@@ -248,8 +263,10 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
             Effect.annotateLogs({ fixerId: fixer.id, reason }),
           );
           yield* publish(key);
-        }),
-      );
+        });
+        // As in `dropTurn`: once the end is stored, the rest runs even when its caller goes away.
+        yield* whileEnding(fixer.id, Effect.uninterruptible(body));
+      });
 
     const stop = (key: PullRequestKey) =>
       Effect.gen(function* () {
@@ -406,6 +423,8 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
       rebind,
       rebindOrKeep,
       boundFixer,
+      discard,
+      finishDrop,
       dropTurn,
       end,
       stop,

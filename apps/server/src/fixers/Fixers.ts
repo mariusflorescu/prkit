@@ -81,13 +81,13 @@ export const make = Effect.gen(function* () {
 
   const state = yield* makeFixerState;
   const {
-    appendActivity,
     changes,
     commandTurn,
     dbFailures,
     findFixer,
     notices,
     now,
+    recordActivity,
     runId,
     snapshotOf,
     turnsOf,
@@ -98,18 +98,10 @@ export const make = Effect.gen(function* () {
   const queue = yield* makeTurnQueue(state, leftovers, (turnId): TurnBody =>
     bodies.runTurn(turnId),
   );
-  const { advance, enqueue, launch } = queue;
+  const { advance, enqueue, letGo, start } = queue;
   const sessions = yield* makeSessions(state, queue, leftovers);
-  const {
-    boundFixer,
-    chooseAgent,
-    chooseAgentOrKeep,
-    dropTurn,
-    ensureFixer,
-    rebindOrKeep,
-    reconcile,
-    stop,
-  } = sessions;
+  const { boundFixer, chooseAgent, chooseAgentOrKeep, dropTurn, ensureFixer, reconcile, stop } =
+    sessions;
   const runs = yield* makeAgentRuns(state, leftovers);
   const pushes = yield* makePushes(state, queue, sessions);
   const { pushAccess, pushTurn } = pushes;
@@ -370,22 +362,38 @@ export const make = Effect.gen(function* () {
       const cleaned = note.trim().slice(0, 2000);
       if (cleaned === "")
         return yield* new FixerError({ message: "Say what the agent should change." });
-      const at = yield* now;
       // A change an outside agent asks for makes the turn its work too, so it waits for Push.
       const caller = yield* StartedBy;
       const startedBy = startedByFor(row.started_by, caller);
-      const moved = yield* sql`UPDATE fixer_turns SET status = ${encodeStatus({ _tag: "running" })},
-        rounds = rounds + 1, run_id = ${runId}, started_at = ${at}, finished_at = NULL,
-        started_by = ${startedBy}
-        WHERE id = ${turnId} AND json_extract(status, '$._tag') = 'ready' RETURNING id`;
-      if (moved.length === 0) return yield* snapshotOf(key);
-      yield* appendActivity(
-        key,
-        turnId,
-        "note",
-        `${caller === null ? "You" : caller} asked: ${clip(cleaned, 300)}`,
+      yield* letGo(turnId);
+      const started = yield* start(fixer.id, () =>
+        Effect.gen(function* () {
+          const at = yield* now;
+          const moved =
+            yield* sql`UPDATE fixer_turns SET status = ${encodeStatus({ _tag: "running" })},
+              rounds = rounds + 1, run_id = ${runId}, started_at = ${at}, finished_at = NULL,
+              started_by = ${startedBy}
+              WHERE id = ${turnId} AND json_extract(status, '$._tag') = 'ready' RETURNING id`;
+          if (moved.length === 0) return null;
+          yield* recordActivity(
+            turnId,
+            "note",
+            `${caller === null ? "You" : caller} asked: ${clip(cleaned, 300)}`,
+          );
+          return { turnId, body: reviseBody(turnId, cleaned) };
+        }),
       );
-      yield* launch(fixer, turnId, reviseBody(turnId, cleaned));
+      if (started === "ended")
+        return yield* new FixerStateError({
+          key,
+          message:
+            "The agent is stopped. Push or discard these changes, or send the comments again.",
+        });
+      if (started === "ending")
+        return yield* new FixerStateError({
+          key,
+          message: "prkit is still stopping the agent. Ask again in a moment.",
+        });
       return yield* snapshotOf(key);
     }).pipe(Effect.catchTags(dbFailures));
 
@@ -440,7 +448,8 @@ export const make = Effect.gen(function* () {
           );
         case "revert": {
           // A revert runs no agent: no agent being ready never blocks it.
-          yield* enqueue(yield* rebindOrKeep(fixer), row.work, "retry");
+          const bound = yield* ensureFixer(key, fixer.account_id, yield* chooseAgentOrKeep(fixer));
+          yield* enqueue(bound, row.work, "retry");
           return yield* snapshotOf(key);
         }
       }
