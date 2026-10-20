@@ -14,9 +14,7 @@ import { agentCatalogQuery, fixerQuery, guideSettingsQuery } from "~/rpc/queries
 
 /**
  * Who a fix turn runs on: the one the user picked, else the PR's session agent,
- * else the default from Settings > Agents, checked against the catalog. Nothing
- * until the PR's session is read too, so a slow read never offers the default
- * in place of the session's agent.
+ * else the default from Settings > Agents, checked against the catalog.
  */
 export function useFixAgent(key: PullRequestKey, picked: AgentSelection | null) {
   const client = useQueryClient();

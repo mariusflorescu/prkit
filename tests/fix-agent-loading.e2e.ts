@@ -18,7 +18,6 @@ const SESSION_MODEL = "claude-fable-5-1";
 const pull = (url: string, tab: string) =>
   `${url}/pr/github.com/budget/fixtures/${NUMBER}?account=github.com%2Fbudget-test&tab=${tab}`;
 
-/** Each turn of the pull request's fix session, oldest first: its kind, state and the model it was sent to. */
 const turnsOf = (home: string) =>
   readRows(
     home,
@@ -26,7 +25,6 @@ const turnsOf = (home: string) =>
      JOIN fixers f ON f.id = t.fixer_id WHERE f.pr_key = '${KEY}' ORDER BY t.created_at, t.rowid`,
   ).map((turn) => ({ kind: turn.kind, state: turn.state, model: turn.model }));
 
-/** While it stands, prkit's server waits before each read of a pull request's fix session for a window (`e2eHold.ts`). */
 const holdSessionReads = (home: string) => {
   const file = NodePath.join(home, "e2e-holds", "fix-session-read");
   NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true });
@@ -47,7 +45,6 @@ const clickSubmit = (browser: Fixtures["browser"], form: string) =>
     return null;
   }, form);
 
-/** Where a form's submit button sits and how tall the form is, in CSS pixels. */
 const layoutOf = (browser: Fixtures["browser"], form: string) =>
   browser.evaluate((label: string) => {
     const node = document.querySelector(`form[aria-label="${label}"]`);
@@ -59,7 +56,6 @@ const layoutOf = (browser: Fixtures["browser"], form: string) =>
     };
   }, form);
 
-/** Waits until every open popup has faded in, so a frame shows it as the user does. */
 const shown = (browser: Fixtures["browser"]) =>
   expect
     .poll(() =>
@@ -71,7 +67,6 @@ const shown = (browser: Fixtures["browser"]) =>
     )
     .toBe(true);
 
-/** The Guide tab's setup reads the agents and the default, so a form opened after it waits only on the session. */
 const openWithAgentsRead = async ({ app, screen }: Fixtures, url: string) => {
   await app.open(pull(url, "guide"));
   await expect(
