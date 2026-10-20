@@ -4,7 +4,6 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import { AGENT_OFF } from "../agents/AgentProvider.ts";
 import { Agents } from "../agents/Agents.ts";
-import { makeE2eHold } from "../e2eHold.ts";
 import { RepoCache } from "../repo/RepoCache.ts";
 import type { AgentRuns } from "./agentRuns.ts";
 import type { ConflictTurn } from "./conflictTurn.ts";
@@ -16,6 +15,7 @@ import { fixPrompt, revisePrompt } from "./prompt.ts";
 import type { ScriptAccessReads } from "./scriptAccess.ts";
 import type { Sessions } from "./sessions.ts";
 import type { TurnLeftovers } from "./turnLeftovers.ts";
+import type { TurnQueue } from "./turnQueue.ts";
 import type { TurnSteps } from "./turnSteps.ts";
 
 /**
@@ -24,6 +24,7 @@ import type { TurnSteps } from "./turnSteps.ts";
  */
 export const makeTurnBodies = (
   state: FixerState,
+  queue: TurnQueue,
   runs: AgentRuns,
   steps: TurnSteps,
   conflicts: ConflictTurn,
@@ -36,9 +37,8 @@ export const makeTurnBodies = (
     const repo = yield* RepoCache;
     const agents = yield* Agents;
     const settings = yield* FixerSettingsStore;
-    const hold = yield* makeE2eHold;
-    const { appendActivity, fail, fixerById, notify, publish, returnDrafts, transition, turnById } =
-      state;
+    const { appendActivity, fail, fixerById, notify, publish, transition, turnById } = state;
+    const { endTurn } = queue;
     const { resumeFor, untilReported } = runs;
     const { identityFor, recordHead, repoFailure, settleReady, targetOf } = steps;
     const { agentHeld, conflictsBody, recordConflicted, verifyResolution } = conflicts;
@@ -149,17 +149,13 @@ export const makeTurnBodies = (
           })
           .pipe(Effect.catchTag("RepoError", repoFailure));
         if (sha === null) {
-          if (yield* transition(turn.id, ["running"], { _tag: "unchanged" })) {
-            yield* hold("fix-turn-end");
-            yield* returnDrafts(turn.id);
-            yield* appendActivity(
-              fixer.pr_key,
-              turn.id,
-              "note",
-              "The agent changed nothing, so there is nothing to push",
-            );
+          if (
+            yield* endTurn(fixer, turn.id, { _tag: "unchanged" }, ["running"], {
+              kind: "note",
+              text: "The agent changed nothing, so there is nothing to push",
+            })
+          )
             yield* notify(fixer, "The agent changed nothing", reportSummary(report ?? null));
-          }
           return;
         }
         const diff = yield* repo
@@ -225,13 +221,10 @@ export const makeTurnBodies = (
           })
           .pipe(Effect.catchTag("RepoError", repoFailure));
         if (sha === null) {
-          if (yield* transition(turn.id, ["running"], { _tag: "unchanged" }))
-            yield* appendActivity(
-              fixer.pr_key,
-              turn.id,
-              "note",
-              "Reverting the merge changes nothing now",
-            );
+          yield* endTurn(fixer, turn.id, { _tag: "unchanged" }, ["running"], {
+            kind: "note",
+            text: "Reverting the merge changes nothing now",
+          });
           return;
         }
         const diff = yield* repo
@@ -381,17 +374,10 @@ export const makeTurnBodies = (
             .pipe(Effect.catchTag("RepoError", repoFailure));
           if (sha === null) {
             if (strategy === "rebase") return yield* keepEarlier("The agent changed nothing.");
-            if (yield* transition(turnId, ["running"], { _tag: "unchanged" })) {
-              yield* hold("fix-turn-end");
-              yield* returnDrafts(turnId);
-              yield* repo.holdCommit(ref, turnId, null).pipe(Effect.ignore);
-              yield* appendActivity(
-                fixer.pr_key,
-                turnId,
-                "note",
-                "After the change, the fix changes nothing",
-              );
-            }
+            yield* endTurn(fixer, turnId, { _tag: "unchanged" }, ["running"], {
+              kind: "note",
+              text: "After the change, the fix changes nothing",
+            });
             return;
           }
           const conflicted = (yield* turnById(turnId))?.conflicted ?? [];

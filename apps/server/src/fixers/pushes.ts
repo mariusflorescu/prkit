@@ -41,13 +41,13 @@ export const makePushes = (state: FixerState, queue: TurnQueue, sessions: Sessio
       notify,
       now,
       publish,
-      returnDrafts,
       snapshotOf,
+      storeEnd,
       transition,
       turnById,
     } = state;
-    const { advance, queueTurn, afterQueued } = queue;
-    const { discard, finishDrop, rebindOrKeep } = sessions;
+    const { advance, afterQueued, endTurn, finishEnd, queueTurn } = queue;
+    const { rebindOrKeep } = sessions;
     const accessCache = new Map<string, { readonly at: number; readonly access: PushAccess }>();
 
     /** Pushes a ready turn's commit, only if the branch is still where the turn found it. */
@@ -154,17 +154,15 @@ export const makePushes = (state: FixerState, queue: TurnQueue, sessions: Sessio
               redo === null
                 ? `${moved}. The agent is stopped, so prkit isn't redoing it`
                 : `${moved} and is redoing it on the new head`;
-            yield* discard(
-              row,
-              { _tag: "discarded", reason: "moved", message },
-              ["pushing"],
-              false,
-            );
+            yield* storeEnd(row.id, { _tag: "discarded", reason: "moved", message }, ["pushing"], {
+              kind: "note",
+              text: message,
+            });
             return { _tag: "dropped", redo } as const;
           }),
         );
         if (dropped._tag === "gone") return;
-        yield* finishDrop(fixer, row);
+        yield* finishEnd(fixer, row.id);
         yield* dropped.redo === null ? advance(fixer.id) : afterQueued(bound, dropped.redo);
         yield* publish(fixer.pr_key);
       });
@@ -185,17 +183,12 @@ export const makePushes = (state: FixerState, queue: TurnQueue, sessions: Sessio
         const turnId = row.id;
         const { sha } = to;
         const at = yield* now;
-        if (yield* transition(turnId, ["pushing"], { _tag: "pushed", at }))
-          yield* hold("fix-turn-end");
-        yield* repo.holdCommit(to.ref, turnId, null).pipe(Effect.ignore);
+        const ended = yield* endTurn(fixer, turnId, { _tag: "pushed", at }, ["pushing"], {
+          kind: "note",
+          text: `Pushed ${short(sha)} to ${to.branch}${auto ? " automatically" : ""}`,
+        });
         yield* pullRequests.invalidate(key, fixer.account_id);
         accessCache.clear();
-        yield* appendActivity(
-          key,
-          turnId,
-          "note",
-          `Pushed ${short(sha)} to ${to.branch}${auto ? " automatically" : ""}`,
-        );
         yield* Effect.logInfo("Fix pushed").pipe(
           Effect.annotateLogs({
             turnId,
@@ -205,28 +198,20 @@ export const makePushes = (state: FixerState, queue: TurnQueue, sessions: Sessio
             auto,
           }),
         );
-        yield* afterPush(fixer, row, sha);
+        if (ended) yield* replyOnThreads(fixer, row, sha);
         if (auto) yield* notify(fixer, "Fixes pushed", `${short(sha)} is on ${to.branch}`);
         yield* advance(fixer.id);
       });
 
-    /** Drafts the fix covered are resolved by the agent; GitHub threads get an answer if asked. */
-    const afterPush = (fixer: FixerRow, row: TurnRow, sha: string) =>
+    const replyOnThreads = (fixer: FixerRow, row: TurnRow, sha: string) =>
       Effect.gen(function* () {
-        if (row.work._tag !== "fix") return;
+        if (row.work._tag !== "fix" || !row.work.replyAfterPush) return;
         const report = row.report !== null && "perComment" in row.report ? row.report : null;
         const statusOf = (id: string) => report?.perComment.find((entry) => entry.commentId === id);
-        const at = yield* now;
         for (const comment of row.work.comments) {
           const entry = statusOf(comment.id);
           const done = entry !== undefined && entry.status !== "skipped";
-          if (comment.source._tag === "draft") {
-            yield* sql`UPDATE pending_comments SET state = ${done ? "resolved-by-agent" : "draft"},
-              fixer_turn_id = NULL, updated_at = ${at}
-              WHERE id = ${comment.source.draftId} AND state = 'sent-to-agent'`;
-            continue;
-          }
-          if (!row.work.replyAfterPush || !comment.source.canReply || !done) continue;
+          if (comment.source._tag === "draft" || !comment.source.canReply || !done) continue;
           const body = `${entry.status === "partly" ? "Partly addressed" : "Addressed"} in ${sha}: ${entry.note}`;
           yield* pullRequests
             .replyToThread(fixer.pr_key, fixer.account_id, comment.source.threadId, body)
@@ -249,8 +234,6 @@ export const makePushes = (state: FixerState, queue: TurnQueue, sessions: Sessio
               ),
             );
         }
-        // Drafts nothing reported on go back to the owner.
-        yield* returnDrafts(row.id);
       });
 
     /** Push access as GitHub reports it now, kept a minute so the panel doesn't spend the budget. */

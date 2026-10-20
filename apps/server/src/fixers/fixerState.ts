@@ -1,7 +1,6 @@
 import {
   AUTO_RESOLVE_LIMIT,
   type ConflictReport,
-  FIXER_BUSY,
   FixerError,
   type FixerFeedEvent,
   type FixerId,
@@ -75,6 +74,15 @@ export type Awaiting =
   | { readonly _tag: "conflicts"; readonly files: ReadonlyArray<string> };
 
 export type Notice = Extract<FixerFeedEvent, { _tag: "notice" }>;
+
+export const TURN_ENDS = [
+  "pushed",
+  "unchanged",
+  "discarded",
+  "failed",
+] as const satisfies ReadonlyArray<FixerTurnState>;
+export type TurnEnd = Extract<FixerTurnStatus, { readonly _tag: (typeof TURN_ENDS)[number] }>;
+export type EndNote = { readonly kind: "note" | "error"; readonly text: string };
 
 export const reportSummary = (report: FixReport | ConflictReport | null) => {
   if (report === null) return "ready to review";
@@ -221,14 +229,11 @@ export const makeFixerState = Effect.gen(function* () {
   const transition = (
     turnId: FixerTurnId,
     from: ReadonlyArray<FixerTurnState>,
-    status: FixerTurnStatus,
+    status: Exclude<FixerTurnStatus, TurnEnd>,
   ) =>
     Effect.gen(function* () {
-      const at = yield* now;
-      const ends = !FIXER_BUSY.includes(status._tag) && status._tag !== "queued";
       const rows = yield* sql`
-        UPDATE fixer_turns SET status = ${encodeStatus(status)},
-          finished_at = CASE WHEN ${ends ? 1 : 0} = 1 THEN ${at} ELSE finished_at END
+        UPDATE fixer_turns SET status = ${encodeStatus(status)}
         WHERE id = ${turnId} AND json_extract(status, '$._tag') IN ${sql.in(from)} RETURNING id`;
       return rows.length > 0;
     });
@@ -239,6 +244,47 @@ export const makeFixerState = Effect.gen(function* () {
       const at = yield* now;
       yield* sql`UPDATE pending_comments SET state = 'draft', fixer_turn_id = NULL, updated_at = ${at}
         WHERE fixer_turn_id = ${turnId} AND state = 'sent-to-agent'`;
+    });
+
+  const resolveFixed = (turnId: FixerTurnId) =>
+    Effect.gen(function* () {
+      const turn = yield* turnById(turnId);
+      if (turn === null || turn.work._tag !== "fix") return;
+      const report = turn.report !== null && "perComment" in turn.report ? turn.report : null;
+      const at = yield* now;
+      for (const comment of turn.work.comments) {
+        const entry = report?.perComment.find((each) => each.commentId === comment.id);
+        if (comment.source._tag !== "draft" || entry === undefined || entry.status === "skipped")
+          continue;
+        yield* sql`UPDATE pending_comments SET state = 'resolved-by-agent', fixer_turn_id = NULL,
+          updated_at = ${at}
+          WHERE id = ${comment.source.draftId} AND fixer_turn_id = ${turnId} AND state = 'sent-to-agent'`;
+      }
+    });
+
+  /**
+   * Stores a turn's end in the caller's transaction: its state, its drafts and its note together.
+   * A pushed fix's drafts the agent fixed or partly fixed are resolved; every other draft it holds
+   * goes back to the owner. The turn stays unfinished until `finishEnd` lets go of what it held.
+   * False when the turn had moved on.
+   */
+  const storeEnd = (
+    turnId: FixerTurnId,
+    status: TurnEnd,
+    from: ReadonlyArray<FixerTurnState>,
+    note: EndNote,
+    /** Only a turn no change request ever ran on (`rounds = 0`). */
+    freshOnly = false,
+  ) =>
+    Effect.gen(function* () {
+      const ended = yield* sql`UPDATE fixer_turns SET status = ${encodeStatus(status)}
+        WHERE id = ${turnId} AND json_extract(status, '$._tag') IN ${sql.in(from)}
+          AND (${freshOnly ? 1 : 0} = 0 OR rounds = 0) RETURNING id`;
+      if (ended.length === 0) return false;
+      if (status._tag === "pushed") yield* resolveFixed(turnId);
+      yield* returnDrafts(turnId);
+      yield* recordActivity(turnId, note.kind, note.text);
+      return true;
     });
 
   const notify = (fixer: FixerRow, title: string, body: string) => {
@@ -309,7 +355,7 @@ export const makeFixerState = Effect.gen(function* () {
     recordActivity,
     appendActivity,
     transition,
-    returnDrafts,
+    storeEnd,
     notify,
     dbFailures,
     commandTurn,
