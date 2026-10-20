@@ -4,7 +4,14 @@ import type * as Path from "effect/Path";
 import type { PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
-import { type Checkout, type GitRunner, type GitTarget, GitTampered, RepoError } from "./gitRun.ts";
+import {
+  type Checkout,
+  gitErrorLine,
+  type GitRunner,
+  type GitTarget,
+  GitTampered,
+  RepoError,
+} from "./gitRun.ts";
 import { linksRefusal, newLinks } from "./links.ts";
 import { type NestedEntry, nestedGitEntries } from "./nestedRepos.ts";
 import { rebaseStateHash } from "./rebaseState.ts";
@@ -114,7 +121,7 @@ export const makeFixCheckout = ({
       const files = yield* conflictedFiles(co);
       if (files.length > 0) return { _tag: "conflicts", files } as const;
       yield* Effect.logWarning("git merge failed").pipe(
-        Effect.annotateLogs({ stderr: result.stderr.trim() }),
+        Effect.annotateLogs({ error: gitErrorLine(result.stderr) }),
       );
       return yield* new RepoError({
         reason: "repository",
@@ -135,7 +142,7 @@ export const makeFixCheckout = ({
       const files = yield* conflictedFiles(co);
       if (files.length === 0) {
         yield* Effect.logWarning("git rebase failed").pipe(
-          Effect.annotateLogs({ stderr: result.stderr.trim() }),
+          Effect.annotateLogs({ error: gitErrorLine(result.stderr) }),
         );
         return yield* new RepoError({
           reason: "repository",

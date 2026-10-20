@@ -161,6 +161,13 @@ export class RepoError extends Schema.TaggedError<RepoError>()("RepoError", {
   message: Schema.String,
 }) {}
 
+/**
+ * Git's own error line from its stderr, for the log. The rest can quote the user's code (a
+ * failed apply prints the lines it searched for, a push hook prints what it refused).
+ */
+export const gitErrorLine = (stderr: string) =>
+  /^(?:fatal|error): .{0,200}/m.exec(stderr)?.[0] ?? "";
+
 /** prkit refused a git step because the checkout's git metadata was changed under it. */
 export class GitTampered extends Schema.TaggedError<GitTampered>()("GitTampered", {
   worktree: Schema.String,
@@ -309,7 +316,10 @@ export const makeGitRunner = ({
       Effect.flatMap((result) => {
         if (result.code === 0) return Effect.succeed(result.stdout);
         return Effect.logWarning("git failed").pipe(
-          Effect.annotateLogs({ args: args.slice(0, 2).join(" "), stderr: result.stderr.trim() }),
+          Effect.annotateLogs({
+            args: args.slice(0, 2).join(" "),
+            error: gitErrorLine(result.stderr),
+          }),
           Effect.andThen(
             Effect.fail(
               new RepoError({

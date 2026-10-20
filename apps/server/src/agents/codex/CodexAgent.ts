@@ -513,7 +513,7 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
         ).pipe(
           Effect.tapError((error) =>
             Effect.logWarning("Codex didn't list its models").pipe(
-              Effect.annotateLogs({ message: error.message }),
+              Effect.annotateLogs({ reason: error.reason }),
             ),
           ),
           Effect.orElseSucceed((): ReadonlyArray<AgentModel> => []),

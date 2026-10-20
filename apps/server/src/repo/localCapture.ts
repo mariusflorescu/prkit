@@ -15,7 +15,13 @@ import type { PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import { Hex } from "effect/encoding";
 
-import { checkoutFor, type GitTarget, RepoError, type UserRepository } from "./gitRun.ts";
+import {
+  checkoutFor,
+  gitErrorLine,
+  type GitTarget,
+  RepoError,
+  type UserRepository,
+} from "./gitRun.ts";
 import { lines, makeWorkingTree } from "./localWorkingTree.ts";
 import type { Prepared, Since } from "./RepoCache.ts";
 
@@ -199,7 +205,7 @@ export const makeLocalCapture = (deps: LocalCaptureDeps) => {
           "Some of this repository's objects aren't on this Mac. Run `git fetch` there, then run prkit again.",
         )
       : Effect.logWarning("git failed").pipe(
-          Effect.annotateLogs({ stderr: stderr.trim() }),
+          Effect.annotateLogs({ error: gitErrorLine(stderr) }),
           Effect.andThen(Effect.fail(new RepoError({ reason: "repository", message: failure }))),
         );
 

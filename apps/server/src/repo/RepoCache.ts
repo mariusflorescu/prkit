@@ -25,6 +25,7 @@ import {
   type Checkout,
   checkIntegrity,
   checkoutFor,
+  gitErrorLine,
   type GitTarget,
   makeGitRunner,
   RepoError,
@@ -557,7 +558,7 @@ export const make = Effect.gen(function* () {
       const blobs = batch.code === 0 ? parseBatch(batch.stdout, oids) : null;
       if (blobs === null) {
         yield* Effect.logWarning("git cat-file failed").pipe(
-          Effect.annotateLogs({ stderr: batch.stderr.trim() }),
+          Effect.annotateLogs({ error: gitErrorLine(batch.stderr) }),
         );
         return yield* new RepoError({ reason: "repository", message: failure });
       }

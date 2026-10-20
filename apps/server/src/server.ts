@@ -3,6 +3,7 @@ import * as NodeHttp from "node:http";
 
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import { ServerReadyLineJson } from "@prkit/contracts";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
@@ -168,5 +169,14 @@ const layerLogFile = Logger.layer(
 // The CLI supplies ServerConfig. The home lock builds first, so a second server for the
 // same home never touches the database, listens or writes into the first one's log.
 export const runServer = Layer.launch(
-  layerServer.pipe(Layer.provide(layerLogFile), Layer.provide(HomeLock.layer)),
+  layerServer.pipe(
+    // A server that can't start says why in its file too, before the logger closes.
+    Layer.tapCause((cause) =>
+      Cause.hasInterruptsOnly(cause)
+        ? Effect.void
+        : Effect.logError("prkit server couldn't start", cause),
+    ),
+    Layer.provide(layerLogFile),
+    Layer.provide(HomeLock.layer),
+  ),
 );

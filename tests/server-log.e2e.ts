@@ -166,9 +166,13 @@ test("a guide written on a pull request leaves none of its code in the log", asy
     await screen.getByRole("button", "Retry").first().tap({ timeout: 30_000 });
     await expect.poll(state, { timeout: 120_000 }).toBe("watching");
     const file = NodePath.join(instancePaths(name).home, "logs", "server.log");
+    // Both attempts' turns are in the file, the failed one's and the guide's, so nothing is
+    // still waiting in the logger's batch.
     await expect
-      .poll(() => NodeFS.readFileSync(file, "utf8"), { timeout: 15_000 })
-      .toContain("Agent turn finished");
+      .poll(() => NodeFS.readFileSync(file, "utf8").split("Agent turn finished").length - 1, {
+        timeout: 15_000,
+      })
+      .toBe(2);
     expect(NodeFS.readFileSync(file, "utf8")).toContain("Attempt failed");
     const [attempt] = readRows(
       run.home,

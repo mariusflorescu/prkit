@@ -9,7 +9,7 @@ import { Base64 } from "effect/encoding";
 import type { GitHubAccounts } from "../accounts/GitHubAccounts.ts";
 import { foreignConfigKeys } from "./cacheConfig.ts";
 import { denied, fetchFailure } from "./fetchFailure.ts";
-import { type GitRunner, type GitTarget, RepoError } from "./gitRun.ts";
+import { type GitRunner, type GitTarget, gitErrorLine, RepoError } from "./gitRun.ts";
 
 export const repoName = (ref: PullRequestRef) => `${ref.owner}/${ref.repo}`;
 /** The only remote a cache has; the user's own config never rewrites it. */
@@ -129,7 +129,7 @@ export const makeCacheRemote = ({
       if (result.code === 0) return;
       const stderr = result.stderr.trim();
       yield* Effect.logWarning("git fetch failed").pipe(
-        Effect.annotateLogs({ accountId, repo: repoName(ref), what, stderr }),
+        Effect.annotateLogs({ accountId, repo: repoName(ref), what, error: gitErrorLine(stderr) }),
       );
       return yield* new RepoError(
         fetchFailure(stderr, {
@@ -223,7 +223,10 @@ export const makeCacheRemote = ({
         });
         if (listed.result.code !== 0) {
           yield* Effect.logWarning("git ls-remote failed").pipe(
-            Effect.annotateLogs({ repo: input.headRepo, stderr: listed.result.stderr.trim() }),
+            Effect.annotateLogs({
+              repo: input.headRepo,
+              error: gitErrorLine(listed.result.stderr),
+            }),
           );
           return yield* new RepoError({
             reason: denied(listed.result.stderr) ? "account" : "repository",
@@ -258,7 +261,7 @@ export const makeCacheRemote = ({
         if (pushed.result.code === 0) return { _tag: "pushed" } as const;
         const stderr = pushed.result.stderr.trim();
         yield* Effect.logWarning("git push failed").pipe(
-          Effect.annotateLogs({ repo: input.headRepo, stderr }),
+          Effect.annotateLogs({ repo: input.headRepo, error: gitErrorLine(stderr) }),
         );
         if (
           /non-fast-forward|stale info|fetch first|rejected/i.test(stderr) &&

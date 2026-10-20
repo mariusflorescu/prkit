@@ -39,6 +39,18 @@ export const make = Effect.gen(function* () {
   const first = `${current}.1`;
   const second = `${current}.2`;
 
+  // A folder or file an earlier run or a person left keeps the modes prkit gives its own.
+  yield* Effect.forEach(
+    [
+      [directory, 0o700],
+      [current, 0o600],
+      [first, 0o600],
+      [second, 0o600],
+    ] as const,
+    ([target, mode]) => fs.chmod(target, mode).pipe(Effect.catchIf(isMissing, () => Effect.void)),
+    { discard: true },
+  ).pipe(Effect.catchTag("PlatformError", () => Effect.void));
+
   const sizeOf = (file: string) =>
     fs.stat(file).pipe(
       Effect.map((info) => Number(info.size)),
@@ -73,21 +85,39 @@ export const make = Effect.gen(function* () {
 
   const logger = yield* Logger.batched(Logger.formatLogFmt, { window: FLUSH_WINDOW, flush });
 
-  const read = (file: string) =>
-    fs.readFile(file).pipe(Effect.catchIf(isMissing, () => Effect.succeed(new Uint8Array())));
+  /** The last `limit` bytes of `file` at most, and whether that is all of it. */
+  const tail = (file: string, limit: number) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const handle = yield* fs.open(file, { flag: "r" });
+        const size = Number((yield* handle.stat).size);
+        const start = Math.max(0, size - limit);
+        yield* handle.seek(BigInt(start), "start");
+        const bytes = new Uint8Array(size - start);
+        let filled = 0;
+        while (filled < bytes.length) {
+          const read = yield* handle.read(bytes.subarray(filled));
+          if (read === 0) break;
+          filled += read;
+        }
+        return { bytes: bytes.subarray(0, filled), whole: start === 0 };
+      }),
+    ).pipe(
+      Effect.catchIf(isMissing, () => Effect.succeed({ bytes: new Uint8Array(), whole: true })),
+    );
 
   const recent: Effect.Effect<RecentLog, LogError> = gate
     .withPermits(1)(
       Effect.gen(function* () {
-        const before = yield* read(first);
-        const after = yield* read(current);
-        const both = new Uint8Array(before.length + after.length);
-        both.set(before);
-        both.set(after, before.length);
-        const window = new TextDecoder().decode(
-          both.subarray(Math.max(0, both.length - RECENT_BYTES)),
-        );
-        if (both.length <= RECENT_BYTES) return { text: window, truncated: false };
+        const after = yield* tail(current, RECENT_BYTES);
+        const before = after.whole
+          ? yield* tail(first, RECENT_BYTES - after.bytes.length)
+          : { bytes: new Uint8Array(), whole: false };
+        const both = new Uint8Array(before.bytes.length + after.bytes.length);
+        both.set(before.bytes);
+        both.set(after.bytes, before.bytes.length);
+        const window = new TextDecoder().decode(both);
+        if (before.whole && !(yield* fs.exists(second))) return { text: window, truncated: false };
         // The window starts anywhere in a line, so it begins after its first newline.
         const newline = window.indexOf("\n");
         return { text: newline === -1 ? "" : window.slice(newline + 1), truncated: true };
