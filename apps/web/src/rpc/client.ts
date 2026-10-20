@@ -5,6 +5,7 @@ import type { CliInstallState, SkillInstallerOpened } from "@prkit/contracts";
  */
 import {
   type AppInfo,
+  type RecentLog,
   type AppearanceChange,
   type AppearanceSettings,
   type AccountsResult,
@@ -183,6 +184,8 @@ const call = <A, E>(
 };
 
 export const getAppInfo = (): Promise<AppInfo> => call((client) => client[WS_METHODS.appInfo]({}));
+export const getRecentLog = (): Promise<RecentLog> =>
+  call((client) => client[WS_METHODS.logsRecent]({}));
 export const listAccounts = (): Promise<AccountsResult> =>
   call((client) => client[WS_METHODS.accountsList]({}));
 export const refreshAccounts = (): Promise<AccountsResult> =>

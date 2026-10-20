@@ -31,6 +31,7 @@ import { FixerSettingsStore } from "./fixers/FixerSettingsStore.ts";
 import { boundPort } from "./listenAddress.ts";
 import { CliInstall } from "./cli/CliInstall.ts";
 import { OutsideAgents } from "./outside/OutsideAgents.ts";
+import { LogFile } from "./logs/LogFile.ts";
 
 export type UpgradeDecision =
   | { readonly _tag: "Allow" }
@@ -82,6 +83,7 @@ const layerHandlers = WsRpcGroup.toLayer(
     const guideConfig = yield* GuideConfigStore;
     const cliInstall = yield* CliInstall;
     const outsideAgents = yield* OutsideAgents;
+    const logFile = yield* LogFile;
     const textsError = (error: { readonly message: string }) =>
       new DiffTextsError({ message: error.message });
     /** Each kind of diff source is read by the one service that owns its commit. */
@@ -276,6 +278,7 @@ const layerHandlers = WsRpcGroup.toLayer(
       [WS_METHODS.outsideAgentsGet]: () => outsideAgents.get(),
       [WS_METHODS.outsideAgentsUpdate]: (settings) => outsideAgents.update(settings),
       [WS_METHODS.outsideAgentsReset]: () => outsideAgents.reset(),
+      [WS_METHODS.logsRecent]: () => logFile.recent,
       [WS_METHODS.appInfo]: () =>
         Effect.succeed({
           version: config.version,

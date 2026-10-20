@@ -44,6 +44,8 @@ export interface PrkitDesktopBridge {
   readonly setTheme: (theme: ThemePreference) => void;
   /** Brings this window to the front, for a PR an outside agent opened with focus. */
   readonly bringForward: () => void;
+  /** Reveals the server's log file in Finder, or its folder before the first line is written. */
+  readonly showServerLog: () => void;
   readonly updates: DesktopUpdatesBridge;
 }
 

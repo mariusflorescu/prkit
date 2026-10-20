@@ -20,7 +20,7 @@
  *
  * In FAKE_CLAUDE_DIR, a `hold` file keeps a guide, fix or resolution writing until the file is
  * removed, a `hold-ask` file holds an answer after its first chunk the same way, a `fail` file
- * ends the turn with an error instead, and a `split` file gives every file a chapter of its own,
+ * ends the turn with an error instead (its text, when it has any, is the error), and a `split` file gives every file a chapter of its own,
  * titled after the file. A `notes` file, JSON of
  * `{ [path]: [{ line, side, tone, text }] }`, gives those files line notes in the guide,
  * read when the guide is submitted; without it the guide has none. A `file-notes` file,
@@ -85,6 +85,10 @@ if (args[0] === "auth" && args[1] === "status") {
 
 const control = process.env.FAKE_CLAUDE_DIR ?? "";
 const flagged = (name: string) => control !== "" && NodeFS.existsSync(NodePath.join(control, name));
+/** What a failing turn says: the `fail` file's text, or a fixed line when it is empty. */
+const failure = () =>
+  NodeFS.readFileSync(NodePath.join(control, "fail"), "utf8").trim() ||
+  "The stand-in agent was told to fail.";
 
 const McpConfig = Schema.fromJsonString(
   Schema.Struct({
@@ -504,14 +508,13 @@ const turn = async (prompt: string) => {
     clientInfo: { name: "fake-claude", version: "0" },
   });
   await mcp("notifications/initialized", {}, true);
-  if (/^<prkit-ask>$/m.test(prompt))
-    return flagged("fail") ? finish("The stand-in agent was told to fail.") : answer(prompt);
+  if (/^<prkit-ask>$/m.test(prompt)) return flagged("fail") ? finish(failure()) : answer(prompt);
   await mcp("tools/call", {
     name: "report_progress",
     arguments: { message: "Reading the change with a stand-in agent" },
   });
   while (flagged("hold")) await new Promise((resolve) => setTimeout(resolve, 200));
-  if (flagged("fail")) return finish("The stand-in agent was told to fail.");
+  if (flagged("fail")) return finish(failure());
   if (prompt.includes("`finish_fixes`")) return fix(prompt);
   if (prompt.includes("`finish_conflicts`")) return resolve(prompt);
   const files = changedFiles(prompt);

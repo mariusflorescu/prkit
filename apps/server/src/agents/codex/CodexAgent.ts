@@ -264,9 +264,8 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
           if (code === 0) return "signed-in" as const;
           // Only Codex's own answer counts: a non-zero exit with exactly this on stderr.
           if (errors.trim() === "Not logged in") return "signed-out" as const;
-          // Codex's own error line says what went wrong; any other output could name a key.
-          const error = /^Error\b.{0,200}/m.exec(errors)?.[0];
-          return yield* unknown(`exit ${code}${error === undefined ? "" : `: ${error}`}`);
+          // Any of its output could name a key, so the log says only how it exited.
+          return yield* unknown(`exit ${code}`);
         }),
       ),
       null,
@@ -513,7 +512,7 @@ export const make = Effect.fn("CodexAgent.make")(function* (setup: InstanceSetup
         ).pipe(
           Effect.tapError((error) =>
             Effect.logWarning("Codex didn't list its models").pipe(
-              Effect.annotateLogs({ message: error.message }),
+              Effect.annotateLogs({ reason: error.reason }),
             ),
           ),
           Effect.orElseSucceed((): ReadonlyArray<AgentModel> => []),

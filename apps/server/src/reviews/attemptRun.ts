@@ -180,8 +180,9 @@ export const makeAttemptRun = (
         }),
       );
       yield* tokens.revokeAttempt(attemptId);
+      // The message can be an agent's own words, so it stays in the activity and out of the log.
       yield* Effect.logWarning("Attempt failed").pipe(
-        Effect.annotateLogs({ reason: failure.reason, message: failure.message }),
+        Effect.annotateLogs({ attemptId, reason: failure.reason }),
       );
       yield* appendActivity(review.key, review.id, attemptId, "error", failure.message);
     });

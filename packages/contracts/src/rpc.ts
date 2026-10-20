@@ -240,6 +240,7 @@ export const WS_METHODS = {
   outsideAgentsGet: "outsideAgents.get",
   outsideAgentsUpdate: "outsideAgents.update",
   outsideAgentsReset: "outsideAgents.reset",
+  logsRecent: "logs.recent",
 } as const;
 
 export const AppInfo = Schema.Struct({
@@ -250,6 +251,18 @@ export const AppInfo = Schema.Struct({
   startedAt: Schema.String,
 });
 export type AppInfo = typeof AppInfo.Type;
+
+/** The newest whole lines of the server's log file, oldest first. */
+export const RecentLog = Schema.Struct({
+  text: Schema.String,
+  /** Older lines exist in the files than the text holds. */
+  truncated: Schema.Boolean,
+});
+export type RecentLog = typeof RecentLog.Type;
+
+export class LogError extends Schema.TaggedError<LogError>()("LogError", {
+  message: Schema.String,
+}) {}
 
 export const WsAppInfoRpc = Rpc.make(WS_METHODS.appInfo, {
   payload: Schema.Struct({}),
@@ -954,5 +967,10 @@ export const WsRpcGroup = RpcGroup.make(
     payload: Schema.Struct({}),
     success: SkillInstallerOpened,
     error: CliInstallError,
+  }),
+  Rpc.make(WS_METHODS.logsRecent, {
+    payload: Schema.Struct({}),
+    success: RecentLog,
+    error: LogError,
   }),
 );

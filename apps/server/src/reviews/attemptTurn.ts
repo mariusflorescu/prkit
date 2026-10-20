@@ -239,7 +239,7 @@ export const makeAttemptTurn = (
                 case "finished":
                   result.finished = { outcome: event.outcome, message: event.message };
                   return Effect.logInfo("Agent turn finished").pipe(
-                    Effect.annotateLogs({ outcome: event.outcome, message: event.message ?? "" }),
+                    Effect.annotateLogs({ outcome: event.outcome }),
                   );
                 case "mcp-ready":
                 case "text":

@@ -136,8 +136,9 @@ export const makeTurnQueue = (
           yield* leftovers
             .unlessLeftovers(fixer.id, repo.resetFix(ref, fixer.id, turn.head_sha))
             .pipe(Effect.ignore);
+        // The message can be an agent's own words, so it stays in the activity and out of the log.
         yield* Effect.logWarning("Fix turn failed").pipe(
-          Effect.annotateLogs({ reason: failure.reason, message: failure.message }),
+          Effect.annotateLogs({ turnId, reason: failure.reason }),
         );
         yield* appendActivity(fixer.pr_key, turnId, "error", failure.message);
         yield* notify(fixer, "The agent couldn't finish", failure.message);
