@@ -401,12 +401,16 @@ const emptyStats = (): Stats => ({
   log: [],
 });
 export let stats = emptyStats();
-/** Who a fake token was printed for: `fake-token-for-<login>@<gh config directory's name>`. */
+/**
+ * Who a fake token was printed for: `fake-token-for-<login>@<gh config directory under $HOME>`.
+ * GitHub logins ignore case, and GitHub answers with its own (all fake logins are lowercase), so
+ * a directory that spells the login `Budget-Test` reads as `budget-test`.
+ */
 export const tokenOwner = (authorization: string) => {
   const [login = "", dir = ""] = authorization
     .replace(/^(Bearer|token) fake-token-for-/, "")
     .split("@");
-  return { login, dir };
+  return { login: login.toLowerCase(), dir };
 };
 export const resetStats = () => {
   stats = emptyStats();

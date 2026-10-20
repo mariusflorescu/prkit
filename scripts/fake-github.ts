@@ -33,7 +33,8 @@
  * in no inbox search, and an archived `budget/attic` that lists leave out.
  *
  * `--home` gets `.config/gh/hosts.yml` and a `gh` that prints a fake token for the login
- * in `$GH_CONFIG_DIR/hosts.yml` and that directory's name; pass it to `verify-app start --github-api <url> --gh-home <dir>`.
+ * in `$GH_CONFIG_DIR/hosts.yml` and that directory's path under `$HOME` (`.config/gh`); pass
+ * it to `verify-app start --github-api <url> --gh-home <dir>`.
  * `--second-account` adds `.config/gh-second` for `budget-second`, which sees the same pull
  * requests. `/user` answers for any `budget-` login and refuses any other token like GitHub
  * refuses an expired one (401). The ready line on stdout is
@@ -90,7 +91,11 @@
  *   GET  writes                         every mutation and REST write, with its input
  *   POST limit?resource=graphql|core&seconds=<s>   the limit is used up until then
  *   POST latency?ms=<n>[&resource=graphql|core]   every API answer, or that resource's, waits this long
- *   POST hold?resource=graphql|core     that resource's answers wait from now on, until release
+ *   POST hold?resource=graphql|core[&dir=<d>][&part=body]   that resource's answers wait from now
+ *                                       on, until release; with dir, only answers to that gh config
+ *                                       directory's token (its path under $HOME, as the stats log names
+ *                                       it); with part=body, the status and headers go at once and only
+ *                                       the body waits
  *   POST release?resource=graphql|core  sends the answers held since hold, and holds no more
  *   POST archive?repo=<name>            archives a repository, so lists leave it out
  *   POST inbox-only?login=<l>&prs=<n,n> that login's inbox searches find only these pull requests
@@ -173,8 +178,14 @@ const quotas = {
 };
 type Resource = keyof typeof quotas;
 const latency: Record<Resource, number> = { core: 0, graphql: 0 };
-/** Answers a `hold` keeps back until `release`, per resource; null when nothing is held. */
-const held: Record<Resource, Array<() => void> | null> = { core: null, graphql: null };
+const held: Record<
+  Resource,
+  {
+    readonly queue: Array<() => void>;
+    readonly dir: string | null;
+    readonly body: boolean;
+  } | null
+> = { core: null, graphql: null };
 
 /** By kind, or by kind and login (`<kind>@<login>`) for one account's requests. */
 const failures = new Map<
@@ -205,26 +216,33 @@ const send = (
   status: number,
   body: string,
   headers: Record<string, string> = {},
+  token = "",
 ) => {
   const quota = quotas[resource];
   const reset =
     Date.now() < quota.limitedUntil ? Math.ceil(quota.limitedUntil / 1000) : quota.reset;
+  const head = () =>
+    response.writeHead(status, {
+      "content-type": "application/json",
+      "x-ratelimit-limit": String(LIMIT),
+      "x-ratelimit-remaining": String(remaining(resource)),
+      "x-ratelimit-used": String(quota.used),
+      "x-ratelimit-reset": String(reset),
+      "x-ratelimit-resource": resource,
+      ...headers,
+    });
   const write = () =>
     setTimeout(() => {
-      response.writeHead(status, {
-        "content-type": "application/json",
-        "x-ratelimit-limit": String(LIMIT),
-        "x-ratelimit-remaining": String(remaining(resource)),
-        "x-ratelimit-used": String(quota.used),
-        "x-ratelimit-reset": String(reset),
-        "x-ratelimit-resource": resource,
-        ...headers,
-      });
+      head();
       response.end(body);
     }, latency[resource]);
-  const queue = held[resource];
-  if (queue === null) write();
-  else queue.push(write);
+  const hold = held[resource];
+  if (hold === null || (hold.dir !== null && hold.dir !== tokenOwner(token).dir)) write();
+  else if (hold.body) {
+    head();
+    response.flushHeaders();
+    hold.queue.push(() => response.end(body));
+  } else hold.queue.push(write);
 };
 
 const failedByControl = (
@@ -246,6 +264,8 @@ const failedByControl = (
       resource,
       failure.status,
       failure.message === null ? "{}" : encodeJson({ message: failure.message }),
+      {},
+      token,
     );
   }, failure.ms);
   return true;
@@ -493,8 +513,15 @@ const control = (url: URL, method: string, text: string, response: NodeHttp.Serv
   }
   if (name === "hold" || name === "release") {
     const resource = url.searchParams.get("resource") === "core" ? "core" : "graphql";
-    const queue = held[resource] ?? [];
-    held[resource] = name === "hold" ? queue : null;
+    const queue = held[resource]?.queue ?? [];
+    held[resource] =
+      name === "hold"
+        ? {
+            queue,
+            dir: url.searchParams.get("dir"),
+            body: url.searchParams.get("part") === "body",
+          }
+        : null;
     if (name === "release") for (const write of queue) write();
     return answer({ ok: true, resource, held: queue.length });
   }
@@ -565,6 +592,8 @@ const server = NodeHttp.createServer((request, response) => {
             ? { data: withCost }
             : { data: withCost, errors: answer.errors },
         ),
+        {},
+        request.headers.authorization,
       );
     });
     return;
@@ -599,6 +628,7 @@ const server = NodeHttp.createServer((request, response) => {
       answer.status,
       answer.body === null ? "" : encodeJson(answer.body),
       "etag" in answer && answer.etag !== undefined ? { etag: answer.etag } : {},
+      request.headers.authorization,
     );
   });
 });
@@ -614,7 +644,7 @@ ghConfig("gh", LOGIN);
 if (values["second-account"]) ghConfig("gh-second", SECOND_LOGIN);
 NodeFS.writeFileSync(
   NodePath.join(home, "gh"),
-  `#!/bin/sh\necho "fake-token-for-$(sed -n 's/^  user: //p' "$GH_CONFIG_DIR/hosts.yml" | head -n 1)@$(basename "$GH_CONFIG_DIR")"\n`,
+  `#!/bin/sh\necho "fake-token-for-$(sed -n 's/^  user: //p' "$GH_CONFIG_DIR/hosts.yml" | head -n 1)@\${GH_CONFIG_DIR#"$HOME"/}"\n`,
   { mode: 0o755 },
 );
 server.listen(Number(values.port), "127.0.0.1", () => {

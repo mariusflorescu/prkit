@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { test } from "@e2e-dev/web";
@@ -108,6 +109,10 @@ test("Accounts validates directories and saves only user-added paths", async ({
 }) => {
   const run = runForUrl(app.baseUrl);
   const addedPath = join(run.home, "added-gh-config");
+  // Settings writes a directory under the home folder from `~`.
+  const shownPath = addedPath.startsWith(`${homedir()}/`)
+    ? `~${addedPath.slice(homedir().length)}`
+    : addedPath;
   await mkdir(addedPath, { recursive: true });
   await writeFile(join(addedPath, "hosts.yml"), "{}\n");
   await app.open(run.openUrl);
@@ -144,11 +149,11 @@ test("Accounts validates directories and saves only user-added paths", async ({
   await field.fill(addedPath);
   await add.tap();
   await expect(screen.getByText("GitHub directory added")).toBeVisible();
-  await expect(screen.getByText(addedPath)).toBeVisible();
+  await expect(screen.getByText(shownPath)).toBeVisible();
   await app.screenshot("directory-added");
   await screen.getByRole("button", "Remove").tap();
   await expect(screen.getByText("GitHub directory removed")).toBeVisible();
-  await expect(screen.getByText(addedPath)).toHaveCount(0);
+  await expect(screen.getByText(shownPath)).toHaveCount(0);
   await app.screenshot("directory-removed");
 });
 

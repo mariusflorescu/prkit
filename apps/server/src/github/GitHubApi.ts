@@ -40,7 +40,8 @@ type GitHubJson =
  * Why a read failed. Only `unauthorized` means the account itself is broken (its
  * token was refused after one re-read); the others are about this request.
  * `rate-limited` and `reserved` were never sent: the account is paused, or a
- * background read would dip into the share kept for clicks.
+ * background read would dip into the share kept for clicks. `moved`: the account is read
+ * through another gh config directory now (see `GitHubBinding`).
  */
 export const GitHubFailure = Schema.Literals([
   "unauthorized",
@@ -49,6 +50,7 @@ export const GitHubFailure = Schema.Literals([
   "reserved",
   "network",
   "rejected",
+  "moved",
 ]);
 export type GitHubFailure = typeof GitHubFailure.Type;
 
@@ -71,6 +73,25 @@ export const GitHubPriority = Context.Reference<Priority>(
 );
 export const inBackground = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.provideService(effect, GitHubPriority, "background");
+
+/**
+ * The gh config directory a cached read is kept under for its account. Its requests go out
+ * only with that directory's token, and an answer that arrives once a rediscovery reads the
+ * account through another directory, or no longer finds it, fails as `moved`, so nothing
+ * keeps or shows it.
+ */
+export const GitHubBinding = Context.Reference<{
+  readonly accountId: AccountId;
+  /** Null: the account had no directory when the read started, so any it has now is another. */
+  readonly configDir: string | null;
+} | null>("@prkit/server/github/GitHubApi/GitHubBinding", { defaultValue: () => null });
+export const throughBinding =
+  (binding: { readonly accountId: AccountId; readonly configDir: string }) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.provideService(effect, GitHubBinding, {
+      accountId: binding.accountId,
+      configDir: binding.configDir,
+    });
 
 /** One entry of a GraphQL `errors` array; `path[0]` is the alias it belongs to. */
 export const GraphQLError = Schema.Struct({
@@ -267,8 +288,37 @@ export const make = Effect.gen(function* () {
       id,
       Effect.gen(function* () {
         const priority = yield* GitHubPriority;
-        let binding = yield* accounts.token(id);
-        const login = binding.account.login;
+        const pinned = yield* GitHubBinding;
+        const pin = pinned?.accountId === id ? pinned : null;
+        const moved = (login: string, when: "before-send" | "on-answer") =>
+          Effect.logWarning(
+            "GitHub read set aside: its account moved to another gh directory",
+          ).pipe(
+            Effect.annotateLogs({ accountId: id, operation, configDir: pin?.configDir, when }),
+            Effect.andThen(
+              Effect.fail(
+                fail(
+                  "moved",
+                  `${login}'s gh directory changed while prkit was reading GitHub. Try again.`,
+                ),
+              ),
+            ),
+          );
+        /** Checked once the whole answer is in: an answer still arriving when the account moved counts as late. */
+        const movedAway =
+          pin === null
+            ? Effect.succeed(false)
+            : accounts.known.pipe(
+                Effect.map(
+                  (known) =>
+                    (known?.accounts.find((account) => account.id === id)?.configDir ?? null) !==
+                    pin.configDir,
+                ),
+              );
+        let bound = yield* accounts.token(id);
+        const login = bound.account.login;
+        if (pin !== null && bound.account.configDir !== pin.configDir)
+          return yield* moved(login, "before-send");
         let reread = false;
         let rateRetries = 0;
         while (true) {
@@ -288,8 +338,8 @@ export const make = Effect.gen(function* () {
               null,
               admission.until,
             );
-          const built = request(accounts.apiBase(binding.account.host)).pipe(
-            HttpClientRequest.bearerToken(binding.token),
+          const built = request(accounts.apiBase(bound.account.host)).pipe(
+            HttpClientRequest.bearerToken(bound.token),
             HttpClientRequest.setHeaders({
               "user-agent": "prkit",
               "x-github-api-version": "2022-11-28",
@@ -315,13 +365,17 @@ export const make = Effect.gen(function* () {
             yield* logRequest(
               points === undefined || response.status === 304 ? spent : points(value),
             );
+            if (yield* movedAway) return yield* moved(login, "on-answer");
             return value;
           }
           const rejectedBody = yield* response.text;
           yield* logRequest(spent);
+          if (yield* movedAway) return yield* moved(login, "on-answer");
           if (response.status === 401 && !reread) {
-            binding = yield* accounts.token(id, true);
+            bound = yield* accounts.token(id, true);
             reread = true;
+            if (pin !== null && bound.account.configDir !== pin.configDir)
+              return yield* moved(login, "before-send");
             continue;
           }
           if (response.status === 403 || response.status === 429) {

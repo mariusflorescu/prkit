@@ -41,7 +41,11 @@ export function AddConfigDirForm() {
         Add gh config directory
       </label>
       <p className="text-xs text-muted-foreground">
-        Default gh directories are found automatically. Add a directory stored elsewhere.
+        prkit looks where gh does: <code className="font-mono">GH_CONFIG_DIR</code> and{" "}
+        <code className="font-mono">XDG_CONFIG_HOME</code> from your login shell, then{" "}
+        <code className="font-mono">~/.config</code>, with the{" "}
+        <code className="font-mono">gh-*</code> directories beside gh. Add a directory stored
+        elsewhere.
       </p>
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">

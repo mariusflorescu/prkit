@@ -29,6 +29,8 @@ export const ConfigDirProblem = Schema.Struct({
 export type ConfigDirProblem = typeof ConfigDirProblem.Type;
 
 export const AccountsResult = Schema.Struct({
+  /** The home folder prkit looks for gh in, so a directory under it can read as `~/.config/gh`. */
+  home: Schema.String,
   accounts: Schema.Array(Account),
   addedConfigDirs: Schema.Array(Schema.String),
   configDirProblems: Schema.Array(ConfigDirProblem),

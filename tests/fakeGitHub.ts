@@ -31,7 +31,7 @@ const Stats = Schema.fromJsonString(
         cost: Schema.Number,
         /** The login the request's token was for, empty without one. */
         login: Schema.String,
-        /** The name of the gh config directory that printed the token, empty without one. */
+        /** The gh config directory that printed the token, under the fake's HOME (`.config/gh`), empty without one. */
         dir: Schema.String,
       }),
     ),
@@ -108,8 +108,18 @@ export const startFakeGitHub = async (
     /** Every answer, or only `resource`'s, waits `ms`. */
     latency: (ms: number, resource?: "graphql" | "core") =>
       post(`latency?ms=${ms}${resource === undefined ? "" : `&resource=${resource}`}`),
-    /** `resource`'s answers wait from now on, until `release` sends them. */
-    hold: (resource: "graphql" | "core") => post(`hold?resource=${resource}`),
+    /**
+     * `resource`'s answers wait from now on, until `release` sends them. With `dir`, only answers
+     * to that directory's token; with `body`, the status and headers go at once and the body waits.
+     */
+    hold: (resource: "graphql" | "core", only: { dir?: string; body?: boolean } = {}) =>
+      post(
+        `hold?${new URLSearchParams([
+          ["resource", resource],
+          ...(only.dir === undefined ? [] : [["dir", only.dir]]),
+          ...(only.body === true ? [["part", "body"]] : []),
+        ])}`,
+      ),
     release: (resource: "graphql" | "core") => post(`release?resource=${resource}`),
     archive: (repo: string) => post(`archive?repo=${repo}`),
     /** `login`'s inbox finds only these pull requests from now on. */

@@ -5,6 +5,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
+import { forgetMovedAccounts } from "~/features/accounts/forgetMovedAccounts";
 import { AppearanceSync } from "~/features/settings/appearance/AppearanceSync";
 import { applyTheme, bootTheme } from "~/lib/colorScheme";
 import { isMacDesktop } from "~/lib/desktop";
@@ -30,6 +31,7 @@ const [{ router }] = await Promise.all([
 const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false } },
 });
+forgetMovedAccounts(queryClient);
 const rootElement = document.getElementById("root");
 if (rootElement === null) throw new Error("index.html is missing #root");
 

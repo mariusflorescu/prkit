@@ -21,9 +21,9 @@ const THIRD = "budget-third";
 const INBOX_READS = new Set(["rest:user", "graphql:inbox", "graphql:review-waits"]);
 /** The only gh config directory each login's token may come from. */
 const HOME_DIR: Record<string, string> = {
-  [FIRST]: "gh",
-  [SECOND]: "gh-second",
-  [THIRD]: "gh-third",
+  [FIRST]: ".config/gh",
+  [SECOND]: ".config/gh-second",
+  [THIRD]: ".config/gh-third",
 };
 
 const rows = (browser: Browser) =>
@@ -178,7 +178,7 @@ test(
       const reads = await pullRequestReads(prkit.fake);
       expect(reads.length).toBeGreaterThan(0);
       expect([...new Set(reads.map((entry) => `${entry.login}@${entry.dir}`))]).toEqual([
-        `${SECOND}@gh-second`,
+        `${SECOND}@.config/gh-second`,
       ]);
       expect(await crossed(prkit.fake)).toEqual([]);
 
@@ -204,7 +204,7 @@ test(
       await new Promise((resolve) => setTimeout(resolve, 12_000));
       expect(
         (await prkit.fake.stats()).log.filter(
-          (entry) => entry.login === SECOND || entry.dir === "gh-second",
+          (entry) => entry.login === SECOND || entry.dir === ".config/gh-second",
         ),
       ).toEqual([]);
       // gh empties the file before it writes it, so an empty file is one it is still writing.
@@ -309,7 +309,7 @@ test(
       await expect.poll(() => rows(browser), { timeout: 20_000 }).toBe("1,2,3,4");
       const firstReads = (await prkit.fake.stats()).log.filter((entry) => entry.login === FIRST);
       expect(firstReads.length).toBeGreaterThan(0);
-      expect([...new Set(firstReads.map((entry) => entry.dir))]).toEqual(["gh"]);
+      expect([...new Set(firstReads.map((entry) => entry.dir))]).toEqual([".config/gh"]);
 
       // The first can't be read: the login waits for it, and nothing reads through the second.
       await prkit.fake.resetStats();
@@ -334,9 +334,9 @@ test(
           .filter({ hasText: `prkit can't open ~/.config/gh, so it can't check ${FIRST}.` }),
       ).toBeVisible({ timeout: 20_000 });
       await new Promise((resolve) => setTimeout(resolve, 2_000));
-      expect((await prkit.fake.stats()).log.filter((entry) => entry.dir === "gh-second")).toEqual(
-        [],
-      );
+      expect(
+        (await prkit.fake.stats()).log.filter((entry) => entry.dir === ".config/gh-second"),
+      ).toEqual([]);
       expect((await prkit.fake.stats()).log.filter((entry) => entry.login === FIRST)).toEqual([]);
 
       // Readable again: the login is read through the first directory once more.
@@ -349,7 +349,7 @@ test(
       await expect(screen.getByRole("alert")).toHaveCount(0, { timeout: 20_000 });
       const repaired = (await prkit.fake.stats()).log.filter((entry) => entry.login === FIRST);
       expect(repaired.length).toBeGreaterThan(0);
-      expect([...new Set(repaired.map((entry) => entry.dir))]).toEqual(["gh"]);
+      expect([...new Set(repaired.map((entry) => entry.dir))]).toEqual([".config/gh"]);
     } finally {
       prkit.stop();
     }

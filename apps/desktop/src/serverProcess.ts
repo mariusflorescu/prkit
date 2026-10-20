@@ -50,7 +50,9 @@ export function startServer(options: {
     {
       env: childEnv(process.env, {
         GH_CONFIG_DIR: process.env.GH_CONFIG_DIR,
+        XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
         PRKIT_GH_PATH: process.env.PRKIT_GH_PATH,
+        PRKIT_GITHUB_API_URL: process.env.PRKIT_GITHUB_API_URL,
         ELECTRON_RUN_AS_NODE: "1",
         PRKIT_HOME: options.home,
         PRKIT_AUTH_TOKEN: options.token,

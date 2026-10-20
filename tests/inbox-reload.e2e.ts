@@ -18,7 +18,10 @@ import { emulateOsColorScheme, screenshotLightAndDark } from "./osColorScheme.ts
 const FIRST = "budget-test";
 const SECOND = "budget-second";
 /** The only gh config directory each login's token may come from. */
-const HOME_DIR: Record<string, string> = { [FIRST]: "gh", [SECOND]: "gh-second" };
+const HOME_DIR: Record<string, string> = {
+  [FIRST]: ".config/gh",
+  [SECOND]: ".config/gh-second",
+};
 /** How long GitHub takes to answer the second account's failing inbox reads, as in an outage. */
 const FAIL_MS = 10_000;
 

@@ -16,7 +16,7 @@ import * as Schema from "effect/Schema";
 
 import { ThemePreference } from "@prkit/contracts";
 import { applyBranding } from "./branding.ts";
-import { hydratePathFromLoginShell } from "./loginShellPath.ts";
+import { hydrateFromLoginShell } from "./loginShellEnv.ts";
 import { createMainWindow } from "./mainWindow.ts";
 import type { ServerTarget } from "./serverProcess.ts";
 import { createServerSupervisor } from "./serverSupervisor.ts";
@@ -151,7 +151,7 @@ async function boot() {
   installApplicationMenu({ checkForUpdates: () => void updates?.checkFromMenu() });
   const token = NodeCrypto.randomBytes(32).toString("hex");
   // Before the server child exists: it inherits PATH through childEnv, and a Dock launch has only launchd's.
-  process.stdout.write(`[desktop] PATH ${await hydratePathFromLoginShell()}\n`);
+  process.stdout.write(`[desktop] login shell: ${await hydrateFromLoginShell()}\n`);
   const target: ServerTarget = devWebUrl
     ? { _tag: "DevWeb", webOrigin: new URL(devWebUrl).origin }
     : { _tag: "Built", webDist };

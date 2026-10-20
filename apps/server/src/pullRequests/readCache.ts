@@ -7,7 +7,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { GitHubRequestError, inBackground } from "../github/GitHubApi.ts";
+import { GitHubRequestError, inBackground, throughBinding } from "../github/GitHubApi.ts";
 import { isoAt } from "../github/budget.ts";
 import { makeKeyedGate } from "../github/keyedGate.ts";
 
@@ -257,7 +257,7 @@ export const makeReadCache = <V>(
         const before = yield* lookup(key);
         if (before === undefined) return;
         const startedAt = yield* Clock.currentTimeMillis;
-        const result = yield* inBackground(fetch).pipe(Effect.result);
+        const result = yield* inBackground(throughBinding(key)(fetch)).pipe(Effect.result);
         if (result._tag === "Success") {
           const unchanged =
             encode(result.success) === encode(before.value) && before.problem === null;
@@ -265,6 +265,8 @@ export const makeReadCache = <V>(
           if (!unchanged) yield* options.changed(key);
           return;
         }
+        // A read through a directory the account has left says nothing about the answer kept now.
+        if (entries.get(id(key))?.configDir !== key.configDir) return;
         const problem = problemOf(result.failure) ?? {
           _tag: "unavailable" as const,
           message: isGitHubError(result.failure)
@@ -325,7 +327,7 @@ export const makeReadCache = <V>(
             )
               return entry;
             const startedAt = yield* Clock.currentTimeMillis;
-            const result = yield* fetch.pipe(Effect.result);
+            const result = yield* throughBinding(key)(fetch).pipe(Effect.result);
             if (result._tag === "Success") return yield* store(key, result.success, startedAt);
             const problem = opts.fallback === false ? null : problemOf(result.failure);
             if (entry === undefined || problem === null) return yield* Effect.fail(result.failure);
@@ -446,7 +448,7 @@ export const makeObservedReadCache = <V>(
         yield* Effect.forkIn(
           Effect.gen(function* () {
             const startedAt = yield* Clock.currentTimeMillis;
-            const result = yield* fetch;
+            const result = yield* throughBinding(key)(fetch);
             yield* outcome(key, result, startedAt);
             return result;
           }).pipe(

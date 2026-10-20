@@ -1,10 +1,12 @@
 # Settings > Accounts
 
-Settings lists each discovered GitHub host/login with its config directory, avatar and status. Each account the machine's gh config dirs hold shows as a Ready row. Users can add a directory, remove directories they added, and refresh account credentials. Saved directories survive a server restart.
+Settings lists each discovered GitHub host/login with the config directory it was found in (from `~` when it is under the home folder), avatar and status. Each account the machine's gh config dirs hold shows as a Ready row. Users can add a directory, remove directories they added, and refresh account credentials. Saved directories survive a server restart.
 
 ## Sub-features
 
-- `accounts-list` lists each host/login once; the first discovered directory binds its credentials.
+- `accounts-list` lists each host/login once, whatever case each directory spells it in; the first discovered directory binds its credentials and names the account.
+- `accounts-locations` looks where gh does: `GH_CONFIG_DIR`, then `gh` in `XDG_CONFIG_HOME`, then `~/.config/gh`, each with the `gh-*` directories beside it. The desktop app started from Finder reads both variables from the login shell, and a launch that sets either keeps its own.
+- `accounts-moves` reads an account's open pull requests again through the directory its login moves to, and sets aside a read that lands after the move.
 - `accounts-status` shows `ready`, or `error` with the reason in plain words.
 - `accounts-add-dir` adds a gh config dir the scan did not find.
 - `accounts-remove-dir` removes a saved directory from discovery without changing its gh files.
@@ -17,6 +19,8 @@ Settings lists each discovered GitHub host/login with its config directory, avat
 
 ## Driving it with e2e
 
+`tests/accounts-discovery.e2e.ts` runs on the fake GitHub and its per-token, per-directory request log: two directories that spell one login in different case (one account, read through the first, which an unreadable first directory keeps across a relaunch), an open pull request read again through the directory its login moves to, a read held across a move that the server logs as set aside and keeps nowhere, and the built desktop app launched like Finder (launchd's PATH, no gh variables) with a stand-in login shell that exports `GH_CONFIG_DIR` and `XDG_CONFIG_HOME`, then again with a launch that sets its own `XDG_CONFIG_HOME`. It files Settings frames in light, dark and at 900 px under `.e2e/evidence/accounts-discovery/`.
+
 The journey in `tests/accounts-inbox.e2e.ts` checks both Ready accounts, directory validation, API errors, success toasts, and add/remove through the UI. `tests/accounts-config-dirs.e2e.ts` makes directories unreadable on the fake GitHub, mid-run and at launch, and repairs them.
 
 Preconditions:
@@ -25,6 +29,7 @@ Preconditions:
 - Every gh config dir is logged in. Check each with the real gh binary, not the mise shim: `GH_CONFIG_DIR=~/.config/gh-<name> "$(mise which gh)" auth status` names that dir's login.
 
 - **List.** Open Settings. One row per account, each with its host and its config dir.
+- **Where gh keeps it.** With a stand-in login shell that exports `XDG_CONFIG_HOME=~/xdg` and `GH_CONFIG_DIR=~/custom/gh-own`, the desktop app finds `budget-third` in `~/custom/gh-own`, `budget-test` in `~/xdg/gh` (not `~/.config/gh`, which lists it too) and `budget-second` in `~/xdg/gh-second`, and the fake's log shows each login read only through its own directory.
 - **Status.** Every row reads Ready; none reads `Needs attention`.
 - **Validation.** Tap `screen.getByRole("button", "Add directory")` with an empty field. The form asks for a directory. Fill `screen.getByRole("textbox", "Add gh config directory")` with a nonexistent absolute path; the field explains that it cannot be read. Submit an existing directory without `hosts.yml`; the field explains which file is missing.
 - **Add and remove.** Submit a new directory containing `hosts.yml`, kept under `.e2e/`. Check the success toast, restart with `--keep-home`, and check the saved directory before tapping its Remove button. Default directories have no Remove button. A remove that fails keeps the row, shows the error with Retry below the list without moving the rows, and Retry removes it again: `tests/settings-failed-saves.e2e.ts`, see Failed saves in [Settings](./settings.md). An error from Refresh shows under the header, beside its button.
