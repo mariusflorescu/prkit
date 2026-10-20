@@ -148,6 +148,8 @@ test(
         expect(turnsOf(home), "no resolution starts before the session's agent is read").toEqual([
           discarded,
         ]);
+        await expect(resolve.getByRole("alert")).toHaveCount(0);
+        await expect(resolve.getByRole("button", "Resolve with the agent")).toBeDisabled();
         await expect(resolve.getByRole("button", /^Agent and model: /)).toHaveCount(0);
       } finally {
         resolveHold.release();
@@ -180,6 +182,10 @@ test(
           timeout: 30_000,
         });
         await expect.poll(sendHold.reached, { timeout: 30_000 }).toBe(true);
+        await expect(send.getByLabel("Loading push access")).toHaveCount(0, { timeout: 30_000 });
+        await expect(send.getByLabel("Loading whether the agent runs scripts")).toHaveCount(0, {
+          timeout: 30_000,
+        });
         await shown(browser);
         held = await layoutOf(browser, "Send to agent");
         await screenshotLightAndDark(app, browser, "fix-agent-loading-send-held");
@@ -194,6 +200,8 @@ test(
         expect(turnsOf(home), "no fix starts before the session's agent is read").toEqual([
           discarded,
         ]);
+        await expect(send.getByRole("alert")).toHaveCount(0);
+        await expect(send.getByRole("button", "Send 1 comment to agent")).toBeDisabled();
         await expect(send.getByRole("button", /^Agent and model: /)).toHaveCount(0);
         await browser.setViewport({ width: 720, height: 860 });
         await shown(browser);

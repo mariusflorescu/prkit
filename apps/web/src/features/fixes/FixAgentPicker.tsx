@@ -39,7 +39,7 @@ export function FixAgentPicker({
     );
   const { selection, model } = agent;
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-1">
+    <div className="flex min-w-0 items-center gap-1">
       <AgentModelPicker
         catalog={agent.catalog}
         value={selection}
