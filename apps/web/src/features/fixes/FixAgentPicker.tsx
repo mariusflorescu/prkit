@@ -19,9 +19,13 @@ export function FixAgentPicker({
 }) {
   if (agent.loading)
     return (
-      <div aria-busy="true" aria-label="Loading agents" className="flex items-center gap-2">
-        <Skeleton className="h-5 w-36" />
-        <Skeleton className="h-5 w-20" />
+      <div
+        aria-busy="true"
+        aria-label="Loading agents"
+        className="flex h-7 items-center gap-4 px-2"
+      >
+        <Skeleton className="h-3.5 w-32" />
+        <Skeleton className="h-3.5 w-16" />
       </div>
     );
   if (agent.error !== null || agent.catalog === undefined)
@@ -35,7 +39,7 @@ export function FixAgentPicker({
     );
   const { selection, model } = agent;
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-1">
+    <div className="flex min-w-0 items-center gap-1">
       <AgentModelPicker
         catalog={agent.catalog}
         value={selection}

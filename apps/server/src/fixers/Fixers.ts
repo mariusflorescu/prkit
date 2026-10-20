@@ -27,6 +27,7 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { processHost } from "../agents/turnEnd.ts";
+import { makeE2eHold } from "../e2eHold.ts";
 import { GitHubApi } from "../github/GitHubApi.ts";
 import { makeKeyedGate } from "../github/keyedGate.ts";
 import { PullRequests } from "../pullRequests/PullRequests.ts";
@@ -78,6 +79,7 @@ export const make = Effect.gen(function* () {
   const api = yield* GitHubApi;
   const pullRequests = yield* PullRequests;
   const withRetry = makeKeyedGate<PullRequestKey>(1);
+  const hold = yield* makeE2eHold;
 
   const state = yield* makeFixerState;
   const {
@@ -112,7 +114,8 @@ export const make = Effect.gen(function* () {
   const { reviseBody } = bodies;
   const { finishFixes, finishConflicts, reportProgress } = yield* makeFixTools(state, conflicts);
 
-  const get = (key: PullRequestKey) => snapshotOf(key).pipe(Effect.catchTags(dbFailures));
+  const get = (key: PullRequestKey) =>
+    hold("fix-session-read").pipe(Effect.andThen(snapshotOf(key)), Effect.catchTags(dbFailures));
   const history = (key: PullRequestKey) => snapshotOf(key, true).pipe(Effect.catchTags(dbFailures));
   const turnActivity = (key: PullRequestKey, turnId: FixerTurnId) =>
     state.turnActivity(key, turnId).pipe(Effect.catchTags(dbFailures));
@@ -545,6 +548,7 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         // Subscribe before reading, so nothing that lands in between is lost.
         const subscription = yield* PubSub.subscribe(changes);
+        yield* hold("fix-session-read");
         const first = yield* snapshotOf(key);
         return Stream.concat(
           Stream.succeed(first),
