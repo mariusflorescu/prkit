@@ -4,7 +4,6 @@ import type { AgentCatalogEntry } from "@prkit/contracts";
 import { Button } from "~/components/ui/button";
 import { ButtonLabel } from "~/components/ui/button-label";
 
-import { configOf } from "./instanceConfig";
 import { useAgentInstanceActions } from "./useAgentInstanceActions";
 
 /**
@@ -60,9 +59,7 @@ export function ResetAgentDialog({
               variant="destructive"
               disabled={reset.isPending}
               aria-busy={reset.isPending}
-              onClick={() =>
-                reset.mutate(configOf(entry), { onSuccess: () => onOpenChange(false) })
-              }
+              onClick={() => reset.mutate(entry, { onSuccess: () => onOpenChange(false) })}
             >
               <ButtonLabel
                 shown={reset.isPending ? "resetting" : "reset"}

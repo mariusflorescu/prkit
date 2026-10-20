@@ -253,6 +253,7 @@ describe("keepsConversation", () => {
       entry("claude_same", "claude:/Users/octocat/.claude"),
       entry("claude_work", "claude:/Users/octocat/.claude-work"),
     ],
+    damaged: [],
   };
 
   it("keeps it within a group and starts over across groups", () => {

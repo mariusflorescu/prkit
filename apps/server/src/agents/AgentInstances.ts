@@ -18,6 +18,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -41,7 +42,11 @@ const InstanceRow = Schema.Struct({
   environment: Schema.fromJsonString(Schema.Array(StoredVariable)),
   login: AgentLogin,
 });
-const decodeRows = Schema.decodeUnknownEffect(Schema.Array(InstanceRow));
+const decodeRow = Schema.decodeUnknownResult(InstanceRow);
+/** What a row prkit can't read still says of itself, so it can be shown and removed. */
+const decodeIdentity = Schema.decodeUnknownOption(Schema.Struct({ id: AgentInstanceId }));
+const decodeKind = Schema.decodeUnknownOption(Schema.Struct({ kind: AgentProviderKind }));
+const decodeStoredId = Schema.decodeUnknownOption(Schema.Struct({ id: Schema.String }));
 const decodeEnvironments = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ environment: InstanceRow.fields.environment })),
 );
@@ -55,6 +60,17 @@ const decodeSecrets = Schema.decodeUnknownEffect(Secrets);
 type SecretMap = Readonly<Record<string, Readonly<Record<string, string>>>>;
 const encodeSecrets = Schema.encodeSync(Secrets);
 const NO_SECRETS: SecretMap = {};
+
+/**
+ * A stored instance prkit can't read. It never runs, and a default one never gives way to how it
+ * shipped, which would run on another login.
+ */
+export interface DamagedInstance {
+  readonly id: AgentInstanceId;
+  /** Null when the kind can't be read either. */
+  readonly kind: AgentProviderKind | null;
+  readonly problem: string;
+}
 
 /** An instance with its real environment, for the server only: sensitive values included. */
 export interface ResolvedInstance {
@@ -128,13 +144,54 @@ export const make = Effect.gen(function* () {
       yield* fs.rename(temporary, secretsFile);
     });
 
-  const rows =
-    sql`SELECT id, kind, label, accent, enabled, config_dir, binary_path, environment, login
-    FROM agent_instances ORDER BY created_at, id`.pipe(Effect.flatMap(decodeRows));
+  /**
+   * Each row, read on its own: one prkit can run, or one it can't (damaged, or of a kind only a
+   * newer prkit knows) that still names an instance. A row whose ID can't be read is left out
+   * with a warning: nothing prkit reads can point at it.
+   */
+  const rows = Effect.gen(function* () {
+    const raw = yield* sql`SELECT id, kind, label, accent, enabled, config_dir, binary_path,
+      environment, login FROM agent_instances ORDER BY created_at, id`;
+    const readable: Array<typeof InstanceRow.Type & { readonly kind: AgentProviderKind }> = [];
+    const damaged: Array<DamagedInstance> = [];
+    for (const row of raw) {
+      const read = decodeRow(row);
+      if (Result.isSuccess(read) && isKind(read.success.kind)) {
+        readable.push({ ...read.success, kind: read.success.kind });
+        continue;
+      }
+      const identity = Option.getOrUndefined(decodeIdentity(row));
+      const problem = Result.isFailure(read)
+        ? read.failure.message
+        : "Its kind is one prkit doesn't know.";
+      if (identity === undefined) {
+        yield* Effect.logWarning("Left out an agent setting whose ID prkit can't read").pipe(
+          Effect.annotateLogs({ problem }),
+        );
+        continue;
+      }
+      const kind = Option.match(decodeKind(row), {
+        onSome: (known) => known.kind,
+        onNone: () => AGENT_KINDS.find((known) => known === identity.id) ?? null,
+      });
+      damaged.push({ id: identity.id, kind, problem });
+    }
+    // Two rows that read as one ID can't say which login is meant, so neither runs.
+    const seen = new Map<string, number>();
+    for (const { id } of [...readable, ...damaged]) seen.set(id, (seen.get(id) ?? 0) + 1);
+    const shared = readable.filter((row) => (seen.get(row.id) ?? 0) > 1);
+    for (const row of shared)
+      if (!damaged.some((entry) => entry.id === row.id))
+        damaged.push({ id: row.id, kind: row.kind, problem: "Another setting has the same ID." });
+    return { readable: readable.filter((row) => !shared.includes(row)), damaged };
+  });
 
-  /** Every instance with its real environment: each kind's default first, then the user's. */
+  /**
+   * Every instance with its real environment: each kind's default first, then the user's, and
+   * those prkit can't read.
+   */
   const resolved = Effect.gen(function* () {
-    const stored = yield* rows;
+    const { readable: stored, damaged } = yield* rows;
     // An unreadable secrets file loses only the sensitive values: every agent still builds,
     // and one that had any says so instead of running without them.
     const { secrets, unreadable } = yield* readSecrets.pipe(
@@ -164,35 +221,26 @@ export const make = Effect.gen(function* () {
         secretsLost: unreadable && config.environment.some((variable) => variable.sensitive),
       };
     };
-    const fromRow = (row: (typeof stored)[number]): AgentInstanceConfig | null =>
-      isKind(row.kind)
-        ? {
-            id: row.id,
-            kind: row.kind,
-            label: row.label,
-            accent: row.accent,
-            enabled: row.enabled !== 0,
-            configDir: row.config_dir,
-            binaryPath: row.binary_path,
-            environment: row.environment.map((variable) => ({ ...variable, valueRedacted: false })),
-            login: row.login,
-          }
-        : null;
-    const defaults = AGENT_KINDS.map(
-      (kind) =>
-        stored.map(fromRow).find((config) => config?.id === kind) ?? defaultInstanceConfig(kind),
+    const fromRow = (row: (typeof stored)[number]): AgentInstanceConfig => ({
+      id: row.id,
+      kind: row.kind,
+      label: row.label,
+      accent: row.accent,
+      enabled: row.enabled !== 0,
+      configDir: row.config_dir,
+      binaryPath: row.binary_path,
+      environment: row.environment.map((variable) => ({ ...variable, valueRedacted: false })),
+      login: row.login,
+    });
+    const defaults = AGENT_KINDS.filter((kind) => !damaged.some((entry) => entry.id === kind)).map(
+      (kind) => {
+        const row = stored.find((entry) => entry.id === kind);
+        return row === undefined ? defaultInstanceConfig(kind) : fromRow(row);
+      },
     );
-    const added = stored
-      .filter((row) => !isDefaultInstance(row.id))
-      .map(fromRow)
-      .filter((config) => config !== null);
-    return [...defaults, ...added].map(toResolved);
-  }).pipe(
-    Effect.catchTags({
-      SqlError: fail("prkit couldn't read your agents."),
-      SchemaError: fail("prkit read a damaged agent setting. Check Settings > Agents."),
-    }),
-  );
+    const added = stored.filter((row) => !isDefaultInstance(row.id)).map(fromRow);
+    return { instances: [...defaults, ...added].map(toResolved), damaged };
+  }).pipe(Effect.catchTag("SqlError", fail("prkit couldn't read your agents.")));
 
   /**
    * `saved` holds the names the instance already has. One a newer rule refuses isn't checked
@@ -321,7 +369,15 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           // Read first: a secrets file prkit can't read stops the removal before anything goes.
           const secrets = yield* readSecrets;
-          yield* sql`DELETE FROM agent_instances WHERE id = ${id}`;
+          // As stored: a damaged ID with spaces around it still reads as this instance.
+          for (const row of yield* sql`SELECT id FROM agent_instances`) {
+            const stored = Option.getOrUndefined(decodeStoredId(row));
+            if (
+              stored !== undefined &&
+              Option.exists(decodeIdentity(row), (identity) => identity.id === id)
+            )
+              yield* sql`DELETE FROM agent_instances WHERE id = ${stored.id}`;
+          }
           if (secrets[id] !== undefined) yield* writeSecrets(withSecrets(secrets, id, {}));
         }),
       )

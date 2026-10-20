@@ -53,7 +53,9 @@ export const makeAgentChoice = Effect.gen(function* () {
       const entry = chosen === null ? undefined : findAgentEntry(catalog, chosen.instance);
       if (chosen === null || entry === undefined)
         return yield* new FixerError({
-          message: "No agent is ready. Sign one in under Settings > Agents, then check again.",
+          message:
+            (chosen === null ? null : selectionProblem(catalog, chosen)) ??
+            "No agent is ready. Sign one in under Settings > Agents, then check again.",
         });
       return { ...chosen, provider: entry.kind };
     });

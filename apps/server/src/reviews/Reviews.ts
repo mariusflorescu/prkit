@@ -136,6 +136,7 @@ export const make = Effect.gen(function* () {
       if (chosen === null || entry === undefined)
         return yield* new ReviewError({
           message:
+            (chosen === null ? null : selectionProblem(catalog, chosen)) ??
             "No agent is ready to write guides. Sign one in under Settings > Agents, then check again.",
         });
       return { ...chosen, provider: entry.kind };
@@ -253,6 +254,18 @@ export const make = Effect.gen(function* () {
           INSERT INTO guide_batches (id, origin_key, account_id, created_at)
           VALUES (${batch}, ${key}, ${accountId}, ${yield* now})`;
         for (const item of plan) {
+          // With no agent picked, a layer on a setting prkit can't read stays on it and fails
+          // saying so, rather than moving to this PR's agent and maybe another login.
+          const stays =
+            input.agent === undefined &&
+            item.review !== null &&
+            (yield* agents
+              .usable(item.review.instance, item.review.provider)
+              .pipe(
+                Effect.flatMap((instance) =>
+                  instance === null ? Effect.succeed(null) : agents.damagedMessage(instance),
+                ),
+              )) !== null;
           const ran =
             item.review === null
               ? (yield* ensureReview(
@@ -264,7 +277,7 @@ export const make = Effect.gen(function* () {
               : yield* startAttempt(
                   item.review,
                   item.review.latestRevision === null ? "first" : "retry",
-                  { agent, batch },
+                  stays ? { batch } : { agent, batch },
                 );
           if (ran) started.push(item.key);
         }

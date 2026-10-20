@@ -3,6 +3,7 @@ import {
   findAgentModel,
   keepsConversation,
   type PullRequestKey,
+  pinnedDamage,
   selectionProblem,
   sessionSelection,
 } from "@prkit/contracts";
@@ -39,10 +40,16 @@ export function useFixAgent(key: PullRequestKey, picked: AgentSelection | null) 
     (catalog.data === undefined || settings.data === undefined
       ? null
       : sessionSelection(catalog.data, own, settings.data.defaultAgent));
+  // A session on a setting prkit can't read stays on it, a session from before models included.
+  const pinned =
+    picked === null && catalog.data !== undefined && session != null
+      ? pinnedDamage(catalog.data, session.instance, session.provider)
+      : undefined;
   const problem =
-    catalog.data === undefined || selection === null
+    pinned?.message ??
+    (catalog.data === undefined || selection === null
       ? null
-      : selectionProblem(catalog.data, selection);
+      : selectionProblem(catalog.data, selection));
   const model =
     catalog.data === undefined || selection === null
       ? undefined

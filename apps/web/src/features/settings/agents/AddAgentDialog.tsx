@@ -54,7 +54,9 @@ export function AddAgentDialog({
     binaryPath,
     configDir,
   };
-  const existing = new Set<string>(catalog.providers.map((entry) => entry.instance));
+  const existing = new Set<string>(
+    [...catalog.providers, ...catalog.damaged].map((entry) => entry.instance),
+  );
   const steps = stepsFor(values.setup);
   const problem = attempted ? stepProblem(step, values, existing) : null;
   const last = step === steps.length - 1;

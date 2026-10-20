@@ -68,7 +68,11 @@ export const makeTurnBodies = (
     const agentFor = (turn: TurnRow) =>
       Effect.gen(function* () {
         const provider = yield* agents.get(turn.instance_id);
-        if (provider === null) return yield* fail("agent-auth", AGENT_OFF);
+        if (provider === null)
+          return yield* fail(
+            "agent-auth",
+            (yield* agents.damagedMessage(turn.instance_id)) ?? AGENT_OFF,
+          );
         return provider;
       });
 

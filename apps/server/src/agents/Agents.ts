@@ -1,4 +1,5 @@
 import {
+  AGENT_KIND_NAMES,
   AGENT_KINDS,
   type AgentCatalog,
   type AgentCatalogEntry,
@@ -8,6 +9,7 @@ import {
   type AgentProviderKind,
   type AgentProviderState,
   AgentSignInError,
+  type DamagedAgent,
   defaultInstanceId,
   isDefaultInstance,
 } from "@prkit/contracts";
@@ -119,6 +121,26 @@ const settingsKey = (config: AgentInstanceConfig, setup: InstanceSetup) =>
       .map(([name, value]) => `${name}=${value}`),
   ].join("\u0000");
 
+/** A setting prkit can't read, as Settings shows it and as a guide or fix on it fails. */
+const toDamaged = ({ id, kind }: AgentInstancesStore.DamagedInstance): DamagedAgent => {
+  const isDefault = isDefaultInstance(id);
+  const name = isDefault && kind !== null ? AGENT_KIND_NAMES[kind].short : id;
+  return {
+    instance: id,
+    kind,
+    isDefault,
+    message: isDefault
+      ? `prkit couldn't read the setting for ${name}, so nothing runs on it. Reset it to default in Settings > Agents.`
+      : `prkit couldn't read the setting for ${name}, so nothing runs on it. Remove it in Settings > Agents, then add it again.`,
+  };
+};
+
+/** Every instance with its provider, and the settings prkit can't read, from one read. */
+interface Snapshot {
+  readonly list: ReadonlyArray<Built>;
+  readonly damaged: ReadonlyArray<DamagedAgent>;
+}
+
 interface Built {
   /** The settings the provider was built from; a change rebuilds it. */
   readonly key: string;
@@ -136,6 +158,8 @@ export const make = Effect.gen(function* () {
   /** At most two agent processes app-wide, guides and fixes together; a slot covers a whole attempt or turn. */
   const slots = yield* Semaphore.make(2);
   let built = new Map<AgentInstanceId, Built>();
+  /** Settings prkit can't read, from the same read as `built`. */
+  let damaged: ReadonlyArray<DamagedAgent> = [];
   /** Each instance's last read login and models, by the settings they were read with. */
   const checked = new Map<
     AgentInstanceId,
@@ -145,10 +169,27 @@ export const make = Effect.gen(function* () {
   const build = (kind: AgentProviderKind, setup: InstanceSetup) =>
     Effect.provideContext(FACTORIES[kind](setup), services);
 
-  /** Every instance with its provider, built again only when its settings changed. */
+  const snapshot = (): Snapshot => ({
+    list: [...built.values()].toSorted((left, right) => order(left.config, right.config)),
+    damaged,
+  });
+
+  /**
+   * Every instance with its provider, built again only when its settings changed, and the
+   * settings prkit can't read, both from the same read.
+   */
   const instances = building.withPermits(1)(
     Effect.gen(function* () {
-      const resolved = yield* store.resolved;
+      const { instances: resolved, damaged: unread } = yield* store.resolved;
+      if (unread.map((entry) => entry.id).join() !== damaged.map((entry) => entry.instance).join())
+        yield* Effect.forEach(
+          unread,
+          (entry) =>
+            Effect.logWarning("Couldn't read an agent setting").pipe(
+              Effect.annotateLogs({ instance: entry.id, problem: entry.problem }),
+            ),
+          { discard: true },
+        );
       const next = new Map<AgentInstanceId, Built>();
       for (const instance of resolved) {
         const setup = setupOf(instance, process.env);
@@ -167,15 +208,14 @@ export const make = Effect.gen(function* () {
         );
       }
       built = next;
-      return [...next.values()].toSorted((left, right) => order(left.config, right.config));
+      damaged = unread.map(toDamaged);
+      return snapshot();
     }).pipe(
-      // A failed read keeps what was built last, so a running app keeps its agents.
+      // A failed read keeps what was read last, so a running app keeps its agents.
       Effect.catchTag("AgentInstanceError", (error) =>
         Effect.logWarning("Couldn't read the agent instances").pipe(
           Effect.annotateLogs({ message: error.message }),
-          Effect.as(
-            [...built.values()].toSorted((left, right) => order(left.config, right.config)),
-          ),
+          Effect.as(snapshot()),
         ),
       ),
     ),
@@ -184,7 +224,7 @@ export const make = Effect.gen(function* () {
   /** The instance's provider when it exists and is on; null otherwise. */
   const get = (id: AgentInstanceId) =>
     instances.pipe(
-      Effect.map((list) => {
+      Effect.map(({ list }) => {
         const found = list.find((entry) => entry.config.id === id);
         return found !== undefined && found.config.enabled ? found.provider : null;
       }),
@@ -192,20 +232,26 @@ export const make = Effect.gen(function* () {
 
   /**
    * The instance a review or fix session pointing at `id` runs on now: `id` itself while it is on,
-   * else its kind's default instance while that is on. Null when neither is: the caller falls
-   * back to the default agent.
+   * else its kind's default instance while that is on. One whose setting prkit can't read counts
+   * as on, so the run says why instead of moving to another login. Null when neither is: the
+   * caller falls back to the default agent.
    */
   const usable = (id: AgentInstanceId, kind: AgentProviderKind) =>
-    Effect.gen(function* () {
-      if ((yield* get(id)) !== null) return id;
-      const fallback = defaultInstanceId(kind);
-      return (yield* get(fallback)) === null ? null : fallback;
-    });
+    instances.pipe(
+      Effect.map(({ list, damaged }) => {
+        const stays = (instance: AgentInstanceId) =>
+          list.some((entry) => entry.config.id === instance && entry.config.enabled) ||
+          damaged.some((entry) => entry.instance === instance);
+        if (stays(id)) return id;
+        const fallback = defaultInstanceId(kind);
+        return stays(fallback) ? fallback : null;
+      }),
+    );
 
   /** Every instance whose conversations `id`'s can continue: the same group, `id` included. */
   const sameGroup = (id: AgentInstanceId) =>
     instances.pipe(
-      Effect.map((list) => {
+      Effect.map(({ list }) => {
         const group = list.find((entry) => entry.config.id === id)?.provider.group;
         const members = list
           .filter((entry) => group !== undefined && entry.provider.group === group)
@@ -253,7 +299,7 @@ export const make = Effect.gen(function* () {
   const catalog = (refresh = false, only?: AgentInstanceId) =>
     loading.withPermits(1)(
       Effect.gen(function* () {
-        const list = yield* instances;
+        const { list, damaged } = yield* instances;
         const entries = yield* Effect.forEach(
           list,
           (entry) => {
@@ -287,7 +333,10 @@ export const make = Effect.gen(function* () {
               ),
             ),
           );
-        const loaded: AgentCatalog = { providers: entries.map((entry) => entry.entry) };
+        const loaded: AgentCatalog = {
+          providers: entries.map((entry) => entry.entry),
+          damaged,
+        };
         return loaded;
       }),
     );
@@ -348,7 +397,7 @@ export const make = Effect.gen(function* () {
         return yield* new AgentInstanceError({
           message: "A default agent can't be removed. Reset it or turn it off instead.",
         });
-      const found = (yield* instances).find((entry) => entry.config.id === id);
+      const found = (yield* instances).list.find((entry) => entry.config.id === id);
       const wasEnabled = found?.config.enabled ?? false;
       if (wasEnabled) yield* store.setEnabled(id, false);
       const restore = wasEnabled ? store.setEnabled(id, true).pipe(Effect.ignore) : Effect.void;
@@ -378,9 +427,16 @@ export const make = Effect.gen(function* () {
       return yield* catalog(true, id);
     });
 
+  /** Why `id` can't run when prkit can't read its setting, else null. */
+  const damagedMessage = (id: AgentInstanceId) =>
+    instances.pipe(
+      Effect.map(({ damaged }) => damaged.find((entry) => entry.instance === id)?.message ?? null),
+    );
+
   return {
     get,
     usable,
+    damagedMessage,
     sameGroup,
     catalog,
     invalidate,
