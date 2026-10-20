@@ -101,6 +101,7 @@ test("the server keeps a rotated log in its home without a token, and Copy recen
     expect(copied).toMatch(/operation=PrkitInbox status=502/);
     expect(copied.length).toBeLessThanOrEqual(300 * 1024);
     expect(copied.endsWith("\n")).toBe(true);
+    expect(copied.startsWith("timestamp="), "the copy begins with a whole line").toBe(true);
     expectNoSecrets(copied, "the copied log");
     await app.screenshot("about-light");
 

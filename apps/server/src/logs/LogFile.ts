@@ -15,6 +15,7 @@ import { redactSecrets } from "./redact.ts";
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const RECENT_BYTES = 256 * 1024;
 const FLUSH_WINDOW = "250 millis";
+const NEWLINE = 0x0a;
 
 const isMissing = (error: PlatformError) => error.reason._tag === "NotFound";
 
@@ -39,8 +40,9 @@ export const make = Effect.gen(function* () {
   const first = `${current}.1`;
   const second = `${current}.2`;
 
-  // A folder or file an earlier run or a person left keeps the modes prkit gives its own.
-  yield* Effect.forEach(
+  // A folder or file an earlier run or a person left gets the modes prkit gives its own. When
+  // it can't (another user owns it), the server writes no log file rather than a readable one.
+  const writes = yield* Effect.forEach(
     [
       [directory, 0o700],
       [current, 0o600],
@@ -49,7 +51,10 @@ export const make = Effect.gen(function* () {
     ] as const,
     ([target, mode]) => fs.chmod(target, mode).pipe(Effect.catchIf(isMissing, () => Effect.void)),
     { discard: true },
-  ).pipe(Effect.catchTag("PlatformError", () => Effect.void));
+  ).pipe(
+    Effect.as(true),
+    Effect.catchTag("PlatformError", () => Effect.succeed(false)),
+  );
 
   const sizeOf = (file: string) =>
     fs.stat(file).pipe(
@@ -77,33 +82,47 @@ export const make = Effect.gen(function* () {
   });
 
   const flush = (lines: ReadonlyArray<string>) =>
-    gate
-      .withPermits(1)(append(new TextEncoder().encode(redactSecrets(`${lines.join("\n")}\n`))))
-      // The log is a convenience. A full disk or a folder the user removed must not stop the
-      // server, and logging the failure would only feed the next flush.
-      .pipe(Effect.catchTag("PlatformError", () => Effect.void));
+    writes
+      ? gate
+          .withPermits(1)(append(new TextEncoder().encode(redactSecrets(`${lines.join("\n")}\n`))))
+          // The log is a convenience. A full disk or a folder the user removed must not stop
+          // the server, and logging the failure would only feed the next flush.
+          .pipe(Effect.catchTag("PlatformError", () => Effect.void))
+      : Effect.void;
 
   const logger = yield* Logger.batched(Logger.formatLogFmt, { window: FLUSH_WINDOW, flush });
 
   /** The last `limit` bytes of `file` at most, and whether that is all of it. */
+  /**
+   * The last `limit` bytes of `file` at most, whether that is all of it, and whether they begin
+   * a line (the file's start, or right after a newline).
+   */
   const tail = (file: string, limit: number) =>
     Effect.scoped(
       Effect.gen(function* () {
         const handle = yield* fs.open(file, { flag: "r" });
         const size = Number((yield* handle.stat).size);
         const start = Math.max(0, size - limit);
-        yield* handle.seek(BigInt(start), "start");
-        const bytes = new Uint8Array(size - start);
+        // One byte more, from before the window, says whether the window begins a line.
+        const from = Math.max(0, start - 1);
+        yield* handle.seek(BigInt(from), "start");
+        const bytes = new Uint8Array(size - from);
         let filled = 0;
         while (filled < bytes.length) {
           const read = yield* handle.read(bytes.subarray(filled));
           if (read === 0) break;
           filled += read;
         }
-        return { bytes: bytes.subarray(0, filled), whole: start === 0 };
+        return {
+          bytes: bytes.subarray(start - from, filled),
+          whole: start === 0,
+          beginsLine: start === 0 || bytes[0] === NEWLINE,
+        };
       }),
     ).pipe(
-      Effect.catchIf(isMissing, () => Effect.succeed({ bytes: new Uint8Array(), whole: true })),
+      Effect.catchIf(isMissing, () =>
+        Effect.succeed({ bytes: new Uint8Array(), whole: true, beginsLine: true }),
+      ),
     );
 
   const recent: Effect.Effect<RecentLog, LogError> = gate
@@ -112,15 +131,16 @@ export const make = Effect.gen(function* () {
         const after = yield* tail(current, RECENT_BYTES);
         const before = after.whole
           ? yield* tail(first, RECENT_BYTES - after.bytes.length)
-          : { bytes: new Uint8Array(), whole: false };
+          : { bytes: new Uint8Array(), whole: false, beginsLine: true };
         const both = new Uint8Array(before.bytes.length + after.bytes.length);
         both.set(before.bytes);
         both.set(after.bytes, before.bytes.length);
         const window = new TextDecoder().decode(both);
-        if (before.whole && !(yield* fs.exists(second))) return { text: window, truncated: false };
-        // The window starts anywhere in a line, so it begins after its first newline.
+        const truncated = !after.whole || !before.whole || (yield* fs.exists(second));
+        if (after.whole ? before.beginsLine : after.beginsLine) return { text: window, truncated };
+        // The window starts partway into a line, so it begins after its first newline.
         const newline = window.indexOf("\n");
-        return { text: newline === -1 ? "" : window.slice(newline + 1), truncated: true };
+        return { text: newline === -1 ? "" : window.slice(newline + 1), truncated };
       }),
     )
     .pipe(

@@ -163,10 +163,14 @@ export class RepoError extends Schema.TaggedError<RepoError>()("RepoError", {
 
 /**
  * Git's own error line from its stderr, for the log. The rest can quote the user's code (a
- * failed apply prints the lines it searched for, a push hook prints what it refused).
+ * failed apply prints the lines it searched for, a push hook prints what it refused), and so
+ * can a remote's own refusal, which git prints after `remote error:`.
  */
 export const gitErrorLine = (stderr: string) =>
-  /^(?:fatal|error): .{0,200}/m.exec(stderr)?.[0] ?? "";
+  (/^(?:fatal|error): .{0,200}/m.exec(stderr)?.[0] ?? "").replace(
+    /^((?:fatal|error): remote error).*/,
+    "$1",
+  );
 
 /** prkit refused a git step because the checkout's git metadata was changed under it. */
 export class GitTampered extends Schema.TaggedError<GitTampered>()("GitTampered", {
