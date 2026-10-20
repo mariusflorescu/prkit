@@ -40,6 +40,23 @@ const latestGuide = (home: string, number: number) =>
        WHERE r.pr_key = '${keyOf(number)}' AND v.revision = r.latest_revision`,
     )[0]?.guide ?? "",
   );
+/**
+ * Renames the column guides live in, so every read of them fails the way a database prkit can't
+ * read does, and back.
+ */
+const hideGuides = (home: string, hidden: boolean) => {
+  const db = new DatabaseSync(NodePath.join(home, "prkit.sqlite"));
+  try {
+    db.exec(
+      hidden
+        ? "ALTER TABLE review_revisions RENAME COLUMN guide TO guide_hidden"
+        : "ALTER TABLE review_revisions RENAME COLUMN guide_hidden TO guide",
+    );
+  } finally {
+    db.close();
+  }
+};
+
 /** Writes the guide of a pull request's latest revision, a damaged one included. */
 const storeGuide = (home: string, number: number, guide: string) => {
   const db = new DatabaseSync(NodePath.join(home, "prkit.sqlite"));
@@ -90,11 +107,10 @@ test(
       const byRisk = await inboxOrder(browser);
       expect(byRisk).not.toEqual(byWait);
 
-      // #4's guide is damaged while prkit is closed, so the review feed fails before its first
+      // prkit can't read its guides when it starts, so the review feed fails before its first
       // index: every row still shows, in the order the sort falls back to without any levels.
       stopFakeInstance(name, { keepHome: true });
-      const guide = latestGuide(run.home, 4);
-      storeGuide(run.home, 4, "not a guide");
+      hideGuides(run.home, true);
       run = launch();
       await app.open(run.openUrl);
       const opened = Date.now();
@@ -163,7 +179,7 @@ test(
       // next tries about a minute in, and the notice outlasts the repair until Retry.
       await new Promise((resolve) => setTimeout(resolve, opened + 35_000 - Date.now()));
       await expect(notice).toBeVisible();
-      storeGuide(run.home, 4, guide);
+      hideGuides(run.home, false);
       await new Promise((resolve) => setTimeout(resolve, 3_000));
       await expect(notice).toBeVisible();
       const retried = Date.now();
@@ -182,8 +198,11 @@ test(
       const again = screen.getByRole("button", "Generate again");
       await expect(again).toBeVisible({ timeout: 30_000 });
       claude.hold();
-      storeGuide(run.home, 4, "not a guide");
       await again.tap();
+      const stop = screen.getByRole("button", "Stop");
+      await expect(stop).toBeVisible({ timeout: 30_000 });
+      hideGuides(run.home, true);
+      await stop.tap();
       await screen.getByRole("link", "Inbox").tap();
       await expect(notice).toContainText(
         "prkit can't read your guides right now. Guide marks and risk levels may be out of date until it can.",
@@ -193,9 +212,90 @@ test(
       expect(await inboxOrder(browser)).toEqual(byRisk);
       await sortTrigger(screen).hover();
       await app.screenshot("feed-stale-light");
-      storeGuide(run.home, 4, guide);
+      hideGuides(run.home, false);
       await expect(notice).toHaveCount(0, { timeout: 10_000 });
       claude.release();
+    } finally {
+      claude.release();
+      stopFakeInstance(name, { keepHome: false });
+      fake.stop();
+    }
+  },
+);
+
+test(
+  "a guide prkit can't read hides only its own risk level, and the Inbox says nothing of it",
+  { timeout: 480_000 },
+  async ({ app, screen, browser }) => {
+    const name = "review-feed-damaged-guide";
+    const claude = setUpFakeClaude(name);
+    const fake = await startFakeGitHub(name);
+    const git = outsideGit(name);
+    const launch = () => git.start(() => startFakeInstance(name, fake, ["--claude", claude.file]));
+    try {
+      for (const number of [1, 2, 4, 6]) await fake.gitHead(number, git.head(number));
+      let run = launch();
+      await emulateOsColorScheme(browser, "light");
+      await app.open(run.openUrl);
+      await expect(screen.getByRole("link", /#1 Budget fixture 1/)).toBeVisible({
+        timeout: 20_000,
+      });
+      for (const [number, risk] of [
+        [1, "high"],
+        [2, "medium"],
+        [4, "high"],
+        [6, "low"],
+      ] as const) {
+        claude.chapters([{ title: `Change ${number}`, files: ["src/change-0.ts"], risk }]);
+        await screen.getByRole("link", new RegExp(`#${number} `)).hover();
+        await screen.getByRole("button", `Generate guide for budget/fixtures #${number}`).tap();
+        await expect
+          .poll(async () => (await rowOf(browser, number)).risk, { timeout: 120_000 })
+          .toBe(risk);
+        await toastsGone(screen);
+      }
+      claude.chapters([]);
+
+      stopFakeInstance(name, { keepHome: true });
+      storeGuide(run.home, 4, "not a guide");
+      const db = new DatabaseSync(NodePath.join(run.home, "prkit.sqlite"));
+      try {
+        const setLevel = db.prepare(
+          `UPDATE review_revisions SET guide = json_set(guide, '$.risk.level', json(?))
+           WHERE review_id = (SELECT id FROM reviews WHERE pr_key = ?)`,
+        );
+        setLevel.run('"extreme"', keyOf(6));
+        setLevel.run("9223372036854775807", keyOf(1));
+      } finally {
+        db.close();
+      }
+      expect(latestGuide(run.home, 6)).toContain('"level":"extreme"');
+      expect(latestGuide(run.home, 1)).toContain('"level":9223372036854775807');
+      run = launch();
+      await app.open(run.openUrl);
+      await expect
+        .poll(async () => (await rowOf(browser, 2)).risk, { timeout: 20_000 })
+        .toBe("medium");
+      await expect(screen.getByRole("alert", "Couldn't read your guides")).toHaveCount(0);
+      for (const number of [1, 4, 6]) {
+        const row = await rowOf(browser, number);
+        expect({ number, guide: row.guide, risk: row.risk }).toEqual({
+          number,
+          guide: "ready",
+          risk: "",
+        });
+        await screen.getByRole("link", new RegExp(`#${number} `)).hover();
+        await expect(
+          screen.getByRole("button", `Generate guide for budget/fixtures #${number}`),
+        ).toHaveCount(0);
+      }
+      await choose(screen, sortTrigger(screen), "Riskiest first");
+      await sortTrigger(screen).hover();
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      await app.screenshot("damaged-guide-light");
+      await setOsColorScheme(browser, "dark");
+      await app.screenshot("damaged-guide-dark");
+      await setOsColorScheme(browser, "light");
     } finally {
       claude.release();
       stopFakeInstance(name, { keepHome: false });

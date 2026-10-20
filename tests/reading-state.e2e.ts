@@ -1,6 +1,7 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { test } from "@e2e-dev/web";
 import { expect } from "e2e";
@@ -293,6 +294,109 @@ test(
       expect(git.pushes()).toEqual([]);
     } finally {
       stopFakeInstance(NAME, { keepHome: false });
+      fake.stop();
+    }
+  },
+);
+
+test(
+  "what you read on a pull request GitHub no longer shows its account goes once that lasts a month, and a removed account's too",
+  { timeout: 300_000 },
+  async ({ app, screen, browser }) => {
+    const name = "reading-state-lost";
+    NodeFS.rmSync(NodePath.join(repoRoot, ".e2e", "logs", `${name}.log`), { force: true });
+    const fake = await startFakeGitHub(name);
+    const launch = () => startFakeInstance(name, fake, ["--e2e", "--watch-interval", "2000"]);
+    const GONE = "pull-request github.com/gone-account github.com/budget/fixtures#7";
+    const write = (home: string, statement: string) => {
+      const db = new DatabaseSync(NodePath.join(home, "prkit.sqlite"));
+      try {
+        db.exec(statement);
+      } finally {
+        db.close();
+      }
+    };
+    const daysAgo = (days: number) =>
+      new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const files = (home: string) =>
+      readRows(home, "SELECT subject FROM reviewed_files ORDER BY subject").map(
+        (row) => row.subject,
+      );
+    const lost = (home: string) =>
+      readRows(home, "SELECT subject FROM lost_pull_requests ORDER BY subject").map(
+        (row) => row.subject,
+      );
+    try {
+      let run = launch();
+      await browser.setViewport({ width: 1280, height: 900 });
+      await app.open(run.openUrl);
+      await expect(screen.getByRole("link", "Inbox")).toBeVisible({ timeout: 30_000 });
+      const tabs = screen.getByRole("navigation", "Workspace tabs");
+      for (const number of [5, 6, 7]) {
+        await app.open(prUrl(run.url, number, "files"));
+        const box = screen.getByRole("checkbox", "Reviewed src/change-0.ts");
+        await box.tap({ timeout: 30_000 });
+        await expect(box).toHaveAttribute("aria-checked", "true");
+        await tabs.getByRole("button", `Close budget/fixtures #${number}`).tap();
+      }
+      await expect(tabs.getByRole("link", /^Open budget\/fixtures #(5|6|7)/)).toHaveCount(0);
+      expect(files(run.home)).toEqual([subjectOf(5), subjectOf(6), subjectOf(7)]);
+
+      stopFakeInstance(name, { keepHome: true });
+      write(
+        run.home,
+        `UPDATE reviewed_files SET subject = '${GONE}' WHERE subject = '${subjectOf(7)}'`,
+      );
+      await fake.lose(5);
+      run = launch();
+      await expect
+        .poll(() => lost(run.home), { timeout: 30_000, interval: 500 })
+        .toEqual([subjectOf(5), GONE]);
+      const noted = readRows(run.home, "SELECT since FROM lost_pull_requests").map((row) =>
+        Date.parse(String(row.since)),
+      );
+      for (const since of noted) expect(Date.now() - since).toBeLessThan(5 * 60_000);
+      expect(files(run.home)).toEqual([subjectOf(5), subjectOf(6), GONE]);
+
+      stopFakeInstance(name, { keepHome: true });
+      write(
+        run.home,
+        `UPDATE lost_pull_requests SET since = '${daysAgo(31)}' WHERE subject = '${subjectOf(5)}';
+         UPDATE lost_pull_requests SET since = '${daysAgo(29)}' WHERE subject = '${GONE}';
+         INSERT INTO lost_pull_requests (subject, since) VALUES ('${subjectOf(6)}', '${daysAgo(31)}');`,
+      );
+      const emptied = async () => (await fake.stats()).byKind["graphql:fingerprint:failed"] ?? 0;
+      const before = await emptied();
+      await fake.fail("graphql:fingerprint", 1, 200);
+      run = launch();
+      await expect.poll(emptied, { timeout: 30_000 }).toBeGreaterThan(before);
+      // The pass that sent that read settles after it, so wait out two more ticks.
+      await new Promise((resolve) => setTimeout(resolve, 4_000));
+      expect(files(run.home)).toEqual([subjectOf(5), subjectOf(6), GONE]);
+      expect(lost(run.home)).toEqual([subjectOf(5), subjectOf(6), GONE]);
+
+      stopFakeInstance(name, { keepHome: true });
+      run = launch();
+      await expect
+        .poll(() => files(run.home), { timeout: 30_000, interval: 500 })
+        .toEqual([subjectOf(6), GONE]);
+      await expect.poll(() => lost(run.home), { timeout: 30_000, interval: 500 }).toEqual([GONE]);
+      expect(forgotten(run.log)).toHaveLength(1);
+
+      stopFakeInstance(name, { keepHome: true });
+      write(
+        run.home,
+        `UPDATE lost_pull_requests SET since = '${daysAgo(31)}' WHERE subject = '${GONE}'`,
+      );
+      run = launch();
+      await expect
+        .poll(() => files(run.home), { timeout: 30_000, interval: 500 })
+        .toEqual([subjectOf(6)]);
+      await expect.poll(() => lost(run.home), { timeout: 30_000, interval: 500 }).toEqual([]);
+      expect(forgotten(run.log)).toHaveLength(2);
+      expect(await fake.writes()).toEqual([]);
+    } finally {
+      stopFakeInstance(name, { keepHome: false });
       fake.stop();
     }
   },

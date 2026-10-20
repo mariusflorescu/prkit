@@ -31,6 +31,7 @@ import {
   stats,
   TOOLS_PULL,
   unreadable,
+  lost,
   WITHHELD,
 } from "./model.ts";
 import { STACKS } from "./options.ts";
@@ -650,13 +651,26 @@ export const graphql = (
   }
   if (query.includes("PrkitWatch")) {
     const data: Record<string, { pullRequest: ReturnType<typeof fingerprint> | null } | null> = {};
+    const errors: Array<Schema.Json> = [];
     for (const match of query.matchAll(/(p\d+): repository/g)) {
       const alias = match[1] ?? "";
       const index = alias.slice(1);
       const pull = variables[`r${index}`] === REPO ? pullFrom(variables[`n${index}`]) : undefined;
-      data[alias] = { pullRequest: pull === undefined ? null : fingerprint(pull) };
+      if (pull !== undefined && lost.has(pull.number)) {
+        data[alias] = null;
+        errors.push({
+          type: "NOT_FOUND",
+          path: [alias],
+          message: `Could not resolve to a Repository with the name '${OWNER}/${REPO}'.`,
+        });
+      } else data[alias] = { pullRequest: pull === undefined ? null : fingerprint(pull) };
     }
-    return { kind: "graphql:fingerprint", cost: 1, data };
+    return {
+      kind: "graphql:fingerprint",
+      cost: 1,
+      data,
+      ...(errors.length === 0 ? {} : { errors }),
+    };
   }
   if (query.includes("PrkitTimeline")) {
     const pull = pulls.get(Number(/pullRequest\(number: (\d+)\)/.exec(query)?.[1]));

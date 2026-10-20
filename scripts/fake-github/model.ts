@@ -67,6 +67,7 @@ export const pullDefaults = (): Pick<
   body: null,
 });
 export const unreadable = new Set<number>();
+export const lost = new Set<number>();
 /**
  * What makes a pull request unusual in GitHub's answers. A `deleted` author answers
  * `author: null` in GraphQL and GitHub's ghost user in REST; `labels: null` is the null

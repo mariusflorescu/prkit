@@ -34,6 +34,7 @@ import Migration0025 from "./Migrations/025_Asks.ts";
 import Migration0026 from "./Migrations/026_ManualCheckTickCode.ts";
 import Migration0027 from "./Migrations/027_ConfigDirAccounts.ts";
 import Migration0028 from "./Migrations/028_AttemptModelOptions.ts";
+import Migration0029 from "./Migrations/029_LostPullRequests.ts";
 
 export const migrationEntries = [
   [1, "Meta", Migration0001],
@@ -64,6 +65,7 @@ export const migrationEntries = [
   [26, "ManualCheckTickCode", Migration0026],
   [27, "ConfigDirAccounts", Migration0027],
   [28, "AttemptModelOptions", Migration0028],
+  [29, "LostPullRequests", Migration0029],
 ] as const;
 
 const loader = Migrator.fromRecord(

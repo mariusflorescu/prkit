@@ -35,7 +35,7 @@ import {
 } from "../pullRequests/fingerprint.ts";
 import { CheckRun, Status, shownCheckRuns, shownStatuses } from "../pullRequests/detailReads.ts";
 import { PullRequests } from "../pullRequests/PullRequests.ts";
-import { ReadingState } from "../readingState/ReadingState.ts";
+import { type PullRequestRead, ReadingState } from "../readingState/ReadingState.ts";
 import { Workspace } from "../workspace/Workspace.ts";
 import type { Observation } from "./lifecycle.ts";
 import { Reviews, type WatchedReview } from "./Reviews.ts";
@@ -132,7 +132,11 @@ export const make = Effect.gen(function* () {
   const checkedAt = new Map<string, number>();
   const etags = new Map<string, string>();
 
-  /** Each alias is handled on its own; one failed read doesn't touch the others. */
+  /**
+   * Each alias is handled on its own; one failed read doesn't touch the others. A PR GitHub says,
+   * on its own alias, it doesn't have, or one read through an account prkit no longer has
+   * (`configDir` undefined), is `lost`; any other failure says nothing about the PR itself.
+   */
   const readBatch = (
     accountId: AccountId,
     configDir: string | undefined,
@@ -151,6 +155,7 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const alias = `p${index}`;
           let observation: Observation;
+          let lost = configDir === undefined;
           if (Result.isFailure(read)) {
             const error = read.failure;
             observation =
@@ -159,16 +164,15 @@ export const make = Effect.gen(function* () {
                 : { _tag: "unreadable", message: error.message };
           } else {
             const pull = read.success.data?.[alias]?.pullRequest;
-            if (pull == null)
+            if (pull == null) {
+              // Only GitHub's word on this alias says the PR is gone, never another alias's.
+              const own = read.success.errors.find((problem) => problem.path?.[0] === alias);
+              lost = own !== undefined && graphQLFailure(own) === "not-found";
               observation = {
                 _tag: "unreadable",
-                message: aliasProblem(
-                  accountId,
-                  read.success.errors.find((error) => error.path?.[0] === alias) ??
-                    read.success.errors[0],
-                ),
+                message: aliasProblem(accountId, own ?? read.success.errors[0]),
               };
-            else {
+            } else {
               yield* pullRequests.observe(entry.key, accountId, pull);
               observation = {
                 _tag: "pull",
@@ -179,8 +183,14 @@ export const make = Effect.gen(function* () {
             }
           }
           if (entry.review !== null) yield* reviews.observed(entry.review, observation);
-          return observation._tag === "pull"
-            ? { key: entry.key, accountId, state: observation.state }
+          if (observation._tag === "pull")
+            return {
+              key: entry.key,
+              accountId,
+              answer: observation.state,
+            } satisfies PullRequestRead;
+          return lost
+            ? ({ key: entry.key, accountId, answer: "lost" } satisfies PullRequestRead)
             : undefined;
         }).pipe(
           Effect.catchCauseIf(

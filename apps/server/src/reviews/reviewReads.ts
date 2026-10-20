@@ -53,8 +53,7 @@ const FeedRow = Schema.Struct({
   account_id: AccountIdSchema,
   status: Schema.fromJsonString(ReviewStatus),
   latest_revision: Schema.NullOr(Schema.Int),
-  /** Null with no revision and for revisions written before risk. */
-  risk: Schema.NullOr(RiskLevel),
+  risk: Schema.NullOr(Schema.String),
 });
 
 const DurationRow = Schema.Struct({ seconds: Schema.Number });
@@ -86,6 +85,16 @@ const RevisionContextRow = Schema.Struct({
 
 const readableFeed = decodeReadable("reviews", FeedRow);
 
+const isRiskLevel = Schema.is(RiskLevel);
+
+/**
+ * A guide's level, read only from a guide that is JSON and only when it is text, so one guide
+ * prkit can't read fails no query over all of them.
+ */
+const RISK = `CASE WHEN json_valid(v.guide) THEN
+  CASE WHEN json_type(v.guide, '$.risk.level') = 'text' THEN json_extract(v.guide, '$.risk.level') END
+END`;
+
 const decodeDraft = Schema.decodeUnknownEffect(Schema.Array(DraftRow));
 
 const decodeHeads = Schema.decodeUnknownEffect(
@@ -105,7 +114,7 @@ const toFeedEntry = (row: typeof FeedRow.Type): ReviewFeedEntry => ({
   accountId: row.account_id,
   status: row.status._tag,
   latestRevision: row.latest_revision,
-  risk: row.risk,
+  risk: isRiskLevel(row.risk) ? row.risk : null,
 });
 
 /** A notice as the pull request feed sends it; a local review's ready isn't one of its events. */
@@ -361,7 +370,8 @@ export const makeReviewReads = ({
 
   const feedEntry = (key: ReviewKey) =>
     sql`
-      SELECT r.id, r.pr_key, r.account_id, r.status, r.latest_revision, json_extract(v.guide, '$.risk.level') AS risk
+      SELECT r.id, r.pr_key, r.account_id, r.status, r.latest_revision,
+        ${sql.literal(RISK)} AS risk
       FROM reviews r LEFT JOIN review_revisions v ON v.review_id = r.id AND v.revision = r.latest_revision
       WHERE r.pr_key = ${key} AND r.local IS NULL`.pipe(
       Effect.flatMap(readableFeed),
@@ -369,7 +379,8 @@ export const makeReviewReads = ({
     );
 
   const readIndex = sql`
-      SELECT r.id, r.pr_key, r.account_id, r.status, r.latest_revision, json_extract(v.guide, '$.risk.level') AS risk
+      SELECT r.id, r.pr_key, r.account_id, r.status, r.latest_revision,
+        ${sql.literal(RISK)} AS risk
       FROM reviews r LEFT JOIN review_revisions v ON v.review_id = r.id AND v.revision = r.latest_revision
       WHERE r.local IS NULL`.pipe(
     Effect.flatMap(readableFeed),
