@@ -11,6 +11,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import { AGENT_OFF } from "../agents/AgentProvider.ts";
 import { Agents } from "../agents/Agents.ts";
+import { makeE2eHold } from "../e2eHold.ts";
 import { type Checkout, RepoCache } from "../repo/RepoCache.ts";
 import { Reviews } from "../reviews/Reviews.ts";
 import type { AgentRuns } from "./agentRuns.ts";
@@ -45,6 +46,7 @@ export const makeConflictTurn = (
     const agents = yield* Agents;
     const reviews = yield* Reviews;
     const settings = yield* FixerSettingsStore;
+    const hold = yield* makeE2eHold;
     const { appendActivity, contextDir, fail, fixerById, publish, transition, turnById } = state;
     const { resumeFor, untilReported } = runs;
     const { identityFor, recordHead, repoFailure, settleReady, targetOf } = steps;
@@ -220,8 +222,10 @@ export const makeConflictTurn = (
                 reason: "upstream",
                 message,
               })
-            )
+            ) {
+              yield* hold("fix-turn-end");
               yield* appendActivity(fixer.pr_key, turn.id, "note", message);
+            }
           });
 
         /** One stop: hold what a person decides, let the agent resolve the rest, check it. */

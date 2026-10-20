@@ -4,6 +4,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import { AGENT_OFF } from "../agents/AgentProvider.ts";
 import { Agents } from "../agents/Agents.ts";
+import { makeE2eHold } from "../e2eHold.ts";
 import { RepoCache } from "../repo/RepoCache.ts";
 import type { AgentRuns } from "./agentRuns.ts";
 import type { ConflictTurn } from "./conflictTurn.ts";
@@ -35,6 +36,7 @@ export const makeTurnBodies = (
     const repo = yield* RepoCache;
     const agents = yield* Agents;
     const settings = yield* FixerSettingsStore;
+    const hold = yield* makeE2eHold;
     const { appendActivity, fail, fixerById, notify, publish, returnDrafts, transition, turnById } =
       state;
     const { resumeFor, untilReported } = runs;
@@ -148,6 +150,7 @@ export const makeTurnBodies = (
           .pipe(Effect.catchTag("RepoError", repoFailure));
         if (sha === null) {
           if (yield* transition(turn.id, ["running"], { _tag: "unchanged" })) {
+            yield* hold("fix-turn-end");
             yield* returnDrafts(turn.id);
             yield* appendActivity(
               fixer.pr_key,
@@ -379,6 +382,7 @@ export const makeTurnBodies = (
           if (sha === null) {
             if (strategy === "rebase") return yield* keepEarlier("The agent changed nothing.");
             if (yield* transition(turnId, ["running"], { _tag: "unchanged" })) {
+              yield* hold("fix-turn-end");
               yield* returnDrafts(turnId);
               yield* repo.holdCommit(ref, turnId, null).pipe(Effect.ignore);
               yield* appendActivity(

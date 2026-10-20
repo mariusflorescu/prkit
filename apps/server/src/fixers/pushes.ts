@@ -185,7 +185,8 @@ export const makePushes = (state: FixerState, queue: TurnQueue, sessions: Sessio
         const turnId = row.id;
         const { sha } = to;
         const at = yield* now;
-        yield* transition(turnId, ["pushing"], { _tag: "pushed", at });
+        if (yield* transition(turnId, ["pushing"], { _tag: "pushed", at }))
+          yield* hold("fix-turn-end");
         yield* repo.holdCommit(to.ref, turnId, null).pipe(Effect.ignore);
         yield* pullRequests.invalidate(key, fixer.account_id);
         accessCache.clear();

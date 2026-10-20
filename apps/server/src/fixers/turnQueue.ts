@@ -195,6 +195,7 @@ export const makeTurnQueue = (
         });
         yield* tokens.revokeTurn(turnId);
         if (!failed) return;
+        yield* hold("fix-turn-end");
         yield* returnDrafts(turnId);
         const turn = yield* turnById(turnId);
         const ref = refFromKey(fixer.pr_key);

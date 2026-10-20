@@ -345,6 +345,7 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
               message,
             })
           ) {
+            yield* hold("fix-turn-end");
             yield* returnDrafts(row.id);
             yield* appendActivity(fixer.pr_key, row.id, "error", message);
           }
@@ -382,6 +383,7 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
             message,
           })
         ) {
+          yield* hold("fix-turn-end");
           yield* returnDrafts(row.id);
           if (ref !== null && row.head_sha !== null)
             yield* leftovers
