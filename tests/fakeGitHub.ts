@@ -178,6 +178,8 @@ export const startFakeGitHub = async (
       post(`request-review?pr=${pr}&${reviewerQuery(who)}&minutes=${minutesAgo}`),
     unrequest: (pr: number, who: Reviewer) => post(`unrequest?pr=${pr}&${reviewerQuery(who)}`),
     unreadable: (pr: number) => post(`unreadable?pr=${pr}`),
+    /** From now on the watcher's read of PR `pr` finds nothing, as after the account lost access. */
+    lose: (pr: number) => post(`lose?pr=${pr}`),
     /** Adds PR `pr` (10 or more) to the involved search with an unusual shape GitHub can send. */
     odd: async (pr: number, shape: OddShape) => {
       const response = await fetch(`${url}/__fake/odd?pr=${pr}`, {

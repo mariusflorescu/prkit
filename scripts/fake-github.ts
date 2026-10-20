@@ -69,6 +69,8 @@
  *                                       request event that long ago (default 0); asking twice adds the event only
  *   POST unrequest?pr=<n>&login=<l>|team=<slug>   takes the request back, as a submitted review does; events stay
  *   POST unreadable?pr=<n>              the waits read answers a null node and a FORBIDDEN error for it from now on
+ *   POST lose?pr=<n>                    the watcher's fingerprint answers a null repository and a NOT_FOUND error
+ *                                       for it from now on, as GitHub does once the account loses access
  *   POST odd?pr=<n>                     adds PR n (10 or more) by `outsider` to the involved search, with the
  *                                       unusual shape the JSON body names (see `OddShape` in fake-github/model.ts):
  *                                       an author GitHub types as deleted, a bot, a mannequin or an enterprise
@@ -138,6 +140,7 @@ import {
   stats,
   tokenOwner,
   unreadable,
+  lost,
   writes,
 } from "./fake-github/model.ts";
 import { home, values } from "./fake-github/options.ts";
@@ -469,6 +472,10 @@ const control = (url: URL, method: string, text: string, response: NodeHttp.Serv
   }
   if (name === "unreadable" && pull !== undefined) {
     unreadable.add(pull.number);
+    return answer({ ok: true });
+  }
+  if (name === "lose" && pull !== undefined) {
+    lost.add(pull.number);
     return answer({ ok: true });
   }
   if (name === "describe" && method === "POST" && pull !== undefined) {
