@@ -14,7 +14,9 @@ import { agentCatalogQuery, fixerQuery, guideSettingsQuery } from "~/rpc/queries
 
 /**
  * Who a fix turn runs on: the one the user picked, else the PR's session agent,
- * else the default from Settings > Agents, checked against the catalog.
+ * else the default from Settings > Agents, checked against the catalog. Nothing
+ * until the PR's session is read too, so a slow read never offers the default
+ * in place of the session's agent.
  */
 export function useFixAgent(key: PullRequestKey, picked: AgentSelection | null) {
   const client = useQueryClient();
@@ -25,6 +27,7 @@ export function useFixAgent(key: PullRequestKey, picked: AgentSelection | null) 
     mutationFn: () => getAgentCatalog(true),
     onSuccess: (data) => client.setQueryData(agentCatalogQuery.queryKey, data),
   });
+  const error = catalog.error ?? settings.error ?? fixer.error;
   const session = fixer.data?.fixer;
   const own =
     session?.model == null
@@ -36,10 +39,12 @@ export function useFixAgent(key: PullRequestKey, picked: AgentSelection | null) 
           options: session.modelOptions,
         };
   const selection =
-    picked ??
-    (catalog.data === undefined || settings.data === undefined
+    error !== null ||
+    catalog.data === undefined ||
+    settings.data === undefined ||
+    fixer.data === undefined
       ? null
-      : sessionSelection(catalog.data, own, settings.data.defaultAgent));
+      : (picked ?? sessionSelection(catalog.data, own, settings.data.defaultAgent));
   // A session on a setting prkit can't read stays on it, a session from before models included.
   const pinned =
     picked === null && catalog.data !== undefined && session != null
@@ -59,11 +64,12 @@ export function useFixAgent(key: PullRequestKey, picked: AgentSelection | null) 
     selection,
     problem,
     model,
-    loading: catalog.isPending || settings.isPending,
-    error: catalog.error ?? settings.error,
+    loading: catalog.isPending || settings.isPending || fixer.isPending,
+    error,
     retry: () => {
       void catalog.refetch();
       void settings.refetch();
+      void fixer.refetch();
     },
     checkAgain,
     /** Picking an agent in another conversation group than the session's starts a new conversation. */
