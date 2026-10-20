@@ -109,8 +109,17 @@ export const make = Effect.gen(function* () {
   const { pushAccess, pushTurn } = pushes;
   const steps = yield* makeTurnSteps(state, pushes);
   const access = yield* makeScriptAccess(state);
-  const conflicts = yield* makeConflictTurn(state, runs, steps, sessions, access);
-  const bodies = yield* makeTurnBodies(state, runs, steps, conflicts, sessions, access, leftovers);
+  const conflicts = yield* makeConflictTurn(state, queue, runs, steps, sessions, access);
+  const bodies = yield* makeTurnBodies(
+    state,
+    queue,
+    runs,
+    steps,
+    conflicts,
+    sessions,
+    access,
+    leftovers,
+  );
   const { reviseBody } = bodies;
   const { finishFixes, finishConflicts, reportProgress } = yield* makeFixTools(state, conflicts);
 

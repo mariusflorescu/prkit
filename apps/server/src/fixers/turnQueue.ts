@@ -30,7 +30,13 @@ import {
   type RepoError,
 } from "../repo/RepoCache.ts";
 import { encodeStatus, encodeWork, type FixerRow, type WorkRequest } from "./fixerRows.ts";
-import { decodeCount, type FixerState, TurnFailure } from "./fixerState.ts";
+import {
+  decodeCount,
+  type EndNote,
+  type FixerState,
+  TurnFailure,
+  type TurnEnd,
+} from "./fixerState.ts";
 import type { TurnLeftovers } from "./turnLeftovers.ts";
 
 /** The states a turn is stored in right before its fiber starts: a queued turn's start, a change request. */
@@ -88,9 +94,9 @@ export const makeTurnQueue = (
       now,
       publish,
       recordActivity,
-      returnDrafts,
       runId,
-      transition,
+      settleDrafts,
+      storeEnd,
       turnById,
       turnsOf,
     } = state;
@@ -183,30 +189,75 @@ export const makeTurnQueue = (
       );
 
     /**
+     * Lets go of what an ended turn held: drafts still with it, where its end sends them (an older
+     * prkit could finish a turn without settling them); then, unless it is finished already, the
+     * checkout back at its head, unless something the turn started may still be running there, and
+     * its commit, and the turn is finished so the queue may go on. A pushed result is the branch's
+     * head, so the checkout stays. Safe to run twice.
+     */
+    const finishEnd = (fixer: FixerRow, turnId: FixerTurnId) =>
+      Effect.gen(function* () {
+        const turn = yield* turnById(turnId);
+        if (turn === null) return;
+        yield* settleDrafts(turnId, turn.status);
+        // Once finished, a later turn may hold the checkout.
+        if (turn.finished_at !== null) return;
+        const ref = refFromKey(fixer.pr_key);
+        if (ref !== null && turn.status._tag !== "pushed" && turn.head_sha !== null)
+          yield* leftovers
+            .unlessLeftovers(fixer.id, repo.resetFix(ref, fixer.id, turn.head_sha))
+            .pipe(
+              Effect.catchTags({
+                RepoError: (error) => Effect.logWarning(error.message),
+                PlatformError: () => Effect.void,
+              }),
+            );
+        if (ref !== null) yield* repo.holdCommit(ref, turnId, null).pipe(Effect.ignore);
+        const at = yield* now;
+        yield* sql`UPDATE fixer_turns SET finished_at = ${at} WHERE id = ${turnId} AND finished_at IS NULL`;
+      });
+
+    /**
+     * Ends a turn the caller owns: `storeEnd` in its own transaction, then `finishEnd`. Once
+     * stored, the rest runs even when the caller goes away; a crash leaves it to startup. False
+     * when the turn had moved on.
+     */
+    const endTurn = (
+      fixer: FixerRow,
+      turnId: FixerTurnId,
+      status: TurnEnd,
+      from: ReadonlyArray<FixerTurnState>,
+      note: EndNote,
+    ) =>
+      Effect.uninterruptible(
+        Effect.gen(function* () {
+          if (!(yield* sql.withTransaction(storeEnd(turnId, status, from, note)))) return false;
+          yield* hold("fix-turn-end");
+          yield* finishEnd(fixer, turnId);
+          yield* publish(fixer.pr_key);
+          return true;
+        }),
+      );
+
+    /**
      * Ends a turn as failed: drafts go back to the owner, the checkout to the head, unless
      * something an agent turn started may still be running there.
      */
     const failTurn = (fixer: FixerRow, turnId: FixerTurnId, failure: TurnFailure) =>
       Effect.gen(function* () {
-        const failed = yield* transition(turnId, ["preparing", "running"], {
-          _tag: "failed",
-          reason: failure.reason,
-          message: failure.message,
-        });
         yield* tokens.revokeTurn(turnId);
+        const failed = yield* endTurn(
+          fixer,
+          turnId,
+          { _tag: "failed", reason: failure.reason, message: failure.message },
+          ["preparing", "running"],
+          { kind: "error", text: failure.message },
+        );
         if (!failed) return;
-        yield* returnDrafts(turnId);
-        const turn = yield* turnById(turnId);
-        const ref = refFromKey(fixer.pr_key);
-        if (ref !== null && turn?.head_sha != null)
-          yield* leftovers
-            .unlessLeftovers(fixer.id, repo.resetFix(ref, fixer.id, turn.head_sha))
-            .pipe(Effect.ignore);
         // The message can be an agent's own words, so it stays in the activity and out of the log.
         yield* Effect.logWarning("Fix turn failed").pipe(
           Effect.annotateLogs({ turnId, reason: failure.reason }),
         );
-        yield* appendActivity(fixer.pr_key, turnId, "error", failure.message);
         yield* notify(fixer, "The agent couldn't finish", failure.message);
       });
 
@@ -406,7 +457,18 @@ export const makeTurnQueue = (
         }),
       );
 
-    return { advance, start, letGo, stopFiber, queueTurn, afterQueued, enqueue, whileEnding };
+    return {
+      advance,
+      start,
+      finishEnd,
+      endTurn,
+      letGo,
+      stopFiber,
+      queueTurn,
+      afterQueued,
+      enqueue,
+      whileEnding,
+    };
   });
 
 export type TurnQueue = Effect.Success<ReturnType<typeof makeTurnQueue>>;

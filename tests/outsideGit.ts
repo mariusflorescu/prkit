@@ -5,8 +5,11 @@ import * as NodePath from "node:path";
 import * as Schema from "effect/Schema";
 import { repoRoot } from "../scripts/verify-run.ts";
 
-/** Real local git objects behind a transport stand-in; no production transport changes. */
-export const outsideGit = (name: string, { fetches = true } = {}) => {
+/**
+ * Real local git objects behind a transport stand-in; no production transport changes. With
+ * `pushes`, a push lands on the fixture's branch the way GitHub would take it.
+ */
+export const outsideGit = (name: string, { fetches = true, pushes = false } = {}) => {
   const root = NodePath.join(repoRoot, ".e2e", "fake", `${name}-git`);
   NodeFS.rmSync(root, { recursive: true, force: true });
   NodeFS.mkdirSync(root, { recursive: true });
@@ -32,6 +35,7 @@ export const outsideGit = (name: string, { fetches = true } = {}) => {
     });
   NodeFS.mkdirSync(NodePath.join(source, "src"), { recursive: true });
   git("init", "-q", "-b", "main");
+  git("config", "receive.denyCurrentBranch", "updateInstead");
   NodeFS.writeFileSync(
     NodePath.join(source, "src", "limits.ts"),
     'export const limits = {\n  url: 1024,\n  title: 120,\n};\n\nexport const schemes = ["http", "https"];\n',
@@ -57,16 +61,18 @@ export const outsideGit = (name: string, { fetches = true } = {}) => {
   const bin = NodePath.join(root, "bin");
   NodeFS.mkdirSync(bin);
   // Redirect fetches to this fixture only. Keep the app's pinned git config and real git
-  // for every operation. A push is refused even if the app unexpectedly tries one.
+  // for every operation. A push is refused, even if the app unexpectedly tries one, unless `pushes`.
   NodeFS.writeFileSync(
     NodePath.join(bin, "git"),
     `#!${process.execPath}
 import * as cp from "node:child_process";
 import * as fs from "node:fs";
 const args = process.argv.slice(2).filter((arg) => arg !== "--filter=blob:none");
-if (args.includes("push")) { fs.appendFileSync(${JSON.stringify(pushLog)}, JSON.stringify(args) + "\\n"); process.stderr.write("Fixture refuses pushes\\n"); process.exit(1); }
-if (args.includes("fetch") || args.includes("ls-remote")) {
-  if (!${String(fetches)}) { process.stderr.write("Fixture refuses fetches\\n"); process.exit(1); }
+const pushing = args.includes("push");
+if (pushing) fs.appendFileSync(${JSON.stringify(pushLog)}, JSON.stringify(args) + "\\n");
+if (pushing && !${String(pushes)}) { process.stderr.write("Fixture refuses pushes\\n"); process.exit(1); }
+if (pushing || args.includes("fetch") || args.includes("ls-remote")) {
+  if (!pushing && !${String(fetches)}) { process.stderr.write("Fixture refuses fetches\\n"); process.exit(1); }
   const at = args.findIndex((arg) => arg === "origin" || arg === "https://github.com/budget/fixtures.git");
   if (at < 0) { process.stderr.write("Fixture refuses another remote\\n"); process.exit(1); }
   args[at] = ${JSON.stringify(source)};
@@ -92,6 +98,8 @@ process.exit(result.status ?? 1);
   return {
     start,
     head: (number: number) => git("rev-parse", `refs/pull/${number}/head`).trim(),
+    /** Where the PR's branch is now, after any push that landed. */
+    branch: (number: number) => git("rev-parse", `refs/heads/feature-${number}`).trim(),
     commit: (number: number, files: Record<string, string>) => {
       git("checkout", "-q", `feature-${number}`);
       for (const [path, content] of Object.entries(files))

@@ -28,13 +28,12 @@ import {
   decodeEachFixer,
   decodeTurnStates,
   encodeOptions,
-  encodeStatus,
   type FixerRow,
   readableTurns,
   TURN_COLUMNS,
   type TurnRow,
 } from "./fixerRows.ts";
-import type { FixerState } from "./fixerState.ts";
+import { type FixerState, TURN_ENDS } from "./fixerState.ts";
 import { type TurnLeftovers, turnSince } from "./turnLeftovers.ts";
 import type { TurnQueue } from "./turnQueue.ts";
 
@@ -69,14 +68,13 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
       newId,
       now,
       publish,
-      recordActivity,
-      returnDrafts,
       runId,
       snapshotOf,
+      storeEnd,
       transition,
       unreadableTurns,
     } = state;
-    const { advance, stopFiber, whileEnding } = queue;
+    const { advance, endTurn, finishEnd, stopFiber, whileEnding } = queue;
 
     /**
      * The fixer for a PR on the agent given, created if there is none, and brought back if it
@@ -159,46 +157,6 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
         return fixer;
       });
 
-    /**
-     * A turn's drop in the database: its state, its drafts back with the owner and its note,
-     * together in the caller's transaction. It stays unfinished, so it holds the checkout, until
-     * `finishDrop` has done the rest; startup finishes a drop a crash cut off.
-     */
-    const discard = (
-      row: TurnRow,
-      status: Extract<FixerTurnStatus, { _tag: "discarded" }>,
-      from: ReadonlyArray<FixerTurnState>,
-      /** Only a turn no change request ever ran on (`rounds = 0`). */
-      freshOnly: boolean,
-    ) =>
-      Effect.gen(function* () {
-        const dropped = yield* sql`UPDATE fixer_turns SET status = ${encodeStatus(status)}
-          WHERE id = ${row.id} AND json_extract(status, '$._tag') IN ${sql.in(from)}
-            AND (${freshOnly ? 1 : 0} = 0 OR rounds = 0) RETURNING id`;
-        if (dropped.length === 0) return false;
-        yield* returnDrafts(row.id);
-        yield* recordActivity(row.id, "note", status.message);
-        return true;
-      });
-
-    /** The rest of a drop once its agent is stopped: the checkout back at the head, the commit let go, the turn finished. */
-    const finishDrop = (fixer: FixerRow, row: TurnRow) =>
-      Effect.gen(function* () {
-        const ref = refFromKey(fixer.pr_key);
-        if (ref !== null && row.head_sha !== null)
-          yield* leftovers
-            .unlessLeftovers(fixer.id, repo.resetFix(ref, fixer.id, row.head_sha))
-            .pipe(
-              Effect.catchTags({
-                RepoError: (error) => Effect.logWarning(error.message),
-                PlatformError: () => Effect.void,
-              }),
-            );
-        if (ref !== null) yield* repo.holdCommit(ref, row.id, null).pipe(Effect.ignore);
-        const at = yield* now;
-        yield* sql`UPDATE fixer_turns SET finished_at = ${at} WHERE id = ${row.id} AND finished_at IS NULL`;
-      });
-
     /** Drops a turn: a running agent stops, a ready commit goes, the drafts come back. Nothing reached GitHub. */
     const dropTurn = (
       fixer: FixerRow,
@@ -210,9 +168,11 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
       // Once the drop is stored, the rest runs even when its caller goes away (a closed window).
       Effect.uninterruptible(
         Effect.gen(function* () {
-          if (!(yield* sql.withTransaction(discard(row, status, from, freshOnly)))) return false;
+          const note = { kind: "note", text: status.message } as const;
+          if (!(yield* sql.withTransaction(storeEnd(row.id, status, from, note, freshOnly))))
+            return false;
           yield* stopFiber(row.id);
-          yield* finishDrop(fixer, row);
+          yield* finishEnd(fixer, row.id);
           yield* publish(fixer.pr_key);
           return true;
         }),
@@ -241,7 +201,8 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
               const droppable = yield* sql`SELECT ${sql.literal(TURN_COLUMNS)} FROM fixer_turns
                 WHERE fixer_id = ${fixer.id} AND json_extract(status, '$._tag') IN ${sql.in(DROPPABLE)}
                 ORDER BY created_at, rowid`.pipe(Effect.flatMap(readableTurns));
-              for (const row of droppable) yield* discard(row, status, DROPPABLE, false);
+              for (const row of droppable)
+                yield* storeEnd(row.id, status, DROPPABLE, { kind: "note", text: status.message });
               // A push in flight finishes, but is never redone.
               yield* sql`UPDATE fixer_turns SET status = json_set(status, '$.spared', json('true'))
                 WHERE fixer_id = ${fixer.id} AND json_extract(status, '$._tag') = 'pushing'`;
@@ -252,7 +213,7 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
           yield* hold("fix-session-end");
           for (const row of dropped) {
             yield* stopFiber(row.id);
-            yield* finishDrop(fixer, row);
+            yield* finishEnd(fixer, row.id);
           }
           yield* (yield* unreadableTurns(fixer.id)).length > 0
             ? Effect.logWarning("Kept the fix checkout: a turn prkit can't read may still be in it")
@@ -284,8 +245,9 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
      * Startup (docs/internals/fix-agent.md "Restarts"): turns an earlier run left
      * working become failed(interrupted) and their drafts go back; a change request
      * cut off returns to the result it changed; a push cut off goes back to ready,
-     * and the next push finds out whether it landed; a drop cut off (a discard, or a
-     * session's end) finishes. Checkouts of ended sessions are removed and queues
+     * and the next push finds out whether it landed; an end cut off (a failure, a push,
+     * a drop, a session's end) finishes, and drafts an older prkit left with an ended fix
+     * go where its end sends them. Checkouts of ended sessions are removed and queues
      * advance. A second run changes nothing.
      */
     const reconcile = Effect.gen(function* () {
@@ -306,12 +268,19 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
         Effect.flatMap(decodeEachFixer),
       );
       const known = new Map(fixers.map((fixer) => [fixer.id, fixer]));
-      // Turns an earlier run left working, and drops a crash cut off before they finished.
       const stale = yield* sql`SELECT ${sql.literal(TURN_COLUMNS)} FROM fixer_turns
         WHERE (json_extract(status, '$._tag') IN ('preparing', 'running', 'pushing')
-            OR (json_extract(status, '$._tag') = 'discarded' AND finished_at IS NULL))
+            OR (json_extract(status, '$._tag') IN ${sql.in(TURN_ENDS)} AND (finished_at IS NULL
+              OR id IN (SELECT fixer_turn_id FROM pending_comments WHERE state = 'sent-to-agent'))))
           AND (run_id IS NULL OR run_id != ${runId})`.pipe(Effect.flatMap(readableTurns));
       for (const row of stale) {
+        const fixer = known.get(row.fixer_id);
+        // A finished fix only still holds drafts an older prkit left with it. What that prkit
+        // recorded of its processes stays for the next turn's look.
+        if (row.finished_at !== null) {
+          if (fixer !== undefined) yield* finishEnd(fixer, row.id);
+          continue;
+        }
         // An agent outlives a killed server; stop it before anything resumes its session.
         if (row.agent_pid !== null && row.agent_started !== null) {
           const reaped = yield* reapAgentGroup(row.agent_pid, row.agent_started).pipe(
@@ -325,29 +294,25 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
         // What prkit can still tie to the turn ends too, by the mark its processes carry, before
         // anything here or a Retry runs git in its checkout (fix-agent doc, "Turn end").
         const end =
-          row.status._tag === "pushing"
+          row.status._tag === "pushing" || row.status._tag === "pushed"
             ? ({ _tag: "ended" } as const)
             : yield* leftovers.sweep(row.id, turnSince(row));
-        const fixer = known.get(row.fixer_id);
         if (fixer === undefined) continue;
         const ref = refFromKey(fixer.pr_key);
         if (end._tag === "unfinished") yield* leftovers.record(row.id, end);
-        if (row.status._tag === "discarded") {
-          yield* finishDrop(fixer, row);
+        if (TURN_ENDS.some((ended) => ended === row.status._tag)) {
+          yield* finishEnd(fixer, row.id);
           continue;
         }
         if (end._tag === "unfinished") {
           const message = `prkit stopped while the agent was working, and couldn't make sure that everything the agent started has ended (${end.reason}). Nothing was committed or pushed. Retry to run it again.`;
-          if (
-            yield* transition(row.id, ["preparing", "running"], {
-              _tag: "failed",
-              reason: "checks",
-              message,
-            })
-          ) {
-            yield* returnDrafts(row.id);
-            yield* appendActivity(fixer.pr_key, row.id, "error", message);
-          }
+          yield* endTurn(
+            fixer,
+            row.id,
+            { _tag: "failed", reason: "checks", message },
+            ["preparing", "running"],
+            { kind: "error", text: message },
+          );
           continue;
         }
         if (row.status._tag === "pushing") {
@@ -375,20 +340,13 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
           continue;
         }
         const message = "prkit stopped while the agent was working. Retry to run it again.";
-        if (
-          yield* transition(row.id, ["preparing", "running"], {
-            _tag: "failed",
-            reason: "interrupted",
-            message,
-          })
-        ) {
-          yield* returnDrafts(row.id);
-          if (ref !== null && row.head_sha !== null)
-            yield* leftovers
-              .unlessLeftovers(fixer.id, repo.resetFix(ref, fixer.id, row.head_sha))
-              .pipe(Effect.ignore);
-          yield* appendActivity(fixer.pr_key, row.id, "error", message);
-        }
+        yield* endTurn(
+          fixer,
+          row.id,
+          { _tag: "failed", reason: "interrupted", message },
+          ["preparing", "running"],
+          { kind: "error", text: message },
+        );
       }
       const live = new Set(fixers.filter((fixer) => fixer.ended === null).map((fixer) => fixer.id));
       // A fixer whose record can't be read, or with a turn whose state can't be read, may still
@@ -423,8 +381,6 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
       rebind,
       rebindOrKeep,
       boundFixer,
-      discard,
-      finishDrop,
       dropTurn,
       end,
       stop,

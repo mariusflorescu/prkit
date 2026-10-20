@@ -21,6 +21,7 @@ import { type FixerState, plural, repositoryOf, short } from "./fixerState.ts";
 import { type Commit, conflictPrompt, nextStopPrompt } from "./prompt.ts";
 import type { ScriptAccessReads } from "./scriptAccess.ts";
 import type { Sessions } from "./sessions.ts";
+import type { TurnQueue } from "./turnQueue.ts";
 import type { TurnSteps } from "./turnSteps.ts";
 
 const MAX_REBASE_STOPS = 30;
@@ -32,6 +33,7 @@ const MAX_REBASE_STOPS = 30;
  */
 export const makeConflictTurn = (
   state: FixerState,
+  queue: TurnQueue,
   runs: AgentRuns,
   steps: TurnSteps,
   sessions: Sessions,
@@ -46,6 +48,7 @@ export const makeConflictTurn = (
     const reviews = yield* Reviews;
     const settings = yield* FixerSettingsStore;
     const { appendActivity, contextDir, fail, fixerById, publish, transition, turnById } = state;
+    const { endTurn } = queue;
     const { resumeFor, untilReported } = runs;
     const { identityFor, recordHead, repoFailure, settleReady, targetOf } = steps;
     const { end } = sessions;
@@ -212,17 +215,13 @@ export const makeConflictTurn = (
             ...input,
           });
         const cleanly = (message: string) =>
-          Effect.gen(function* () {
-            yield* repo.resetFix(ref, fixer.id, headSha).pipe(Effect.ignore);
-            if (
-              yield* transition(turn.id, ["preparing", "running"], {
-                _tag: "discarded",
-                reason: "upstream",
-                message,
-              })
-            )
-              yield* appendActivity(fixer.pr_key, turn.id, "note", message);
-          });
+          endTurn(
+            fixer,
+            turn.id,
+            { _tag: "discarded", reason: "upstream", message },
+            ["preparing", "running"],
+            { kind: "note", text: message },
+          ).pipe(Effect.asVoid);
 
         /** One stop: hold what a person decides, let the agent resolve the rest, check it. */
         const resolveStop = (
