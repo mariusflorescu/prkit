@@ -246,7 +246,8 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
      * working become failed(interrupted) and their drafts go back; a change request
      * cut off returns to the result it changed; a push cut off goes back to ready,
      * and the next push finds out whether it landed; an end cut off (a failure, a push,
-     * a drop, a session's end) finishes. Checkouts of ended sessions are removed and queues
+     * a drop, a session's end) finishes, and drafts an older prkit left with an ended fix
+     * go where its end sends them. Checkouts of ended sessions are removed and queues
      * advance. A second run changes nothing.
      */
     const reconcile = Effect.gen(function* () {
@@ -269,9 +270,17 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
       const known = new Map(fixers.map((fixer) => [fixer.id, fixer]));
       const stale = yield* sql`SELECT ${sql.literal(TURN_COLUMNS)} FROM fixer_turns
         WHERE (json_extract(status, '$._tag') IN ('preparing', 'running', 'pushing')
-            OR (json_extract(status, '$._tag') IN ${sql.in(TURN_ENDS)} AND finished_at IS NULL))
+            OR (json_extract(status, '$._tag') IN ${sql.in(TURN_ENDS)} AND (finished_at IS NULL
+              OR id IN (SELECT fixer_turn_id FROM pending_comments WHERE state = 'sent-to-agent'))))
           AND (run_id IS NULL OR run_id != ${runId})`.pipe(Effect.flatMap(readableTurns));
       for (const row of stale) {
+        const fixer = known.get(row.fixer_id);
+        // A finished fix only still holds drafts an older prkit left with it. What that prkit
+        // recorded of its processes stays for the next turn's look.
+        if (row.finished_at !== null) {
+          if (fixer !== undefined) yield* finishEnd(fixer, row.id);
+          continue;
+        }
         // An agent outlives a killed server; stop it before anything resumes its session.
         if (row.agent_pid !== null && row.agent_started !== null) {
           const reaped = yield* reapAgentGroup(row.agent_pid, row.agent_started).pipe(
@@ -288,7 +297,6 @@ export const makeSessions = (state: FixerState, queue: TurnQueue, leftovers: Tur
           row.status._tag === "pushing" || row.status._tag === "pushed"
             ? ({ _tag: "ended" } as const)
             : yield* leftovers.sweep(row.id, turnSince(row));
-        const fixer = known.get(row.fixer_id);
         if (fixer === undefined) continue;
         const ref = refFromKey(fixer.pr_key);
         if (end._tag === "unfinished") yield* leftovers.record(row.id, end);

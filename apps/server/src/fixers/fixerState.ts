@@ -263,10 +263,19 @@ export const makeFixerState = Effect.gen(function* () {
     });
 
   /**
-   * Stores a turn's end in the caller's transaction: its state, its drafts and its note together.
-   * A pushed fix's drafts the agent fixed or partly fixed are resolved; every other draft it holds
-   * goes back to the owner. The turn stays unfinished until `finishEnd` lets go of what it held.
-   * False when the turn had moved on.
+   * The drafts an ended turn still holds go where its end sends them: a pushed fix's drafts the
+   * agent fixed or partly fixed are resolved, and every other draft goes back to the owner.
+   */
+  const settleDrafts = (turnId: FixerTurnId, status: FixerTurnStatus) =>
+    Effect.gen(function* () {
+      if (status._tag === "pushed") yield* resolveFixed(turnId);
+      yield* returnDrafts(turnId);
+    });
+
+  /**
+   * Stores a turn's end in the caller's transaction: its state, its drafts settled and its note,
+   * together. The turn stays unfinished until `finishEnd` lets go of what it held. False when the
+   * turn had moved on.
    */
   const storeEnd = (
     turnId: FixerTurnId,
@@ -281,8 +290,7 @@ export const makeFixerState = Effect.gen(function* () {
         WHERE id = ${turnId} AND json_extract(status, '$._tag') IN ${sql.in(from)}
           AND (${freshOnly ? 1 : 0} = 0 OR rounds = 0) RETURNING id`;
       if (ended.length === 0) return false;
-      if (status._tag === "pushed") yield* resolveFixed(turnId);
-      yield* returnDrafts(turnId);
+      yield* settleDrafts(turnId, status);
       yield* recordActivity(turnId, note.kind, note.text);
       return true;
     });
@@ -355,6 +363,7 @@ export const makeFixerState = Effect.gen(function* () {
     recordActivity,
     appendActivity,
     transition,
+    settleDrafts,
     storeEnd,
     notify,
     dbFailures,

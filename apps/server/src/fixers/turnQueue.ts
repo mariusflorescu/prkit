@@ -95,6 +95,7 @@ export const makeTurnQueue = (
       publish,
       recordActivity,
       runId,
+      settleDrafts,
       storeEnd,
       turnById,
       turnsOf,
@@ -188,15 +189,19 @@ export const makeTurnQueue = (
       );
 
     /**
-     * Lets go of what an ended turn held: the checkout back at its head, unless something the
-     * turn started may still be running there, and its commit; then the turn is finished and the
-     * queue may go on. A pushed result is the branch's head, so the checkout stays. Safe to run twice.
+     * Lets go of what an ended turn held: drafts still with it, where its end sends them (an older
+     * prkit could finish a turn without settling them); then, unless it is finished already, the
+     * checkout back at its head, unless something the turn started may still be running there, and
+     * its commit, and the turn is finished so the queue may go on. A pushed result is the branch's
+     * head, so the checkout stays. Safe to run twice.
      */
     const finishEnd = (fixer: FixerRow, turnId: FixerTurnId) =>
       Effect.gen(function* () {
         const turn = yield* turnById(turnId);
+        if (turn === null) return;
+        yield* settleDrafts(turnId, turn.status);
         // Once finished, a later turn may hold the checkout.
-        if (turn === null || turn.finished_at !== null) return;
+        if (turn.finished_at !== null) return;
         const ref = refFromKey(fixer.pr_key);
         if (ref !== null && turn.status._tag !== "pushed" && turn.head_sha !== null)
           yield* leftovers

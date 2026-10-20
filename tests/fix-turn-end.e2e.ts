@@ -15,7 +15,7 @@ import {
   startFakeInstance,
   stopFakeInstance,
 } from "./fakeGitHub.ts";
-import { type Fixtures, sendLineToAgent } from "./fixActions.ts";
+import { type Fixtures, openSendToAgent, sendLineToAgent } from "./fixActions.ts";
 import { processGroup, processStart, readRows, stopAgentGroup } from "./fixturePr.ts";
 import { emulateOsColorScheme, screenshotLightAndDark } from "./osColorScheme.ts";
 import { outsideGit } from "./outsideGit.ts";
@@ -450,6 +450,256 @@ test(
       stopFakeInstance(name, { keepHome: false });
       claude.release();
       if (agent !== null) stopAgentGroup(agent.pid, agent.startedAt);
+      fake.stop();
+    }
+  },
+);
+
+const idOf = (home: string, number: number) =>
+  String(
+    readRows(
+      home,
+      `SELECT t.id FROM fixer_turns t JOIN fixers f ON f.id = t.fixer_id WHERE f.pr_key = '${keyOf(number)}'
+       ORDER BY t.created_at, t.rowid LIMIT 1`,
+    )[0]?.id,
+  );
+const checkoutOf = (home: string, number: number) =>
+  NodePath.join(
+    home,
+    "fixes",
+    String(readRows(home, `SELECT id FROM fixers WHERE pr_key = '${keyOf(number)}'`)[0]?.id),
+  );
+
+/** Writes a draft on the first commentable line of `file`, the `pending`th one on the pull request. */
+const writeDraft = async (
+  { screen, browser }: Fixtures,
+  file: string,
+  comment: string,
+  pending: number,
+) => {
+  const line = screen
+    .getByRole("region", file)
+    .getByRole("button", /^Comment on line \d+$/)
+    .first();
+  await expect(line).toBeVisible({ timeout: 30_000 });
+  await line.focus();
+  await browser.keyboard.press("Enter");
+  const composer = screen.getByRole("textbox", /^Comment on line \d+$/);
+  await composer.fill(comment);
+  await composer.press("Meta+Enter");
+  await expect(screen.getByRole("button", `Review, ${pending} pending`).first()).toBeVisible({
+    timeout: 30_000,
+  });
+};
+
+/** What an older prkit recorded of #6's failed fix's processes when it couldn't make sure they ended. */
+const LEFT_RUNNING = JSON.stringify({
+  _tag: "unfinished",
+  reason: "processes kept turning up",
+  processes: [{ pid: 99999, started: "Mon Oct 19 09:00:00 2026", leader: true }],
+});
+
+/**
+ * Leaves the database the way an older prkit's crash did: each ended fix still holds its drafts,
+ * and the notes a failure and an empty fix wrote after the drafts are missing. The agent skipped
+ * #4's second comment, #6's failed fix recorded processes it couldn't make sure of, and #2's fix
+ * is stored the way a newer prkit would, which this one can't read.
+ */
+/** A folder holding a `ps` that fails, as when prkit can't list the machine's processes. */
+const failingPs = (name: string) => {
+  const bin = NodePath.join(repoRoot, ".e2e", "fake", `${name}-ps`);
+  NodeFS.rmSync(bin, { recursive: true, force: true });
+  NodeFS.mkdirSync(bin, { recursive: true });
+  NodeFS.writeFileSync(NodePath.join(bin, "ps"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  return bin;
+};
+/** Runs `launch` with `bin` first on the PATH the server it starts keeps. */
+const withPath = <A>(bin: string, launch: () => A) => {
+  const previous = process.env.PATH;
+  process.env.PATH = `${bin}:${previous ?? ""}`;
+  try {
+    return launch();
+  } finally {
+    if (previous === undefined) delete process.env.PATH;
+    else process.env.PATH = previous;
+  }
+};
+
+const strandDrafts = (home: string, turns: Record<number, string>) => {
+  const db = new DatabaseSync(NodePath.join(home, "prkit.sqlite"));
+  try {
+    for (const turn of Object.values(turns))
+      db.prepare(
+        `UPDATE pending_comments SET state = 'sent-to-agent', fixer_turn_id = ?1
+         WHERE id IN (SELECT json_extract(c.value, '$.source.draftId')
+           FROM fixer_turns t, json_each(t.work, '$.comments') c WHERE t.id = ?1)`,
+      ).run(turn);
+    db.prepare(
+      "UPDATE fixer_turns SET status = json_set(status, '$.reason', 'from-a-newer-prkit') WHERE id = ?",
+    ).run(turns[2] ?? "");
+    db.prepare("UPDATE fixer_turns SET unfinished_end = ? WHERE id = ?").run(
+      LEFT_RUNNING,
+      turns[6] ?? "",
+    );
+    db.prepare(
+      "UPDATE fixer_turns SET report = json_set(report, '$.perComment[1].status', 'skipped') WHERE id = ?",
+    ).run(turns[4] ?? "");
+    db.prepare(
+      `DELETE FROM fixer_activity WHERE (turn_id = ? AND kind = 'error')
+         OR (turn_id = ? AND text = 'The agent changed nothing, so there is nothing to push')`,
+    ).run(turns[6] ?? "", turns[9] ?? "");
+  } finally {
+    db.close();
+  }
+};
+
+test(
+  "drafts an older prkit left with ended fixes land once on this build's first start, where each fix's end sends them",
+  { timeout: 360_000 },
+  async ({ app, screen, browser }) => {
+    const name = "fix-turn-end-stranded";
+    const page: Fixtures = { app, screen, browser };
+    const fake = await startFakeGitHub(name);
+    const claude = setUpFakeClaude(name);
+    const git = outsideGit(name, { pushes: true });
+    const launch = () =>
+      git.start(() => startFakeInstance(name, fake, ["--claude", claude.file, "--e2e"]));
+    let home = "";
+    try {
+      git.commit(9, { "stand-in.md": WRITTEN });
+      for (const number of [1, 2, 4, 6, 9]) await fake.gitHead(number, git.head(number));
+      let run = launch();
+      home = run.home;
+      await emulateOsColorScheme(browser, "light");
+      await app.open(run.openUrl);
+
+      claude.failingWith("The stand-in agent gave up.");
+      await sendLineToAgent(page, pull(run.url, 6, "files"), FILE, "Name the change.");
+      await expect.poll(() => statesOf(run.home, 6), { timeout: 60_000 }).toEqual(["failed"]);
+      claude.failing(false);
+      // A later fix on #6 sends only a new comment, as Retry couldn't send the stranded one.
+      await app.open(pull(run.url, 6, "files"));
+      await writeDraft(page, FILE, "Say why it starts here.", 2);
+      const later = await openSendToAgent(page, 2);
+      await later.getByRole("checkbox").first().tap();
+      await later.getByRole("button", "Send 1 comment to agent").tap();
+      await expect
+        .poll(() => statesOf(run.home, 6), { timeout: 60_000 })
+        .toEqual(["failed", "ready"]);
+      await sendLineToAgent(page, pull(run.url, 9, "files"), "src/limits.ts", "Name the limit.");
+      await expect.poll(() => statesOf(run.home, 9), { timeout: 60_000 }).toEqual(["unchanged"]);
+      for (const number of [1, 2]) {
+        await sendLineToAgent(page, pull(run.url, number, "files"), FILE, "Name the change.");
+        await expect.poll(() => statesOf(run.home, number), { timeout: 60_000 }).toEqual(["ready"]);
+        await app.open(pull(run.url, number, "fixes"));
+        await screen
+          .getByRole("article", "Fix 1 comment: Ready to review")
+          .getByRole("button", "Discard")
+          .tap();
+        await expect
+          .poll(() => statesOf(run.home, number), { timeout: 30_000 })
+          .toEqual(["discarded"]);
+      }
+
+      await app.open(pull(run.url, 4, "files"));
+      await writeDraft(page, FILE, "Name the change.", 1);
+      await writeDraft(page, FILE, "Say why it starts here.", 2);
+      const send = await openSendToAgent(page, 2);
+      await send.getByRole("button", "Send 2 comments to agent").tap();
+      await expect.poll(() => statesOf(run.home, 4), { timeout: 60_000 }).toEqual(["ready"]);
+      const sha = commitOf(run.home, 4);
+      await app.open(pull(run.url, 4, "fixes"));
+      const ready = screen.getByRole("article", "Fix 2 comments: Ready to review");
+      await expect(ready.getByRole("button", "Push")).toBeEnabled({ timeout: 30_000 });
+      await ready.getByRole("button", "Push").tap();
+      await expect.poll(() => statesOf(run.home, 4), { timeout: 30_000 }).toEqual(["pushed"]);
+
+      stopFakeInstance(name, { keepHome: true });
+      const turns = Object.fromEntries(
+        [1, 2, 4, 6, 9].map((number) => [number, idOf(home, number)]),
+      );
+      strandDrafts(home, turns);
+      const laterFix = String(
+        readRows(
+          home,
+          `SELECT t.id FROM fixer_turns t JOIN fixers f ON f.id = t.fixer_id
+           WHERE f.pr_key = '${keyOf(6)}' AND json_extract(t.status, '$._tag') = 'ready'`,
+        )[0]?.id,
+      );
+      // #6's later fix still has its result in the checkout the failed one shared.
+      const kept = NodePath.join(checkoutOf(home, 6), "kept-by-the-later-fix.txt");
+      NodeFS.writeFileSync(kept, "");
+
+      // The first start can't list processes either, so no look at them could stand in for what
+      // the older prkit recorded.
+      const ps = failingPs(name);
+      run = await relaunch(page, () => withPath(ps, launch));
+      const pushed = `Pushed ${sha.slice(0, 7)} to feature-4`;
+      const landed = () => {
+        expect(endsOf(run.home, 6)[0]).toEqual({
+          state: "failed",
+          reason: "agent",
+          finished: 1,
+          said: 0,
+          held: null,
+        });
+        expect(statesOf(run.home, 6)).toEqual(["failed", "ready"]);
+        expect(
+          readRows(run.home, `SELECT unfinished_end FROM fixer_turns WHERE id = '${turns[6]}'`),
+        ).toEqual([{ unfinished_end: LEFT_RUNNING }]);
+        expect(NodeFS.existsSync(kept)).toBe(true);
+        expect(endsOf(run.home, 2)).toEqual([
+          {
+            state: "discarded",
+            reason: "from-a-newer-prkit",
+            finished: 1,
+            said: 1,
+            held: "sent-to-agent",
+          },
+        ]);
+        expect(
+          endsOf(run.home, 9, "The agent changed nothing, so there is nothing to push"),
+        ).toEqual([{ state: "unchanged", reason: null, finished: 1, said: 0, held: null }]);
+        expect(endsOf(run.home, 1)).toEqual([
+          { state: "discarded", reason: "user", finished: 1, said: 1, held: null },
+        ]);
+        expect(endsOf(run.home, 4, pushed)).toEqual([
+          { state: "pushed", reason: null, finished: 1, said: 1, held: null },
+        ]);
+        for (const number of [1, 9])
+          expect(draftsOf(run.home, number)).toEqual([{ state: "draft", turn: null }]);
+        expect(draftsOf(run.home, 6)).toEqual([
+          { state: "draft", turn: null },
+          { state: "sent-to-agent", turn: laterFix },
+        ]);
+        expect(
+          readRows(
+            run.home,
+            `SELECT c.state, c.fixer_turn_id AS turn,
+               c.id = json_extract(t.work, '$.comments[1].source.draftId') AS skipped
+             FROM pending_comments c JOIN fixer_turns t ON t.id = '${turns[4]}'
+             WHERE c.pr_key = '${keyOf(4)}' ORDER BY skipped`,
+          ),
+        ).toEqual([
+          { state: "resolved-by-agent", turn: null, skipped: 0 },
+          { state: "draft", turn: null, skipped: 1 },
+        ]);
+        expect(git.pushes()).toHaveLength(1);
+        expect(heldCommits(run.home)).toEqual([`refs/prkit/fixes/${laterFix}`]);
+      };
+      landed();
+      await app.open(pull(run.url, 4, "fixes"));
+      await expect(screen.getByRole("article", "Fix 2 comments: Pushed")).toBeVisible({
+        timeout: 30_000,
+      });
+      await expect(screen.getByRole("button", "Review, 1 pending").first()).toBeVisible();
+      await screenshotLightAndDark(app, browser, "stranded-pushed-after-upgrade");
+
+      stopFakeInstance(name, { keepHome: true });
+      run = await relaunch(page, launch);
+      landed();
+    } finally {
+      stopFakeInstance(name, { keepHome: false });
       fake.stop();
     }
   },
