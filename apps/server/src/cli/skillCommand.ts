@@ -17,16 +17,8 @@ export const skillInstallWords = (repository: string, ref: string) => {
 };
 
 /**
- * The file a terminal runs. It removes itself and its folder first and names no path of its own,
- * and it starts in the home folder as a new terminal does, since Ghostty starts an opened file in
- * its folder.
+ * The file a terminal runs. It names no path of its own, and it starts in the home folder as a new
+ * terminal does, since Ghostty starts an opened file in its folder.
  */
 export const skillInstallerScript = (words: ReadonlyArray<string>) =>
-  [
-    "#!/bin/sh",
-    'rm -f -- "$0"',
-    'rmdir -- "${0%/*}"',
-    "cd || exit",
-    `exec ${words.map(shellQuote).join(" ")}`,
-    "",
-  ].join("\n");
+  ["#!/bin/sh", "cd || exit", `exec ${words.map(shellQuote).join(" ")}`, ""].join("\n");

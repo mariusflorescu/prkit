@@ -6,7 +6,12 @@ import { type Browser, test } from "@e2e-dev/web";
 import { expect, type Screen, type TestFixtures } from "e2e";
 import * as Schema from "effect/Schema";
 
-import { startFakeGitHub, startFakeInstance, stopFakeInstance } from "./fakeGitHub.ts";
+import {
+  instanceHome,
+  startFakeGitHub,
+  startFakeInstance,
+  stopFakeInstance,
+} from "./fakeGitHub.ts";
 import { emulateOsColorScheme, screenshotLightAndDark } from "./osColorScheme.ts";
 import { pressShortcut } from "./shortcut.ts";
 
@@ -39,7 +44,7 @@ const toastsGone = (browser: Browser) =>
 /**
  * Stand-ins for the macOS tools prkit opens a terminal with. `osascript` answers the default
  * terminal from `default` ("unreadable" fails it). `open` records its call with the modes of the
- * terminal folder, the click's folder and the file, refuses any app listed in `refuse`, leaves
+ * installer's folder and the file, refuses any app listed in `refuse`, leaves
  * the file for later while `defer` exists (as Ghostty does while it asks), and otherwise runs it
  * the way a terminal does, with an `npx` that records how the installer was started.
  */
@@ -62,7 +67,7 @@ printf '%s\\n' "$answer"
     NodePath.join(bin, "open"),
     `#!/bin/sh
 folder=$(dirname "$3")
-printf '%s\\t%s\\t%s\\t%s %s %s\\n' "$1" "$2" "$3" "$(stat -f %Lp "$(dirname "$folder")")" "$(stat -f %Lp "$folder")" "$(stat -f %Lp "$3")" >> '${state}/open-calls.txt'
+printf '%s\\t%s\\t%s\\t%s %s\\n' "$1" "$2" "$3" "$(stat -f %Lp "$folder")" "$(stat -f %Lp "$3")" >> '${state}/open-calls.txt'
 if grep -qx "$2" '${state}/refuse'; then exit 1; fi
 if [ -e '${state}/defer' ]; then exit 0; fi
 (cd && pwd -P) > '${state}/home.txt'
@@ -102,6 +107,14 @@ PATH='${npxBin}':/usr/bin:/bin "$3"
   };
 };
 
+const GHOSTTY_TOAST =
+  "Skill installer opened in Ghostty | It's your default terminal. You can change it from your terminal's menu.";
+
+const openOutsideAgents = async ({ screen, browser }: { screen: Screen; browser: Browser }) => {
+  await pressShortcut(screen, browser, "Comma");
+  await screen.getByRole("link", "Outside agents").tap();
+};
+
 const open = async (
   { screen, browser }: { screen: Screen; browser: Browser },
   expectedToast: string,
@@ -133,21 +146,20 @@ test(
       const launches = () =>
         tools.opens().map(({ flag, app, file, modes }) => {
           expect(flag).toBe("-b");
-          expect(NodePath.dirname(NodePath.dirname(file))).toBe(terminalFolder);
+          expect(NodePath.dirname(file)).toBe(terminalFolder);
           expect(NodePath.basename(file)).toBe("prkit-skill-installer");
-          expect(modes, "terminal folder, click folder and file modes").toBe("700 700 700");
+          expect(modes, "terminal folder and file modes").toBe("700 700");
           return app;
         });
       const installerRan = () => {
         expect(tools.npx().split("\n")).toEqual([tools.home(), ...installerWords]);
-        expect(NodeFS.readdirSync(terminalFolder)).toEqual([]);
+        expect(NodeFS.readdirSync(terminalFolder)).toEqual(["prkit-skill-installer"]);
       };
       await emulateOsColorScheme(browser, "light");
       await browser.setViewport({ width: 1280, height: 720 });
       await app.open(run.openUrl);
       await recordToasts(browser);
-      await pressShortcut(screen, browser, "Comma");
-      await screen.getByRole("link", "Outside agents").tap();
+      await openOutsideAgents({ screen, browser });
       const button = screen.getByRole("button", "Open skill installer in terminal");
       await expect(button).toBeVisible({ timeout: 30_000 });
       await expect(
@@ -168,10 +180,8 @@ test(
       );
       const installerWords: ReadonlyArray<string> = command.split(" ").slice(1);
 
-      const ghosttyToast =
-        "Skill installer opened in Ghostty | It's your default terminal. You can change it from your terminal's menu.";
       tools.prepare("com.mitchellh.ghostty");
-      await open({ screen, browser }, ghosttyToast);
+      await open({ screen, browser }, GHOSTTY_TOAST);
       await app.screenshot("default-terminal-opened-ghostty");
       expect(tools.osascript().split("\n").slice(0, 3)).toEqual(["-l", "JavaScript", "-e"]);
       expect(tools.osascript()).toContain('$("public.unix-executable"), $.kLSRolesShell');
@@ -179,18 +189,18 @@ test(
       installerRan();
 
       tools.prepare("com.mitchellh.ghostty", [], { defer: true });
-      await open({ screen, browser }, ghosttyToast);
+      await open({ screen, browser }, GHOSTTY_TOAST);
       const [waiting] = tools.opens();
       tools.prepare("com.mitchellh.ghostty");
-      await open({ screen, browser }, ghosttyToast);
+      await open({ screen, browser }, GHOSTTY_TOAST);
       expect(launches()).toEqual(["com.mitchellh.ghostty"]);
-      expect(tools.opens()[0]?.file).not.toBe(waiting?.file);
+      expect(tools.opens()[0]?.file).toBe(waiting?.file);
       const home = tools.home();
       expect(NodeFS.readdirSync(terminalFolder)).toHaveLength(1);
       tools.prepare("com.mitchellh.ghostty");
       expect(tools.runLater(waiting?.file ?? "", home).status).toBe(0);
       expect(tools.npx().split("\n")).toEqual([home, ...installerWords]);
-      expect(NodeFS.readdirSync(terminalFolder)).toEqual([]);
+      expect(NodeFS.readdirSync(terminalFolder)).toEqual(["prkit-skill-installer"]);
 
       // iTerm2's "make Terminal the default" stores the bundle id in lower case.
       tools.prepare("com.apple.terminal");
@@ -234,7 +244,7 @@ test(
       await expect(failure).toBeVisible({ timeout: 15_000 });
       expect(launches()).toEqual(["com.mitchellh.ghostty", "com.apple.Terminal"]);
       expect(tools.npx()).toBe("");
-      expect(NodeFS.readdirSync(terminalFolder)).toEqual([]);
+      expect(NodeFS.readdirSync(terminalFolder)).toEqual(["prkit-skill-installer"]);
       expect((await toasts(browser)).slice(before)).toEqual([]);
       const centerFailure = () =>
         browser.evaluate(() => {
@@ -249,7 +259,7 @@ test(
       await browser.setViewport({ width: 1280, height: 720 });
 
       tools.prepare("com.mitchellh.ghostty");
-      await open({ screen, browser }, ghosttyToast, () =>
+      await open({ screen, browser }, GHOSTTY_TOAST, () =>
         failure.getByRole("button", "Retry").tap(),
       );
       await expect(failure).toHaveCount(0);
@@ -263,6 +273,90 @@ test(
       fake.stop();
       if (previous === undefined) delete process.env.PRKIT_TERMINAL_BIN;
       else process.env.PRKIT_TERMINAL_BIN = previous;
+    }
+  },
+);
+
+test(
+  "the skill installer and folders older versions wrote stay while a terminal may still ask about them, and a crash's scratch goes",
+  { timeout: 120_000 },
+  async ({ app, screen, browser }: Pick<TestFixtures, "app" | "screen"> & { browser: Browser }) => {
+    const name = "default-terminal-old";
+    const fake = await startFakeGitHub(name);
+    const tools = standIns(NodePath.join(fake.home, "terminal-tools"));
+    const previous = process.env.PRKIT_TERMINAL_BIN;
+    process.env.PRKIT_TERMINAL_BIN = tools.bin;
+    try {
+      const terminalFolder = NodePath.join(instanceHome(name), "terminal");
+      const installer = NodePath.join(terminalFolder, "prkit-skill-installer");
+      const monthAgo = Date.now() / 1000 - 30 * 24 * 60 * 60;
+      /** A folder holding an installer, as an older prkit's click or a crash mid-click leaves it. */
+      const plant = (folder: string) => {
+        const file = NodePath.join(terminalFolder, folder, "prkit-skill-installer");
+        NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true, mode: 0o700 });
+        NodeFS.writeFileSync(file, "#!/bin/sh\n", { mode: 0o700 });
+        NodeFS.utimesSync(file, monthAgo, monthAgo);
+        NodeFS.utimesSync(NodePath.dirname(file), monthAgo, monthAgo);
+      };
+      const left = () => NodeFS.readdirSync(terminalFolder).toSorted();
+      NodeFS.mkdirSync(terminalFolder, { recursive: true, mode: 0o700 });
+      plant("ciH2mH");
+      plant("scratch-Xy12Ab");
+
+      const run = startFakeInstance(name, fake);
+      await expect.poll(left, { timeout: 15_000 }).toEqual(["ciH2mH"]);
+
+      await app.open(run.openUrl);
+      await recordToasts(browser);
+      await openOutsideAgents({ screen, browser });
+      await expect(screen.getByRole("button", "Open skill installer in terminal")).toBeVisible({
+        timeout: 30_000,
+      });
+      tools.prepare("com.mitchellh.ghostty", [], { defer: true });
+      await open({ screen, browser }, GHOSTTY_TOAST);
+      expect(tools.opens().map(({ file }) => file)).toEqual([installer]);
+      expect(left()).toEqual(["ciH2mH", "prkit-skill-installer"]);
+
+      // However long Ghostty has been asking, across a relaunch, its installer stays and runs.
+      NodeFS.utimesSync(installer, monthAgo, monthAgo);
+      stopFakeInstance(name, { keepHome: true });
+      plant("scratch-Zz34Cd");
+      startFakeInstance(name, fake);
+      await expect.poll(left, { timeout: 15_000 }).toEqual(["ciH2mH", "prkit-skill-installer"]);
+      expect(tools.runLater(installer, fake.home).status).toBe(0);
+      expect(tools.npx().split("\n").slice(-2)).toEqual(["--skill", "prkit-cli"]);
+    } finally {
+      stopFakeInstance(name, { keepHome: false });
+      fake.stop();
+      if (previous === undefined) delete process.env.PRKIT_TERMINAL_BIN;
+      else process.env.PRKIT_TERMINAL_BIN = previous;
+    }
+  },
+);
+
+test(
+  "off macOS, Settings says to copy the skill installer's command, with no button and no word of Ghostty",
+  { timeout: 120_000 },
+  async ({ app, screen, browser }: Pick<TestFixtures, "app" | "screen"> & { browser: Browser }) => {
+    const name = "default-terminal-elsewhere";
+    const fake = await startFakeGitHub(name);
+    try {
+      const run = startFakeInstance(name, fake, ["--platform", "linux"]);
+      await emulateOsColorScheme(browser, "light");
+      await browser.setViewport({ width: 1280, height: 720 });
+      await app.open(run.openUrl);
+      await openOutsideAgents({ screen, browser });
+      const words = screen.getByText(
+        "Copy the command and run it in your terminal. prkit opens a terminal for you only on macOS.",
+      );
+      await expect(words).toBeVisible({ timeout: 30_000 });
+      await expect(screen.getByRole("button", "Open skill installer in terminal")).toHaveCount(0);
+      await expect(screen.getByText(/Ghostty/)).toHaveCount(0);
+      await words.scrollIntoView();
+      await screenshotLightAndDark(app, browser, "default-terminal-elsewhere");
+    } finally {
+      stopFakeInstance(name, { keepHome: false });
+      fake.stop();
     }
   },
 );

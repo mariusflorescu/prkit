@@ -126,18 +126,27 @@ export function CommandLineSettings({
             ) : (
               <>
                 <FixCommand command={state.data.skillCommand} />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={change.isPending}
-                  onClick={() => change.mutate("skill")}
-                >
-                  Open skill installer in terminal
-                </Button>
-                <p className="text-xs text-muted-foreground">
-                  Uses your default terminal. Change it from your terminal's menu, for example
-                  Ghostty &gt; Make Ghostty the Default Terminal.
-                </p>
+                {state.data.opensTerminal ? (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={change.isPending}
+                      onClick={() => change.mutate("skill")}
+                    >
+                      Open skill installer in terminal
+                    </Button>
+                    <p className="text-xs text-muted-foreground">
+                      Uses your default terminal. Change it from your terminal's menu, for example
+                      Ghostty &gt; Make Ghostty the Default Terminal.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Copy the command and run it in your terminal. prkit opens a terminal for you
+                    only on macOS.
+                  </p>
+                )}
               </>
             )}
           </div>

@@ -19,6 +19,8 @@ import { skillBuild } from "./skillBuild.ts";
 import { skillInstallerScript, skillInstallWords } from "./skillCommand.ts";
 import { defaultTerminalScript, terminalsToTry } from "./terminal.ts";
 
+const SCRATCH_PREFIX = "scratch-";
+
 export class CliInstall extends Context.Service<CliInstall, Effect.Success<typeof make>>()(
   "@prkit/server/cli/CliInstall",
 ) {}
@@ -115,6 +117,7 @@ export const make = Effect.gen(function* () {
         pathSource,
         pathCommand: `export PATH=${shellQuote(directory)}:"$PATH"`,
         skillCommand,
+        opensTerminal: process.platform === "darwin",
       } satisfies CliInstallState;
     }).pipe(
       Effect.catchTag("PlatformError", () =>
@@ -218,6 +221,28 @@ export const make = Effect.gen(function* () {
       env: childEnv(process.env),
     });
 
+  /**
+   * A click's scratch that a crash left. Its installer never reached a terminal, unlike the folders
+   * older versions wrote per click, which Ghostty or iTerm2 may still be asking to run, so those
+   * stay.
+   */
+  const removeScratch = Effect.gen(function* () {
+    if (!(yield* fs.exists(installerFolder))) return;
+    yield* requireDirectory(installerFolder);
+    for (const name of yield* fs.readDirectory(installerFolder))
+      if (name.startsWith(SCRATCH_PREFIX))
+        yield* fs
+          .remove(path.join(installerFolder, name), { recursive: true, force: true })
+          .pipe(Effect.ignore);
+  }).pipe(
+    Effect.catchTags({
+      PlatformError: (error) =>
+        Effect.logWarning("Couldn't remove a skill installer's scratch", error),
+      CliInstallError: (error) =>
+        Effect.logWarning("Couldn't remove a skill installer's scratch", error),
+    }),
+  );
+
   const openSkillInstaller = () =>
     Effect.gen(function* () {
       if (skillWords === null)
@@ -243,20 +268,29 @@ export const make = Effect.gen(function* () {
       yield* fs.makeDirectory(installerFolder, { recursive: true, mode: 0o700 });
       yield* requireDirectory(installerFolder);
       yield* fs.chmod(installerFolder, 0o700);
-      // A folder per click, since a terminal may run its file after the next click.
-      const folder = yield* fs.makeTempDirectory({ directory: installerFolder });
-      const file = path.join(folder, "prkit-skill-installer");
-      yield* fs.writeFileString(file, skillInstallerScript(skillWords), {
-        flag: "wx",
-        mode: 0o700,
-      });
+      // One installer for every click, replaced whole and never removed: a terminal may still be
+      // asking about it, or running it, when the next click comes.
+      const file = path.join(installerFolder, "prkit-skill-installer");
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const scratch = yield* fs.makeTempDirectoryScoped({
+            directory: installerFolder,
+            prefix: SCRATCH_PREFIX,
+          });
+          const written = path.join(scratch, "prkit-skill-installer");
+          yield* fs.writeFileString(written, skillInstallerScript(skillWords), {
+            flag: "wx",
+            mode: 0o700,
+          });
+          yield* fs.rename(written, file);
+        }),
+      );
       for (const terminal of terminalsToTry(defaultTerminal)) {
         const code = yield* spawner
           .exitCode(macTool("open", ["-b", terminal.bundleId, file]))
           .pipe(Effect.catchTag("PlatformError", () => Effect.succeed(-1)));
         if (code === 0) return { terminal: terminal.name, isDefault: terminal.isDefault };
       }
-      yield* fs.remove(folder, { recursive: true, force: true }).pipe(Effect.ignore);
       return yield* fail("prkit couldn't open your terminal. Copy the command and run it there.");
     }).pipe(
       Effect.catchTag("PlatformError", () =>
@@ -265,6 +299,7 @@ export const make = Effect.gen(function* () {
         ),
       ),
     );
+  yield* removeScratch;
   return { get, install: () => change(true), uninstall: () => change(false), openSkillInstaller };
 });
 

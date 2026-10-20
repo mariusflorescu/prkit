@@ -426,7 +426,7 @@ it.runIf(process.platform === "darwin")(
         isDefault: true,
       });
       const [file = ""] = NodeFs.readFileSync(opened, "utf8").split("\n");
-      expect(NodePath.dirname(NodePath.dirname(file))).toBe(NodePath.join(home, "terminal"));
+      expect(NodePath.dirname(file)).toBe(NodePath.join(home, "terminal"));
       expect(NodePath.basename(file)).toBe("prkit-skill-installer");
     }),
 );

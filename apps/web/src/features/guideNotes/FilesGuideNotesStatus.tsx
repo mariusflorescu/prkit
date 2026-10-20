@@ -1,10 +1,24 @@
-import { useId } from "react";
+import { useEffect, useId, useState } from "react";
 
 import { Button } from "~/components/ui/button";
 import { ButtonLabel } from "~/components/ui/button-label";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { noNotesHere } from "./placeGuideNotes";
 import type { FilesGuideNotesState } from "./useFilesGuideNotes";
+
+/** A read quicker than this says nothing, so a guide landing never flashes "Loading". */
+const LOADING_WORDS_AFTER_MS = 500;
+
+function useLongLoad(loading: boolean) {
+  const [long, setLong] = useState(false);
+  if (!loading && long) setLong(false);
+  useEffect(() => {
+    if (!loading) return;
+    const timer = setTimeout(() => setLong(true), LOADING_WORDS_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [loading]);
+  return long;
+}
 
 /** What the tab row says about the notes. */
 type NotesStatus = {
@@ -14,7 +28,10 @@ type NotesStatus = {
   readonly story: string;
   readonly busy: boolean;
   /** Beside the words, so what the keyboard is on never turns into something else. */
-  readonly action: { readonly _tag: "retry" | "show"; readonly run: () => void } | null;
+  readonly action:
+    | { readonly _tag: "retry" | "show"; readonly run: () => void }
+    | { readonly _tag: "retrying" }
+    | null;
 };
 
 const said = (words: string, story = words): NotesStatus => ({
@@ -42,6 +59,15 @@ const statusOf = (state: FilesGuideNotesState): NotesStatus | null => {
       return {
         ...said("Guide notes unavailable", `Couldn't load the guide's notes. ${state.message}`),
         action: { _tag: "retry", run: state.retry },
+      };
+    case "retrying":
+      return {
+        ...said(
+          "Guide notes unavailable",
+          "Couldn't load the guide's notes. prkit is reading them again.",
+        ),
+        busy: true,
+        action: { _tag: "retrying" },
       };
     case "hidden":
       return state.waiting ? said("Guide notes show after your comment") : null;
@@ -91,13 +117,15 @@ const statusOf = (state: FilesGuideNotesState): NotesStatus | null => {
  */
 export function FilesGuideNotesStatus({ state }: { state: FilesGuideNotesState }) {
   const storyId = useId();
-  const status = statusOf(state);
+  const loading = state._tag === "loading";
+  const longLoad = useLongLoad(loading);
+  const status = loading && !longLoad ? null : statusOf(state);
   const told = status !== null && status.story !== status.words;
   return (
     <span
       role="status"
       aria-atomic="true"
-      aria-busy={status?.busy === true || undefined}
+      aria-busy={loading || status?.busy === true || undefined}
       data-guide-notes-status=""
       className="flex items-center gap-1.5 text-xs text-muted-foreground"
     >
@@ -129,11 +157,22 @@ export function FilesGuideNotesStatus({ state }: { state: FilesGuideNotesState }
               variant={status.action._tag === "show" ? "outline" : "ghost-muted"}
               size="micro"
               disabled={status.busy}
-              onClick={status.action.run}
+              onClick={status.action._tag === "retrying" ? undefined : status.action.run}
             >
               <ButtonLabel
-                shown={status.action._tag === "retry" ? "retry" : status.busy ? "loading" : "show"}
-                labels={{ retry: "Retry", loading: "Loading...", show: "Show its notes" }}
+                shown={
+                  status.action._tag === "show"
+                    ? status.busy
+                      ? "loading"
+                      : "show"
+                    : status.action._tag
+                }
+                labels={{
+                  retry: "Retry",
+                  retrying: "Retrying...",
+                  loading: "Loading...",
+                  show: "Show its notes",
+                }}
               />
             </Button>
           )}

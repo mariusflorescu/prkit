@@ -1,3 +1,7 @@
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import { DatabaseSync } from "node:sqlite";
+
 import { type Browser, test } from "@e2e-dev/web";
 import { expect, type TestFixtures } from "e2e";
 import * as Schema from "effect/Schema";
@@ -21,6 +25,8 @@ const OLDER = "Guide notes from an older commit";
 const WORDS = "Should short reject an empty slug too?";
 const STORY =
   "Guide notes come from r1, written for an older commit. They show only where the code still reads the same.";
+const LOADING = "Loading guide notes...";
+const UNAVAILABLE = "Guide notes unavailable";
 
 const CHECKS = `export const limits = {
   url: 2048,
@@ -149,6 +155,42 @@ const revisionCount = (home: string) =>
     `SELECT COUNT(*) AS n FROM review_revisions r JOIN reviews v ON v.id = r.review_id WHERE v.pr_key = '${KEY}'`,
   )[0]?.n;
 const settle = () => new Promise((resolve) => setTimeout(resolve, 1_000));
+
+const storedGuide = (home: string) =>
+  String(
+    readRows(
+      home,
+      `SELECT r.guide FROM review_revisions r JOIN reviews v ON v.id = r.review_id
+       WHERE v.pr_key = '${KEY}' AND r.revision = 1`,
+    )[0]?.guide ?? "",
+  );
+const storeGuide = (home: string, guide: string) => {
+  const db = new DatabaseSync(NodePath.join(home, "prkit.sqlite"));
+  try {
+    db.prepare(
+      `UPDATE review_revisions SET guide = ?
+       WHERE review_id = (SELECT id FROM reviews WHERE pr_key = ?) AND revision = 1`,
+    ).run(guide, KEY);
+  } finally {
+    db.close();
+  }
+};
+
+/**
+ * Holds every guide read on the server (`e2eHold.ts`): for `millis` each when given, else until
+ * `release`. `reached` resolves once a read is held.
+ */
+const holdGuideReads = (home: string, millis?: number) => {
+  const file = NodePath.join(home, "e2e-holds", "guide-read");
+  NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true });
+  NodeFS.rmSync(`${file}.reached`, { force: true });
+  NodeFS.writeFileSync(file, millis === undefined ? "" : String(millis));
+  return {
+    reached: () =>
+      expect.poll(() => NodeFS.existsSync(`${file}.reached`), { timeout: 120_000 }).toBe(true),
+    release: () => NodeFS.rmSync(file, { force: true }),
+  };
+};
 
 /** Whether the tab row needs scrolling to show all of itself. */
 const tabRowOverflows = (browser: Browser) =>
@@ -365,6 +407,135 @@ test(
       expect(await tops(browser)).toEqual([start]);
       expect(await notesWords(browser)).toBe("");
       await app.screenshot("files-notes-line-none-newer-dark");
+    } finally {
+      stopFakeInstance(name, { keepHome: false });
+      fake.stop();
+    }
+  },
+);
+
+test(
+  "notes line on Files: a quick read of a landing guide's notes says nothing, and a slow one says it is loading",
+  { timeout: 480_000 },
+  async ({ app, screen, browser }) => {
+    const name = "files-notes-line-loading";
+    const { fake, claude, run } = await setUp(name);
+    try {
+      claude.notes({ [LIMITS]: [question(3, SLUG)] });
+      await browser.setViewport({ width: 1280, height: 900 });
+      await emulateOsColorScheme(browser, "light");
+      await app.open(run.openUrl);
+      await expect(screen.getByRole("link", "Inbox")).toBeVisible({ timeout: 30_000 });
+      const tabs = screen.getByRole("navigation", "Pull request tabs");
+      const file = screen.getByRole("region", LIMITS);
+      const note = browser.locator(`[data-path="${LIMITS}"] [data-guide-note]`);
+      await app.open(`${run.url}${PR}&tab=guide`);
+      await screen.getByRole("button", "Generate guide").tap({ timeout: 60_000 });
+      await tabs.getByRole("link", "Files").tap();
+      await expect(file).toBeVisible({ timeout: 30_000 });
+      await recordFrames(browser);
+      const [start = ""] = await tops(browser);
+
+      const quick = holdGuideReads(run.home, 150);
+      claude.release();
+      await quick.reached();
+      await expect(note).toBeVisible({ timeout: 30_000 });
+      quick.release();
+      await settle();
+      expect((await frames(browser)).filter((frame) => frame.includes(LOADING))).toEqual([]);
+      expect(await tops(browser)).toEqual([start]);
+      expect(await notesWords(browser)).toBe("");
+
+      // A reload forgets the read, so showing the notes again reads them again.
+      await tabs.getByRole("button", "Hide guide notes").tap();
+      await expect(note).toHaveCount(0);
+      await app.open(`${run.url}${PR}&tab=files`);
+      await expect(file).toBeVisible({ timeout: 30_000 });
+      await recordFrames(browser);
+      const [shown = ""] = await tops(browser);
+      const slow = holdGuideReads(run.home);
+      await tabs.getByRole("button", "Show guide notes").tap();
+      await slow.reached();
+      const loading = tabs.getByRole("button", LOADING);
+      await expect(loading).toBeVisible({ timeout: 5_000 });
+      await settle();
+      await screenshotLightAndDark(app, browser, "files-notes-line-loading");
+      await browser.setViewport({ width: 760, height: 900 });
+      await expect.poll(() => tabRowOverflows(browser)).toBe(false);
+      await screenshotLightAndDark(app, browser, "files-notes-line-loading-narrow");
+      await browser.setViewport({ width: 1280, height: 900 });
+      await settle();
+      slow.release();
+      await expect(note).toBeVisible({ timeout: 30_000 });
+      await expect(loading).toHaveCount(0);
+      expect(await notesWords(browser)).toBe("");
+      await settle();
+      expect(await tops(browser)).toEqual([shown]);
+    } finally {
+      stopFakeInstance(name, { keepHome: false });
+      fake.stop();
+    }
+  },
+);
+
+test(
+  "notes line on Files: notes prkit can't read say so with a Retry, and Retry brings them once they read again",
+  { timeout: 480_000 },
+  async ({ app, screen, browser }) => {
+    const name = "files-notes-line-failed";
+    const { fake, claude, run } = await setUp(name);
+    try {
+      claude.notes({ [LIMITS]: [question(3, SLUG)] });
+      claude.release();
+      await browser.setViewport({ width: 1280, height: 900 });
+      await emulateOsColorScheme(browser, "light");
+      await app.open(run.openUrl);
+      await expect(screen.getByRole("link", "Inbox")).toBeVisible({ timeout: 30_000 });
+      const tabs = screen.getByRole("navigation", "Pull request tabs");
+      const file = screen.getByRole("region", LIMITS);
+      const note = browser.locator(`[data-path="${LIMITS}"] [data-guide-note]`);
+      const notesStatus = browser.locator("nav [data-guide-notes-status]");
+      await app.open(`${run.url}${PR}&tab=guide`);
+      await screen.getByRole("button", "Generate guide").tap({ timeout: 60_000 });
+      await expect.poll(() => revisionCount(run.home), { timeout: 120_000 }).toBe(1);
+
+      const guide = storedGuide(run.home);
+      storeGuide(run.home, '{"damaged":true}');
+      await app.open(`${run.url}${PR}&tab=files`);
+      const unavailable = tabs.getByRole("button", UNAVAILABLE);
+      await expect(unavailable).toBeVisible({ timeout: 30_000 });
+      await expect(file).toBeVisible();
+      await expect(note).toHaveCount(0);
+      await expect(notesStatus).toContainText(
+        "Couldn't load the guide's notes. prkit read a damaged review record.",
+      );
+      const retry = tabs.getByRole("button", "Retry");
+      await expect(retry).toBeVisible();
+      await screenshotLightAndDark(app, browser, "files-notes-line-failed");
+      await browser.setViewport({ width: 760, height: 900 });
+      await expect.poll(() => tabRowOverflows(browser)).toBe(false);
+      await expect(retry).toBeVisible();
+      await screenshotLightAndDark(app, browser, "files-notes-line-failed-narrow");
+      await browser.setViewport({ width: 1280, height: 900 });
+
+      const again = holdGuideReads(run.home);
+      await retry.tap();
+      await again.reached();
+      const retrying = tabs.getByRole("button", "Retrying...");
+      await expect(retrying).toBeDisabled();
+      await app.screenshot("files-notes-line-failed-retrying");
+      again.release();
+      await expect(retry).toBeEnabled({ timeout: 30_000 });
+      await expect(unavailable).toBeVisible();
+      await expect(note).toHaveCount(0);
+
+      storeGuide(run.home, guide);
+      await retry.tap();
+      await expect(note).toBeVisible({ timeout: 30_000 });
+      await expect(unavailable).toHaveCount(0);
+      await expect(retry).toHaveCount(0);
+      expect(await notesWords(browser)).toBe("");
+      await app.screenshot("files-notes-line-failed-recovered");
     } finally {
       stopFakeInstance(name, { keepHome: false });
       fake.stop();

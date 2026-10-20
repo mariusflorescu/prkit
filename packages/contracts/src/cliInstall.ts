@@ -9,6 +9,8 @@ export const CliInstallState = Schema.Struct({
   pathSource: Schema.Literals(["process", "system", "missing"]),
   pathCommand: Schema.String,
   skillCommand: Schema.NullOr(Schema.String),
+  /** Whether prkit can open the skill installer in a terminal here, which it does only on macOS. */
+  opensTerminal: Schema.Boolean,
 });
 export type CliInstallState = typeof CliInstallState.Type;
 
