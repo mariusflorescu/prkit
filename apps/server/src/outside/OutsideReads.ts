@@ -1,4 +1,5 @@
 import {
+  AGENT_KIND_NAMES,
   type DiffSnapshot,
   forReader,
   PullRequestFile,
@@ -177,9 +178,8 @@ export const makeOutsideReads = (
           input.refresh === true && input.cursor === undefined,
           input.instance,
         );
-        const rows = list.providers
-          .filter((entry) => input.instance === undefined || entry.instance === input.instance)
-          .map((entry) => ({
+        const rows = [
+          ...list.providers.map((entry) => ({
             instance: entry.instance,
             kind: entry.kind,
             label: entry.label,
@@ -189,7 +189,23 @@ export const makeOutsideReads = (
             ready: entry.state._tag === "ready",
             problem: entry.state._tag === "unavailable" ? entry.state.message : null,
             models: entry.models,
-          }));
+          })),
+          // A setting prkit can't read runs nothing; it is listed so a client sees why.
+          ...list.damaged.map((entry) => ({
+            instance: entry.instance,
+            kind: entry.kind,
+            label:
+              entry.isDefault && entry.kind !== null
+                ? AGENT_KIND_NAMES[entry.kind].short
+                : entry.instance,
+            enabled: false,
+            isDefault: entry.isDefault,
+            version: null,
+            ready: false,
+            problem: entry.message,
+            models: [],
+          })),
+        ].filter((row) => input.instance === undefined || row.instance === input.instance);
         return yield* page(rows, input, `agents:${input.instance ?? "all"}`);
       }).pipe(Effect.mapError(asFailure));
 

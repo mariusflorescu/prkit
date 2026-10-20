@@ -96,7 +96,8 @@ export const RepositoryPullRequestsResult = Schema.Struct({
 /** Configuration paths, login commands and every environment value stay on the server. */
 export const OutsideAgent = Schema.Struct({
   instance: AgentCatalogEntry.fields.instance,
-  kind: AgentCatalogEntry.fields.kind,
+  /** Null only for a setting prkit can't read whose kind it can't read either. */
+  kind: Schema.NullOr(AgentCatalogEntry.fields.kind),
   label: AgentCatalogEntry.fields.label,
   enabled: Schema.Boolean,
   isDefault: Schema.Boolean,

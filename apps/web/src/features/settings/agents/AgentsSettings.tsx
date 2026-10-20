@@ -1,3 +1,4 @@
+import { AGENT_KINDS, type AgentProviderKind } from "@prkit/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { PlusIcon, RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
@@ -15,8 +16,13 @@ import { SettingsAlert } from "../SettingsAlert";
 import { SettingsSection } from "../SettingsSection";
 import { AddAgentDialog } from "./AddAgentDialog";
 import { AgentInstanceCard } from "./AgentInstanceCard";
+import { DamagedAgentRow } from "./DamagedAgentRow";
 import { DefaultAgentSetting } from "./DefaultAgentSetting";
 import { useCheckAgents } from "./useCheckAgents";
+
+/** Where a kind's rows go; a setting whose kind can't be read goes last. */
+const kindRank = (kind: AgentProviderKind | null) =>
+  kind === null ? AGENT_KINDS.length : AGENT_KINDS.indexOf(kind);
 
 /**
  * Settings > Agents: every agent setup on this machine (each kind's default, then the ones the
@@ -32,6 +38,18 @@ export function AgentsSettings() {
     catalog.data !== undefined && settings.data !== undefined
       ? { catalog: catalog.data, settings: settings.data }
       : undefined;
+  // A setting prkit can't read sits with its kind, a default one where the default would be.
+  const rows =
+    data === undefined
+      ? []
+      : [
+          ...data.catalog.providers.map((entry) => ({ _tag: "agent" as const, agent: entry })),
+          ...data.catalog.damaged.map((damaged) => ({ _tag: "damaged" as const, agent: damaged })),
+        ].toSorted(
+          (left, right) =>
+            kindRank(left.agent.kind) - kindRank(right.agent.kind) ||
+            Number(right.agent.isDefault) - Number(left.agent.isDefault),
+        );
   return (
     <SettingsSection
       title="Agents"
@@ -78,7 +96,7 @@ export function AgentsSettings() {
         <ListSkeleton label="Loading agents" rows={3} kind="accounts" />
       ) : (
         <div className="mt-5 border-t border-border/60">
-          {data.catalog.providers.length === 0 ? (
+          {rows.length === 0 ? (
             <p
               role="status"
               className="border-b border-border/60 py-6 text-center text-xs text-muted-foreground"
@@ -87,14 +105,18 @@ export function AgentsSettings() {
             </p>
           ) : (
             <ul aria-label="Agents">
-              {data.catalog.providers.map((entry) => (
-                <AgentInstanceCard
-                  key={entry.instance}
-                  entry={entry}
-                  catalog={data.catalog}
-                  checkingAll={checkAgain.isPending}
-                />
-              ))}
+              {rows.map((row) =>
+                row._tag === "damaged" ? (
+                  <DamagedAgentRow key={row.agent.instance} damaged={row.agent} />
+                ) : (
+                  <AgentInstanceCard
+                    key={row.agent.instance}
+                    entry={row.agent}
+                    catalog={data.catalog}
+                    checkingAll={checkAgain.isPending}
+                  />
+                ),
+              )}
             </ul>
           )}
           <DefaultAgentSetting

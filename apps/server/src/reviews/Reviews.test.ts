@@ -124,6 +124,7 @@ const CATALOG: AgentCatalog = {
       ],
     },
   ],
+  damaged: [],
 };
 
 const FLOW = {
@@ -287,6 +288,7 @@ const scriptedAgents = (turns: Queue.Queue<Turn>) =>
       return Agents.of({
         get: () => Effect.succeed(provider),
         usable: (instance) => Effect.succeed(instance),
+        damagedMessage: () => Effect.succeed(null),
         sameGroup: (instance) => Effect.succeed([instance]),
         catalog: () => Effect.succeed(CATALOG),
         invalidate: Effect.void,

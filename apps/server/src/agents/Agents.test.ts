@@ -314,7 +314,9 @@ describe("AgentInstances secrets", () => {
           }),
         );
 
-        const read = (yield* store.resolved).find((entry) => entry.config.id === "claude_work");
+        const read = (yield* store.resolved).instances.find(
+          (entry) => entry.config.id === "claude_work",
+        );
         expect(read?.environment).toEqual({ HTTPS_PROXY: "http://proxy", MY_TOKEN: "s3cret" });
         expect(read?.config.environment).toEqual([
           { name: "HTTPS_PROXY", value: "http://proxy", sensitive: false, valueRedacted: false },
@@ -333,7 +335,9 @@ describe("AgentInstances secrets", () => {
         yield* store.update(
           work({ label: "Day job", environment: read?.config.environment ?? [] }),
         );
-        const kept = (yield* store.resolved).find((entry) => entry.config.id === "claude_work");
+        const kept = (yield* store.resolved).instances.find(
+          (entry) => entry.config.id === "claude_work",
+        );
         expect(kept?.environment["MY_TOKEN"]).toBe("s3cret");
 
         yield* store.drop(id("claude_work"));
@@ -412,7 +416,7 @@ describe("AgentInstances secrets", () => {
           "couldn't read its saved secrets",
         );
         expect(
-          (yield* store.resolved).find((e) => e.config.id === "claude_work")?.environment,
+          (yield* store.resolved).instances.find((e) => e.config.id === "claude_work")?.environment,
         ).toEqual({});
 
         // Turning a default off still works and leaves the file alone; a secret save doesn't.
@@ -444,7 +448,7 @@ describe("AgentInstances secrets", () => {
         }
         const gone = yield* store.update(work({ id: id("Claude_Work") })).pipe(Effect.flip);
         expect(gone.message).toBe("That agent was removed. Check again.");
-        expect((yield* store.resolved).map((entry) => entry.config.id)).toEqual([
+        expect((yield* store.resolved).instances.map((entry) => entry.config.id)).toEqual([
           "claude",
           "codex",
           "cursor",
@@ -467,7 +471,7 @@ describe("AgentInstances secrets", () => {
           )
           .pipe(Effect.flip);
         expect(refused.message).toContain("off your subscription");
-        expect((yield* store.resolved).map((entry) => entry.config.id)).toEqual([
+        expect((yield* store.resolved).instances.map((entry) => entry.config.id)).toEqual([
           "claude",
           "codex",
           "cursor",
@@ -510,7 +514,9 @@ describe("AgentInstances secrets", () => {
         expect(folder.message).toContain("leave Config folder and Binary path empty");
 
         yield* store.create(cursor({ environment: [key(true)] }));
-        const read = (yield* store.resolved).find((entry) => entry.config.id === "cursor_work");
+        const read = (yield* store.resolved).instances.find(
+          (entry) => entry.config.id === "cursor_work",
+        );
         expect(read?.environment).toEqual({ CURSOR_API_KEY: "key_123" });
         expect(read?.config.environment[0]?.value).toBe("");
         // A saved key can't be turned into a plain value later.
@@ -518,7 +524,9 @@ describe("AgentInstances secrets", () => {
           .update(cursor({ environment: [{ ...key(false), value: "key_456" }] }))
           .pipe(Effect.flip);
         expect(flipped.message).toContain("Sensitive");
-        const kept = (yield* store.resolved).find((entry) => entry.config.id === "cursor_work");
+        const kept = (yield* store.resolved).instances.find(
+          (entry) => entry.config.id === "cursor_work",
+        );
         expect(kept?.environment).toEqual({ CURSOR_API_KEY: "key_123" });
       }),
     ));

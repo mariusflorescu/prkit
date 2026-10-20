@@ -527,7 +527,10 @@ export const make = Effect.gen(function* () {
       const instance = yield* agents.usable(context.agent.instance, context.agent.kind);
       const provider: AgentProvider | null = instance === null ? null : yield* agents.get(instance);
       if (provider === null)
-        return yield* new AnswerFailure({ reason: "not-ready", message: AGENT_OFF });
+        return yield* new AnswerFailure({
+          reason: "not-ready",
+          message: (yield* agents.damagedMessage(instance ?? context.agent.instance)) ?? AGENT_OFF,
+        });
       const group = yield* agents.sameGroup(provider.instance);
       const plan = forkSources({
         canFork: provider.forkTurn !== null,
@@ -798,8 +801,12 @@ export const make = Effect.gen(function* () {
           return yield* refuse("not-found", `This review has no guide revision ${input.revision}.`);
         const problem = scopeProblem(input.scope, context);
         if (problem !== null) return yield* refuse("invalid", problem);
-        if ((yield* agents.usable(context.agent.instance, context.agent.kind)) === null)
-          return yield* refuse("not-ready", AGENT_OFF);
+        const instance = yield* agents.usable(context.agent.instance, context.agent.kind);
+        if (instance === null || (yield* agents.get(instance)) === null)
+          return yield* refuse(
+            "not-ready",
+            (yield* agents.damagedMessage(instance ?? context.agent.instance)) ?? AGENT_OFF,
+          );
         const id = QuestionId.make(yield* newId);
         const askedBy = yield* StartedBy;
         const at = yield* now;

@@ -102,8 +102,28 @@ export const AgentCatalogEntry = Schema.Struct({
 });
 export type AgentCatalogEntry = typeof AgentCatalogEntry.Type;
 
-/** Every instance, default first within each kind, its login, and the models it offers. */
-export const AgentCatalog = Schema.Struct({ providers: Schema.Array(AgentCatalogEntry) });
+/**
+ * An agent setting prkit can't read. It runs nothing, and nothing set to run on it runs on another
+ * agent or login instead, until it is removed (or, for a default, reset).
+ */
+export const DamagedAgent = Schema.Struct({
+  instance: AgentInstanceId,
+  /** Null when the kind can't be read either. */
+  kind: Schema.NullOr(AgentProviderKind),
+  isDefault: Schema.Boolean,
+  /** What happened and the way out, in words for the user. */
+  message: Schema.String,
+});
+export type DamagedAgent = typeof DamagedAgent.Type;
+
+/**
+ * Every instance, default first within each kind, its login, and the models it offers, and the
+ * settings prkit can't read.
+ */
+export const AgentCatalog = Schema.Struct({
+  providers: Schema.Array(AgentCatalogEntry),
+  damaged: Schema.Array(DamagedAgent),
+});
 export type AgentCatalog = typeof AgentCatalog.Type;
 
 const SelectionFields = {
@@ -133,8 +153,24 @@ export const findAgentEntry = (catalog: AgentCatalog, instance: string) =>
 export const findAgentModel = (catalog: AgentCatalog, instance: string, slug: string | null) =>
   findAgentEntry(catalog, instance)?.models.find((model) => model.slug === slug);
 
+export const findDamagedAgent = (catalog: AgentCatalog, instance: string) =>
+  catalog.damaged.find((entry) => entry.instance === instance);
+
+/**
+ * The setting prkit can't read that a guide or fix session on `instance` stays on: its own, or its
+ * kind's default when its own is off or gone. Such a session runs nowhere else until it is fixed
+ * or another agent is picked.
+ */
+export const pinnedDamage = (catalog: AgentCatalog, instance: string, kind: AgentProviderKind) =>
+  findDamagedAgent(catalog, instance) ??
+  (findAgentEntry(catalog, instance)?.enabled === true
+    ? undefined
+    : findDamagedAgent(catalog, defaultInstanceId(kind)));
+
 /** Why a selection can't run now, in words for the user, or null when it can. */
 export const selectionProblem = (catalog: AgentCatalog, selection: AgentSelection) => {
+  const damaged = findDamagedAgent(catalog, selection.instance);
+  if (damaged !== undefined) return damaged.message;
   const provider = findAgentEntry(catalog, selection.instance);
   if (provider === undefined)
     return "That agent was removed in Settings > Agents. Pick another one.";
@@ -154,13 +190,19 @@ export const selectionProblem = (catalog: AgentCatalog, selection: AgentSelectio
 
 /**
  * The selection to use when none is given: `preferred` if it can run, else the
- * default model of the first ready instance. Null when no agent is ready.
+ * default model of the first ready instance. Null when no agent is ready. A `preferred` whose
+ * setting prkit can't read stays, so it says why rather than running on another login.
  */
 export const effectiveSelection = (
   catalog: AgentCatalog,
   preferred: AgentSelection | null,
 ): AgentSelection | null => {
-  if (preferred !== null && selectionProblem(catalog, preferred) === null) return preferred;
+  if (
+    preferred !== null &&
+    (findDamagedAgent(catalog, preferred.instance) !== undefined ||
+      selectionProblem(catalog, preferred) === null)
+  )
+    return preferred;
   for (const provider of catalog.providers) {
     if (provider.state._tag !== "ready") continue;
     const usable = provider.models.filter((model) => model.blocked === null);
@@ -173,7 +215,9 @@ export const effectiveSelection = (
 /**
  * What a PR's guide or fix session runs on next, as the server picks it: its own instance while
  * that is on, else its kind's default instance while that is on, else `fallback` (the default
- * agent). Each is then checked as `effectiveSelection` checks it.
+ * agent). Each is then checked as `effectiveSelection` checks it. An own instance, or a kind's
+ * default, whose setting prkit can't read stays, so it says why rather than running on another
+ * login.
  */
 export const sessionSelection = (
   catalog: AgentCatalog,
@@ -186,6 +230,8 @@ export const sessionSelection = (
 ) => {
   if (own === null) return effectiveSelection(catalog, fallback);
   const selection = { model: own.model, options: own.options };
+  const pinned = pinnedDamage(catalog, own.instance, own.kind);
+  if (pinned !== undefined) return { ...selection, instance: pinned.instance };
   if (findAgentEntry(catalog, own.instance)?.enabled === true)
     return effectiveSelection(catalog, { ...selection, instance: own.instance });
   const kindDefault = defaultInstanceId(own.kind);

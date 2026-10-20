@@ -2,6 +2,7 @@ import {
   everythingSkippedMessage,
   type PullRequestDetail,
   type Review,
+  pinnedDamage,
   selectionProblem,
   sessionSelection,
 } from "@prkit/contracts";
@@ -120,10 +121,16 @@ export function GuideSetup({
     (catalog.data === undefined || settings.data === undefined
       ? null
       : sessionSelection(catalog.data, own, settings.data.defaultAgent));
+  // A review on a setting prkit can't read stays on it, a review from before models included.
+  const pinned =
+    picked === null && catalog.data !== undefined && review != null
+      ? pinnedDamage(catalog.data, review.instance, review.provider)
+      : undefined;
   const problem =
-    catalog.data === undefined || selection === null
+    pinned?.message ??
+    (catalog.data === undefined || selection === null
       ? null
-      : selectionProblem(catalog.data, selection);
+      : selectionProblem(catalog.data, selection));
   const blocked =
     preview.everythingSkipped && preview.skipped !== null
       ? everythingSkippedMessage(

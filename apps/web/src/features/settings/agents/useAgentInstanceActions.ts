@@ -1,4 +1,4 @@
-import type { AgentCatalog, AgentInstanceConfig, AgentInstanceId } from "@prkit/contracts";
+import type { AgentCatalog, AgentInstanceId } from "@prkit/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { toastManager } from "~/components/ui/toast";
@@ -12,6 +12,9 @@ import {
 import { agentCatalogQuery } from "~/rpc/queries";
 
 import { configOf } from "./instanceConfig";
+
+/** An instance as Remove and Reset name it, a setting prkit can't read included. */
+type NamedAgent = { readonly instance: AgentInstanceId; readonly label: string };
 
 /**
  * Every change to one agent instance from Settings > Agents. Each stores the catalog the server
@@ -61,17 +64,17 @@ export function useAgentInstanceActions() {
     },
   });
   const remove = useMutation({
-    mutationFn: (config: AgentInstanceConfig) => removeAgentInstance(config.id),
-    onSuccess: (catalog, config) => {
+    mutationFn: (agent: NamedAgent) => removeAgentInstance(agent.instance),
+    onSuccess: (catalog, agent) => {
       store(catalog);
-      toastManager.add({ title: `Removed ${config.label}`, type: "success" });
+      toastManager.add({ title: `Removed ${agent.label}`, type: "success" });
     },
   });
   const reset = useMutation({
-    mutationFn: (config: AgentInstanceConfig) => resetAgentInstance(config.id),
-    onSuccess: (catalog, config) => {
+    mutationFn: (agent: NamedAgent) => resetAgentInstance(agent.instance),
+    onSuccess: (catalog, agent) => {
       store(catalog);
-      toastManager.add({ title: `Reset ${config.label} to its defaults`, type: "success" });
+      toastManager.add({ title: `Reset ${agent.label} to its defaults`, type: "success" });
     },
   });
   const check = useMutation({

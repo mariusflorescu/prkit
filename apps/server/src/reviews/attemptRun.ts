@@ -284,7 +284,8 @@ export const makeAttemptRun = (
       if (provider === null)
         return yield* fail(
           "agent-auth",
-          "This guide's agent is turned off or was removed. Pick another agent and retry.",
+          (yield* agents.damagedMessage(review.instance)) ??
+            "This guide's agent is turned off or was removed. Pick another agent and retry.",
         );
       const state = yield* provider.check;
       if (state._tag === "unavailable") {

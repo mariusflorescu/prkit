@@ -4,7 +4,6 @@ import { AGENT_KIND_NAMES, type AgentCatalogEntry, type AgentProviderKind } from
 import { Button } from "~/components/ui/button";
 import { ButtonLabel } from "~/components/ui/button-label";
 
-import { configOf } from "./instanceConfig";
 import { useAgentInstanceActions } from "./useAgentInstanceActions";
 
 /** What removing leaves of an instance's folders and login. */
@@ -76,9 +75,7 @@ export function RemoveAgentDialog({
               variant="destructive"
               disabled={remove.isPending}
               aria-busy={remove.isPending}
-              onClick={() =>
-                remove.mutate(configOf(entry), { onSuccess: () => onOpenChange(false) })
-              }
+              onClick={() => remove.mutate(entry, { onSuccess: () => onOpenChange(false) })}
             >
               <ButtonLabel
                 shown={remove.isPending ? "removing" : "remove"}
