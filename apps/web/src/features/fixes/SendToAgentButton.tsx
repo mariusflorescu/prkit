@@ -34,9 +34,7 @@ export function SendToAgentButton({
       </PopoverTrigger>
       <PopoverPopup width="xl" align="end">
         <p className="text-sm font-medium">Send to agent</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          The agent fixes it on this branch. You review the change before anything is pushed.
-        </p>
+        <p className="mt-1 text-xs text-muted-foreground">The agent fixes it on this branch.</p>
         {open && <SendToAgentForm detail={detail} only={target} onDone={() => setOpen(false)} />}
       </PopoverPopup>
     </Popover>

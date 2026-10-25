@@ -85,7 +85,7 @@ export function SendToAgentFields({
       toastManager.add({
         type: "success",
         title: "Sent to the agent",
-        description: `${plural(values.picked.length, "comment")}. You review the changes before anything is pushed.`,
+        description: plural(values.picked.length, "comment"),
         actionProps: { children: "Open Fixes", onClick: openFixes },
       });
       onDone();

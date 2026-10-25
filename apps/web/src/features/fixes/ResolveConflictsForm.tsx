@@ -1,11 +1,13 @@
 import type { AgentSelection, ConflictStrategy, PullRequestDetail } from "@prkit/contracts";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useForm, useWatch } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
 import { ButtonLabel } from "~/components/ui/button-label";
+import { Skeleton } from "~/components/ui/skeleton";
 import { resolveConflicts } from "~/rpc/client";
+import { pushAccessQuery, scriptAccessQuery } from "~/rpc/queries";
 
 import { runsOnCursor } from "./cursorFixes";
 import { FixAgentPicker } from "./FixAgentPicker";
@@ -22,6 +24,7 @@ interface Values {
 /**
  * Asks the fix agent to resolve the PR's conflicts: merge the base in (a normal
  * push), or, on your own PR, rebase onto it (always a manual force-push with lease).
+ * It shows once the agent and what it may push and run are read, like Send to agent.
  */
 export function ResolveConflictsForm({
   detail,
@@ -37,6 +40,8 @@ export function ResolveConflictsForm({
   const form = useForm<Values>({ defaultValues: { strategy: "merge", agent: null } });
   const chosen = useWatch({ control: form.control, name: "agent" });
   const agent = useFixAgent(detail.key, chosen);
+  const pushAccess = useQuery(pushAccessQuery(detail.key, detail.accountId));
+  const scriptAccess = useQuery(scriptAccessQuery(detail.key, detail.accountId));
   const start = useMutation({
     mutationFn: (values: Values) => {
       if (agent.selection === null) return Promise.reject(new Error("Pick an agent first."));
@@ -63,6 +68,34 @@ export function ResolveConflictsForm({
     },
   });
   const submit = form.handleSubmit((values) => start.mutate(values));
+  const onGitHub = (
+    <Button
+      size="xs"
+      variant="link"
+      render={<a href={`${detail.url}/conflicts`} target="_blank" rel="noreferrer" />}
+    >
+      Resolve on GitHub instead
+    </Button>
+  );
+  if (agent.error !== null)
+    return (
+      <div className="space-y-3">
+        <div role="alert" className="flex items-center gap-2 text-xs text-error-foreground">
+          <span>{agent.error.message}</span>
+          <Button variant="outline" size="compact" onClick={agent.retry}>
+            Retry
+          </Button>
+        </div>
+        {onGitHub}
+      </div>
+    );
+  if (!agent.known || pushAccess.isPending || scriptAccess.isPending)
+    return (
+      <div aria-busy="true" aria-label="Loading the form" className="space-y-2">
+        <Skeleton className="h-8 w-full" />
+        <Skeleton className="h-8 w-4/5" />
+      </div>
+    );
   return (
     <form
       noValidate
@@ -117,13 +150,7 @@ export function ResolveConflictsForm({
         </p>
       )}
       <div className="flex items-center justify-between gap-2">
-        <Button
-          size="xs"
-          variant="link"
-          render={<a href={`${detail.url}/conflicts`} target="_blank" rel="noreferrer" />}
-        >
-          Resolve on GitHub instead
-        </Button>
+        {onGitHub}
         <Button
           type="submit"
           size="sm"

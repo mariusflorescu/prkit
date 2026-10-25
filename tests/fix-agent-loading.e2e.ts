@@ -1,5 +1,6 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { test } from "@e2e-dev/web";
 import { expect } from "e2e";
@@ -48,16 +49,13 @@ const clickSubmit = (browser: Fixtures["browser"], form: string) =>
     return null;
   }, form);
 
-const layoutOf = (browser: Fixtures["browser"], form: string) =>
-  browser.evaluate((label: string) => {
-    const node = document.querySelector(`form[aria-label="${label}"]`);
-    const submit = node?.querySelector('button[type="submit"]')?.getBoundingClientRect();
-    return {
-      submitTop: Math.round(submit?.top ?? -1),
-      submitHeight: Math.round(submit?.height ?? -1),
-      formHeight: Math.round(node?.getBoundingClientRect().height ?? -1),
-    };
-  }, form);
+/** Whether a form offers an enabled submit button. */
+const submitEnabled = (browser: Fixtures["browser"], form: string) =>
+  browser.evaluate(
+    (label: string) =>
+      document.querySelector(`form[aria-label="${label}"] button[type="submit"]:enabled`) !== null,
+    form,
+  );
 
 const shown = (browser: Fixtures["browser"]) =>
   expect
@@ -91,34 +89,33 @@ const wordsOf = (browser: Fixtures["browser"], form: string) =>
     form,
   );
 
-/** Notes where every element of a form sits, for `movedSinceMarked`. */
-const markPlaces = (browser: Fixtures["browser"], form: string) =>
-  browser.evaluate((label: string) => {
-    const node = document.querySelector(`form[aria-label="${label}"]`);
-    const all = node === null ? [] : [node, ...node.querySelectorAll("*")];
-    for (const element of all) {
-      const box = element.getBoundingClientRect();
-      element.setAttribute("data-held-at", `${Math.round(box.left)},${Math.round(box.top)}`);
-    }
-    return all.length;
-  }, form);
+/** Notes where every element of the open popups sits, under `mark`, for `movedSince`. */
+const markPlaces = (browser: Fixtures["browser"], mark: string) =>
+  browser.evaluate((name: string) => {
+    for (const popup of document.querySelectorAll('[role="dialog"]'))
+      for (const element of [popup, ...popup.querySelectorAll("*")]) {
+        const box = element.getBoundingClientRect();
+        element.setAttribute(`data-at-${name}`, `${Math.round(box.left)},${Math.round(box.top)}`);
+      }
+    return null;
+  }, mark);
 
-/** The elements `markPlaces` noted that are still in the form and sit somewhere else now. */
-const movedSinceMarked = (browser: Fixtures["browser"], form: string) =>
-  browser.evaluate((label: string) => {
-    const node = document.querySelector(`form[aria-label="${label}"]`);
-    const all = node === null ? [] : [node, ...node.querySelectorAll("[data-held-at]")];
-    return all.flatMap((element) => {
-      const box = element.getBoundingClientRect();
-      const now = `${Math.round(box.left)},${Math.round(box.top)}`;
-      const was = element.getAttribute("data-held-at") ?? "";
-      return was === now
-        ? []
-        : [
-            `${element.tagName.toLowerCase()} "${(element.textContent ?? "").slice(0, 48)}" ${was} -> ${now}`,
-          ];
-    });
-  }, form);
+/** The elements noted under `mark` that are still on the page and sit somewhere else now. */
+const movedSince = (browser: Fixtures["browser"], mark: string) =>
+  browser.evaluate(
+    (name: string) =>
+      [...document.querySelectorAll(`[data-at-${name}]`)].flatMap((element) => {
+        const box = element.getBoundingClientRect();
+        const now = `${Math.round(box.left)},${Math.round(box.top)}`;
+        const was = element.getAttribute(`data-at-${name}`) ?? "";
+        return was === now
+          ? []
+          : [
+              `${element.tagName.toLowerCase()} "${(element.textContent ?? "").slice(0, 48)}" ${was} -> ${now}`,
+            ];
+      }),
+    mark,
+  );
 
 test(
   "Send to agent and Resolve conflicts show and send no agent until the pull request's fix session is read",
@@ -174,9 +171,7 @@ test(
         await openWithAgentsRead(page, run.url);
         await screen.getByRole("button", "Resolve conflicts").tap();
         const resolve = screen.getByRole("form", "Resolve conflicts");
-        await expect(resolve.getByRole("button", "Resolve with the agent")).toBeVisible({
-          timeout: 30_000,
-        });
+        await expect(screen.getByRole("dialog").first()).toBeVisible({ timeout: 30_000 });
         await expect.poll(resolveHold.reached, { timeout: 30_000 }).toBe(true);
         await shown(browser);
         await app.screenshot("fix-agent-loading-resolve-held");
@@ -185,7 +180,7 @@ test(
           .poll(
             async () =>
               (await resolve.count()) === 0 ||
-              (await resolve.getByLabel("Loading agents").count()) === 1,
+              (await screen.getByLabel("Loading the form").count()) === 1,
             { timeout: 30_000 },
           )
           .toBe(true);
@@ -193,7 +188,7 @@ test(
           discarded,
         ]);
         await expect(resolve.getByRole("alert")).toHaveCount(0);
-        await expect(resolve.getByRole("button", "Resolve with the agent")).toBeDisabled();
+        expect(await submitEnabled(browser, "Resolve conflicts")).toBe(false);
         await expect(resolve.getByRole("button", /^Agent and model: /)).toHaveCount(0);
       } finally {
         resolveHold.release();
@@ -208,7 +203,6 @@ test(
       await expect(resolve).toHaveCount(0);
 
       const sendHold = holdSessionReads(home);
-      let held: Awaited<ReturnType<typeof layoutOf>> | null = null;
       try {
         await openWithAgentsRead(page, run.url);
         await screen
@@ -222,22 +216,21 @@ test(
           .getByRole("button", "Send to agent")
           .tap();
         const send = screen.getByRole("dialog", "Send to agent");
-        await expect(send.getByRole("button", "Send 1 comment to agent")).toBeVisible({
-          timeout: 30_000,
-        });
+        await expect(send).toBeVisible({ timeout: 30_000 });
         await expect.poll(sendHold.reached, { timeout: 30_000 }).toBe(true);
         await expect(send.getByLabel("Loading push access")).toHaveCount(0, { timeout: 30_000 });
         await expect(send.getByLabel("Loading whether the agent runs scripts")).toHaveCount(0, {
           timeout: 30_000,
         });
         await shown(browser);
-        held = await layoutOf(browser, "Send to agent");
+        await markPlaces(browser, "held");
         await screenshotLightAndDark(app, browser, "fix-agent-loading-send-held");
         await clickSubmit(browser, "Send to agent");
         await expect
           .poll(
             async () =>
-              (await send.count()) === 0 || (await send.getByLabel("Loading agents").count()) === 1,
+              (await send.count()) === 0 ||
+              (await send.getByLabel("Loading the form").count()) === 1,
             { timeout: 30_000 },
           )
           .toBe(true);
@@ -245,12 +238,13 @@ test(
           discarded,
         ]);
         await expect(send.getByRole("alert")).toHaveCount(0);
-        await expect(send.getByRole("button", "Send 1 comment to agent")).toBeDisabled();
+        expect(await submitEnabled(browser, "Send to agent")).toBe(false);
         await expect(send.getByRole("button", /^Agent and model: /)).toHaveCount(0);
         await browser.setViewport({ width: 720, height: 860 });
         await shown(browser);
         await app.screenshot("fix-agent-loading-send-held-narrow");
         await browser.setViewport({ width: 1280, height: 860 });
+        await expect.poll(() => movedSince(browser, "held"), { timeout: 10_000 }).toEqual([]);
       } finally {
         sendHold.release();
       }
@@ -258,10 +252,7 @@ test(
       await expect(send.getByRole("button", "Agent and model: Claude Fable 5.1")).toBeVisible({
         timeout: 30_000,
       });
-      expect(
-        await layoutOf(browser, "Send to agent"),
-        "nothing moves when the agent shows",
-      ).toEqual(held);
+      expect(await movedSince(browser, "held"), "nothing moves when the agent shows").toEqual([]);
       await screenshotLightAndDark(app, browser, "fix-agent-loading-send-ready");
       await send.getByRole("button", "Send 1 comment to agent").tap();
       await expect(send).toHaveCount(0, { timeout: 30_000 });
@@ -280,6 +271,15 @@ test(
     }
   },
 );
+
+const tamper = (home: string, statement: string) => {
+  const db = new DatabaseSync(NodePath.join(home, "prkit.sqlite"));
+  try {
+    db.exec(statement);
+  } finally {
+    db.close();
+  }
+};
 
 const CURSOR_REASON =
   "Cursor fixes edit files only: Cursor can't ask before each command, so it never runs this repository's scripts.";
@@ -315,15 +315,16 @@ const heldThenRead = async (
   page: Fixtures,
   home: string,
   label: string,
-  open: () => Promise<ReturnType<Fixtures["screen"]["getByRole"]>>,
+  open: () => Promise<void>,
   shot: string,
 ) => {
   const { app, browser } = page;
   const hold = holdSessionReads(home);
   let held: ReadonlyArray<string> = [];
   try {
-    const form = await open();
+    await open();
     await expect.poll(hold.reached, { timeout: 30_000 }).toBe(true);
+    const form = page.screen.getByRole("form", label);
     await expect(form.getByLabel("Loading push access")).toHaveCount(0, { timeout: 30_000 });
     await expect(form.getByLabel("Loading whether the agent runs scripts")).toHaveCount(0, {
       timeout: 30_000,
@@ -331,15 +332,15 @@ const heldThenRead = async (
     await expect(form.getByRole("button", /^Agent and model: /)).toHaveCount(0);
     await shown(browser);
     held = await wordsOf(browser, label);
-    await markPlaces(browser, label);
+    await markPlaces(browser, "held");
     await screenshotLightAndDark(app, browser, `${shot}-held`);
   } finally {
     hold.release();
   }
   const form = page.screen.getByRole("form", label);
-  await expect(form.getByRole("button", "Agent and model: Stand-in 1")).toBeVisible({
-    timeout: 30_000,
-  });
+  await expect(form.getByRole("button", /^Agent and model: /)).toBeVisible({ timeout: 30_000 });
+  await markPlaces(browser, "shown");
+  await expect(form.getByRole("button", "Agent and model: Stand-in 1")).toBeVisible();
   await expect(form.getByRole("status", "Check scripts")).toHaveText(CURSOR_REASON, {
     timeout: 30_000,
   });
@@ -350,9 +351,11 @@ const heldThenRead = async (
     held.filter((words) => !read.includes(words)),
     "no line reads one way while the session loads and another once it lands",
   ).toEqual([]);
-  expect(await movedSinceMarked(browser, label), "nothing moves when the session lands").toEqual(
-    [],
-  );
+  expect(
+    await movedSince(browser, "held"),
+    "nothing shown while the session loads moves when it lands",
+  ).toEqual([]);
+  expect(await movedSince(browser, "shown"), "nothing moves once the form shows").toEqual([]);
   await screenshotLightAndDark(app, browser, `${shot}-read`);
   return form;
 };
@@ -418,7 +421,33 @@ test(
       const composer = screen.getByRole("textbox", /^Comment on line \d+$/);
       await composer.fill("Name the change.");
       await composer.press("Meta+Enter");
-      const first = await openSendToAgent(page, 1);
+      // The PR's own read for its scripts line held: whatever the form shows meanwhile stays put.
+      const pullReads = async () =>
+        (await fake.stats()).log.filter((entry) => entry.kind === "rest:pull").length;
+      const readsBefore = await pullReads();
+      await fake.hold("core");
+      try {
+        await screen.getByRole("button", "Review, 1 pending").first().tap();
+        await screen
+          .getByRole("group", "Where your comments go")
+          .getByRole("button", "Send to agent")
+          .tap();
+        await expect(screen.getByRole("dialog", "Send to agent")).toBeVisible({ timeout: 30_000 });
+        await expect.poll(pullReads, { timeout: 30_000 }).toBeGreaterThan(readsBefore);
+        await shown(browser);
+        await markPlaces(browser, "early");
+      } finally {
+        await fake.release("core");
+      }
+      const first = screen.getByRole("dialog", "Send to agent");
+      await expect(first.getByRole("status", "Check scripts")).toHaveText(/^The agent may run /, {
+        timeout: 30_000,
+      });
+      await shown(browser);
+      expect(
+        await movedSince(browser, "early"),
+        "nothing moves when the scripts line's read lands",
+      ).toEqual([]);
       await pickModel(page, first, "stand-in", /Stand-in 1/);
       await first.getByRole("button", "Send 1 comment to agent").tap();
       await expect(first).toHaveCount(0, { timeout: 30_000 });
@@ -452,9 +481,7 @@ test(
         async () => {
           await openWithAgentsRead(page, run.url);
           await screen.getByRole("button", "Resolve conflicts").tap();
-          const form = screen.getByRole("form", "Resolve conflicts");
-          await expect(form.getByRole("radio", /^Merge /)).toBeVisible({ timeout: 30_000 });
-          return form;
+          await expect(screen.getByRole("dialog").first()).toBeVisible({ timeout: 30_000 });
         },
         "fix-form-notices-resolve",
       );
@@ -473,9 +500,7 @@ test(
           .getByRole("group", "Where your comments go")
           .getByRole("button", "Send to agent")
           .tap();
-        const form = screen.getByRole("form", "Send to agent");
-        await expect(form.getByRole("checkbox").first()).toBeVisible({ timeout: 30_000 });
-        return form;
+        await expect(screen.getByRole("dialog", "Send to agent")).toBeVisible({ timeout: 30_000 });
       };
       const send = await heldThenRead(
         page,
@@ -520,6 +545,63 @@ test(
         cut: true,
       });
       await app.screenshot("fix-form-notices-long-model-narrow");
+      await browser.keyboard.press("Escape");
+      await browser.setViewport({ width: 1280, height: 860 });
+
+      // A pull request with nothing to send still says, once read, whether the agent runs scripts.
+      await app.open(
+        `${run.url}/pr/github.com/budget/fixtures/6?account=github.com%2Fbudget-test&tab=files`,
+      );
+      await screen.getByRole("button", "Review").tap({ timeout: 30_000 });
+      await screen
+        .getByRole("group", "Where your comments go")
+        .getByRole("button", "Send to agent")
+        .tap();
+      const empty = screen.getByRole("dialog", "Send to agent");
+      await expect(
+        empty.getByText("No comments to send. Comment on a line in Files first."),
+      ).toBeVisible({
+        timeout: 30_000,
+      });
+      await expect(empty.getByRole("status", "Check scripts")).toHaveText(/^The agent may run /);
+      await browser.keyboard.press("Escape");
+
+      // A session read that fails: each form says why with Retry, and Resolve still offers GitHub.
+      tamper(home, "ALTER TABLE fixers RENAME TO fixers_away;");
+      try {
+        await openWithAgentsRead(page, run.url);
+        await screen.getByRole("button", "Resolve conflicts").tap();
+        const failed = screen.getByRole("dialog").first();
+        await expect(failed.getByRole("alert")).toBeVisible({ timeout: 30_000 });
+        await expect(failed.getByRole("button", "Retry")).toBeVisible();
+        await expect(failed.getByRole("link", "Resolve on GitHub instead")).toBeVisible();
+        await expect(screen.getByRole("form", "Resolve conflicts")).toHaveCount(0);
+        await shown(browser);
+        await screenshotLightAndDark(app, browser, "fix-form-notices-resolve-failed");
+        await browser.keyboard.press("Escape");
+        await screen
+          .getByRole("navigation", "Pull request tabs")
+          .getByRole("link", /^Files/)
+          .tap();
+        await screen.getByRole("button", "Review, 1 pending").first().tap({ timeout: 30_000 });
+        await screen
+          .getByRole("group", "Where your comments go")
+          .getByRole("button", "Send to agent")
+          .tap();
+        const send = screen.getByRole("dialog", "Send to agent");
+        await expect(send.getByRole("alert")).toBeVisible({ timeout: 30_000 });
+        await expect(send.getByRole("form", "Send to agent")).toHaveCount(0);
+        await shown(browser);
+        await screenshotLightAndDark(app, browser, "fix-form-notices-send-failed");
+      } finally {
+        tamper(home, "ALTER TABLE fixers_away RENAME TO fixers;");
+      }
+      const again = screen.getByRole("dialog", "Send to agent");
+      await again.getByRole("button", "Retry").tap();
+      await expect(
+        again.getByRole("form", "Send to agent").getByRole("button", "Agent and model: Stand-in 1"),
+      ).toBeVisible({ timeout: 30_000 });
+      await expect(again.getByRole("status", "Check scripts")).toHaveText(CURSOR_REASON);
     } finally {
       if (home !== "")
         NodeFS.rmSync(NodePath.join(home, "e2e-holds", "fix-session-read"), { force: true });

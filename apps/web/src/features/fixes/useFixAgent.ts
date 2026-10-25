@@ -36,13 +36,14 @@ export function useFixAgent(key: PullRequestKey, picked: AgentSelection | null) 
           model: session.model,
           options: session.modelOptions,
         };
-  const selection =
-    error !== null ||
-    catalog.data === undefined ||
-    settings.data === undefined ||
-    fixer.data === undefined
-      ? null
-      : (picked ?? sessionSelection(catalog.data, own, settings.data.defaultAgent));
+  const known =
+    error === null &&
+    catalog.data !== undefined &&
+    settings.data !== undefined &&
+    fixer.data !== undefined;
+  const selection = known
+    ? (picked ?? sessionSelection(catalog.data, own, settings.data.defaultAgent))
+    : null;
   // A session on a setting prkit can't read stays on it, a session from before models included.
   const pinned =
     picked === null && catalog.data !== undefined && session != null
@@ -62,7 +63,8 @@ export function useFixAgent(key: PullRequestKey, picked: AgentSelection | null) 
     selection,
     problem,
     model,
-    loading: catalog.isPending || settings.isPending || fixer.isPending,
+    /** The agents, the default and the PR's fix session are read, so `selection` is no guess. */
+    known,
     error,
     retry: () => {
       void catalog.refetch();
