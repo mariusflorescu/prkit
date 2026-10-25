@@ -20,8 +20,7 @@ import { useFixAgent } from "./useFixAgent";
  * Hands comments to the PR's fix agent: which ones, anything else it should know,
  * and the agent. `only` preselects one comment (a draft's or thread's own button);
  * otherwise every draft is picked, and on your own PR every open thread whose last
- * comment isn't yours. It shows once everything it says is read, the agent and what
- * it may push and run included, so no line changes or moves when a read lands.
+ * comment isn't yours.
  */
 export function SendToAgentForm({
   detail,

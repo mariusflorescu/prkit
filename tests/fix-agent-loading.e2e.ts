@@ -49,7 +49,6 @@ const clickSubmit = (browser: Fixtures["browser"], form: string) =>
     return null;
   }, form);
 
-/** Whether a form offers an enabled submit button. */
 const submitEnabled = (browser: Fixtures["browser"], form: string) =>
   browser.evaluate(
     (label: string) =>
@@ -77,7 +76,6 @@ const openWithAgentsRead = async ({ app, screen }: Fixtures, url: string) => {
   ).toBeVisible({ timeout: 30_000 });
 };
 
-/** Every line a form says: its statuses and alerts, as shown. */
 const wordsOf = (browser: Fixtures["browser"], form: string) =>
   browser.evaluate(
     (label: string) =>
@@ -89,7 +87,6 @@ const wordsOf = (browser: Fixtures["browser"], form: string) =>
     form,
   );
 
-/** Notes where every element of the open popups sits, under `mark`, for `movedSince`. */
 const markPlaces = (browser: Fixtures["browser"], mark: string) =>
   browser.evaluate((name: string) => {
     for (const popup of document.querySelectorAll('[role="dialog"]'))
@@ -100,7 +97,6 @@ const markPlaces = (browser: Fixtures["browser"], mark: string) =>
     return null;
   }, mark);
 
-/** The elements noted under `mark` that are still on the page and sit somewhere else now. */
 const movedSince = (browser: Fixtures["browser"], mark: string) =>
   browser.evaluate(
     (name: string) =>
@@ -286,7 +282,6 @@ const CURSOR_REASON =
 const AUTO_PUSH = /^prkit pushes the fix to .+ as soon as it's ready \(on for this repository\)\.$/;
 const LONG_MODEL = "Stand-in with a model name far too long for one row of the picker";
 
-/** Settings > Agents: installs the stand-in Cursor's support and signs in for prkit. */
 const signInCursor = async (
   { screen, browser }: Fixtures,
   cursor: ReturnType<typeof setUpFakeCursor>,
@@ -306,11 +301,6 @@ const signInCursor = async (
   await expect(status).toHaveText(/^Signed in/, { timeout: 30_000 });
 };
 
-/**
- * Holds the PR's fix session read while `open` reaches a form, then checks that every line the
- * form says while held still reads the same once the read lands, and that nothing shown while
- * held, or once the form shows, moves after.
- */
 const heldThenRead = async (
   page: Fixtures,
   home: string,
@@ -421,7 +411,6 @@ test(
       const composer = screen.getByRole("textbox", /^Comment on line \d+$/);
       await composer.fill("Name the change.");
       await composer.press("Meta+Enter");
-      // The PR's own read for its scripts line held: whatever the form shows meanwhile stays put.
       const pullReads = async () =>
         (await fake.stats()).log.filter((entry) => entry.kind === "rest:pull").length;
       const readsBefore = await pullReads();
@@ -548,7 +537,6 @@ test(
       await browser.keyboard.press("Escape");
       await browser.setViewport({ width: 1280, height: 860 });
 
-      // A pull request with nothing to send still says, once read, whether the agent runs scripts.
       await app.open(
         `${run.url}/pr/github.com/budget/fixtures/6?account=github.com%2Fbudget-test&tab=files`,
       );
@@ -566,7 +554,6 @@ test(
       await expect(empty.getByRole("status", "Check scripts")).toHaveText(/^The agent may run /);
       await browser.keyboard.press("Escape");
 
-      // A session read that fails: each form says why with Retry, and Resolve still offers GitHub.
       tamper(home, "ALTER TABLE fixers RENAME TO fixers_away;");
       try {
         await openWithAgentsRead(page, run.url);

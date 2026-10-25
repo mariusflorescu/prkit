@@ -63,7 +63,6 @@ export function useFixAgent(key: PullRequestKey, picked: AgentSelection | null) 
     selection,
     problem,
     model,
-    /** The agents, the default and the PR's fix session are read, so `selection` is no guess. */
     known,
     error,
     retry: () => {

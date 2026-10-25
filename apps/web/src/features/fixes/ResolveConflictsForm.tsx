@@ -24,7 +24,6 @@ interface Values {
 /**
  * Asks the fix agent to resolve the PR's conflicts: merge the base in (a normal
  * push), or, on your own PR, rebase onto it (always a manual force-push with lease).
- * It shows once the agent and what it may push and run are read, like Send to agent.
  */
 export function ResolveConflictsForm({
   detail,
