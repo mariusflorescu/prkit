@@ -85,10 +85,10 @@
  *                                       With a login, only that login's requests fail; with ms, each
  *                                       failure answers that much later, as GitHub's 502s and 504s do
  *   POST behind?pr=<n>&by=<k>           its base gained k commits, so Update branch applies
- *   POST describe?pr=<n>                its author or description, as JSON `{ "author", "body" }`,
- *                                       either one (bumps updatedAt). PATCH on the pull request
- *                                       changes its title and description too, counted as
- *                                       `rest:pull-edit`
+ *   POST describe?pr=<n>                its author, description or title, as JSON
+ *                                       `{ "author", "body", "title" }`, any of them (bumps
+ *                                       updatedAt). PATCH on the pull request changes its title
+ *                                       and description too, counted as `rest:pull-edit`
  *   GET  pull?pr=<n>                    its node id, head sha and workflow run ids, for assertions
  *   GET  writes                         every mutation and REST write, with its input
  *   POST limit?resource=graphql|core&seconds=<s>   the limit is used up until then
@@ -170,6 +170,7 @@ const decodeDescribe = Schema.decodeUnknownSync(
     Schema.Struct({
       author: Schema.optionalKey(Schema.String),
       body: Schema.optionalKey(Schema.String),
+      title: Schema.optionalKey(Schema.String),
     }),
   ),
 );
@@ -482,6 +483,7 @@ const control = (url: URL, method: string, text: string, response: NodeHttp.Serv
     const given = decodeDescribe(text);
     if (given.author !== undefined) pull.author = given.author;
     if (given.body !== undefined) pull.body = given.body;
+    if (given.title !== undefined) pull.title = given.title;
     pull.updatedAt = Date.now();
     return answer({ ok: true });
   }

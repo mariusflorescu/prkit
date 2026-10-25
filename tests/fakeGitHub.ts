@@ -210,8 +210,8 @@ export const startFakeGitHub = async (
         ])}`,
       ),
     behind: (pr: number, by: number) => post(`behind?pr=${pr}&by=${by}`),
-    /** Who opened the PR and its description, either one. */
-    describe: (pr: number, given: { author?: string; body?: string }) =>
+    /** Who opened the PR, its description or its title, any of them. */
+    describe: (pr: number, given: { author?: string; body?: string; title?: string }) =>
       fetch(`${url}/__fake/describe?pr=${pr}`, { method: "POST", body: JSON.stringify(given) }),
     checks: (pr: number, status: "queued" | "in_progress" | "completed") =>
       post(`checks?pr=${pr}&status=${status}`),
