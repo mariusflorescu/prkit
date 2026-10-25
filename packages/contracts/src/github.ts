@@ -58,11 +58,29 @@ export const PullRequestStatus = Schema.Struct({
 });
 export type PullRequestStatus = typeof PullRequestStatus.Type;
 
+/** The gh config directory an account is read through. */
+export const AccountBinding = Schema.Struct({ accountId: AccountId, configDir: Schema.String });
+export type AccountBinding = typeof AccountBinding.Type;
+
 /** What changed on the server's GitHub caches, for a visible window. */
 export const GitHubEvent = Schema.Union([
-  /** First event of every subscription: the last status of each fingerprinted PR. */
-  Schema.TaggedStruct("opened", { statuses: Schema.Array(PullRequestStatus) }),
-  /** This PR's cached reads are stale; refetch what is on screen. */
+  /**
+   * First event of every subscription: the directory each account is read through, null before
+   * the first discovery, and the last status of each fingerprinted PR read through its account's.
+   */
+  Schema.TaggedStruct("opened", {
+    bindings: Schema.NullOr(Schema.Array(AccountBinding)),
+    statuses: Schema.Array(PullRequestStatus),
+  }),
+  /**
+   * A discovery changed the directory an account is read through, or added or removed one: what a
+   * window read through a directory its account left is stale, and these statuses replace its own.
+   */
+  Schema.TaggedStruct("accounts", {
+    bindings: Schema.Array(AccountBinding),
+    statuses: Schema.Array(PullRequestStatus),
+  }),
+  /** This PR's cached reads are stale; refetch what is on screen. `status` is its status now, if any. */
   Schema.TaggedStruct("changed", {
     key: PullRequestKey,
     accountId: AccountId,

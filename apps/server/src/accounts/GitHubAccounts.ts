@@ -23,6 +23,7 @@ import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -138,7 +139,7 @@ export const make = Effect.gen(function* () {
   const tokens = new Map<AccountId, Redacted.Redacted<string>>();
   let activeAccounts = new Set<AccountId>();
   let unreadableDirAccounts = new Set<AccountId>();
-  let current: AccountsResult | null = null;
+  const current = yield* SubscriptionRef.make<AccountsResult | null>(null);
   const firstFound = yield* Deferred.make<
     {
       readonly accounts: ReadonlyArray<Pick<Account, "id" | "configDir" | "status">>;
@@ -509,19 +510,24 @@ export const make = Effect.gen(function* () {
       for (const [id, token] of freshTokens) tokens.set(id, token);
       activeAccounts = foundActiveAccounts;
       unreadableDirAccounts = unreadAccounts;
-      current = { home, accounts, addedConfigDirs, configDirProblems };
-      return current;
+      const result = { home, accounts, addedConfigDirs, configDirProblems };
+      yield* SubscriptionRef.set(current, result);
+      return result;
     });
 
   const refresh = () => gate.withPermits(1)(discover());
   const list = () =>
     gate.withPermits(1)(
-      Effect.suspend(() => (current === null ? discover() : Effect.succeed(current))),
+      SubscriptionRef.get(current).pipe(
+        Effect.flatMap((known) => (known === null ? discover() : Effect.succeed(known))),
+      ),
     );
   const token = (id: AccountId, reread = false) =>
     gate.withPermits(1)(
       Effect.gen(function* () {
-        const account = current?.accounts.find((entry) => entry.id === id);
+        const account = (yield* SubscriptionRef.get(current))?.accounts.find(
+          (entry) => entry.id === id,
+        );
         if (!account)
           return yield* new AccountUnavailableError({
             accountId: id,
@@ -542,12 +548,14 @@ export const make = Effect.gen(function* () {
               ...account,
               status: { _tag: "error" as const, message: error.message },
             };
-            if (current)
-              current = {
-                ...current,
-                accounts: current.accounts.map((entry) => (entry.id === id ? failed : entry)),
-              };
-            return Effect.fail(error);
+            return SubscriptionRef.update(current, (known) =>
+              known === null
+                ? known
+                : {
+                    ...known,
+                    accounts: known.accounts.map((entry) => (entry.id === id ? failed : entry)),
+                  },
+            ).pipe(Effect.andThen(Effect.fail(error)));
           }),
         );
         tokens.set(id, fresh);
@@ -629,7 +637,9 @@ export const make = Effect.gen(function* () {
     Effect.forkScoped,
   );
   /** The accounts as last discovered, without waiting for a discovery to finish. */
-  const known = Effect.sync(() => current);
+  const known = SubscriptionRef.get(current);
+  /** The accounts as last discovered, then again each time they change. */
+  const changes = SubscriptionRef.changes(current);
   /**
    * Who the first discovery found in the gh config directories, and where, with the directories
    * it couldn't read, while GitHub verifies them. The same snapshot discovery verifies, so a
@@ -637,7 +647,17 @@ export const make = Effect.gen(function* () {
    * through another.
    */
   const configured = Deferred.await(firstFound);
-  return { list, known, configured, refresh, addConfigDir, removeConfigDir, token, apiBase };
+  return {
+    list,
+    known,
+    changes,
+    configured,
+    refresh,
+    addConfigDir,
+    removeConfigDir,
+    token,
+    apiBase,
+  };
 });
 
 export const layer = Layer.effect(GitHubAccounts, make);

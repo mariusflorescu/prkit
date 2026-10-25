@@ -1,6 +1,8 @@
 import {
   type Account,
+  type AccountBinding,
   type AccountId,
+  type AccountsResult,
   type ConfigDirProblem,
   type GitHubEvent,
   type GitHubProblem,
@@ -20,6 +22,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
@@ -62,6 +65,37 @@ const INBOX_DEADLINE = {
 /** Persisted answers older than this are dropped at startup. */
 const KEEP_MS = 14 * 24 * 60 * 60_000;
 
+/** A tab status and the gh config directory the watcher read it through. */
+interface ReadStatus {
+  readonly status: PullRequestStatus;
+  readonly configDir: string | null;
+}
+
+/** The directory each account is read through; null before the first discovery. */
+const bindingsOf = (known: AccountsResult | null): ReadonlyArray<AccountBinding> | null =>
+  known?.accounts.map(({ id, configDir }) => ({ accountId: id, configDir })) ?? null;
+const sameBindings = (
+  before: ReadonlyArray<AccountBinding> | null,
+  after: ReadonlyArray<AccountBinding>,
+) =>
+  before?.length === after.length &&
+  before.every(
+    (binding, index) =>
+      binding.accountId === after[index]?.accountId &&
+      binding.configDir === after[index]?.configDir,
+  );
+/** Only a status read through the directory its account is read through now is sent or used. */
+const readable = (
+  read: ReadStatus | undefined,
+  bindings: ReadonlyArray<AccountBinding> | null,
+): read is ReadStatus =>
+  read !== undefined &&
+  (bindings?.some(
+    (binding) =>
+      binding.accountId === read.status.accountId && binding.configDir === read.configDir,
+  ) ??
+    false);
+
 const encodeFingerprint = Schema.encodeSync(Schema.fromJsonString(PullRequestFingerprint));
 const decodeFingerprint = Schema.decodeOption(Schema.fromJsonString(PullRequestFingerprint));
 
@@ -77,7 +111,13 @@ export const make = Effect.gen(function* () {
   const events = yield* PubSub.unbounded<GitHubEvent>();
   /** Windows holding `events` open; open PR tabs are fingerprinted only while one is visible. */
   const presence = yield* SubscriptionRef.make(0);
-  const statuses = new Map<string, PullRequestStatus>();
+  const statuses = new Map<string, ReadStatus>();
+  /**
+   * Statuses are announced, and a window's stream opens with its snapshot, one at a time, so no
+   * window hears a status older than its snapshot or read through a directory a later `accounts`
+   * event told it the account left.
+   */
+  const announcing = yield* Semaphore.make(1);
   const fingerprints = new Map<string, string>();
 
   const startedAt = yield* Clock.currentTimeMillis;
@@ -98,14 +138,46 @@ export const make = Effect.gen(function* () {
     fingerprints.set(`${row.account_id}:${row.key}`, row.value);
 
   const publish = (event: GitHubEvent) => PubSub.publish(events, event).pipe(Effect.asVoid);
-  const detailReads = yield* makeDetailReads({
-    changed: (key, accountId, status) =>
-      Effect.gen(function* () {
-        if (status !== null) statuses.set(`${accountId}:${key}`, status);
-        yield* publish({ _tag: "changed", key, accountId, status });
+  const readableStatuses = (bindings: ReadonlyArray<AccountBinding> | null) =>
+    [...statuses.values()].filter((read) => readable(read, bindings)).map((read) => read.status);
+  const statusNow = (key: PullRequestKey, accountId: AccountId) =>
+    accounts.known.pipe(
+      Effect.map((known) => {
+        const read = statuses.get(`${accountId}:${key}`);
+        return readable(read, bindingsOf(known)) ? read.status : null;
       }),
+    );
+  const changed = (key: PullRequestKey, accountId: AccountId) =>
+    announcing.withPermits(1)(
+      statusNow(key, accountId).pipe(
+        Effect.flatMap((status) =>
+          PubSub.publish(events, { _tag: "changed", key, accountId, status }),
+        ),
+      ),
+    );
+  const detailReads = yield* makeDetailReads({
+    changed,
     stackChanged: (accountId) => publish({ _tag: "stack", accountId }),
   });
+  /** The bindings the last `accounts` event carried. */
+  let told: ReadonlyArray<AccountBinding> | null = null;
+  yield* accounts.changes.pipe(
+    Stream.runForEach(() =>
+      announcing.withPermits(1)(
+        Effect.gen(function* () {
+          const bindings = bindingsOf(yield* accounts.known);
+          if (bindings === null || sameBindings(told, bindings)) return;
+          told = bindings;
+          yield* PubSub.publish(events, {
+            _tag: "accounts",
+            bindings,
+            statuses: readableStatuses(bindings),
+          });
+        }),
+      ),
+    ),
+    Effect.forkScoped,
+  );
   const inboxCache = yield* makeObservedReadCache({
     name: "inbox",
     json: Schema.fromJsonString(AccountInbox),
@@ -316,17 +388,17 @@ export const make = Effect.gen(function* () {
   const observe = (
     key: PullRequestKey,
     accountId: AccountId,
+    configDir: string | null,
     fingerprint: PullRequestFingerprint,
   ) =>
     Effect.gen(function* () {
       const id = `${accountId}:${key}`;
       const text = encodeFingerprint(fingerprint);
       const previous = fingerprints.get(id);
-      const status = statusOf(key, accountId, fingerprint);
       const known = statuses.get(id);
-      statuses.set(id, status);
+      statuses.set(id, { status: statusOf(key, accountId, fingerprint), configDir });
       if (previous === text) {
-        if (known === undefined) yield* publish({ _tag: "changed", key, accountId, status });
+        if (known?.configDir !== configDir) yield* changed(key, accountId);
         return;
       }
       fingerprints.set(id, text);
@@ -351,32 +423,41 @@ export const make = Effect.gen(function* () {
           (cached.value.updatedAt !== fingerprint.updatedAt ||
             cached.value.headSha !== fingerprint.headRefOid);
         if (!behind) {
-          yield* publish({ _tag: "changed", key, accountId, status });
+          yield* changed(key, accountId);
           return;
         }
       }
       yield* Effect.logInfo("Pull request changed on GitHub").pipe(
         Effect.annotateLogs({ key, accountId }),
       );
-      yield* detailReads.invalidate(key, accountId, status);
+      yield* detailReads.invalidate(key, accountId);
     });
 
   /** Open while a window is visible: first the known statuses, then every change. */
   const watch = (): Stream.Stream<GitHubEvent> =>
     Stream.unwrap(
       Effect.gen(function* () {
-        const subscription = yield* PubSub.subscribe(events);
+        const { subscription, opening } = yield* announcing.withPermits(1)(
+          Effect.gen(function* () {
+            const bindings = bindingsOf(yield* accounts.known);
+            const opening: GitHubEvent = {
+              _tag: "opened",
+              bindings,
+              statuses: readableStatuses(bindings),
+            };
+            return { subscription: yield* PubSub.subscribe(events), opening };
+          }),
+        );
         yield* Effect.acquireRelease(
           SubscriptionRef.update(presence, (count) => count + 1),
           () => SubscriptionRef.update(presence, (count) => count - 1),
         );
-        const opening: GitHubEvent = { _tag: "opened", statuses: [...statuses.values()] };
         return Stream.concat(Stream.succeed(opening), Stream.fromSubscription(subscription));
       }),
     );
-  /** The last fingerprinted state of a PR, if the watcher has read it. */
+  /** The last fingerprinted state of a PR, if the watcher read it through its account's directory. */
   const statusFor = (key: PullRequestKey, accountId: AccountId) =>
-    Effect.sync(() => statuses.get(`${accountId}:${key}`));
+    statusNow(key, accountId).pipe(Effect.map((status) => status ?? undefined));
 
   return {
     inbox,

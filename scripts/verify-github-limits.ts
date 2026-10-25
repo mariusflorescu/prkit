@@ -10,6 +10,7 @@ import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import * as SqlClient from "effect/sql/SqlClient";
 
@@ -309,6 +310,7 @@ const accounts = GitHubAccounts.of({
     addedConfigDirs: [],
     configDirProblems: [],
   }),
+  changes: Stream.empty,
   configured: Effect.succeed({ accounts: [account], configDirProblems: [] }),
   token: () => Effect.succeed({ account, token: Redacted.make("local-test-token") }),
   apiBase: () => "https://api.github.com",
