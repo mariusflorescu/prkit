@@ -159,7 +159,10 @@ export function SendToAgentFields({
         </label>
       )}
       <PushNotice detail={detail} />
-      <ScriptAccessNotice detail={detail} cursor={runsOnCursor(agent.catalog, agent.selection)} />
+      {/* The scripts line takes two rows here, so its read landing moves nothing below it. */}
+      <div className="min-h-8">
+        <ScriptAccessNotice detail={detail} cursor={runsOnCursor(agent.catalog, agent.selection)} />
+      </div>
       {agent.problem !== null && (
         <p role="status" className="text-xs text-muted-foreground">
           {agent.problem}

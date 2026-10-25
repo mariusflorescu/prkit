@@ -1,5 +1,5 @@
 import type { AgentSelection, ConflictStrategy, PullRequestDetail } from "@prkit/contracts";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, usePrefetchQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useForm, useWatch } from "react-hook-form";
 
@@ -39,8 +39,8 @@ export function ResolveConflictsForm({
   const form = useForm<Values>({ defaultValues: { strategy: "merge", agent: null } });
   const chosen = useWatch({ control: form.control, name: "agent" });
   const agent = useFixAgent(detail.key, chosen);
-  const pushAccess = useQuery(pushAccessQuery(detail.key, detail.accountId));
-  const scriptAccess = useQuery(scriptAccessQuery(detail.key, detail.accountId));
+  usePrefetchQuery(pushAccessQuery(detail.key, detail.accountId));
+  usePrefetchQuery(scriptAccessQuery(detail.key, detail.accountId));
   const start = useMutation({
     mutationFn: (values: Values) => {
       if (agent.selection === null) return Promise.reject(new Error("Pick an agent first."));
@@ -88,7 +88,7 @@ export function ResolveConflictsForm({
         {onGitHub}
       </div>
     );
-  if (!agent.known || pushAccess.isPending || scriptAccess.isPending)
+  if (!agent.known)
     return (
       <div aria-busy="true" aria-label="Loading the form" className="space-y-2">
         <Skeleton className="h-8 w-full" />
@@ -137,7 +137,10 @@ export function ResolveConflictsForm({
         onChange={(selection) => form.setValue("agent", selection)}
       />
       <PushNotice detail={detail} />
-      <ScriptAccessNotice detail={detail} cursor={runsOnCursor(agent.catalog, agent.selection)} />
+      {/* The scripts line takes two rows here, so its read landing moves nothing below it. */}
+      <div className="min-h-8">
+        <ScriptAccessNotice detail={detail} cursor={runsOnCursor(agent.catalog, agent.selection)} />
+      </div>
       {agent.problem !== null && (
         <p role="status" className="text-xs text-muted-foreground">
           {agent.problem}

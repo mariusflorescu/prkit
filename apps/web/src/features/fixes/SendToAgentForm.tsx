@@ -1,5 +1,5 @@
 import type { FixTarget, PullRequestDetail } from "@prkit/contracts";
-import { useQuery } from "@tanstack/react-query";
+import { usePrefetchQuery, useQuery } from "@tanstack/react-query";
 
 import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
@@ -36,16 +36,12 @@ export function SendToAgentForm({
   const pending = useQuery(pendingCommentsQuery(detail.key, detail.accountId));
   const threads = useQuery(reviewThreadsQuery(detail.key, detail.accountId));
   const agent = useFixAgent(detail.key, null);
-  const pushAccess = useQuery(pushAccessQuery(detail.key, detail.accountId));
-  const scriptAccess = useQuery(scriptAccessQuery(detail.key, detail.accountId));
+  usePrefetchQuery(pushAccessQuery(detail.key, detail.accountId));
+  usePrefetchQuery(scriptAccessQuery(detail.key, detail.accountId));
   const loadError = pending.error ?? threads.error ?? agent.error;
   if (
     loadError === null &&
-    (pending.isPending ||
-      (threads.isPending && only?._tag !== "draft") ||
-      !agent.known ||
-      pushAccess.isPending ||
-      scriptAccess.isPending)
+    (pending.isPending || (threads.isPending && only?._tag !== "draft") || !agent.known)
   )
     return (
       <div aria-busy="true" aria-label="Loading the form" className="mt-3 space-y-2">
