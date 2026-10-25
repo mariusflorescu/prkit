@@ -10,14 +10,16 @@ import {
 } from "~/rpc/queries";
 
 /**
- * Each account is read through one gh config directory. The server says which in the accounts
- * list and whenever this window starts listening or a discovery changes one; the first it hears
+ * Each account is read through one gh config directory. The server says which whenever this
+ * window starts listening or a discovery changes one, and in the accounts list; the first it hears
  * is what this window read through. When an account is read through another directory, or is
  * gone, this window drops what it read through the old one, so what it shows is read again
  * through the new one, never kept from the old.
  */
 export const forgetMovedAccounts = (client: QueryClient) => {
   let readThrough: ReadonlyMap<AccountId, string> | null = null;
+  // The events come in order; a list answer can overtake them, so it counts only until they speak.
+  let heard = false;
   const forget = (moved: ReadonlyArray<AccountId>) => {
     // A key can hold the account inside an object (a diff's source), so look in the whole hash.
     void client.resetQueries({
@@ -58,7 +60,7 @@ export const forgetMovedAccounts = (client: QueryClient) => {
   };
   const fromList = () => {
     const result = client.getQueryData(accountsQuery.queryKey);
-    if (result === undefined) return;
+    if (result === undefined || heard) return;
     rebind(
       result.accounts.map((account) => ({ accountId: account.id, configDir: account.configDir })),
     );
@@ -73,5 +75,11 @@ export const forgetMovedAccounts = (client: QueryClient) => {
     )
       fromList();
   });
-  return { rebind, stop };
+  return {
+    rebind: (bindings: ReadonlyArray<AccountBinding>) => {
+      heard = true;
+      return rebind(bindings);
+    },
+    stop,
+  };
 };

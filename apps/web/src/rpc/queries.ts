@@ -66,11 +66,6 @@ export const accountsQuery = queryOptions({
   staleTime: 30_000,
   retry: false,
 });
-/** Reads the accounts again, dropping a read on its way that may be from before a change. */
-export const readAccountsAgain = (client: QueryClient) =>
-  void client
-    .cancelQueries({ queryKey: accountsQuery.queryKey })
-    .then(() => client.invalidateQueries({ queryKey: accountsQuery.queryKey }));
 /**
  * GitHub reads below stay until the server says they changed (`useGitHubEvents`):
  * the server decides how fresh an answer must be and when GitHub is read again.

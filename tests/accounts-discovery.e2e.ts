@@ -436,6 +436,96 @@ test(
 );
 
 test(
+  "an Inbox Refresh still reading another account when a login moves sends back no row read through the old directory",
+  { timeout: 300_000 },
+  async ({ app, screen, browser }) => {
+    const name = "accounts-moved-refresh";
+    const fake = await startFakeGitHub(name, { secondAccount: true });
+    const first = NodePath.join(fake.home, ".config/gh/hosts.yml");
+    ghDir(fake, ".config/gh-move", FIRST);
+    // #3 belongs to budget-test's inbox alone.
+    await fake.inboxOnly(SECOND, [5]);
+    const other = await chromium.launch({ headless: true, args: ["--use-mock-keychain"] });
+    try {
+      const prkit = await open(name, fake, { app, screen, browser });
+      // Every message the server sends the Inbox window, as it arrives.
+      const inbox = await other.newPage();
+      const frames: Array<string> = [];
+      inbox.on("websocket", (socket) =>
+        socket.on("framereceived", (frame) => frames.push(String(frame.payload))),
+      );
+      await inbox.goto(prkit.run.openUrl);
+      await inbox.getByRole("link", { name: /#3 Budget fixture 3/ }).waitFor({ timeout: 30_000 });
+
+      // budget-second's inbox read waits, so the Refresh is still out when budget-test moves, and
+      // nothing reads through ~/.config/gh-move until the end.
+      await fake.hold("graphql", { dir: [".config/gh-second", ".config/gh-move"] });
+      await fake.resetStats();
+      await inbox.getByRole("button", { name: "Refresh" }).first().click();
+      await expect
+        .poll(
+          async () =>
+            (await fake.stats()).log.filter(
+              (entry) =>
+                entry.kind === "graphql:inbox" &&
+                ((entry.login === FIRST && entry.dir === ".config/gh") ||
+                  (entry.login === SECOND && entry.dir === ".config/gh-second")),
+            ).length,
+          { timeout: 15_000 },
+        )
+        .toBe(2);
+
+      NodeFS.writeFileSync(first, "{}\n");
+      await fake.describe(3, { title: "Title after the move" });
+      await prkit.rediscover();
+      await expect(
+        prkit.accounts
+          .getByRole("listitem")
+          .filter({ hasText: FIRST })
+          .first()
+          .getByText("~/.config/gh-move", { exact: true }),
+      ).toBeVisible();
+      await inbox
+        .getByRole("link", { name: /#3 Budget fixture 3/ })
+        .waitFor({ state: "detached", timeout: 10_000 });
+      // Everything after the event that told the window about the move left the server after it.
+      const moved = frames.findIndex(
+        (frame) => frame.includes('"_tag":"accounts"') && frame.includes(".config/gh-move"),
+      );
+      expect(moved).toBeGreaterThan(-1);
+
+      // The Refresh finishes with budget-second; what it answers for budget-test comes through
+      // ~/.config/gh-move, where nothing is read yet.
+      await fake.release("graphql", ".config/gh-second");
+      await expect
+        .poll(() => inbox.getByRole("button", { name: "Refresh" }).first().isEnabled(), {
+          timeout: 20_000,
+        })
+        .toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      expect(
+        frames
+          .slice(moved)
+          .filter((frame) => frame.includes("Budget fixture 3"))
+          .map((frame) => frame.slice(0, 80)),
+      ).toEqual([]);
+      expect(await inbox.getByRole("link", { name: /#3 Budget fixture 3/ }).count()).toBe(0);
+
+      await fake.release("graphql");
+      await inbox
+        .getByRole("link", { name: /#3 Title after the move/ })
+        .first()
+        .waitFor({ timeout: 20_000 });
+    } finally {
+      await other.close();
+      await fake.release("graphql");
+      stopFakeInstance(name, { keepHome: false });
+      fake.stop();
+    }
+  },
+);
+
+test(
   "the desktop app started like Finder finds gh where the login shell's GH_CONFIG_DIR and XDG_CONFIG_HOME keep it, and a launch with its own keeps them",
   { timeout: 300_000 },
   async () => {

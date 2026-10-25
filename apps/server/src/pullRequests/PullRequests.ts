@@ -302,11 +302,13 @@ export const make = Effect.gen(function* () {
         { concurrency: 4 },
       );
       if (read._tag === "snapshot") return result(rows, discovered.configDirProblems);
-      // What the reads it waited for brought, and every other account as it is by then.
-      const settled = yield* Effect.forEach(discovered.accounts, (account) =>
+      // What the reads it waited for brought, and every other account as it is by then, each
+      // through the directory it is read through by then.
+      const now = yield* accounts.list();
+      const settled = yield* Effect.forEach(now.accounts, (account) =>
         inboxCache.observe(inboxKey(account)).pipe(Effect.map((seen) => accountRow(account, seen))),
       );
-      return result(settled, discovered.configDirProblems);
+      return result(settled, now.configDirProblems);
     });
   /**
    * The inbox across accounts. A snapshot never waits for GitHub: before accounts are
