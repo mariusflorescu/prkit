@@ -46,7 +46,7 @@ export const forgetMovedAccounts = (client: QueryClient) => {
             ),
           },
     );
-    readInboxAgain(client);
+    void readInboxAgain(client);
     void client.invalidateQueries({ queryKey: repositoriesQuery.queryKey });
   };
   const rebind = (bindings: ReadonlyArray<AccountBinding>) => {

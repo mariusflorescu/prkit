@@ -54,7 +54,7 @@ export function InboxPage() {
   const scroll = useRef<HTMLDivElement>(null);
   const { collapsed, sentinel } = useCollapsingHeader(scroll);
   // Each read below shows through the inbox query, the one a gh directory move cancels and reads
-  // again, so an answer put together before the move can't land after it.
+  // again, so an answer put together before the move can't land after it. Each waits for it.
   const refresh = useMutation({
     mutationFn: () => listInbox({ _tag: "refresh" }),
     onSuccess: () => readInboxAgain(queryClient),

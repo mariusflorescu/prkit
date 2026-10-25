@@ -42,7 +42,7 @@ const applyTo =
           void client.invalidateQueries({ queryKey: accountsQuery.queryKey });
         showStatuses(client, event.statuses);
         // The inbox's first answer may have started reads that landed before this opened.
-        readInboxAgain(client);
+        void readInboxAgain(client);
         if (!reopened) return;
         // Changes made while this window was hidden or offline were never sent; the
         // server answers these from its cache unless GitHub really changed.
@@ -64,7 +64,7 @@ const applyTo =
           void client.invalidateQueries({ queryKey });
         return;
       case "inbox":
-        readInboxAgain(client);
+        void readInboxAgain(client);
         return;
       case "stack":
         void client.invalidateQueries({ queryKey: ["pullRequestStack", event.accountId] });

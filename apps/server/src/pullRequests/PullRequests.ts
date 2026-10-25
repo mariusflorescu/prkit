@@ -339,6 +339,8 @@ export const make = Effect.gen(function* () {
             .observe(inboxKey(account))
             .pipe(Effect.map((seen) => accountRow(account, seen))),
         );
+        // Discovery finished meanwhile and may read an account through another directory.
+        if ((yield* accounts.known) !== null) return yield* readAll(read);
         yield* Effect.forkIn(
           readAll(read).pipe(
             Effect.andThen(publish({ _tag: "inbox" })),

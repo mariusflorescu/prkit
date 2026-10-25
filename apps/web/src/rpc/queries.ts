@@ -81,7 +81,7 @@ export const inboxQuery = queryOptions({
  * that answer, which may be from before the change, so that one is dropped first.
  */
 export const readInboxAgain = (client: QueryClient) =>
-  void client
+  client
     .cancelQueries({ queryKey: inboxQuery.queryKey })
     .then(() => client.invalidateQueries({ queryKey: inboxQuery.queryKey }));
 /** Every repository the accounts can see; the server keeps it a day and says when it changed. */
