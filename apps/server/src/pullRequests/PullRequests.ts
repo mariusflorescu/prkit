@@ -293,22 +293,36 @@ export const make = Effect.gen(function* () {
       configDirProblems,
     };
   };
+  /** Each account's row as kept now, through the directory it is read through. */
+  const keptRows = (discovered: AccountsResult) =>
+    Effect.forEach(discovered.accounts, (account) =>
+      inboxCache.observe(inboxKey(account)).pipe(Effect.map((seen) => accountRow(account, seen))),
+    );
+  /**
+   * A snapshot answers with what its reads saw; the others with what they brought and every other
+   * account as kept by then. The rows go out through the directories the accounts are read
+   * through when the answer is put together, again if a rediscovery moves one meanwhile.
+   */
   const readAll = (read: InboxRead) =>
     Effect.gen(function* () {
       const discovered = yield* accounts.list();
-      const rows = yield* Effect.forEach(
+      let rows = yield* Effect.forEach(
         discovered.accounts,
         (account) => readAccount(account, modeOf(read, account)),
         { concurrency: 4 },
       );
-      if (read._tag === "snapshot") return result(rows, discovered.configDirProblems);
-      // What the reads it waited for brought, and every other account as it is by then, each
-      // through the directory it is read through by then.
-      const now = yield* accounts.list();
-      const settled = yield* Effect.forEach(now.accounts, (account) =>
-        inboxCache.observe(inboxKey(account)).pipe(Effect.map((seen) => accountRow(account, seen))),
-      );
-      return result(settled, now.configDirProblems);
+      let through = discovered;
+      if (read._tag !== "snapshot") {
+        through = yield* accounts.list();
+        rows = yield* keptRows(through);
+      }
+      while (true) {
+        const now = yield* accounts.list();
+        if (sameBindings(bindingsOf(through), bindingsOf(now) ?? []))
+          return result(rows, now.configDirProblems);
+        through = now;
+        rows = yield* keptRows(now);
+      }
     });
   /**
    * The inbox across accounts. A snapshot never waits for GitHub: before accounts are
