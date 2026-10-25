@@ -309,7 +309,7 @@ const signInCursor = async (
 /**
  * Holds the PR's fix session read while `open` reaches a form, then checks that every line the
  * form says while held still reads the same once the read lands, and that nothing shown while
- * held has moved.
+ * held, or once the form shows, moves after.
  */
 const heldThenRead = async (
   page: Fixtures,
@@ -361,7 +361,7 @@ const heldThenRead = async (
 };
 
 test(
-  "on a Cursor session in a repository that pushes automatically, the push and scripts lines wait for the fix session, and nothing moves when it lands",
+  "the fix forms show once what they say is read: on a Cursor session in a repository that pushes automatically no line changes and nothing moves, and a failed session read offers Retry",
   { timeout: 480_000 },
   async ({ app, screen, browser }) => {
     const name = "fix-form-notices";
