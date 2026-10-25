@@ -1,11 +1,13 @@
 import type { AgentSelection, ConflictStrategy, PullRequestDetail } from "@prkit/contracts";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, usePrefetchQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useForm, useWatch } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
 import { ButtonLabel } from "~/components/ui/button-label";
+import { Skeleton } from "~/components/ui/skeleton";
 import { resolveConflicts } from "~/rpc/client";
+import { pushAccessQuery, scriptAccessQuery } from "~/rpc/queries";
 
 import { runsOnCursor } from "./cursorFixes";
 import { FixAgentPicker } from "./FixAgentPicker";
@@ -37,6 +39,8 @@ export function ResolveConflictsForm({
   const form = useForm<Values>({ defaultValues: { strategy: "merge", agent: null } });
   const chosen = useWatch({ control: form.control, name: "agent" });
   const agent = useFixAgent(detail.key, chosen);
+  usePrefetchQuery(pushAccessQuery(detail.key, detail.accountId));
+  usePrefetchQuery(scriptAccessQuery(detail.key, detail.accountId));
   const start = useMutation({
     mutationFn: (values: Values) => {
       if (agent.selection === null) return Promise.reject(new Error("Pick an agent first."));
@@ -63,6 +67,34 @@ export function ResolveConflictsForm({
     },
   });
   const submit = form.handleSubmit((values) => start.mutate(values));
+  const onGitHub = (
+    <Button
+      size="xs"
+      variant="link"
+      render={<a href={`${detail.url}/conflicts`} target="_blank" rel="noreferrer" />}
+    >
+      Resolve on GitHub instead
+    </Button>
+  );
+  if (agent.error !== null)
+    return (
+      <div className="space-y-3">
+        <div role="alert" className="flex items-center gap-2 text-xs text-error-foreground">
+          <span>{agent.error.message}</span>
+          <Button variant="outline" size="compact" onClick={agent.retry}>
+            Retry
+          </Button>
+        </div>
+        {onGitHub}
+      </div>
+    );
+  if (!agent.known)
+    return (
+      <div aria-busy="true" aria-label="Loading the form" className="space-y-2">
+        <Skeleton className="h-8 w-full" />
+        <Skeleton className="h-8 w-4/5" />
+      </div>
+    );
   return (
     <form
       noValidate
@@ -105,7 +137,10 @@ export function ResolveConflictsForm({
         onChange={(selection) => form.setValue("agent", selection)}
       />
       <PushNotice detail={detail} />
-      <ScriptAccessNotice detail={detail} cursor={runsOnCursor(agent.catalog, agent.selection)} />
+      {/* The scripts line takes two rows here, so its read landing moves nothing below it. */}
+      <div className="min-h-8">
+        <ScriptAccessNotice detail={detail} cursor={runsOnCursor(agent.catalog, agent.selection)} />
+      </div>
       {agent.problem !== null && (
         <p role="status" className="text-xs text-muted-foreground">
           {agent.problem}
@@ -117,13 +152,7 @@ export function ResolveConflictsForm({
         </p>
       )}
       <div className="flex items-center justify-between gap-2">
-        <Button
-          size="xs"
-          variant="link"
-          render={<a href={`${detail.url}/conflicts`} target="_blank" rel="noreferrer" />}
-        >
-          Resolve on GitHub instead
-        </Button>
+        {onGitHub}
         <Button
           type="submit"
           size="sm"

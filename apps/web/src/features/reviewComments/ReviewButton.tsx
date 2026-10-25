@@ -65,7 +65,7 @@ export function ReviewButton({ detail }: { detail: PullRequestDetail }) {
             <Popover.Description className="mt-1 text-xs text-muted-foreground">
               {mode === "github"
                 ? `Posted to GitHub as ${detail.accountId}.`
-                : "The agent fixes them on this branch. You review the change before anything is pushed."}
+                : "The agent fixes them on this branch."}
             </Popover.Description>
             {open &&
               (mode === "github" ? (

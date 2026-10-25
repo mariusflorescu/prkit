@@ -85,7 +85,7 @@ export function SendToAgentFields({
       toastManager.add({
         type: "success",
         title: "Sent to the agent",
-        description: `${plural(values.picked.length, "comment")}. You review the changes before anything is pushed.`,
+        description: plural(values.picked.length, "comment"),
         actionProps: { children: "Open Fixes", onClick: openFixes },
       });
       onDone();
@@ -159,7 +159,10 @@ export function SendToAgentFields({
         </label>
       )}
       <PushNotice detail={detail} />
-      <ScriptAccessNotice detail={detail} cursor={runsOnCursor(agent.catalog, agent.selection)} />
+      {/* The scripts line takes two rows here, so its read landing moves nothing below it. */}
+      <div className="min-h-8">
+        <ScriptAccessNotice detail={detail} cursor={runsOnCursor(agent.catalog, agent.selection)} />
+      </div>
       {agent.problem !== null && (
         <p role="status" className="text-xs text-muted-foreground">
           {agent.problem}
