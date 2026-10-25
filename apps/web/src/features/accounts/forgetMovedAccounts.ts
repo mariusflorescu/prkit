@@ -54,6 +54,7 @@ export const forgetMovedAccounts = (client: QueryClient) => {
       .map(([id]) => id);
     readThrough = next;
     if (moved.length > 0) notifyManager.batch(() => forget(moved));
+    return moved;
   };
   const fromList = () => {
     const result = client.getQueryData(accountsQuery.queryKey);
@@ -63,8 +64,13 @@ export const forgetMovedAccounts = (client: QueryClient) => {
     );
   };
   fromList();
+  // Only a new answer: a read starting or going stale still holds the last one.
   const stop = client.getQueryCache().subscribe((event) => {
-    if (event.type === "updated" && event.query.queryKey[0] === accountsQuery.queryKey[0])
+    if (
+      event.type === "updated" &&
+      event.action.type === "success" &&
+      event.query.queryKey[0] === accountsQuery.queryKey[0]
+    )
       fromList();
   });
   return { rebind, stop };

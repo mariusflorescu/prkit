@@ -1,13 +1,13 @@
-import type { AccountBinding, GitHubEvent, PullRequestStatus } from "@prkit/contracts";
+import type { AccountBinding, AccountId, GitHubEvent, PullRequestStatus } from "@prkit/contracts";
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
 import { forgetMovedAccounts } from "~/features/accounts/forgetMovedAccounts";
 import { watchGitHub } from "~/rpc/client";
 import {
-  accountsQuery,
   pullRequestQueryKeys,
   pullRequestStatusQuery,
+  readAccountsAgain,
   readInboxAgain,
   repositoriesQuery,
 } from "~/rpc/queries";
@@ -30,12 +30,15 @@ const showStatuses = (client: QueryClient, statuses: ReadonlyArray<PullRequestSt
   );
 
 const applyTo =
-  (client: QueryClient, rebind: (bindings: ReadonlyArray<AccountBinding>) => void) =>
+  (
+    client: QueryClient,
+    rebind: (bindings: ReadonlyArray<AccountBinding>) => ReadonlyArray<AccountId>,
+  ) =>
   (event: GitHubEvent, reopened: boolean) => {
     switch (event._tag) {
       case "opened":
         // A discovery while this window wasn't listening shows up here, against what it heard last.
-        if (event.bindings !== null) rebind(event.bindings);
+        if (event.bindings !== null && rebind(event.bindings).length > 0) readAccountsAgain(client);
         showStatuses(client, event.statuses);
         // The inbox's first answer may have started reads that landed before this opened.
         readInboxAgain(client);
@@ -47,7 +50,7 @@ const applyTo =
       case "accounts":
         rebind(event.bindings);
         showStatuses(client, event.statuses);
-        void client.invalidateQueries({ queryKey: accountsQuery.queryKey });
+        readAccountsAgain(client);
         return;
       case "changed":
         if (event.status !== null) {

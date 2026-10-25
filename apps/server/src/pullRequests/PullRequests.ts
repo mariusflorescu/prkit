@@ -90,11 +90,11 @@ const readable = (
   bindings: ReadonlyArray<AccountBinding> | null,
 ): read is ReadStatus =>
   read !== undefined &&
-  (bindings?.some(
+  bindings !== null &&
+  bindings.some(
     (binding) =>
       binding.accountId === read.status.accountId && binding.configDir === read.configDir,
-  ) ??
-    false);
+  );
 
 const encodeFingerprint = Schema.encodeSync(Schema.fromJsonString(PullRequestFingerprint));
 const decodeFingerprint = Schema.decodeOption(Schema.fromJsonString(PullRequestFingerprint));

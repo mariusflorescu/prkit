@@ -506,12 +506,17 @@ export const make = Effect.gen(function* () {
               ),
         { concurrency: 4 },
       );
-      tokens.clear();
-      for (const [id, token] of freshTokens) tokens.set(id, token);
-      activeAccounts = foundActiveAccounts;
-      unreadableDirAccounts = unreadAccounts;
       const result = { home, accounts, addedConfigDirs, configDirProblems };
-      yield* SubscriptionRef.set(current, result);
+      // Tokens and the accounts they belong to change together, even when the caller goes away.
+      yield* Effect.uninterruptible(
+        Effect.suspend(() => {
+          tokens.clear();
+          for (const [id, token] of freshTokens) tokens.set(id, token);
+          activeAccounts = foundActiveAccounts;
+          unreadableDirAccounts = unreadAccounts;
+          return SubscriptionRef.set(current, result);
+        }),
+      );
       return result;
     });
 
