@@ -1,12 +1,14 @@
-import type { GitHubEvent } from "@prkit/contracts";
+import type { AccountBinding, AccountId, GitHubEvent, PullRequestStatus } from "@prkit/contracts";
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
+import { forgetMovedAccounts } from "~/features/accounts/forgetMovedAccounts";
 import { watchGitHub } from "~/rpc/client";
 import {
-  inboxQuery,
+  accountsQuery,
   pullRequestQueryKeys,
   pullRequestStatusQuery,
+  readInboxAgain,
   repositoriesQuery,
 } from "~/rpc/queries";
 
@@ -20,51 +22,59 @@ const PULL_REQUEST_READS = [
   "pullRequestStack",
 ];
 
-/**
- * Reads the inbox again. A refetch while its first answer is still on its way would only join
- * that answer, which may be from before the change, so that one is dropped first.
- */
-const readInboxAgain = (client: QueryClient) =>
-  void client
-    .cancelQueries({ queryKey: inboxQuery.queryKey })
-    .then(() => client.invalidateQueries({ queryKey: inboxQuery.queryKey }));
+/** The server's statuses replace this window's, so none read through a directory left behind stays. */
+const showStatuses = (client: QueryClient, statuses: ReadonlyArray<PullRequestStatus>) =>
+  client.setQueryData(
+    pullRequestStatusQuery.queryKey,
+    new Map(statuses.map((status) => [statusKey(status.accountId, status.key), status])),
+  );
 
-const applyTo = (client: QueryClient) => (event: GitHubEvent, reopened: boolean) => {
-  switch (event._tag) {
-    case "opened":
-      client.setQueryData(
-        pullRequestStatusQuery.queryKey,
-        new Map(event.statuses.map((status) => [statusKey(status.accountId, status.key), status])),
-      );
-      // The inbox's first answer may have started reads that landed before this opened.
-      readInboxAgain(client);
-      if (!reopened) return;
-      // Changes made while this window was hidden or offline were never sent; the
-      // server answers these from its cache unless GitHub really changed.
-      for (const name of PULL_REQUEST_READS) void client.invalidateQueries({ queryKey: [name] });
-      return;
-    case "changed":
-      if (event.status !== null) {
-        const status = event.status;
-        client.setQueryData(pullRequestStatusQuery.queryKey, (previous) =>
-          new Map(previous).set(statusKey(status.accountId, status.key), status),
-        );
-      }
-      for (const queryKey of pullRequestQueryKeys(event.key, event.accountId))
-        void client.invalidateQueries({ queryKey });
-      return;
-    case "inbox":
-      readInboxAgain(client);
-      return;
-    case "stack":
-      void client.invalidateQueries({ queryKey: ["pullRequestStack", event.accountId] });
-      return;
-    case "repositories":
-      void client.invalidateQueries({ queryKey: repositoriesQuery.queryKey });
-      void client.invalidateQueries({ queryKey: ["repositoryPullRequests"] });
-      return;
-  }
-};
+const applyTo =
+  (
+    client: QueryClient,
+    rebind: (bindings: ReadonlyArray<AccountBinding>) => ReadonlyArray<AccountId>,
+  ) =>
+  (event: GitHubEvent, reopened: boolean) => {
+    switch (event._tag) {
+      case "opened":
+        // A discovery while this window wasn't listening shows up here, against what it heard last.
+        if (event.bindings !== null && rebind(event.bindings).length > 0)
+          void client.invalidateQueries({ queryKey: accountsQuery.queryKey });
+        showStatuses(client, event.statuses);
+        // The inbox's first answer may have started reads that landed before this opened.
+        void readInboxAgain(client);
+        if (!reopened) return;
+        // Changes made while this window was hidden or offline were never sent; the
+        // server answers these from its cache unless GitHub really changed.
+        for (const name of PULL_REQUEST_READS) void client.invalidateQueries({ queryKey: [name] });
+        return;
+      case "accounts":
+        rebind(event.bindings);
+        showStatuses(client, event.statuses);
+        void client.invalidateQueries({ queryKey: accountsQuery.queryKey });
+        return;
+      case "changed":
+        if (event.status !== null) {
+          const status = event.status;
+          client.setQueryData(pullRequestStatusQuery.queryKey, (previous) =>
+            new Map(previous).set(statusKey(status.accountId, status.key), status),
+          );
+        }
+        for (const queryKey of pullRequestQueryKeys(event.key, event.accountId))
+          void client.invalidateQueries({ queryKey });
+        return;
+      case "inbox":
+        void readInboxAgain(client);
+        return;
+      case "stack":
+        void client.invalidateQueries({ queryKey: ["pullRequestStack", event.accountId] });
+        return;
+      case "repositories":
+        void client.invalidateQueries({ queryKey: repositoriesQuery.queryKey });
+        void client.invalidateQueries({ queryKey: ["repositoryPullRequests"] });
+        return;
+    }
+  };
 
 /**
  * Listens to the server's GitHub caches while the window is visible. Holding the
@@ -74,7 +84,8 @@ const applyTo = (client: QueryClient) => (event: GitHubEvent, reopened: boolean)
 export function useGitHubEvents() {
   const client = useQueryClient();
   useEffect(() => {
-    const apply = applyTo(client);
+    const accounts = forgetMovedAccounts(client);
+    const apply = applyTo(client, accounts.rebind);
     let stop: (() => void) | null = null;
     let opened = 0;
     const sync = () => {
@@ -93,6 +104,7 @@ export function useGitHubEvents() {
     return () => {
       document.removeEventListener("visibilitychange", sync);
       stop?.();
+      accounts.stop();
     };
   }, [client]);
 }

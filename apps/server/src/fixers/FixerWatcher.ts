@@ -13,7 +13,7 @@ import * as Schedule from "effect/Schedule";
 
 import { GitHubAccounts } from "../accounts/GitHubAccounts.ts";
 import * as ServerConfig from "../config.ts";
-import { GitHubApi, inBackground } from "../github/GitHubApi.ts";
+import { GitHubApi, GitHubBinding, inBackground } from "../github/GitHubApi.ts";
 import {
   FingerprintResponse,
   fingerprintQuery,
@@ -85,13 +85,19 @@ export const make = Effect.gen(function* () {
     return byKey;
   });
 
-  const readBatch = (accountId: AccountId, batch: ReadonlyArray<Watched>) =>
+  const readBatch = (
+    accountId: AccountId,
+    configDir: string | null,
+    batch: ReadonlyArray<Watched>,
+  ) =>
     Effect.gen(function* () {
       // The review watcher's own fingerprint, read as background work under the
       // reserve; every read also tells PullRequests, so its caches see our pushes.
       const { query, variables } = fingerprintQuery(batch.map((entry) => entry.ref));
       const read = yield* inBackground(
-        api.graphqlResult(accountId, query, variables, FingerprintResponse),
+        api
+          .graphqlResult(accountId, query, variables, FingerprintResponse)
+          .pipe(Effect.provideService(GitHubBinding, { accountId, configDir })),
       );
       yield* Effect.forEach(
         batch,
@@ -99,7 +105,7 @@ export const make = Effect.gen(function* () {
           const pull = read.data?.[`p${index}`]?.pullRequest;
           if (pull == null) return Effect.void;
           return pullRequests
-            .observe(entry.key, accountId, pull)
+            .observe(entry.key, accountId, configDir, pull)
             .pipe(
               Effect.andThen(
                 fixers.observed(entry.key, accountId, {
@@ -133,7 +139,7 @@ export const make = Effect.gen(function* () {
     const watched = yield* candidates;
     if (watched.size === 0) return;
     // Tokens are only handed out for discovered accounts.
-    yield* accounts.list();
+    const discovered = yield* accounts.list();
     const byAccount = new Map<AccountId, Array<Watched>>();
     for (const [key, accountId] of watched) {
       const ref = refFromKey(key);
@@ -147,7 +153,12 @@ export const make = Effect.gen(function* () {
           Array.from({ length: Math.ceil(entries.length / BATCH_SIZE) }, (_, index) =>
             entries.slice(index * BATCH_SIZE, (index + 1) * BATCH_SIZE),
           ),
-          (batch) => readBatch(accountId, batch),
+          (batch) =>
+            readBatch(
+              accountId,
+              discovered.accounts.find((account) => account.id === accountId)?.configDir ?? null,
+              batch,
+            ),
           { discard: true },
         ),
       { concurrency: 4, discard: true },

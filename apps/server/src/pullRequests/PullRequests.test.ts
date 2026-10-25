@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as References from "effect/References";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import { describe, expect, it } from "vite-plus/test";
 
 import { GitHubAccounts } from "../accounts/GitHubAccounts.ts";
@@ -103,26 +104,29 @@ const fingerprint = (head: string, updatedAt: string): PullRequestFingerprint =>
   reviews: { totalCount: 0 },
 });
 
+const discovered = {
+  accounts: [
+    {
+      id: ACCOUNT,
+      host: "github.com",
+      login: "octocat",
+      name: null,
+      avatarUrl: null,
+      configDir: "/gh/octocat",
+      status: { _tag: "ready" },
+    },
+  ],
+  home: "/home/octocat",
+  addedConfigDirs: [],
+  configDirProblems: [],
+} as const;
+
 const github = (state: GitHubState) =>
   Layer.mergeAll(
     Layer.mock(GitHubAccounts, {
-      list: () =>
-        Effect.succeed({
-          accounts: [
-            {
-              id: ACCOUNT,
-              host: "github.com",
-              login: "octocat",
-              name: null,
-              avatarUrl: null,
-              configDir: "/gh/octocat",
-              status: { _tag: "ready" },
-            },
-          ],
-          home: "/home/octocat",
-          addedConfigDirs: [],
-          configDirProblems: [],
-        }),
+      list: () => Effect.succeed(discovered),
+      known: Effect.succeed(discovered),
+      changes: Stream.make(discovered),
       apiBase: () => "https://api.github.com",
     }),
     Layer.mock(GitHubApi, {
@@ -192,13 +196,13 @@ describe("PullRequests.observe", () => {
           headSha: HEAD,
           problem: null,
         });
-        yield* pullRequests.observe(KEY, ACCOUNT, fingerprint(HEAD, UPDATED));
+        yield* pullRequests.observe(KEY, ACCOUNT, "/gh/octocat", fingerprint(HEAD, UPDATED));
         yield* pullRequests.detail(KEY, ACCOUNT);
         expect(state.pullReads).toBe(1);
 
         state.head = NEXT;
         state.updatedAt = PUSHED;
-        yield* pullRequests.observe(KEY, ACCOUNT, fingerprint(NEXT, PUSHED));
+        yield* pullRequests.observe(KEY, ACCOUNT, "/gh/octocat", fingerprint(NEXT, PUSHED));
         expect(shown(yield* pullRequests.detail(KEY, ACCOUNT))).toEqual({
           headSha: NEXT,
           problem: null,
@@ -215,7 +219,7 @@ describe("PullRequests.observe", () => {
         yield* pullRequests.detail(KEY, ACCOUNT);
         state.head = NEXT;
         state.updatedAt = PUSHED;
-        yield* pullRequests.observe(KEY, ACCOUNT, fingerprint(NEXT, PUSHED));
+        yield* pullRequests.observe(KEY, ACCOUNT, "/gh/octocat", fingerprint(NEXT, PUSHED));
         expect(shown(yield* pullRequests.detail(KEY, ACCOUNT))).toEqual({
           headSha: NEXT,
           problem: null,
@@ -230,9 +234,9 @@ describe("PullRequests.observe", () => {
     return run(state, (pullRequests) =>
       Effect.gen(function* () {
         yield* pullRequests.detail(KEY, ACCOUNT);
-        yield* pullRequests.observe(KEY, ACCOUNT, fingerprint(HEAD, UPDATED));
+        yield* pullRequests.observe(KEY, ACCOUNT, "/gh/octocat", fingerprint(HEAD, UPDATED));
         state.reachable = false;
-        yield* pullRequests.observe(KEY, ACCOUNT, fingerprint(NEXT, PUSHED));
+        yield* pullRequests.observe(KEY, ACCOUNT, "/gh/octocat", fingerprint(NEXT, PUSHED));
         expect(shown(yield* pullRequests.detail(KEY, ACCOUNT))).toEqual({
           headSha: HEAD,
           problem: { _tag: "unavailable", message: "GitHub didn't answer." },

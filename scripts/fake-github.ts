@@ -85,20 +85,21 @@
  *                                       With a login, only that login's requests fail; with ms, each
  *                                       failure answers that much later, as GitHub's 502s and 504s do
  *   POST behind?pr=<n>&by=<k>           its base gained k commits, so Update branch applies
- *   POST describe?pr=<n>                its author or description, as JSON `{ "author", "body" }`,
- *                                       either one (bumps updatedAt). PATCH on the pull request
- *                                       changes its title and description too, counted as
- *                                       `rest:pull-edit`
+ *   POST describe?pr=<n>                its author, description or title, as JSON
+ *                                       `{ "author", "body", "title" }`, any of them (bumps
+ *                                       updatedAt). PATCH on the pull request changes its title
+ *                                       and description too, counted as `rest:pull-edit`
  *   GET  pull?pr=<n>                    its node id, head sha and workflow run ids, for assertions
  *   GET  writes                         every mutation and REST write, with its input
  *   POST limit?resource=graphql|core&seconds=<s>   the limit is used up until then
  *   POST latency?ms=<n>[&resource=graphql|core]   every API answer, or that resource's, waits this long
- *   POST hold?resource=graphql|core[&dir=<d>][&part=body]   that resource's answers wait from now
- *                                       on, until release; with dir, only answers to that gh config
- *                                       directory's token (its path under $HOME, as the stats log names
- *                                       it); with part=body, the status and headers go at once and only
- *                                       the body waits
- *   POST release?resource=graphql|core  sends the answers held since hold, and holds no more
+ *   POST hold?resource=graphql|core[&dir=<d>...][&part=body]   that resource's answers wait from now
+ *                                       on, until release; with dir (repeatable), only answers to
+ *                                       those gh config directories' tokens (each its path under
+ *                                       $HOME, as the stats log names it); with part=body, the status
+ *                                       and headers go at once and only the body waits
+ *   POST release?resource=graphql|core[&dir=<d>]   sends the answers held since hold, and holds no
+ *                                       more; with dir, only that directory's, and the others stay held
  *   POST archive?repo=<name>            archives a repository, so lists leave it out
  *   POST inbox-only?login=<l>&prs=<n,n> that login's inbox searches find only these pull requests
  *   POST context?pr=<n>                 seeds what the PR says besides its diff (the body is JSON, see
@@ -170,6 +171,7 @@ const decodeDescribe = Schema.decodeUnknownSync(
     Schema.Struct({
       author: Schema.optionalKey(Schema.String),
       body: Schema.optionalKey(Schema.String),
+      title: Schema.optionalKey(Schema.String),
     }),
   ),
 );
@@ -184,8 +186,9 @@ const latency: Record<Resource, number> = { core: 0, graphql: 0 };
 const held: Record<
   Resource,
   {
-    readonly queue: Array<() => void>;
-    readonly dir: string | null;
+    readonly queue: Array<{ readonly dir: string; readonly send: () => void }>;
+    /** Null: every directory's answers wait. */
+    readonly dirs: ReadonlyArray<string> | null;
     readonly body: boolean;
   } | null
 > = { core: null, graphql: null };
@@ -240,12 +243,13 @@ const send = (
       response.end(body);
     }, latency[resource]);
   const hold = held[resource];
-  if (hold === null || (hold.dir !== null && hold.dir !== tokenOwner(token).dir)) write();
+  const dir = tokenOwner(token).dir;
+  if (hold === null || (hold.dirs !== null && !hold.dirs.includes(dir))) write();
   else if (hold.body) {
     head();
     response.flushHeaders();
-    hold.queue.push(() => response.end(body));
-  } else hold.queue.push(write);
+    hold.queue.push({ dir, send: () => response.end(body) });
+  } else hold.queue.push({ dir, send: write });
 };
 
 const failedByControl = (
@@ -482,6 +486,7 @@ const control = (url: URL, method: string, text: string, response: NodeHttp.Serv
     const given = decodeDescribe(text);
     if (given.author !== undefined) pull.author = given.author;
     if (given.body !== undefined) pull.body = given.body;
+    if (given.title !== undefined) pull.title = given.title;
     pull.updatedAt = Date.now();
     return answer({ ok: true });
   }
@@ -520,16 +525,27 @@ const control = (url: URL, method: string, text: string, response: NodeHttp.Serv
   }
   if (name === "hold" || name === "release") {
     const resource = url.searchParams.get("resource") === "core" ? "core" : "graphql";
-    const queue = held[resource]?.queue ?? [];
+    const current = held[resource];
+    const queue = current?.queue ?? [];
+    const dirs = url.searchParams.getAll("dir");
+    if (name === "hold") {
+      held[resource] = {
+        queue,
+        dirs: dirs.length === 0 ? null : dirs,
+        body: url.searchParams.get("part") === "body",
+      };
+      return answer({ ok: true, resource, held: queue.length });
+    }
+    const still =
+      dirs.length === 0 || current === null || current.dirs === null
+        ? []
+        : current.dirs.filter((dir) => !dirs.includes(dir));
+    const going = still.length === 0 ? queue : queue.filter((item) => dirs.includes(item.dir));
     held[resource] =
-      name === "hold"
-        ? {
-            queue,
-            dir: url.searchParams.get("dir"),
-            body: url.searchParams.get("part") === "body",
-          }
-        : null;
-    if (name === "release") for (const write of queue) write();
+      current === null || still.length === 0
+        ? null
+        : { ...current, queue: queue.filter((item) => !going.includes(item)), dirs: still };
+    for (const item of going) item.send();
     return answer({ ok: true, resource, held: queue.length });
   }
   if (name === "latency") {

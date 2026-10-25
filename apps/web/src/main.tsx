@@ -5,7 +5,6 @@ import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-import { forgetMovedAccounts } from "~/features/accounts/forgetMovedAccounts";
 import { AppearanceSync } from "~/features/settings/appearance/AppearanceSync";
 import { applyTheme, bootTheme } from "~/lib/colorScheme";
 import { isMacDesktop } from "~/lib/desktop";
@@ -20,8 +19,9 @@ document.documentElement.classList.toggle("electron-mac", isMacDesktop);
 // The UI faces load behind the boot splash, so the first render never swaps fonts. A face
 // that fails to load leaves its fallback in place rather than holding the app on the splash.
 const loadFace = (font: string) => document.fonts.load(font).catch(() => []);
-const [{ router }] = await Promise.all([
+const [{ router }, { accountsQuery }] = await Promise.all([
   import("~/router"),
+  import("~/rpc/queries"),
   ...["400", "500", "600"].map((weight) => loadFace(`${weight} 1em "Fira Sans"`)),
   loadFace('400 1em "JetBrains Mono"'),
 ]);
@@ -31,7 +31,9 @@ const [{ router }] = await Promise.all([
 const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false } },
 });
-forgetMovedAccounts(queryClient);
+// Before anything that reads through an account, so the gh directories this window hears first
+// are never newer than what it read (`forgetMovedAccounts`).
+void queryClient.prefetchQuery(accountsQuery);
 const rootElement = document.getElementById("root");
 if (rootElement === null) throw new Error("index.html is missing #root");
 

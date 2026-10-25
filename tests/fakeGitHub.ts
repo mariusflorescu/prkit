@@ -110,17 +110,25 @@ export const startFakeGitHub = async (
       post(`latency?ms=${ms}${resource === undefined ? "" : `&resource=${resource}`}`),
     /**
      * `resource`'s answers wait from now on, until `release` sends them. With `dir`, only answers
-     * to that directory's token; with `body`, the status and headers go at once and the body waits.
+     * to that directory's token, or those directories'; with `body`, the status and headers go at
+     * once and the body waits.
      */
-    hold: (resource: "graphql" | "core", only: { dir?: string; body?: boolean } = {}) =>
+    hold: (
+      resource: "graphql" | "core",
+      only: { dir?: string | ReadonlyArray<string>; body?: boolean } = {},
+    ) =>
       post(
         `hold?${new URLSearchParams([
           ["resource", resource],
-          ...(only.dir === undefined ? [] : [["dir", only.dir]]),
+          ...[only.dir ?? []].flat().map((dir) => ["dir", dir]),
           ...(only.body === true ? [["part", "body"]] : []),
         ])}`,
       ),
-    release: (resource: "graphql" | "core") => post(`release?resource=${resource}`),
+    /** Sends what `resource` held; with `dir`, only that directory's, and the others stay held. */
+    release: (resource: "graphql" | "core", dir?: string) =>
+      post(
+        `release?${new URLSearchParams([["resource", resource], ...(dir === undefined ? [] : [["dir", dir]])])}`,
+      ),
     archive: (repo: string) => post(`archive?repo=${repo}`),
     /** `login`'s inbox finds only these pull requests from now on. */
     inboxOnly: (login: string, prs: ReadonlyArray<number>) =>
@@ -210,8 +218,8 @@ export const startFakeGitHub = async (
         ])}`,
       ),
     behind: (pr: number, by: number) => post(`behind?pr=${pr}&by=${by}`),
-    /** Who opened the PR and its description, either one. */
-    describe: (pr: number, given: { author?: string; body?: string }) =>
+    /** Who opened the PR, its description or its title, any of them. */
+    describe: (pr: number, given: { author?: string; body?: string; title?: string }) =>
       fetch(`${url}/__fake/describe?pr=${pr}`, { method: "POST", body: JSON.stringify(given) }),
     checks: (pr: number, status: "queued" | "in_progress" | "completed") =>
       post(`checks?pr=${pr}&status=${status}`),

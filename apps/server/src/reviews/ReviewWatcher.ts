@@ -173,7 +173,7 @@ export const make = Effect.gen(function* () {
                 message: aliasProblem(accountId, own ?? read.success.errors[0]),
               };
             } else {
-              yield* pullRequests.observe(entry.key, accountId, pull);
+              yield* pullRequests.observe(entry.key, accountId, configDir ?? null, pull);
               observation = {
                 _tag: "pull",
                 state: pullRequestState(pull),

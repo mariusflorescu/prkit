@@ -4,6 +4,7 @@ import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -30,6 +31,7 @@ const accounts = Layer.succeed(
   GitHubAccounts.of({
     list: () => unused,
     known: unused,
+    changes: Stream.empty,
     configured: unused,
     refresh: () => unused,
     addConfigDir: () => unused,

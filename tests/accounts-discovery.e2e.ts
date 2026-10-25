@@ -4,7 +4,8 @@ import { DatabaseSync } from "node:sqlite";
 
 import { type Browser, test } from "@e2e-dev/web";
 import { expect, type TestFixtures } from "e2e";
-import { _electron } from "playwright";
+import * as Schema from "effect/Schema";
+import { _electron, chromium, type Page } from "playwright";
 
 import { childEnv } from "../packages/contracts/src/childEnv.ts";
 import {
@@ -62,6 +63,7 @@ const open = async (
     await expect(accounts).toBeVisible();
   };
   return {
+    run,
     accounts,
     settings,
     /** Settings > GitHub accounts > Refresh, which looks into every directory again. */
@@ -249,6 +251,273 @@ test(
       ).toHaveLength(1);
     } finally {
       await fake.release("core");
+      await fake.release("graphql");
+      stopFakeInstance(name, { keepHome: false });
+      fake.stop();
+    }
+  },
+);
+
+/**
+ * Keeps every set of tab names a page had since it loaded, painted or not, as JSON in `<html>`'s
+ * `data-tab-names`, so a journey can tell a title that showed for a moment from one that never did.
+ */
+const RECORD_TAB_NAMES = `(() => {
+  const names = [];
+  new MutationObserver(() => {
+    const now = [...document.querySelectorAll("[data-open-pr]")]
+      .map((tab) => tab.getAttribute("aria-label"))
+      .join(" | ");
+    if (names[names.length - 1] === now) return;
+    names.push(now);
+    document.documentElement.dataset.tabNames = JSON.stringify(names);
+  }).observe(document, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ["aria-label"],
+  });
+})()`;
+const decodeTabNames = Schema.decodeSync(Schema.fromJsonString(Schema.Array(Schema.String)));
+const START_HIDDEN = `(() => {
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+})()`;
+
+test(
+  "after an account's gh directory moves, no window shows a tab status read through the old one, on reconnect or otherwise",
+  { timeout: 300_000 },
+  async ({ app, screen, browser }) => {
+    const name = "accounts-moved-statuses";
+    const fake = await startFakeGitHub(name);
+    const first = NodePath.join(fake.home, ".config/gh/hosts.yml");
+    ghDir(fake, ".config/gh-move", FIRST);
+    const before = "Open budget/fixtures #3 Title before the move";
+    const listed = "Open budget/fixtures #3 Budget fixture 3";
+    const loading = "Open budget/fixtures #3";
+    const after = "Open budget/fixtures #3 Title after the move";
+    const tabsOf = () =>
+      [...document.querySelectorAll("[data-open-pr]")].map((tab) => tab.getAttribute("aria-label"));
+    const namesOf = () => document.documentElement.dataset.tabNames ?? "[]";
+    const setVisible = (visible: boolean) => {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => (visible ? "visible" : "hidden"),
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    const frames = NodePath.join(repoRoot, ".e2e/evidence/accounts-moved-statuses");
+    NodeFS.rmSync(frames, { recursive: true, force: true });
+    NodeFS.mkdirSync(frames, { recursive: true });
+    /** The title bar of `page` with #3's tooltip open: what the tab says it shows. */
+    const frame = async (page: Page, file: string) => {
+      await page.getByRole("link", { name: /^Open budget\/fixtures #3/ }).hover();
+      await page.getByRole("tooltip").waitFor();
+      // Its details show after a moment's hover.
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      await page.screenshot({
+        path: NodePath.join(frames, `${file}.png`),
+        clip: { x: 0, y: 0, width: 640, height: 160 },
+      });
+      await page.mouse.move(640, 400);
+    };
+    const other = await chromium.launch({ headless: true, args: ["--use-mock-keychain"] });
+    try {
+      await browser.addInitScript(RECORD_TAB_NAMES);
+      // The watcher reads the open tab's fingerprint every 5 seconds.
+      const prkit = await open(name, fake, { app, screen, browser }, [
+        "--e2e",
+        "--watch-interval",
+        "5000",
+      ]);
+      await screen.getByRole("link", /#3 Budget fixture 3/).tap();
+      await fake.describe(3, { title: "Title before the move" });
+      await expect.poll(() => browser.evaluate(tabsOf), { timeout: 20_000 }).toEqual([before]);
+      // A window that keeps listening, and one opened hidden on the pull request, which reads it
+      // but hears nothing until it is shown.
+      const listening = await other.newPage();
+      await listening.addInitScript(RECORD_TAB_NAMES);
+      await listening.goto(prkit.run.openUrl);
+      await listening
+        .getByRole("link", { name: "Inbox", exact: true })
+        .waitFor({ timeout: 30_000 });
+      await expect.poll(() => listening.evaluate(tabsOf), { timeout: 20_000 }).toEqual([before]);
+      await frame(listening, "before-the-move");
+      const hidden = await other.newPage();
+      await hidden.addInitScript(RECORD_TAB_NAMES);
+      await hidden.addInitScript(START_HIDDEN);
+      await hidden.goto(prkit.run.openUrl);
+      await hidden.getByRole("link", { name: "Inbox", exact: true }).waitFor({ timeout: 30_000 });
+      await hidden.goto(
+        `${prkit.run.url}/pr/github.com/budget/fixtures/3?account=${encodeURIComponent(`github.com/${FIRST}`)}`,
+      );
+      await expect.poll(() => hidden.evaluate(tabsOf), { timeout: 20_000 }).toEqual([before]);
+
+      // No fingerprint or inbox is read through ~/.config/gh-move until the release, so every
+      // title a tab shows until then was read through ~/.config/gh.
+      await fake.hold("graphql", { dir: ".config/gh-move" });
+      NodeFS.writeFileSync(first, "{}\n");
+      const heard = decodeTabNames(await listening.evaluate(namesOf)).length;
+      await prkit.settings();
+      await prkit.accounts.getByRole("button", "Refresh").tap();
+      await expect(
+        prkit.accounts
+          .getByRole("listitem")
+          .filter({ hasText: FIRST })
+          .first()
+          .getByText("~/.config/gh-move", { exact: true }),
+      ).toBeVisible({ timeout: 20_000 });
+      await fake.describe(3, { title: "Title after the move" });
+
+      // The window that listens drops the status and the inbox row behind it at once.
+      await expect.poll(() => listening.evaluate(tabsOf), { timeout: 10_000 }).toEqual([loading]);
+      await expect.poll(() => browser.evaluate(tabsOf), { timeout: 10_000 }).toEqual([loading]);
+      await frame(listening, "moved-read-again");
+      const listened = decodeTabNames(await listening.evaluate(namesOf)).slice(heard);
+      expect(listened.slice(listened.indexOf(loading))).toEqual([loading]);
+      expect(listened.filter((names) => names !== before && names !== loading)).toEqual([]);
+      // A window that reconnects, by a reload or by being hidden and shown, is sent the statuses again.
+      await browser.reload();
+      await expect(screen.getByRole("link", "Inbox")).toBeVisible({ timeout: 20_000 });
+      await listening.evaluate(setVisible, false);
+      await listening.evaluate(setVisible, true);
+      // The hidden window read the pull request through ~/.config/gh; shown, it reads it again.
+      const shown = decodeTabNames(await hidden.evaluate(namesOf)).length;
+      await hidden.evaluate(setVisible, true);
+      await expect.poll(() => hidden.evaluate(tabsOf), { timeout: 10_000 }).not.toEqual([before]);
+      for (let check = 0; check < 6; check++) {
+        expect(await browser.evaluate(tabsOf)).toEqual([loading]);
+        expect(await listening.evaluate(tabsOf)).toEqual([loading]);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      expect(
+        decodeTabNames(await browser.evaluate(namesOf)).filter(
+          (names) => names !== "" && names !== loading,
+        ),
+      ).toEqual([]);
+      expect(
+        decodeTabNames(await hidden.evaluate(namesOf))
+          .slice(shown)
+          .filter((names) => names === before || names === listed),
+      ).toEqual([]);
+
+      await fake.release("graphql");
+      await expect.poll(() => browser.evaluate(tabsOf), { timeout: 20_000 }).toEqual([after]);
+      await expect.poll(() => listening.evaluate(tabsOf), { timeout: 20_000 }).toEqual([after]);
+      await expect.poll(() => hidden.evaluate(tabsOf), { timeout: 20_000 }).toEqual([after]);
+      await frame(listening, "read-through-the-new-directory");
+
+      // Back to ~/.config/gh with nothing changed on GitHub: the same fingerprint, read through
+      // the directory the account uses now, still brings the status back. No window shows the
+      // pull request and the inbox leaves it out, so only its status can name it.
+      await hidden.close();
+      await fake.inboxOnly(FIRST, [1]);
+      await fake.hold("graphql", { dir: ".config/gh" });
+      NodeFS.writeFileSync(first, hostsFor(FIRST));
+      await prkit.settings();
+      await prkit.accounts.getByRole("button", "Refresh").tap();
+      await expect(
+        prkit.accounts
+          .getByRole("listitem")
+          .filter({ hasText: FIRST })
+          .first()
+          .getByText("~/.config/gh", { exact: true }),
+      ).toBeVisible({ timeout: 20_000 });
+      await expect.poll(() => listening.evaluate(tabsOf), { timeout: 10_000 }).not.toEqual([after]);
+      await fake.release("graphql");
+      await expect.poll(() => browser.evaluate(tabsOf), { timeout: 20_000 }).toEqual([after]);
+      await expect.poll(() => listening.evaluate(tabsOf), { timeout: 20_000 }).toEqual([after]);
+    } finally {
+      await other.close();
+      await fake.release("graphql");
+      stopFakeInstance(name, { keepHome: false });
+      fake.stop();
+    }
+  },
+);
+
+test(
+  "an Inbox Refresh still reading another account when a login moves sends back no row read through the old directory",
+  { timeout: 300_000 },
+  async ({ app, screen, browser }) => {
+    const name = "accounts-moved-refresh";
+    const fake = await startFakeGitHub(name, { secondAccount: true });
+    const first = NodePath.join(fake.home, ".config/gh/hosts.yml");
+    ghDir(fake, ".config/gh-move", FIRST);
+    // #3 belongs to budget-test's inbox alone.
+    await fake.inboxOnly(SECOND, [5]);
+    const other = await chromium.launch({ headless: true, args: ["--use-mock-keychain"] });
+    try {
+      const prkit = await open(name, fake, { app, screen, browser });
+      // Every message the server sends the Inbox window, as it arrives.
+      const inbox = await other.newPage();
+      const frames: Array<string> = [];
+      inbox.on("websocket", (socket) =>
+        socket.on("framereceived", (frame) => frames.push(String(frame.payload))),
+      );
+      await inbox.goto(prkit.run.openUrl);
+      await inbox.getByRole("link", { name: /#3 Budget fixture 3/ }).waitFor({ timeout: 30_000 });
+
+      // budget-second's inbox read waits, so the Refresh is still out when budget-test moves, and
+      // nothing reads through ~/.config/gh-move until the end.
+      await fake.hold("graphql", { dir: [".config/gh-second", ".config/gh-move"] });
+      await fake.resetStats();
+      await inbox.getByRole("button", { name: "Refresh" }).first().click();
+      await expect
+        .poll(
+          async () =>
+            (await fake.stats()).log.filter(
+              (entry) =>
+                entry.kind === "graphql:inbox" &&
+                ((entry.login === FIRST && entry.dir === ".config/gh") ||
+                  (entry.login === SECOND && entry.dir === ".config/gh-second")),
+            ).length,
+          { timeout: 15_000 },
+        )
+        .toBe(2);
+
+      NodeFS.writeFileSync(first, "{}\n");
+      await fake.describe(3, { title: "Title after the move" });
+      await prkit.rediscover();
+      await expect(
+        prkit.accounts
+          .getByRole("listitem")
+          .filter({ hasText: FIRST })
+          .first()
+          .getByText("~/.config/gh-move", { exact: true }),
+      ).toBeVisible();
+      await inbox
+        .getByRole("link", { name: /#3 Budget fixture 3/ })
+        .waitFor({ state: "detached", timeout: 10_000 });
+      // Everything after the event that told the window about the move left the server after it.
+      const moved = frames.findIndex(
+        (frame) => frame.includes('"_tag":"accounts"') && frame.includes(".config/gh-move"),
+      );
+      expect(moved).toBeGreaterThan(-1);
+
+      // The Refresh finishes with budget-second; what it answers for budget-test comes through
+      // ~/.config/gh-move, where nothing is read yet.
+      await fake.release("graphql", ".config/gh-second");
+      await expect
+        .poll(() => inbox.getByRole("button", { name: "Refresh" }).first().isEnabled(), {
+          timeout: 20_000,
+        })
+        .toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      expect(
+        frames
+          .slice(moved)
+          .filter((frame) => frame.includes("Budget fixture 3"))
+          .map((frame) => frame.slice(0, 80)),
+      ).toEqual([]);
+      expect(await inbox.getByRole("link", { name: /#3 Budget fixture 3/ }).count()).toBe(0);
+
+      await fake.release("graphql");
+      await inbox
+        .getByRole("link", { name: /#3 Title after the move/ })
+        .first()
+        .waitFor({ timeout: 20_000 });
+    } finally {
+      await other.close();
       await fake.release("graphql");
       stopFakeInstance(name, { keepHome: false });
       fake.stop();

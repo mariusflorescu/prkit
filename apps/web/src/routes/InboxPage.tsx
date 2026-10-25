@@ -27,7 +27,7 @@ import { useInboxStore } from "~/features/inbox/inboxStore";
 import { useSavedInboxFilters } from "~/features/inbox/useSavedInboxFilters";
 import { useCollapsingHeader } from "~/hooks/useCollapsingHeader";
 import { listInbox, refreshAccounts } from "~/rpc/client";
-import { accountsQuery, inboxQuery, reviewFeedQuery } from "~/rpc/queries";
+import { accountsQuery, inboxQuery, readInboxAgain, reviewFeedQuery } from "~/rpc/queries";
 import "~/features/inbox/inbox.css";
 
 export function InboxPage() {
@@ -53,9 +53,11 @@ export function InboxPage() {
       : null;
   const scroll = useRef<HTMLDivElement>(null);
   const { collapsed, sentinel } = useCollapsingHeader(scroll);
+  // Each read below shows through the inbox query, the one a gh directory move cancels and reads
+  // again, so an answer put together before the move can't land after it. Each waits for it.
   const refresh = useMutation({
     mutationFn: () => listInbox({ _tag: "refresh" }),
-    onSuccess: (result) => queryClient.setQueryData(inboxQuery.queryKey, result),
+    onSuccess: () => readInboxAgain(queryClient),
   });
   // Reads one account again; its login is checked again only after GitHub refused its token.
   const retryAccount = useMutation({
@@ -64,15 +66,14 @@ export function InboxPage() {
         queryClient.setQueryData(accountsQuery.queryKey, await refreshAccounts());
       return listInbox({ _tag: "retry", accountId: input.accountId });
     },
-    onSuccess: (result) => queryClient.setQueryData(inboxQuery.queryKey, result),
+    onSuccess: () => readInboxAgain(queryClient),
   });
   // Answers at once from what prkit kept; the accounts it finds anew show once GitHub is read.
   const rediscover = useMutation({
     mutationFn: async () => {
       queryClient.setQueryData(accountsQuery.queryKey, await refreshAccounts());
-      return listInbox({ _tag: "snapshot" });
     },
-    onSuccess: (result) => queryClient.setQueryData(inboxQuery.queryKey, result),
+    onSuccess: () => readInboxAgain(queryClient),
   });
   const recover = useMutation({
     mutationFn: refreshAccounts,

@@ -16,7 +16,6 @@ import {
   PullRequestKey,
   type PullRequestRef,
   PullRequestStack,
-  type PullRequestStatus,
   refFromKey,
 } from "@prkit/contracts";
 import * as Clock from "effect/Clock";
@@ -180,11 +179,7 @@ const freshnessOf = <V>(cached: Cached<V>): Freshness => ({
 
 interface DetailReadsOptions {
   /** A cached read of this PR has a new answer or a new problem. */
-  readonly changed: (
-    key: PullRequestKey,
-    accountId: AccountId,
-    status: PullRequestStatus | null,
-  ) => Effect.Effect<void>;
+  readonly changed: (key: PullRequestKey, accountId: AccountId) => Effect.Effect<void>;
   /** A cached stack read through this account has a new answer or a new problem. */
   readonly stackChanged: (accountId: AccountId) => Effect.Effect<void>;
 }
@@ -201,7 +196,7 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
   const actionReads = yield* makeActionReads;
   const reviewThreads = yield* makeReviewThreads;
   const changed = (cacheKey: { readonly accountId: AccountId; readonly key: string }) =>
-    options.changed(PullRequestKey.make(cacheKey.key), cacheKey.accountId, null);
+    options.changed(PullRequestKey.make(cacheKey.key), cacheKey.accountId);
   const threadsCache = yield* makeReadCache({
     name: "review-threads",
     json: Schema.fromJsonString(ReviewThreads),
@@ -747,22 +742,16 @@ export const makeDetailReads = Effect.fnUntraced(function* (options: DetailReads
    * Marks every cached read of this PR stale, so the next read of each goes to
    * GitHub, and tells visible windows to read again what they show.
    */
-  const invalidate = (
-    key: PullRequestKey,
-    accountId: AccountId,
-    status: PullRequestStatus | null = null,
-  ) =>
+  const invalidate = (key: PullRequestKey, accountId: AccountId) =>
     Effect.all(
       [detailCache, timelineCache, threadsCache, filesCache, closingIssuesCache].map((cache) =>
         cache.invalidate(accountId, key),
       ),
       { discard: true },
-    ).pipe(Effect.andThen(options.changed(key, accountId, status)));
+    ).pipe(Effect.andThen(options.changed(key, accountId)));
   /** New check results: only the detail shows them. */
   const checksChanged = (key: PullRequestKey, accountId: AccountId) =>
-    detailCache
-      .invalidate(accountId, key)
-      .pipe(Effect.andThen(options.changed(key, accountId, null)));
+    detailCache.invalidate(accountId, key).pipe(Effect.andThen(options.changed(key, accountId)));
   const fetchThreads = (key: PullRequestKey, accountId: AccountId, ref: PullRequestRef) =>
     reviewThreads
       .read(accountId, ref)

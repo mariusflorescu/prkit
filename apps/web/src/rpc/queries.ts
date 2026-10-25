@@ -1,4 +1,4 @@
-import { queryOptions, replaceEqualDeep, skipToken } from "@tanstack/react-query";
+import { type QueryClient, queryOptions, replaceEqualDeep, skipToken } from "@tanstack/react-query";
 
 import {
   type AccountId,
@@ -76,6 +76,14 @@ export const inboxQuery = queryOptions({
   staleTime: Infinity,
   retry: false,
 });
+/**
+ * Reads the inbox again. A refetch while its first answer is still on its way would only join
+ * that answer, which may be from before the change, so that one is dropped first.
+ */
+export const readInboxAgain = (client: QueryClient) =>
+  client
+    .cancelQueries({ queryKey: inboxQuery.queryKey })
+    .then(() => client.invalidateQueries({ queryKey: inboxQuery.queryKey }));
 /** Every repository the accounts can see; the server keeps it a day and says when it changed. */
 export const repositoriesQuery = queryOptions({
   queryKey: ["repositories"],
