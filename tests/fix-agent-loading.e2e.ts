@@ -425,6 +425,7 @@ test(
         await expect.poll(pullReads, { timeout: 30_000 }).toBeGreaterThan(readsBefore);
         await shown(browser);
         await markPlaces(browser, "early");
+        await app.screenshot("fix-form-notices-scripts-held");
       } finally {
         await fake.release("core");
       }
